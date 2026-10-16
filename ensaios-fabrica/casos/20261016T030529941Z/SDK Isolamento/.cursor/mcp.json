@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "ensaio-projeto-sentinela": {
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "type": "stdio",
+      "cwd": "C:\\Users\\jeffe\\Documents\\Apps\\ensaios-fabrica\\casos\\20261016T030529941Z\\SDK Isolamento",
+      "env": {
+        "ENSAIO_MARKER": "C:\\Users\\jeffe\\Documents\\Apps\\ensaios-fabrica\\evidencias\\20261016T030529941Z\\MCP-ISO-04\\project-processes.jsonl"
+      },
+      "args": [
+        "--import",
+        "file:///C:/Users/jeffe/Documents/Apps/ensaios-fabrica/casos/20261016T030529941Z/SDK%20Isolamento/controle/trace.mjs",
+        "C:\\Users\\jeffe\\Documents\\Apps\\ensaios-fabrica\\casos\\20261016T030529941Z\\SDK Isolamento\\controle\\hello-mcp-server.mjs"
+      ]
+    }
+  }
+}
+

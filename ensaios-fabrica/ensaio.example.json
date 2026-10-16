@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "paths": {
+    "cases": "./casos",
+    "evidence": "./evidencias"
+  },
+  "executables": {
+    "node": "node",
+    "omp": "omp",
+    "maestri": "maestri"
+  },
+  "maestri": {
+    "terminalNamePrefix": "Ensaio Fabrica",
+    "createWorkspace": false,
+    "createFloor": false
+  }
+}

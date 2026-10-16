@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ensaio-intruso": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["--import", "./controle/trace-start.mjs", "./controle/hello-mcp-server.mjs"]
+    }
+  }
+}

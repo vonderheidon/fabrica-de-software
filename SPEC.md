@@ -1,20 +1,33 @@
 # Nova fábrica de software — especificação de produto e arquitetura
 
-Data: 2026-10-14. Natureza: contrato para implementação nova, não descrição de capacidades disponíveis no Aula IA. As decisões de produto já discutidas estão consolidadas; os detalhes técnicos recomendados abaixo fazem parte desta proposta para revisão. Não há autorização implícita para provisionar recursos, publicar código, modificar o tracker ou migrar dados.
+Data: 2026-10-14. Natureza: contrato para implementação nova, não descrição de capacidades já disponíveis. As decisões de produto já discutidas estão consolidadas; os detalhes técnicos recomendados abaixo fazem parte desta proposta para revisão. Não há autorização implícita para provisionar recursos, publicar código, modificar o tracker ou migrar dados.
 
 Este pacote contém três fontes complementares:
 
 - Este documento: produto, jornadas, arquitetura, dados, entrega e aceitação.
-- [Integração Maestri/OMP](INTEGRACAO-MAESTRI-OMP.md): contrato executável, desenvolvimento externo, MCPs, processos Windows, workarounds e provas reais.
-- [Glossário](GLOSSARY.md): linguagem do produto novo; não usar a definição Ready do produto antigo.
+- [Integração Maestri/OMP](INTEGRACAO-MAESTRI-OMP.md): contrato executável, início dentro do Maestri, MCPs, processos Windows, workarounds e provas reais.
+- [Glossário](GLOSSARY.md): linguagem do produto e definição normativa de Ready.
 
-Nenhum arquivo Python, controlador ou adapter do produto/protótipo será importado, copiado ou encapsulado como implementação do produto novo. Fontes antigas servem somente como evidência dos comportamentos e problemas descritos.
+Implementar os módulos do zero na stack definida, sem importar, copiar ou encapsular controladores e adapters de outros produtos. As orientações deste pacote descrevem os comportamentos exigidos e os problemas a prevenir.
+
+## Etapas de trabalho: estudos e desenvolvimento
+
+Decisão de escopo em 2026-10-16: encerrar a expansão dos estudos isolados e concentrar o próximo ensaio em um percurso vertical pequeno. O workspace canônico é esta pasta; os ensaios ficam em `ensaios-fabrica/`. Evidências existentes são preservadas, não se tornam obrigações de implementação.
+
+| Etapa | Objetivo e entregáveis | Critério de conclusão |
+| --- | --- | --- |
+| Ensaio vertical, atual | Tarefa pequena, implementação OMP normal, check real, revisão independente, correção e entrega consultável; depois cancelamento e nova tentativa. | Percurso observado com limites e impedimentos concretos, sem exigir controle completo do runtime. |
+| Desenvolvimento da fábrica, futura | Implementar as jornadas de produto e a matriz AC/INT revisada. | Critérios comprovados no produto; fixtures não são aceite integrado. |
+
+A fábrica coordena tarefas, resultados e os efeitos que ela própria executa; não é um ambiente de contenção nem um gerenciador geral do runtime OMP. OMP/Maestri e os MCPs configurados pelo operador são componentes confiáveis, usados pelos mecanismos normais suportados. Não implementar ferramentas próprias de arquivos/shell, resolução exclusiva de MCPs, filtragem própria do ambiente de cada MCP ou plataforma de supervisão para eliminar todos os limites do runtime.
+
+O plano vigente está em `ensaios-fabrica/casos/validacoes.json`; o relatório preserva o histórico e registra a mudança de direção. Estudos adicionais só são justificados por impedimento observado no percurso ou risco concreto à entrega. Não exigir auditoria independente de hashes a cada pequeno estudo ou ajuste documental. Esta revisão autoriza a mudança documental e do plano, não novas chamadas pagas, recursos externos ou publicação.
 
 ## 1. Problema e objetivo
 
-O ambiente atual evoluiu de protótipo com mudanças de direção. Checkout compartilhado, lifecycle global de equipe/reserva, transporte restritivo e ferramentas carregadas em ambientes diferentes tornaram mudanças e novas tentativas difíceis. A UI expõe detalhes de mecanismo e várias confirmações que não correspondem a novas decisões do operador.
+Checkout compartilhado, lifecycle global de equipe/reserva, transporte restritivo e ferramentas carregadas em ambientes diferentes dificultam mudanças e novas tentativas. A UI deve evitar expor mecanismos rotineiros e pedir confirmações que não correspondem a novas decisões do operador.
 
-O produto novo deve transformar uma issue executável em entrega revisada, com ambiente próprio e acompanhamento simples. Deve permitir operar e desenvolver fora do Maestri, sem perder a integração obrigatória com Maestri/OMP em execução. O operador pode conversar livremente com o agente; só resultados oficiais e efeitos executados pela fábrica obedecem ao contrato de coordenação.
+O produto novo deve transformar uma issue executável em entrega revisada, com ambiente próprio e acompanhamento simples. Na primeira versão, a fábrica é iniciada exclusivamente por um terminal dentro do Maestri, herdando e validando seu contexto de conexão; OMP é o executor dos agentes. O código pode ser desenvolvido no IDE de preferência do desenvolvedor. Inicialização externa com attach e agentes Eve da Vercel ficam fora deste escopo. O operador pode conversar livremente com o agente; só resultados oficiais e efeitos executados pela fábrica obedecem ao contrato de coordenação.
 
 A finalidade não é eliminar toda verificação: é remover situações perigosas pelo desenho, esconder mecanismos rotineiros e manter provas de integridade onde elas protegem uma entrega real.
 
@@ -46,7 +59,7 @@ Fora do escopo:
 | Tema | Contrato |
 | --- | --- |
 | Stack | TypeScript, Node.js LTS, Fastify, React/Vite, SQLite; GH CLI no primeiro adapter GitHub |
-| Ambiente inicial | Windows; UI e controlador locais; Maestri aberto no host de execução |
+| Ambiente inicial | Windows; UI e controlador locais; controlador iniciado por terminal-âncora dentro do Maestri |
 | Executor inicial | Maestri apresenta terminal comum; OMP executa agente; fábrica coordena |
 | Interação | TUI nativa livre durante trabalho, pergunta e após resultado; sem filtros próprios do compositor |
 | Entrega | ICR; ICR + Commit local; ICR + Commit + push + PR; sem merge |
@@ -68,7 +81,7 @@ O percurso normal de uma issue não exige selecionar terminais, executar preflig
 | Issue, critérios, referências de spec e dependências | GitHub Issues |
 | Intenção, responsável e posição na fila | GitHub Projects/Issues |
 | Repositório, commits, branch e PR | Git/GitHub |
-| Tentativa, snapshots, resultados e efeitos conhecidos | Banco da fábrica |
+| Tentativa, snapshots de configuração/escopo, referências Git da entrega, resultados e efeitos conhecidos | Banco da fábrica |
 | Perfis e padrões de projeto | Configuração persistida da fábrica |
 | Templates e contratos dos papéis | Arquivos versionados no produto novo |
 | Conversa OMP | Runtime do executor; não é resultado oficial |
@@ -77,7 +90,7 @@ O sistema anterior entrega uma issue com título, objetivo/escopo, critérios ve
 
 Capturar URL, node ID, repositório, número, corpo, digest dos critérios, comentários pertinentes e dependências. Os agentes podem consultar comentários atuais por leitura hospedada, mas o escopo capturado não muda implicitamente. Correção editorial fora dos critérios não deve encerrar trabalho; alteração semântica dos critérios exige decisão humana ou outra tentativa.
 
-Não editar automaticamente checkboxes do corpo da issue: o código antigo mostrou que releituras não fornecem CAS remoto e podem competir com o planejamento externo. Publicar resultado e evidências no corpo da PR e, nos modos sem PR, em um comentário identificado da fábrica. Isso é acompanhamento, não fechamento da issue. Um comentário duplicado após resposta perdida deve ser reconciliado por marcador da tentativa.
+Não editar automaticamente checkboxes do corpo da issue: releituras não fornecem CAS remoto e podem competir com o planejamento externo. Publicar resultado e evidências no corpo da PR e, nos modos sem PR, em um comentário identificado da fábrica. Isso é acompanhamento, não fechamento da issue. Um comentário duplicado após resposta perdida deve ser reconciliado por marcador da tentativa.
 
 ## 3. Projetos, scaffold e configuração
 
@@ -85,7 +98,7 @@ Não editar automaticamente checkboxes do corpo da issue: o código antigo mostr
 
 Informar nome, origem Git (remoto GitHub ou repositório local) e branch-base. Descobrir identidade de remoto por URL/IDs, nunca por nome da pasta. A pasta indicada pode estar dirty: ela é origem de cadastro, não ambiente de execução. Para origem local, clonar histórico commitado; informar que alterações não commitadas não entram na tentativa. Não fazer stash, reset, commit ou limpeza nessa origem.
 
-Projeto local sem remoto pode usar ICR/Commit. PR requer remoto GitHub confirmado. Ready requer Project e issue do repositório associado. Suportar Projects pessoais e organizacionais quando acessíveis pela conta; não limitar implicitamente a um owner/Project do Aula IA.
+Cadastro de projeto local sem remoto é permitido. Para iniciar uma tentativa e entregar em qualquer modo (ICR, ICR + Commit ou ICR + Commit + PR), o projeto deve ter remoto GitHub confirmado e GitHub Project configurado, com a issue do repositório associado presente nesse Project. Enquanto esses pré-requisitos estiverem ausentes, o projeto permanece cadastrado e configurável, sem execução ou entrega. Suportar Projects pessoais e organizacionais quando acessíveis pela conta; não limitar implicitamente a um owner/Project do Aula IA.
 
 ### 3.2 Scaffold
 
@@ -101,13 +114,21 @@ Owner, nome remoto e visibilidade aparecem somente nas modalidades remotas. Nome
 
 Plano automático inclui destino canônico, template/digest, arquivos, efeitos e conta/owner. Revalidar antes de escrever; mudança inicial recusa sem efeitos. Criar diretório exclusivamente, recusar destino existente e escapes por junction/symlink. Não adotar remoto existente por resposta inesperada. Efeitos são registrados antes/depois; criação parcial preserva arquivos e apresenta inspeção do que existe, sem rollback destrutivo ou retry cego.
 
-Templates são recursos autocontidos versionados; não depender de skills em `C:\Users\...` da máquina de desenvolvimento. Template mínimo contém ignore de segredos/caches, instruções de projeto e contrato GitHub; opções de template não alteram as autorizações remotas. Template inválido falha antes de criar diretório. Alterar template não altera projetos já criados.
+O scaffold da criação deve fornecer a configuração de engenharia por repositório descrita pela skill **setup-matt-pocock-skills**: tracker GitHub, orientação de documentação de domínio e configuração de triagem quando aplicável, com os apontadores necessários para os agentes. Essa é a referência funcional do scaffold, não um template genérico de aplicação nem instalação indiscriminada de skills.
 
-Criar não abre agentes nem inicia issue. Sucesso mostra projeto, pasta, baseline e remoto/publicação conforme escolhido; Abrir projeto leva à preparação.
+As skills de referência foram fornecidas em `.agents/skills/` neste repositório. Para implementar o scaffold, o agente deve consultar `.agents/skills/setup-matt-pocock-skills/SKILL.md` e os recursos e skills referenciados por ela para definir a configuração adequada ao projeto. Esta especificação não fixa caminhos, nomes de arquivos ou um layout próprio em substituição à skill. A referência deve permanecer disponível no ambiente de implementação ou nos recursos distribuídos com o produto; nenhum agente deve precisar acessar o workspace usado para elaborar esta especificação.
+
+Nos projetos criados, o scaffold gera apenas a configuração de engenharia e seus apontadores; as skills de referência não são copiadas nem instaladas no projeto de destino. O arquivo de instruções usado pelo scaffold é sempre `AGENTS.md`, criado quando ausente ou atualizado quando existente, preservando seu conteúdo e sem duplicar seções. Essa escolha é fixa, inclusive quando o template contém `CLAUDE.md`, e não exige pergunta ao operador.
+
+O plano de criação apresenta a configuração efetiva antes da ação Criar, sem entrevista duplicada para escolhas já informadas. As regras desta SPEC prevalecem sobre o ritual interativo da skill: escolhas no formulário e no plano, com confirmação única na ação Criar. Preservar as instruções existentes do template e não duplicar seções. A configuração de triagem não substitui a governança Ready/assignee/Project da fábrica nem autoriza criar labels remotas implicitamente. O scaffold também deve ignorar credenciais e arquivos gerados, preservando exemplos versionáveis.
+
+Os recursos necessários devem ser autocontidos e versionados, sem dependência de caminhos pessoais ou da instalação deste workspace. Recurso obrigatório ausente ou template inválido falha antes de criar o destino. Alterar o scaffold não reconfigura projetos existentes. Esta atualização documental não executa o setup.
+
+Criar não abre agentes nem inicia issue. Sucesso mostra projeto, pasta, baseline e remoto/publicação conforme escolhido; Abrir projeto leva à preparação. Scaffold somente local é permitido, mas execução e entrega aguardam a configuração de remoto GitHub e GitHub Project exigida no cadastro.
 
 ### 3.3 Configuração
 
-Configuração global: host executor designado, diretórios, integração Maestri, MCPs da fábrica, perfis reutilizáveis, defaults de tempo e política de artefatos.
+Configuração global: host executor designado, diretórios, integração Maestri, perfis reutilizáveis, defaults de tempo e política de artefatos. MCPs usam a configuração suportada do OMP; a fábrica não mantém um catálogo/resolver paralelo.
 
 Configuração por projeto: origem Git/identidade GitHub, branch-base, Project e IDs de Status, perfis Implementador/Revisor, comandos de checks com cwd relativo, limite de correções, modo de entrega padrão, automação habilitada e ordem na fila.
 
@@ -166,7 +187,7 @@ Delivered é o padrão recomendado; projeto pode mapear outro rótulo com a mesm
 
 Selecionar projeto/issue, modo e orientação opcional. Autosave tem estados salvando/salvo/erro; Iniciar aguarda save confirmado. Mesmo fluxo interno da fila, sem controlador paralelo. Issue deve pertencer ao projeto e estar atribuída exclusivamente à conta, inclusive no início manual; erro informa como atribuir no GitHub. Ready é exigido para primeiro início; Nova tentativa explícita pode iniciar fora de Ready após verificar origem e ausência de tentativa ativa daquela issue.
 
-Preparação verifica dependências exigidas pela tarefa, acesso GitHub, base, template/configuração, executor e ferramentas. Não chama dois providers apenas para aprovar o ambiente antes de cada trabalho: consulta local e handshake efetivo do próprio runtime são usados; autenticação provider será comprovada na chamada real.
+Preparação verifica remoto GitHub confirmado, GitHub Project configurado e vínculo da issue a esse Project em todos os modos de entrega, além das dependências exigidas pela tarefa, acesso GitHub, base, template/configuração, executor e ferramentas. Pré-requisito ausente impede o despacho e informa a configuração necessária. Não chama dois providers apenas para aprovar o ambiente antes de cada trabalho: consulta local e handshake efetivo do próprio runtime são usados; autenticação provider será comprovada na chamada real.
 
 Criar tentativa e consumo/ownership de despacho na mesma transação SQLite. Clone/processos são efeitos posteriores com journal; falha não deixa tentativa invisível. Uma resposta HTTP perdida deve ser consultável por request ID; cliente não repete um lançamento para descobrir se deu certo.
 
@@ -174,22 +195,22 @@ Criar tentativa e consumo/ownership de despacho na mesma transação SQLite. Clo
 
 Clone independente por tentativa em `<data>/work/<attempt-id>/implementation`; branch local `factory/<issue-number>/<attempt-id>`, base fixa por SHA. Sem hard links/alternates que dependam da pasta do operador; não copiar dirty de origem. Sem atualização silenciosa da base no meio da tentativa.
 
-Após entrega, produzir snapshot imutável de conteúdo e evidências fora do clone mutável. Manifesto inclui base SHA, caminho/tipo/mode/digest/conteúdo dos arquivos pertinentes, alterações tracked/untracked não ignoradas, exclusões/renames e estado do índice. Usar Git `-z` para nomes; não parsear `old -> new` ou linhas. Erro Git/leitura/índice conflitante não produz hash aprovável. Arquivos especiais/submodules/LFS devem ser suportados com conteúdo exato e checks apropriados ou receber diagnóstico de incompatibilidade antes da revisão; não fingir uma entrega completa.
+Ao concluir a implementação, o Implementador encerra as escritas e aguarda o término de ferramentas e processos próprios que alteram o produto antes de entregar o resultado oficial. O controlador confirma a conclusão da passagem e então produz snapshot imutável de conteúdo e evidências fora do clone mutável. Checks e revisão começam somente após a captura. A captura é uma versão imutável mantida no Git, com referência protegida contra coleta enquanto a entrega for necessária, sem publicação remota implícita. Ela inclui alterações tracked e untracked não ignoradas pertinentes à entrega, exclusões, renames e modos de arquivo. O banco guarda base SHA, referência da versão e apenas hashes/metadados estritamente necessários; não guarda conteúdo de arquivos nem cópia do índice. A preparação dessa versão não altera o índice do checkout de implementação. Usar Git `-z` para nomes; não parsear `old -> new` ou linhas. Erro Git/leitura/índice conflitante não produz hash aprovável. Arquivos especiais/submodules/LFS devem ser suportados com conteúdo exato e checks apropriados ou receber diagnóstico de incompatibilidade antes da revisão; não fingir uma entrega completa.
 
 Ignored gerados não pertencem à entrega; mostrar arquivos novos ignorados quando o agente afirma alterá-los. Segredos conhecidos não devem ser coletados/publicados automaticamente. Manifesto e diff têm identidade `deliveryVersion` por conteúdo; HEAD sozinho é insuficiente para ICR.
 
 Revisor recebe clone independente da base com snapshot aplicado e dados da issue/achados; não recebe conversa do Implementador. Checks podem criar caches ignored. Alteração de produto pelo Revisor invalida aquele parecer; não aceitar correção feita pelo Revisor como implementação independente. Snapshot permanece disponível após processos terminarem.
 
-O terminal do Implementador pode continuar sendo usado enquanto o Revisor examina o snapshot. Novas alterações no clone mutável não entram nesse snapshot nem herdam aprovação. Mostrar Modificações posteriores; operador pode submeter uma nova entrega para verificação/revisão. Publicação automática exige snapshot aprovado ainda correspondente à entrega corrente e nenhuma passagem de implementação/HITL pendente; se houver novidade, pausar publicação e apresentar Reavaliar alterações, não bloquear conversa.
+Após entregar, o Implementador não modifica o produto durante checks, revisão ou publicação. A conversa pode permanecer disponível, sem filtros no compositor ou autorizações por arquivo. Reprovação abre uma rodada de correção explícita: o Implementador volta a escrever, conclui a correção e entrega uma nova versão para captura, checks e revisão independente. Aprovação segue para a entrega no modo escolhido, sem etapa de edição contínua ou ação Reavaliar alterações.
 
-Capturas repetidas/fingerprint ajudam a detectar mudanças, mas não são filesystem transacional. Para eliminar TOCTOU de publicação, materializar o snapshot aprovado em clone privado de publicação e criar commit/tree a partir dele; nunca executar `git add .` no checkout onde o terminal continua escrevendo.
+A captura ocorre entre o encerramento das escritas da passagem e o início dos checks. Não exigir consentimento por arquivo nem adotar vigilância contínua de modificações como condição de publicação. Alteração externa durante a captura é falha técnica de captura: preservar o trabalho e permitir repetir a captura, sem reiniciar o Implementador. A coordenação das escritas próprias não constitui bloqueio de filesystem contra programas externos. Materializar o snapshot aprovado em clone privado de publicação e criar commit/tree a partir dele; nunca coletar novamente o checkout de implementação para publicar.
 
 ### 5.3 Estados
 
 Evitar flags contraditórias que a UI precisa reconciliar. Registro da tentativa tem etapa explícita e resultado separados:
 
 - Fases: `preparing`, `implementing`, `verifying`, `reviewing`, `publishing`, `finished`.
-- Suspensão opcional: pergunta humana, dependência/configuração, divergência externa, acompanhamento perdido.
+- Suspensão opcional: decisão humana necessária, dependência/configuração indispensável que exige intervenção externa, divergência externa ou acompanhamento perdido. Dificuldade operacional recuperável não suspende a tentativa.
 - Resultado final: `delivered`, `rejected`, `failed`, `cancelled`, `interrupted`.
 - Revisão: `pending`, `approved`, `rejected`, sempre vinculada à deliveryVersion.
 - Publicação: por efeito, não booleano global.
@@ -211,13 +232,21 @@ IDs execution/passage/session/round/role/deliveryVersion são vinculados pelo tr
 
 ### 5.5 Perguntas e erros recuperáveis
 
-Pergunta exige motivo, fatos observados, alternativas e decisão. Não exigir N tentativas arbitrárias. Guia do papel: corrigir schema, consultar ferramentas reais e investigar erro local antes de pedir decisão; não trocar escopo nem ignorar guardas por pressão para continuar.
+O despacho autoriza o agente a resolver dificuldades operacionais dentro do escopo e do ambiente da tentativa, respeitando seu papel. Preparar ou atualizar índices e caches próprios, corrigir argumentos/configuração local e tentar outra abordagem compatível não exigem nova permissão. Essa autonomia não autoriza publicação, alteração do ambiente do operador, mudança de escopo ou efeitos irreversíveis ainda não autorizados. O Revisor mantém a restrição de não alterar o produto.
+
+Pergunta formal apresenta a decisão necessária, contexto e alternativas, associada à tentativa/passagem. Orientações do agente reservam perguntas para decisões de produto, escopo e efeitos ainda não autorizados; manutenção rotineira deve ser resolvida autonomamente. Credencial ausente ou impossibilidade técnica recebe diagnóstico concreto, sem pedido de permissão para bloquear.
+
+O controlador valida formato e vínculo de `execution_question`, não classifica semanticamente a justificativa nem rejeita uma pergunta por um detector de manutenção. Não criar estado Aguardando permissão de bloqueio. Responder continua na mesma passagem; conversa e ferramentas permanecem normais.
+
+Investigar o erro, usar ferramentas reais e corrigir a causa recuperável. Se uma ferramenta auxiliar permanecer indisponível, usar evidência alternativa suficiente, como código atual, sem alegar ter executado a ferramenta. Requisito obrigatório de verificação não pode ser dispensado. Se o cumprimento ficar tecnicamente impossível, registrar falha concreta, ações tentadas e requisito afetado, preservar trabalho/evidências e oferecer recuperação; não converter impossibilidade técnica em pergunta de autorização. Não exigir N tentativas arbitrárias nem repetir operações de efeito desconhecido sem reconciliação.
 
 Aguardando resposta pausa avanço automático e publicação, não TUI, comandos, ferramentas ou conversa. Responder pelo painel entrega à mesma passagem acompanhada, com correlação e ACK; texto digitado no terminal não resolve implicitamente a pergunta formal. Terminal pode exibir a pergunta e uma action suportada de resposta explícita, usando o mesmo contrato, sem parser de conversa livre.
 
 Mudança de escopo vai para GitHub e requer nova tentativa; orientação dentro do escopo pode continuar. Resultado enviado durante pergunta é recusado com diagnóstico corrigível, sem matar agente. Resposta humana com entrega incerta mantém pausa e disponibiliza consulta do recibo antes de outro envio; não retry automático. Cancelar pergunta/tentativa é opção acessível, nunca reset de equipe.
 
 ## 6. Modos de entrega e efeitos remotos
+
+Todos os modos exigem remoto GitHub confirmado e GitHub Project configurado, com a issue associada. ICR e ICR + Commit mantêm as alterações de código locais; a exigência de remoto e Project não autoriza push nesses modos. Revalidar esses vínculos antes de concluir a entrega.
 
 | Modo | Sucesso |
 | --- | --- |
@@ -243,7 +272,7 @@ Elegibilidade de bytes e autorização de publicar agora são consultas distinta
 
 ## 7. Cancelamento, restart e nova tentativa
 
-Cancelar revoga avanço/publicação imediatamente e inicia teardown de recursos próprios; resposta 202 pode dizer Cancelamento solicitado, não Tudo parado. O worker aguarda lançamentos pendentes e recursos surgidos depois da solicitação; nenhum recrutamento atrasado fica fora do ownership.
+Cancelar impede imediatamente novos avanços e efeitos de publicação da fábrica e solicita parada dos recursos que ela iniciou. Resposta 202 informa Cancelamento solicitado, não Tudo parado. O adapter acompanha também o lançamento pendente conhecido; se um terminal retornar depois, registra e solicita sua parada. Falta de confirmação é exibida como limpeza incerta, sem apagar arquivos ou anunciar parada completa. Não há garantia de contenção de todos os daemons, brokers ou descendentes possíveis de ferramentas.
 Cancelar não desfaz uma requisição remota já enviada. Se push/PR/Status terminar depois da solicitação, registrar o efeito efetivamente confirmado e impedir os próximos; mostrar efeitos ocorridos, sem anunciar cancelamento como rollback. A reconciliação permanece disponível para efeitos desconhecidos, mas não autoriza completar automaticamente publicação de tentativa cancelada.
 
 
@@ -257,7 +286,7 @@ Concluir publicação de snapshot aprovado pode continuar após restart com aç�
 
 ### 8.1 Forma
 
-Monólito modular. Um processo controlador Fastify contém scheduler/worker assíncrono; agentes e MCPs são subprocessos externos controlados. Operações HTTP não esperam a duração da tentativa. Sem broker, microserviços, event sourcing ou repository genérico.
+Monólito modular. Um processo controlador Fastify contém scheduler/worker assíncrono; agentes usam runtime OMP normal, que gerencia seus MCPs. A fábrica acompanha os recursos que inicia, sem assumir contenção geral. Operações HTTP não esperam a duração da tentativa. Sem broker, microserviços, event sourcing ou repository genérico.
 
 TypeScript strict; Node 24 LTS inicialmente, dependências com lockfile. Código de produção compilado, não depender de type stripping/experimental flags para instalação. React/Vite é cliente, não dono da orquestração. SQLite com driver transacional e migrations versionadas. Fastify expõe DTOs e schemas; UI não importa modelos internos do runtime.
 
@@ -325,8 +354,6 @@ packages/
 resources/
   roles/                      # Implementador/Revisor versionados
   templates/                  # scaffold autocontido
-native/
-  windows-supervisor/         # helper nativo e protocolo versionado
 tests/
 docs/
   architecture/
@@ -359,14 +386,16 @@ Tabelas orientadas a consultas/operações reais, não tudo em chave JSON compar
 - projects/project_revisions: origem, base, Project e padrões versionados.
 - attempts: issue, base, modo, etapa, resultado, cancelamento e configuração capturada.
 - rounds/passages: papel, contexto, resultado, pergunta e vínculos.
-- deliveries/reviews/checks: conteúdo/digest, julgamento e prova por versão.
+- deliveries/reviews/checks: referências Git e hashes/metadados necessários, julgamento e prova por versão.
 - questions: estado, resposta e recibo de entrega.
 - effects: intenção/reconciliação por operationId.
 - queue_consumptions: ciclo observado/consumo deduplicado.
 - resources: ownership/estado de cleanup e referências privadas protegidas.
 - events/artifacts: histórico de eventos sanitizados e arquivos externos por checksum.
 
-Conteúdos grandes/artefatos em `<data>/artifacts/<attempt-id>`; banco conserva manifestos, checksums, tamanho e relações. Não enviar blobs integrais no polling. Durabilidade: resultado e efeito commitados antes de confirmação; integridade de arquivo é conferida quando consultado/publicado. Missing artifact vira diagnóstico, não fallback vazio.
+O workflow coordena desenvolvimento; não é backup do projeto. Git é a fonte do conteúdo versionado. Persistir apenas configuração, critérios, resultados, evidências pertinentes e estado operacional. Para identificar alterações, guardar referências Git e hashes/metadados estritamente necessários. Não copiar checkout, índice Git, arquivos ignorados ou caches para banco, JSON, Base64 ou snapshots auxiliares, inclusive em arquivos externos. Não preservar esse desenho por compressão, deduplicação, cache ou outra tabela. Clones de trabalho, revisão e publicação são ambientes operacionais Git, não cópias serializadas para histórico; snapshots de configuração e critérios não contêm arquivos do projeto.
+
+Evidências pertinentes, como logs de checks e capturas de UI, podem ficar em `<data>/artifacts/<attempt-id>`; o banco conserva referências, checksums, tamanho e relações. Essa pasta não armazena cópias do projeto ou do índice. Listagens, histórico e polling consultam resumos sem carregar ou serializar conteúdo do projeto; diff e evidências são carregados sob demanda no detalhe. Durabilidade: resultado e efeito commitados antes de confirmação; integridade de arquivo é conferida quando consultado/publicado. Missing artifact vira diagnóstico, não fallback vazio.
 
 Operações atômicas principais: criar tentativa/consumir intenção, aceitar resultado com unique passage, gravar review por deliveryVersion, registrar decisão/recibo, atualizar efeito com versão, finalizar/cancelar. Nenhum SQL/lock privado no HTTP/executor. Transactions curtas; nunca segurar transaction enquanto espera provider/GitHub. Falha de escrita tem consequência explícita e nenhuma confirmação falsa.
 
@@ -392,7 +421,7 @@ Conta/host executor, esteira ligada/pausada, tentativa ativa, próximas issues e
 
 ### Tentativa
 
-Issue, modo, etapa/rodada, progresso, resultado, diff, checks, review, commit/PR e pergunta pendente. Ações conforme estado: Abrir terminal/pasta, Responder, Cancelar, Nova tentativa, Reavaliar alterações, Concluir publicação. Detalhes técnicos contêm integração/recibos sem segredos. Nenhum reset de equipe/liberação de reserva.
+Issue, modo, etapa/rodada, progresso, resultado, diff, checks, review, commit/PR e pergunta pendente. Ações conforme estado: Abrir terminal/pasta, Responder, Cancelar, Nova tentativa, Repetir captura em caso de falha técnica, Concluir publicação. Detalhes técnicos contêm integração/recibos sem segredos. Nenhum reset de equipe/liberação de reserva.
 
 ### Requisitos de UI
 
@@ -406,25 +435,25 @@ Desktop/mobile, teclado, foco visível, nomes acessíveis computados, contraste/
 2. Snapshot privado de publicação + commit + push/PR autorizados e reconciliação de resposta perdida. Não entregar só botão/enum sem efeitos reais.
 3. Fila Ready por assignee, consumo durável, pause/resume e projeção Kanban, usando a mesma operação start.
 4. Scaffold local/remoto e cadastro com plano/revalidação/efeitos parciais.
-5. Jornadas UI finais, diagnóstico e instalação externa Maestri, documentação e critérios cruzados.
+5. Jornadas UI finais, diagnóstico e inicialização pelo terminal Maestri, documentação e critérios cruzados.
 
 A ordem é dependência de verificação, não autorização para omitir modos/scaffold da entrega especificada. Cada fatia termina com percurso funcional; não criar todos os abstractions/stubs primeiro. Mudança estrutural deve reduzir lugares necessários para mudar uma capacidade, não apenas tamanho de arquivo.
 
 ### 10.2 Provas por superfície
 
-Vitest para decisões/contratos determinísticos; Fastify inject e HTTP real para contratos; SQLite/Git/filesystem temporários para transações/versões; processos Windows reais para ownership; Maestri/OMP/provider real para TUI e resultados; Playwright MCP/Chrome para UX. Helpers comuns possuem readiness/teardown próprios, não métodos emprestados de TestCase. Suíte padrão não recruta terminais nem chama provider/rede; ensaios nativos separados com opt-in e custo explícito.
+Vitest para decisões determinísticas; Fastify inject/HTTP, SQLite/Git temporários para contratos; Maestri/OMP/provider real para o percurso e Playwright MCP/Chrome para UX. Suíte padrão não recruta terminais nem chama provider/rede; ensaios reais têm opt-in e custo explícito.
 
-Classificar falha de setup, comportamento, ambiente e teardown. Sem asserts de cópia/texto-fonte/defaults incidentais como aceite. Uma mock reply não certifica resultado nativo. Revisar riscos críticos antes de investir no smoke amplo; suíte final após última mudança de comportamento, com baseline/falhas relatados, não suprimidos.
+Validar primeiro o percurso vertical. Para cancelamento, dois cenários representativos: inicialização e trabalho com processo filho. Não exigir matriz em cada instante, observador externo de crash, inventário individual de handles ou ensaios exaustivos de troca de modelo/sessão e eventos tardios antes do produto. Ao perder acompanhamento, interromper coordenação automática, preservar trabalho e permitir nova tentativa; testar o comportamento implementado. Revisar riscos e achados relevantes e o percurso integrado, não cada alteração documental com outro agente. Relatar falhas e limites sem fabricar sucesso.
 
 ### 10.3 Matriz de aceitação
 
 | ID | Cenário obrigatório | Observação de conclusão |
 | --- | --- | --- |
 | AC-01 | Projeto existente dirty | Cadastro e clone da base sem alterar bytes/índice/HEAD do operador |
-| AC-02 | Scaffold nas três modalidades | Plano sem efeitos; efeito escolhido confirmado; nenhum agente iniciado |
+| AC-02 | Scaffold nas três modalidades | Configuração setup-matt-pocock-skills presente: tracker GitHub, regras de domínio, seção Agent skills e triagem somente quando aplicável; recursos empacotados sem dependência de skill pessoal, sem executar setup interativo ou instalar skills; plano sem efeitos e efeito escolhido confirmado, nenhum agente iniciado |
 | AC-03 | Criação parcial/conta alterada | Efeitos preservados, nenhuma repetição/adoção destrutiva |
 | AC-04 | Defaults e duas abas | Conflito preserva edição; tentativa captura escolhas antigas sem alteração retroativa |
-| AC-05 | Início manual | Um request cria uma tentativa/clone; resposta perdida consultável sem novo despacho |
+| AC-05 | Início manual | Cadastro/scaffold local sem remoto permitido; ausência de remoto GitHub, Project ou vínculo da issue impede início em todos os modos; com pré-requisitos, um request cria uma tentativa/clone e resposta perdida é consultável sem novo despacho |
 | AC-06 | Implementação real | Agente cria artefato e check; fábrica observa resultado durável, checks executados |
 | AC-07 | Revisão independente | Outro runtime e snapshot; critérios/achados exatos; alteração pelo Revisor invalida parecer |
 | AC-08 | Correções | Rodada 1, retorno automático dentro do limite, última correção revisada, esgotamento preserva pendências |
@@ -432,32 +461,33 @@ Classificar falha de setup, comportamento, ambiente e teardown. Sem asserts de c
 | AC-10 | Commit | Tree corresponde ao snapshot aprovado, SHA local, sem push |
 | AC-11 | PR | Ref/SHA remoto e PR confirmados; sem merge, auto-close ou Done |
 | AC-12 | Efeito remoto incerto | Reconciliação não duplica PR/commit nem reimplementa código |
-| AC-13 | Trabalho após aprovação | TUI livre; novas alterações não herdam review; publicação não coleta checkout mutável |
-| AC-14 | Pergunta | Conversa/ferramentas livres; avanço pausado; resposta correlacionada continua mesma passagem |
+| AC-13 | Encerramento e captura da entrega | Escritas próprias terminam antes da captura; checks/revisão usam snapshot fixo; correção exige nova rodada/captura; publicação usa versão aprovada sem consentimento por arquivo ou vigilância contínua do clone |
+| AC-14 | Autonomia e pergunta | Orientação permite manutenção própria; pergunta vinculada recebe resposta na mesma passagem, sem classificador semântico; falha técnica preserva trabalho; conversa/ferramentas livres |
 | AC-15 | Erro de tool recuperável | Chamada inválida seguida de correção, sem block terminal automático |
-| AC-16 | Cancelamento concorrente | Cancel durante clone/compile/recruit/ready/tool/check/publicação; lançamento tardio não escapa ownership |
+| AC-16 | Cancelamento representativo | Cancelar na inicialização e durante trabalho com filho; avanço/publicação interrompidos, recursos conhecidos recebem parada e ausência de confirmação é informada sem apagar trabalho |
 | AC-17 | Nova tentativa | Outro clone/processo, origem/artefatos anteriores preservados, sem reset/liberação/Ready obrigatório |
 | AC-18 | Restart | Histórico/resultado/efeitos preservados, tokens antigos recusados, sem restore de sessão |
 | AC-19 | Fila | Ready+assignee único; ocupado/offline não perde candidatos; múltiplos assignees não executam |
 | AC-20 | Deduplicação | Polls/restart/resposta perdida/Ready residual não geram outra tentativa; retry explícito funciona |
 | AC-21 | Instância/identidade | Segundo processo mesmo host recusado; várias UIs usam worker único; mudança de conta pausa despacho |
 | AC-22 | Troca de responsável/Status | Revoga publicação; nenhum takeover de In progress; handoff documentado |
-| AC-23 | MCPs | Configuração resolvida usada pelo agente, descoberta e chamada reais, desabilitado respeitado |
+| AC-23 | MCPs | MCP necessário funciona no runtime pelo gerenciamento normal do OMP, com descoberta e chamada real; não exigir exclusividade de servidores, resolver próprio ou ambiente mínimo por servidor |
 | AC-24 | UTF-8/frames | Português/emoji fragmentados conservados; malformed/oversize/EOF têm diagnóstico e encerram esperas |
-| AC-25 | Interação Maestri externa | Controlador iniciado fora do app a partir de vínculo explícito; TUI e ownership confirmados |
-| AC-26 | Cleanup | Processos próprios zerados, terminais próprios conferidos; recurso manual intacto; falha conserva evidência |
+| AC-25 | Inicialização dentro do Maestri | Controlador iniciado pelo terminal-âncora com contexto herdado e validado; TUI e ownership confirmados; sem attach externo |
+| AC-26 | Cleanup | Recursos conhecidos iniciados pela fábrica recebem parada, recursos manuais não são alvos; confirmação ou incerteza explícita, sem alegar ausência global de processos nem apagar arquivos com parada incerta |
 | AC-27 | UI | Quatro percursos e três modos, conflito/save/polling, desktop/mobile/teclado e limites visuais |
+| AC-29 | Persistência e desempenho | Com caches e arquivos ignorados volumosos, medir e registrar tamanho persistido (banco e artefatos auxiliares) e latência de listagens, histórico e polling antes/depois; aumentar esses arquivos não aumenta conteúdo persistido nem payloads, e essas consultas não leem ou serializam conteúdo do projeto; entrega continua identificada e recuperável pelo Git |
 | AC-28 | Manutenção | Mudança de executor/MCP sem SQL/UI internos; módulos respeitam imports e contratos; novos checks não alteram lifecycle |
 
-Aceite completo exige matriz mais os casos INT do anexo. Fechamento de issue, número de testes ou stack compilando não equivalem a critérios concluídos. Pendências nativas da prova #96 viram critérios de implementação, não pré-requisito para reconsiderar a stack.
+Aceite completo exige a matriz e os casos INT revisados do anexo. Número de testes ou encerramento de issue não equivale a conclusão. Evidências reais devem comprovar o percurso implementado; limitações de runtime não criam automaticamente novos requisitos de harness. A governança do Kanban da seção 4, os modos de entrega e a proteção dos bytes aprovados/publicação permanecem integralmente mantidos.
 
-## 11. Evidência consultada e diferenças intencionais
+## 11. Orientações de implementação
 
-- [Criação atual](../../../painel/local_creation.py) e [CLI](../../../pipeline/cli.py): modalidades/planos/efeitos; substituir dependência de skill pessoal por templates autocontidos.
-- [Início e rodadas](../../../painel/issue_round.py), [schemas](../../../workflow/tool_schemas.py) e [validadores](../../../workflow/contracts.py): snapshot e cobertura; retirar reserva global, block-permission genérico e adoção dirty.
-- [GitHub](../../../workflow/github.py): IDs e revalidação; substituir snapshot de itens com limite fixo por paginação e fila por assignee. Não editar corpo da issue por falta de CAS remoto.
-- [Runtime Maestri](../../../painel/team_runtime.py), [worker](../../../painel/team_worker.py), [TUI](../../../painel/omp_tui.py): identidade/canais; não portar filtros ou política que desativa ferramentas de trabalho.
-- [Transporte MCP](../../../painel/mcp_stdio.py), [Playwright](../../../painel/playwright_mcp.py), [GitNexus](../../../painel/gitnexus_mcp.py) e [leitura GH](../../../painel/github_issue_read.py): mecanismos e erros; unificar resolução por nome e lifecycle sem apagar credenciais de execução.
-- [Prova #96](https://github.com/vonderheidon/aula-ia/issues/96) e [spec da prova](../prova-tecnica-maestri-omp.md): viabilidade de terminal normal, resultados e contenção. A revisão local identificou cancelamento/recrutamento concorrentes, UTF-8 por chunk, provider ignorado e MCP helpers não ligados ao runtime; o anexo exige prevenção dessas falhas.
+- Criação: explicitar modalidades, planos e efeitos; usar templates autocontidos, sem depender de skill pessoal do operador.
+- Início e rodadas: capturar snapshot e cobertura dos critérios; usar ambientes próprios, sem reserva global, bloqueio genérico de permissões ou adoção de checkout dirty.
+- GitHub: usar IDs estáveis, revalidar estado remoto, paginar itens e organizar fila por assignee. Não editar corpo da issue por falta de CAS remoto.
+- Runtime Maestri/OMP: vincular identidade e canais à passagem; manter terminal normal e ferramentas de trabalho disponíveis.
+- MCPs: usar configuração e lifecycle suportados do OMP; conferir ferramenta necessária com chamada útil, sem resolver paralelo, exclusividade ou launcher sanitizador próprios.
+- Integração: conferir perfil efetivo, resultados vinculados e cancelamento representativo; ao perder acompanhamento, interromper coordenação e preservar trabalho. Usar transporte suportado e UTF-8 correto, sem matriz exaustiva de runtime como pré-requisito.
 
-Inspeção e ajuda CLI realizados nesta elaboração são fatos locais. Nenhum novo smoke de provider, publicação GitHub ou aceite visual é declarado aqui. Maestri CLI observado f956f09c e OMP 18.10.3 são baseline de integração para testes, não versão universal futura.
+Registrar as versões efetivas de Maestri, OMP e servidores MCP nos ensaios de integração. Orientações documentais e ajuda CLI não comprovam execução de provider, publicação GitHub ou aceite visual; essas evidências devem ser produzidas pelos critérios de aceite.

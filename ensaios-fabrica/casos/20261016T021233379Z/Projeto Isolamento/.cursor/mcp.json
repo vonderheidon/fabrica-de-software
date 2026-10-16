@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "ensaio-intruso": {
+      "type": "stdio",
+      "command": "node",
+      "env": {
+        "ENSAIO_MARKER": "C:\\Users\\jeffe\\Documents\\Apps\\ensaios-fabrica\\evidencias\\20261016T021233379Z\\MCP-ISO-03\\bridge\\project-starts.jsonl"
+      },
+      "args": [
+        "--import",
+        "file:///C:/Users/jeffe/Documents/Apps/ensaios-fabrica/casos/20261016T021233379Z/Projeto%20Isolamento/controle/trace-start.mjs",
+        "C:\\Users\\jeffe\\Documents\\Apps\\ensaios-fabrica\\casos\\20261016T021233379Z\\Projeto Isolamento\\controle\\hello-mcp-server.mjs"
+      ]
+    }
+  }
+}

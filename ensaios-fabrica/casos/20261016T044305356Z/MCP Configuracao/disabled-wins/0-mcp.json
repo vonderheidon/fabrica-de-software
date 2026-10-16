@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "target": {
+      "type": "stdio",
+      "command": "C:\\Program Files\\nodejs\\node.exe",
+      "args": [
+        "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\ensaios-fabrica\\controle\\hello-mcp-server.mjs"
+      ],
+      "cwd": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\ensaios-fabrica\\casos\\20261016T044305356Z\\MCP Configuracao",
+      "disabled": true
+    }
+  }
+}
