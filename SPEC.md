@@ -10,18 +10,18 @@ Este pacote contém três fontes complementares:
 
 Implementar os módulos do zero na stack definida, sem importar, copiar ou encapsular controladores e adapters de outros produtos. As orientações deste pacote descrevem os comportamentos exigidos e os problemas a prevenir.
 
-## Etapas de trabalho: estudos e desenvolvimento
+## Etapas de trabalho: ensaio de acesso e desenvolvimento
 
-Decisão de escopo em 2026-10-16: encerrar a expansão dos estudos isolados e concentrar o próximo ensaio em um percurso vertical pequeno. O workspace canônico é esta pasta; os ensaios ficam em `ensaios-fabrica/`. Evidências existentes são preservadas, não se tornam obrigações de implementação.
+Decisão de escopo em 2026-10-16: o ensaio responde somente se o LionClaw consegue acessar o Maestri para implementar e testar a fábrica. O workspace canônico é esta pasta; os ensaios ficam em `ensaios-fabrica/`.
 
-| Etapa | Objetivo e entregáveis | Critério de conclusão |
+| Etapa | Objetivo | Critério de conclusão |
 | --- | --- | --- |
-| Ensaio vertical, atual | Tarefa pequena, implementação OMP normal, check real, revisão independente, correção e entrega consultável; depois cancelamento e nova tentativa. | Percurso observado com limites e impedimentos concretos, sem exigir controle completo do runtime. |
-| Desenvolvimento da fábrica, futura | Implementar as jornadas de produto e a matriz AC/INT revisada. | Critérios comprovados no produto; fixtures não são aceite integrado. |
+| Ensaio de acesso, atual | LionClaw usa Wire para conduzir OMP normal em terminal próprio no Maestri, realizar pequena alteração local e executar um teste. | Alteração e resultado real do teste consultados pelo LionClaw, com evidência e limites registrados. |
+| Desenvolvimento da fábrica, futura | Implementar as jornadas e validar a matriz AC/INT deste pacote. | Critérios comprovados no produto implementado. |
 
-A fábrica coordena tarefas, resultados e os efeitos que ela própria executa; não é um ambiente de contenção nem um gerenciador geral do runtime OMP. OMP/Maestri e os MCPs configurados pelo operador são componentes confiáveis, usados pelos mecanismos normais suportados. Não implementar ferramentas próprias de arquivos/shell, resolução exclusiva de MCPs, filtragem própria do ambiente de cada MCP ou plataforma de supervisão para eliminar todos os limites do runtime.
+A fábrica coordena desenvolvimento. OMP/Maestri e os MCPs configurados pelo operador são componentes confiáveis, usados pelos mecanismos normais suportados. Não implementar ferramentas próprias de arquivos/shell, resolução exclusiva de MCPs, filtragem própria de ambiente ou plataforma de supervisão do runtime.
 
-O plano vigente está em `ensaios-fabrica/casos/validacoes.json`; o relatório preserva o histórico e registra a mudança de direção. Estudos adicionais só são justificados por impedimento observado no percurso ou risco concreto à entrega. Não exigir auditoria independente de hashes a cada pequeno estudo ou ajuste documental. Esta revisão autoriza a mudança documental e do plano, não novas chamadas pagas, recursos externos ou publicação.
+O plano vigente está em `ensaios-fabrica/casos/validacoes.json`. Revisão independente, correção em rodadas, entrega, cancelamento, reinício, persistência e governança continuam requisitos do produto; sua validação pertence ao desenvolvimento da fábrica e não condiciona o encerramento deste ensaio de acesso. Estudo adicional só se justifica por impedimento concreto à prova de acesso, implementação ou teste. Preservar somente evidências pertinentes ao acesso, alteração e teste, conforme o relatório enxuto dos ensaios; estudos descartados não são backlog. Esta limpeza não inicia agentes ou efeitos externos.
 
 ## 1. Problema e objetivo
 

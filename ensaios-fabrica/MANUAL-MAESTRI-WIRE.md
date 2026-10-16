@@ -2,16 +2,13 @@
 
 Procedimento conferido em 15/10/2026 neste ambiente, com PowerShell 7, `curl.exe` e OMP 18.10.3. O acesso é direto por HTTPS/WSS; não depende de ferramenta MCP nem de `MAESTRI_PIPE` no shell do LionClaw.
 
-## Direção vigente dos ensaios — 2026-10-16
+## Direção vigente dos ensaios - 2026-10-16
 
-Usar este manual para conexão e observação, não como obrigação de construir controle de runtime. O plano atual é FLOW-01 (implementação, check, revisão, correção e entrega) e CANCEL-RETRY-01 (cancelar na inicialização/trabalho com filho e nova tentativa), conforme `casos/validacoes.json`.
+O roteiro em `casos/validacoes.json` comprova acesso LionClaw ao Maestri, pequena alteração com OMP normal e teste real cujo resultado volta ao LionClaw. Encerrar ao registrar essa evidência.
 
-`controle/new-run.ps1 -CaseId ALL` ainda prepara os casos históricos de `cases`; não executa nem prepara automaticamente FLOW-01. Para o novo percurso, use `pendingValidationPlan.priorities` como roteiro e uma pasta de rodada nova. Helpers de estudo permanecem preservados, sem promessa de implementação do fluxo vertical.
+`controle/new-run.ps1 -CaseId ALL` prepara somente o caso atual ACCESS-01; não inicia agente ou teste. Use uma pasta de tarefa em `casos/<runId>/`. Requisitos completos da fábrica serão validados durante sua implementação.
 
-Usar OMP normal e seu gerenciamento MCP. Os helpers de bootstrap SDK, isolamento de fontes/ambiente e supervisão Windows abaixo são instrumentos históricos de estudo, não caminho obrigatório de produção nem motivo para novos probes. Não continuar exclusividade MCP, ambiente mínimo por servidor, observador externo de crash, inventário individual de handles, IPC stop próprio ou matriz exaustiva de lifecycle. Job pode ser detalhe interno de cancelamento; parada sem confirmação é informada como incerta e preserva arquivos.
-
-Revisão independente é da entrega do percurso e dos achados relevantes; não exigir revisão/auditoria integral de hashes para cada estudo ou correção documental. Limites, resultados anteriores e recursos existentes permanecem preservados. A governança do Kanban não mudou. Este manual não autoriza iniciar chamadas pagas ou efeitos externos.
-
+Helpers antigos de isolamento, snapshots, revisão de estudos e supervisão foram removidos do controle ativo. O relatório lista somente as evidências preservadas de acesso, alteração e execução, seus limites e resíduos pendentes. Este manual não autoriza chamadas pagas nem efeitos externos.
 
 ## 1. Conexão já pareada
 
@@ -91,7 +88,7 @@ $terminalId = $created.terminalId
 $created | ConvertTo-Json | Set-Content (Join-Path $evidence 'terminal-criado.json') -Encoding utf8
 ```
 
-O script âncora posiciona o shell na pasta do ensaio e executa o preflight; não inicia o OMP. Para iniciá-lo, envie `omp` pelo endpoint de prompt. Após timeout na criação, consulte o feed antes de repetir: não presuma que nada foi criado.
+O script âncora posiciona o shell na pasta do ensaio e executa o preflight; não inicia o OMP. Para iniciá-lo, envie `omp --model openai-codex/gpt-6-luna --thinking high` pelo endpoint de prompt. Após timeout na criação, consulte o feed antes de repetir: não presuma que nada foi criado.
 
 ## 5. Acompanhar a tela e responder perguntas
 
@@ -138,9 +135,3 @@ Em outra máquina, ative **Configurações > Wire** e confira a chave na aba **M
 | Token funciona, mas terminal não responde | Confira ID, `isRunning`, `needsAttention` e a tela pelo stream. |
 
 Tokens não devem aparecer em prompts, comandos, transcrições ou evidências. Os exemplos usam apenas o caminho da credencial. Evidências da execução real: [relatório dos ensaios](evidencias/relatorio-validacao.md).
-
-## 8. Percurso SDK comprovado no ensaio
-
-A rodada `20261016T025007657Z` comprovou uma única TUI operacional com `InteractiveMode` do SDK OMP 18.10.3, modelo `openai-codex/gpt-6-luna`, esforço `high` e MCPManager fornecido explicitamente junto de `mcpTools`. O loader do gerenciador devolve somente as configurações selecionadas, inclusive após `/mcp reload`; as sentinelas nativas global e de projeto não iniciaram no cenário isolado. O controle positivo exercitou as mesmas fontes antes, com descoberta normal.
-
-Bootstrap e dependências fixadas: `controle/sdk-runtime/bootstrap.ts`, `package.json` e `package-lock.json`; launcher: `controle/start-sdk-isolation.ps1`. O launcher precisa de fixtures, configuração selecionada e pastas de evidência preparadas para um RunId novo. Não reutilize a rodada concluída para executar novamente ou sobrescrever evidências. A autenticação é consultada na origem, sem copiar credenciais para o diretório global privado de teste. Consulte o relatório para os comandos registrados, revisão independente, cleanup e limites; este helper é de ensaio, não o controlador da fábrica.

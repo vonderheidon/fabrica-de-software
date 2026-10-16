@@ -4,8 +4,7 @@ Pesquisa em 2026-10-15. Proposta para ensaios locais, sem alterar o escopo da f�
 
 ## Situação após a decisão de escopo de 2026-10-16
 
-Pesquisa histórica preservada. Prevalecem a SPEC e o anexo revisados: Wire continua como meio de conduzir/observar os ensaios, não como justificativa para desenvolver runner, broker ou MCP de controle próprios. O próximo trabalho é o percurso vertical FLOW-01 e cancelamento representativo/nova tentativa, não a expansão de mecanismos de contenção. Recomendações exploratórias abaixo não são backlog obrigatório. OMP e MCPs configurados pelo operador são confiáveis e usam o gerenciamento normal; nenhuma nova garantia de isolamento foi acrescentada.
-
+Pesquisa histórica. O plano vigente está em `ensaios-fabrica/casos/validacoes.json`: comprovar que o LionClaw acessa o Maestri, conduz uma pequena implementação e consulta um teste real. As recomendações exploratórias abaixo, incluindo runner, controle de workers e contratos da fábrica, não compõem o ensaio atual. Os requisitos completos serão validados durante o desenvolvimento da fábrica.
 
 ## Evidências
 

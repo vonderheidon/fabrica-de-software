@@ -78,19 +78,18 @@ Dois cenários representativos de aceite: cancelar durante inicialização e dur
 
 ## 7. Plano atual dos ensaios
 
-Encerrar a expansão de probes isolados. Próximo ensaio, mediante autorização operacional correspondente:
+Fonte do roteiro executável: `ensaios-fabrica/casos/validacoes.json`. A pergunta é: o LionClaw consegue acessar o Maestri para implementar e testar a fábrica?
 
-1. Tarefa pequena, local e verificável em ambiente separado, com OMP normal e perfil correto.
-2. Implementação e check real, com entrega estruturada consultável.
-3. Revisor em outra sessão avalia a versão entregue e registra parecer.
-4. Exercitar um achado reproduzível, correção e nova revisão, preservando a rodada anterior.
-5. Consultar entrega/diff/evidências sem commit/push externo implícito.
-6. Em tentativa separada, cancelar na inicialização e durante trabalho com filho; registrar confirmação ou incerteza.
-7. Iniciar nova tentativa sem reset global, preservando os arquivos anteriores.
+1. Confirmar acesso autenticado pelo Wire e identificar terminal próprio no workspace existente.
+2. Conduzir OMP normal nesse terminal, com o perfil definido para o ensaio, para uma pequena alteração local verificável.
+3. Executar um teste real da alteração pelo mesmo terminal.
+4. Consultar pelo LionClaw a alteração e o resultado do teste, registrando comando, saída, identificador do terminal e limites.
 
-Utilizar evidências já produzidas para decisões de viabilidade. Estudo adicional só quando impedimento observado bloqueia o percurso ou ameaça a entrega. Não elevar toda limitação do relatório a requisito futuro.
+Encerrar quando essa prova estiver registrada. Resultados anteriores podem comprovar partes do roteiro quando contêm evidência direta; não repetir estudos apenas por recomendações históricas.
 
-Revisão independente permanece obrigatória para a entrega de código do percurso; não exigir outro agente e auditoria de todos os hashes para cada pequeno probe ou ajuste documental. Registrar ação, resultado, evidência e limites de forma proporcional. Não reescrever capturas históricas para fazê-las corresponder ao contrato novo.
+Os critérios INT abaixo são aceite da fábrica futura. O ensaio de acesso não exige implementar controlador, revisão independente, ciclo de correção, entrega formal, cancelamento injetado ou nova tentativa. MCP de produto só entra se necessário à tarefa escolhida. Semântica de publicação, persistência e restart será validada no produto implementado.
+
+Helpers de isolamento, snapshots e supervisão foram retirados do diretório de controle ativo. O relatório dos ensaios lista somente as evidências pertinentes preservadas e os resíduos cuja exclusão foi bloqueada.
 
 ## 8. Critérios INT revisados
 
@@ -127,4 +126,4 @@ MCP de fixture, resultado simulado e screenshots históricos não comprovam o pr
 - [Windows Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects): opção interna de cancelamento, não obrigação de plataforma de supervisão.
 - [GH CLI](https://cli.github.com/manual/): consultas e efeitos do adapter GitHub.
 
-O relatório histórico contém resultados úteis de SDK, isolamento MCP e supervisão Windows. Eles não obrigam portar launchers, resolver, observador, snapshots de auditoria ou helper nativo para produção. Registrar versões usadas e limites observados; não repetir ensaios apenas porque uma nota histórica diz próximo passo.
+Os estudos de SDK, isolamento MCP e supervisão Windows foram retirados do plano e da documentação ativa dos ensaios. Usar as evidências mínimas listadas no relatório atual, com seus limites; não portar mecanismos de estudo para produção sem necessidade concreta.

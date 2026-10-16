@@ -1,2 +1,0 @@
-Para entradas numericas finitas: valores negativos retornam "negativo", zero retorna "zero" e valores positivos retornam "positivo".
-Esta fixture contem um defeito controlado para exercitar revisao independente e correcao. A revisao deve identificar o caso concreto e uma evidencia verificavel.

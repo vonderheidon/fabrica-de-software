@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "scope": {
     "workspace": "existing Maestri workspace",
     "createWorkspace": false,
@@ -8,371 +8,72 @@
     "externalDelivery": false,
     "terminalControl": "Maestri Wire"
   },
-  "baseline": {
-    "status": "previously-reported-pass",
-    "evidence": "../evidencias/mcp-call-20261015-164635.json",
-    "assertion": "A separate earlier MCP smoke returned greet for Ada. The workflow cases are driven through Maestri Wire HTTPS/WSS, not through MCP. MCP-ISO-01 only inspects discovery isolation."
+  "purpose": "Provar que o LionClaw consegue acessar o Maestri para implementar e testar a fabrica.",
+  "source": [
+    "../../SPEC.md",
+    "../../INTEGRACAO-MAESTRI-OMP.md"
+  ],
+  "status": "partial-current-agent-profile-unverified",
+  "agentSelection": {
+    "provider": "openai-codex",
+    "model": "gpt-6-luna",
+    "thinking": "high",
+    "fallback": false
   },
-  "historicalCasesNotice": "cases registra os estudos anteriores, nao o plano a executar. MCP-ISO-01 e REC-01 sao historicos; exclusividade MCP e restore de conversa nao sao requisitos atuais. Evidencias e resultados anteriores permanecem preservados.",
   "cases": [
     {
-      "id": "AUT-01",
-      "title": "Resolver impedimento operacional sem bloquear o usuario",
+      "id": "ACCESS-01",
+      "title": "Acesso LionClaw ao Maestri com pequena implementacao e teste",
       "setup": [
-        "Usar uma tarefa local descartavel",
-        "Introduzir uma falha operacional recuperavel e conhecida"
+        "Usar workspace existente e terminal proprio Ensaio",
+        "Consultar autenticacao Wire sem expor credenciais",
+        "Escolher pequena tarefa local verificavel em casos/<runId>, sem alterar issue ativa"
       ],
       "actions": [
-        "Observar se o agente diagnostica e tenta uma recuperacao segura",
-        "Introduzir uma decisao de produto que realmente dependa do usuario"
+        "Conduzir OMP normal no terminal Maestri pelo Wire com o perfil definido",
+        "Solicitar uma pequena alteracao de codigo e um teste real correspondente",
+        "Consultar pelo LionClaw o codigo alterado e o comando, saida e resultado do teste"
       ],
       "expected": [
-        "A falha operacional e resolvida sem pedido generico de permissao",
-        "A decisao de produto gera uma pergunta objetiva",
-        "A resposta retoma a tarefa com o contexto preservado"
+        "Acesso autenticado e terminal correto identificados",
+        "Alteracao real produzida pelo OMP no Maestri",
+        "Teste real da alteracao executado no Maestri",
+        "LionClaw consulta o resultado; falhas e limites ficam explicitos"
       ],
       "evidence": [
-        "eventos e transcricao do terminal",
-        "estado final da tarefa"
-      ]
-    },
-    {
-      "id": "QNA-01",
-      "title": "Pausar e retomar apos pergunta ao usuario",
-      "setup": [
-        "Iniciar uma tarefa local que tenha uma escolha ambigua real"
-      ],
-      "actions": [
-        "Aguardar a pergunta",
-        "Responder com uma opcao clara",
-        "Observar a retomada"
-      ],
-      "expected": [
-        "A tarefa fica pausada sem perder trabalho",
-        "A resposta e aplicada a execucao correta",
-        "Nao ha reinicio nem duplicacao da tarefa"
-      ],
-      "evidence": [
-        "transcricao com pergunta e resposta",
-        "identificador e estado antes/depois"
-      ]
-    },
-    {
-      "id": "REV-01",
-      "title": "Capturar versao imutavel e revisar independentemente",
-      "setup": [
-        "Implementador conclui a tarefa e encerra escritas"
-      ],
-      "actions": [
-        "Controlador captura os arquivos e calcula hashes",
-        "Revisor inicia em sessao separada e recebe somente a captura e os criterios",
-        "Comparar os hashes depois da revisao"
-      ],
-      "expected": [
-        "A revisao referencia a captura identificada",
-        "O Revisor nao compartilha sessao de escrita com o Implementador",
-        "A captura permanece inalterada durante a revisao"
-      ],
-      "evidence": [
-        "manifesto de arquivos e hashes",
-        "identificadores das sessoes",
-        "parecer do Revisor"
-      ]
-    },
-    {
-      "id": "COR-01",
-      "title": "Corrigir finding em nova rodada sem substituir evidencia anterior",
-      "setup": [
-        "A revisao da primeira captura aponta ao menos um finding reproduzivel"
-      ],
-      "actions": [
-        "Implementador corrige o finding",
-        "Controlador fecha a escrita e cria nova captura",
-        "Revisor avalia a nova captura"
-      ],
-      "expected": [
-        "A rodada e incrementada",
-        "A captura nova tem identidade e hashes proprios",
-        "Captura e parecer anteriores continuam disponiveis"
-      ],
-      "evidence": [
-        "findings vinculados a rodada",
-        "manifestos das duas capturas",
-        "pareceres por rodada"
-      ]
-    },
-    {
-      "id": "CAN-01",
-      "title": "Cancelar durante criacao",
-      "setup": [
-        "Iniciar criacao de um recurso descartavel do proprio ensaio",
-        "Manter a issue ativa fora do alvo"
-      ],
-      "actions": [
-        "Cancelar enquanto a criacao ainda esta em andamento",
-        "Verificar processos, estado e artefatos do recurso"
-      ],
-      "expected": [
-        "Somente recursos pertencentes ao ensaio sao cancelados",
-        "A issue ativa permanece intocada",
-        "O estado fica marcado como cancelado e permite diagnostico"
-      ],
-      "evidence": [
-        "timeline de eventos",
-        "lista de processos antes/depois",
-        "inventario de recursos do ensaio"
-      ]
-    },
-    {
-      "id": "CAN-02",
-      "title": "Cancelar durante execucao",
-      "setup": [
-        "Iniciar uma execucao longa e local em escopo descartavel"
-      ],
-      "actions": [
-        "Solicitar cancelamento durante a execucao",
-        "Aguardar a conclusao do cancelamento",
-        "Consultar processo e estado final"
-      ],
-      "expected": [
-        "O processo-filho proprio termina",
-        "A execucao nao aparece como concluida",
-        "Resultados parciais ficam identificados e nao sao entregues"
-      ],
-      "evidence": [
-        "timeline com pedido e confirmacao",
-        "PID e estado final",
-        "inventario de arquivos parciais"
-      ]
-    },
-    {
-      "id": "REC-01",
-      "title": "Recuperar execucao interrompida sem duplicar",
-      "setup": [
-        "Iniciar uma operacao local com identificador persistente",
-        "Interromper em um ponto registrado antes da conclusao"
-      ],
-      "actions": [
-        "Retomar pelo mecanismo normal de recuperacao",
-        "Contar tentativas, sessoes, processos e artefatos associados ao identificador"
-      ],
-      "expected": [
-        "A mesma operacao e retomada ou explicitamente reconciliada",
-        "Nao surgem recursos duplicados",
-        "O resultado final e consistente com o estado persistido"
-      ],
-      "evidence": [
-        "timeline pre e pos-interrupcao",
-        "inventario por identificador",
-        "estado persistido antes/depois"
-      ]
-    },
-    {
-      "id": "MCP-ISO-01",
-      "title": "Conferir isolamento da descoberta MCP sem usar MCP para controlar o ensaio",
-      "setup": [
-        "Usar a sessao OMP do ensaio na raiz do projeto"
-      ],
-      "actions": [
-        "Consultar /mcp list pelo terminal Wire",
-        "Registrar servidores conectados e servidores apenas descobertos e desabilitados"
-      ],
-      "expected": [
-        "Apenas ensaio-local esta conectado",
-        "Configuracoes externas nao sao incorporadas ao ambiente isolado"
-      ],
-      "evidence": [
-        "inventario da sessao OMP",
-        "distincao entre conectado e descoberto desabilitado"
+        "Identificador do terminal e perfil efetivo",
+        "Caminho da tarefa e alteracao consultavel",
+        "Comando, saida e codigo de retorno do teste",
+        "Resultado observado e limites da prova"
       ]
     }
   ],
-  "pendingValidationPlan": {
-    "registeredAt": "2026-10-16",
-    "status": "redirected-to-vertical-flow-not-executed",
-    "source": "../../INTEGRACAO-MAESTRI-OMP.md",
-    "phase": "vertical-flow",
-    "completionRule": "Comprovar percurso pequeno de implementacao, check, revisao, correcao e entrega; depois cancelamento representativo e nova tentativa. Limites nao geram automaticamente novos harnesses.",
-    "baselineEvidence": "../evidencias/relatorio-validacao.md",
-    "agentSelection": {
-      "provider": "openai-codex",
-      "model": "gpt-6-luna",
-      "thinking": "high",
-      "fallback": false
-    },
-    "priorities": [
-      {
-        "priority": 0,
-        "id": "FLOW-01",
-        "title": "Percurso vertical de desenvolvimento",
-        "criteria": ["INT-01", "INT-03", "INT-04", "INT-05", "INT-06", "INT-18"],
-        "expected": [
-          "Ambiente separado e OMP normal com perfil correto e ferramentas nativas",
-          "Tarefa pequena com check real e resultado estruturado consultavel",
-          "Revisor independente avalia a mesma versao entregue",
-          "Achado reproduzivel, correcao e nova revisao sem substituir a rodada anterior",
-          "Entrega, diff e evidencias consultaveis, sem publicacao externa implicita"
-        ]
-      },
-      {
-        "priority": 1,
-        "id": "CANCEL-RETRY-01",
-        "title": "Cancelamento representativo e nova tentativa",
-        "criteria": ["INT-15", "INT-16", "INT-17"],
-        "expected": [
-          "Cancelar durante inicializacao e durante trabalho com processo filho",
-          "Interromper avancos/publicacao e solicitar parada de recursos proprios conhecidos",
-          "Informar confirmacao ou incerteza sem apagar arquivos nem atingir recursos manuais",
-          "Nova tentativa em outro ambiente sem reset ou liberacao global"
-        ]
-      },
-      {
-        "priority": 2,
-        "id": "TOOLS-AS-NEEDED",
-        "title": "Ferramentas e perguntas somente quando pertinentes ao percurso",
-        "criteria": ["INT-07", "INT-09", "INT-10", "INT-11", "INT-12"],
-        "expected": [
-          "MCP necessario funciona pelo gerenciamento normal OMP com chamada util",
-          "Playwright MCP/Chrome para UI e GitNexus na raiz pertinente quando requeridos",
-          "Pergunta e resposta vinculadas sem classificador semantico de manutencao"
-        ]
-      }
-    ],
-    "removedObligations": [
-      "Exclusividade de MCPs, resolver proprio de fontes e interceptacao de reload",
-      "Launcher e allowlist de ambiente minimo por servidor MCP",
-      "Observador externo de crash, inventario individual de handles e recibos de cada processo",
-      "IPC stop proprio e supervisor nativo completo como pre-requisito",
-      "Matriz de cancelamento em cada instante de compile/recruit/ready/tool/check",
-      "Matriz exaustiva de troca de sessao/modelo, eventos tardios e revogacao antes do produto",
-      "Revisor e auditoria integral de hashes para cada pequeno estudo ou ajuste documental"
-    ],
-    "trustBoundary": "OMP, ferramentas e MCPs configurados pelo operador sao confiaveis. Sem garantia de isolamento de filesystem/rede/credenciais ou contencao de todos os daemons. A fabrica nao acrescenta segredos do publisher ao agente.",
-    "preservedScope": ["Governanca integral do Kanban", "Modos de entrega", "Revisao independente por versao", "Publicar somente bytes aprovados", "Reconciliar efeitos proprios sem duplicar publicacao incerta"],
-    "futureDevelopmentAcceptance": [
-      "Ciclo completo de implementacao, checks, revisao e correcao",
-      "Manifesto Git completo e publicacao do snapshot aprovado",
-      "Restart com estado interrupted e revogacao de tokens, sem restauracao automatica da conversa",
-      "Reconciliacao de efeitos GitHub",
-      "Fila, scaffold e UI",
-      "INT-17: nova tentativa apos falha real",
-      "INT-18: captura e publisher"
-    ],
-    "nextAction": "Preparar FLOW-01, mediante autorizacao operacional: tarefa pequena, OMP normal, check real, revisao, correcao e entrega; depois CANCEL-RETRY-01. Nao continuar a expansao dos probes de isolamento/supervisao. Estudo adicional somente para impedimento observado ou risco concreto a entrega.",
-    "historicalStudyProgress20261016": {
-      "windowsOmpIntegration": {
-        "normalRun": "20261016T062651786Z",
-        "cancelRun": "20261016T062836170Z",
-        "crashRun": "20261016T062920665Z",
-        "compileFailureAttempt": "20261016T062544781Z",
-        "evidence": "../evidencias/20261016T062920665Z/physical-and-cases.json",
-        "status": "three-runtime-cases-observed-review-in-progress",
-        "observed": ["Suspended Bun assigned to original owned Job before resume", "Inherited Maestri console std handles; OMP stdin/stdout TTY", "Real Luna/high responses and local MCP calls", "Native read/write/edit/bash and simulated post-result input", "Native /exit: OMP 0, launcher 1, server 0, Job zero active", "Cancel during native tool: five handles exit 197 and Job zero active", "Supervisor self-termination 199: external observer held handles before fault and observed five known members exit 0; task interrupted", "Sixteen recorded identities absent after cases"],
-        "limits": ["No direct ConPTY creation or all-inheritable-handle allowlist", "Crash has no after-death Job query or supervisor cleanup receipt", "Launcher trusted with parent context; only server environment reduced", "No real product MCPs, authenticated stop IPC, full phase matrix or restart authority revocation", "No filesystem/network sandbox or broker/global cleanup guarantee", "Local file barriers for fault injection only"]
-      },
-      "windowsContainment": {
-        "run": "20261016T060900318Z",
-        "previousAttempt": "20261016T060729492Z",
-        "evidence": "../evidencias/20261016T060900318Z/WIN-JOB-01/result.json",
-        "status": "six-native-cases-pass-technical-review-accepted-documentation-adjusted",
-        "documentationReview": {
-          "captureRun": "20261016T061500644Z",
-          "evidence": "../evidencias/20261016T061500644Z/review/result.json",
-          "audit": "../evidencias/20261016T061500644Z/review-audit.json",
-          "verdict": "correcao documental conferida",
-          "snapshotFiles": 4,
-          "hashesUnchanged": true,
-          "scope": "Only the two administrative changes requested by first review; no native rerun"
-        },
-        "independentReview": {
-          "evidence": "../evidencias/20261016T060900318Z/review/result.json",
-          "audit": "../evidencias/20261016T060900318Z/review-audit.json",
-          "recordedVerdict": "ajustes necessarios; no merito tecnico aceito no escopo observado",
-          "requestedAdjustments": ["registrar parecer", "atualizar estado que aguardava revisao"],
-          "disposition": "Parecer vinculado e status atualizado, sem mudanca de fonte ou recibos nativos",
-          "snapshotFiles": 109,
-          "hashesUnchanged": true
-        },
-        "observed": ["create suspended, kernel creationTime and assignment before resume", "normal exit 0 and failed-known exit 23 receipts", "cancel before resume", "common detached orphan and conhost Job members terminated by retained handle", "active count zero queried while owned Job handle remains open", "last-handle-close known process receipts", "controlled external sentinel in separate Job preserved", "33 recorded process identities absent after attempts"],
-        "lesson": "Forced last-handle-close returned exitCode 0 for six observed processes; code 0 alone is not task completion",
-        "limits": ["No OMP/MCP integration or retroactive repair of missing TUI launcher receipt", "No ConPTY/console inheritance proof", "No supervisor crash or authenticated stop IPC", "No full phase cancellation matrix", "No Job query after closing last handle", "No WMI/services/broker containment or filesystem/network sandbox", "External sentinel controlled, not actual manual user process", "Product marker is not Git clone"]
-      },
-      "latestSummaryEvidence": "../evidencias/20261016T060900318Z/study-summary.json",
-      "tuiEnvironment": {
-        "run": "20261016T054706410Z",
-        "previousAttempt": "20261016T054526758Z",
-        "evidence": "../evidencias/20261016T054706410Z/TUI-ENV-01/result.json",
-        "status": "independently-reviewed-partial-teardown-receipt-gap",
-        "independentReview": {
-          "evidence": "../evidencias/20261016T054706410Z/review/result.json",
-          "audit": "../evidencias/20261016T054706410Z/review-audit.json",
-          "verdict": "aceito no escopo observado",
-          "snapshotFiles": 55,
-          "hashesUnchanged": true,
-          "scope": "Evidence audit only; no independent rerun; server exit receipt still unproved"
-        },
-        "architecture": "MCPManager permanece no OMP; launcher Node de confianca herda contexto e inicia servidor real com allowlist. Nao e o host SDK inteiro sanitizado da contraprova anterior.",
-        "observed": ["TUI e autenticacao existente com Luna/high sem fallback", "servidor recebe segredo sintetico autorizado e nao recebe os dois marcadores excluidos", "agente corrige campo obrigatorio ausente rejeitado no runtime", "read/write/edit/bash reais preservados", "mensagens simuladas apos resultado e durante ferramenta processadas na mesma sessao", "comando nativo /new muda sessionId e preserva modelo e conexao MCP"],
-        "limits": ["recibo server-exit com codigo 0 ausente; EOF e ausencia posterior dos PIDs observados", "sem Job Object", "sem MCPs reais de produto nesta rodada", "sem invalidacao de tracking ou rejeicao de resultados antigos", "sem interacao durante pergunta/confirmacao", "primeira tentativa falhou no harness ao tratar SubmittedUserInput como string; preservada", "numero 12 virou string no percurso xd; nao comprova rejeicao estrita numerica"]
-      },
-      "summaryEvidence": "../evidencias/20261016T044558685Z/study-summary.json",
-      "independentReview": {
-        "evidence": "../evidencias/20261016T044558685Z/review/result.json",
-        "audit": "../evidencias/20261016T044558685Z/review-audit.json",
-        "verdict": "aceito no escopo observado",
-        "snapshotFiles": 65,
-        "hashesUnchanged": true,
-        "scope": "Evidence review only; no independent rerun; replay guard added later and checked by main assistant"
-      },
-      "context": {
-        "runs": ["20261016T043953519Z", "20261016T044039750Z"],
-        "status": "partial-mechanism-proof",
-        "observed": ["Wire autenticado", "recruit de shell pelo Maestro e cwd do filho confirmados", "pipe ausente/stale diagnosticados"],
-        "gaps": ["debug stale retorna exit 0", "list com terminal inexistente retorna sucesso vazio", "cwd inicial herda workspace Maestri", "conta/elevacao, divergencia de modelo, readiness OMP e concorrencia pendentes"]
-      },
-      "configuration": {
-        "run": "20261016T044305356Z",
-        "case": "MCP-CFG-01",
-        "status": "eight-study-cases-pass",
-        "limits": "Resolver STDIO minimo com fontes ordenadas de fixture alimentando MCPManager e chamadas reais; sem agente nem configuracoes reais do operador"
-      },
-      "environment": {
-        "run": "20261016T044155017Z",
-        "wireRun": "20261016T044439366Z",
-        "sanitizedHostRun": "20261016T044558685Z",
-        "case": "MCP-ENV-01",
-        "status": "native-inheritance-confirmed-minimal-host-counterproof-passes",
-        "observed": "MCPManager herda marcador do pai e contexto Maestri. Host separado com Environment.Clear e allowlist preservou segredo sintetico autorizado e excluiu ambos. Erro de argumento e correcao comprovados por chamadas diretas, sem agente.",
-        "limits": "Host de teste SDK sem TUI nem autenticacao de modelo; nao e bridge integrada ou isolamento geral de filesystem/rede"
-      },
-      "copiedEvidenceIntegrity": {
-        "evidence": "../evidencias/20261016T044039750Z/CTX-01/historic-copy-hashes.json",
-        "checked": 32,
-        "passed": 32
-      }
-    },
-    "authorization": "Mudanca documental e de plano aprovada; nao inicia chamadas pagas, terminais, entrega externa, push ou alteracao de issue.",
-    "historicalFixtureEvidence": {
-      "schema": "numeric-query-accepted-with-empty-result-no-strict-type-rejection-proven",
-      "runs": [
-        "20261016T032205334Z",
-        "20261016T032650000Z"
-      ],
-      "limits": [
-        "synthetic non-Git directories",
-        "no factory adapter",
-        "config precedence disabled secrets pending",
-        "Job Object pending"
-      ],
-      "gitnexus": "exact-path-query-impact-and-ambiguous-alias-refusal-observed",
-      "chrome": "navigation-content-keyboard-screenshots-tabs-close-observed",
-      "independentReview": "20261016T032800000Z: ACEITO_APENAS_ESCOPO_OBSERVADO; 32 hashes preservados"
-    }
+  "completionRule": "Encerrar quando ACCESS-01 estiver comprovado por evidencia direta. Nao implementar a fabrica nem seu controlador para concluir este ensaio.",
+  "existingEvidence": {
+    "report": "../evidencias/relatorio-validacao.md",
+    "baseline": "../evidencias/mcp-call-20261015-164635.json",
+    "access": "../evidencias/20261015T230824329Z/wire-acesso.json",
+    "implementationAndExecution": "../evidencias/20261015T230824329Z/AUT-01/eventos.jsonl",
+    "wireResult": "../evidencias/20261015T230824329Z/AUT-01/final-feed.json",
+    "fixture": "execucao-20261015T230824329Z/autonomia",
+    "status": "partial",
+    "note": "Evidencia historica de acesso, correcao e execucao real com resultado 5. Feed indica GPT-6.1-Sol; nao comprova o perfil atual Luna/high. Sem nova execucao nesta limpeza."
   },
+  "excludedFromThisTrial": [
+    "FLOW-01: ciclo completo com revisao, correcao e entrega formal",
+    "CANCEL-RETRY-01 e matrizes de lifecycle",
+    "Isolamento de MCPs e ambiente sanitizado",
+    "Supervisor Windows, observador de crash e inventario de handles",
+    "Snapshots auxiliares de checkout ou indice",
+    "Matrizes de GitNexus, Chrome, configuracao e schemas sem necessidade da tarefa"
+  ],
+  "futureProductAcceptance": "Criterios AC/INT da SPEC e do anexo permanecem exigidos durante o desenvolvimento da fabrica, incluindo persistencia leve e medicao de tamanho e latencia.",
+  "additionalStudyRule": "Somente para impedimento concreto ao acesso, pequena alteracao ou teste.",
   "evidenceRules": [
-    "Cada execucao recebe uma pasta propria em evidencias/<runId>/<caseId>.",
-    "Registrar acao, resultado, evidencia e limites de forma proporcional; hashes para identidade da entrega, sem auditoria integral obrigatoria de cada probe.",
-    "Nao registrar tokens, credenciais ou valores secretos.",
-    "Casos de entrega externa continuam fora deste ensaio sem autorizacao especifica."
-  ]
+    "Registrar somente evidencia pertinente, sem tokens ou credenciais",
+    "Usar ferramentas e configuracao normais do OMP",
+    "Git guarda codigo; evidencias nao duplicam checkout, indice ou caches",
+    "Historico nao e backlog nem ordem para repetir estudos"
+  ],
+  "authorization": "Esta limpeza nao inicia agentes, chamadas pagas, terminais, publicacao externa ou alteracoes na issue."
 }
