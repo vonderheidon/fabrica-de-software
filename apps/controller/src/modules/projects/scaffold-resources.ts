@@ -25,6 +25,37 @@ export function safeTemplatePath(path: string): boolean {
     !/^(?:\.git|\.agents|\.claude|node_modules|dist|build|coverage|\.cache)$/i.test(p)) &&
     !/(?:^|\/)(?:\.env(?:\..*)?|.*\.(?:pem|key)|credentials(?:\..*)?|id_rsa)$/i.test(path.replace(/\.env(?:\.[^/]*)?\.example$/i, 'environment-example'));
 }
+function validateRenderedPaths(files: readonly TemplateFile[]): void {
+  const paths = files.map(file => file.path.toLowerCase());
+  if (files.some(file => !safeTemplatePath(file.path)) || new Set(paths).size !== paths.length ||
+    paths.some(path => paths.some(other => other.startsWith(`${path}/`)))) {
+    throw new OperationError(400, 'TEMPLATE_INVALID', 'Template files conflict with the generated engineering files.');
+  }
+}
+interface InstructionHeading { level: number; title: string; start: number; end: number }
+function instructionHeadings(content: string): InstructionHeading[] {
+  const lines = content.split(/(?<=\n)/); const headings: InstructionHeading[] = [];
+  let offset = 0; let fence: { marker: string; length: number } | undefined;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!; const text = line.replace(/\r?\n$/, '');
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(text);
+    if (fence) {
+      if (delimiter && delimiter[1]![0] === fence.marker && delimiter[1]!.length >= fence.length && !delimiter[2]!.trim()) fence = undefined;
+    } else if (delimiter) fence = { marker: delimiter[1]![0]!, length: delimiter[1]!.length };
+    else {
+      const atx = /^ {0,3}(#{1,6})[ \t]+(.+?)\s*$/.exec(text);
+      const underline = lines[index + 1]?.replace(/\r?\n$/, '');
+      if (atx) headings.push({ level: atx[1]!.length, title: atx[2]!.replace(/[ \t]+#+[ \t]*$/, '').trim().toLowerCase(), start: offset, end: offset + line.length });
+      else if (/^ {0,3}\S/.test(text) && underline !== undefined && /^ {0,3}(?:=+|-+)[ \t]*$/.test(underline)) {
+        const next = lines[++index]!;
+        headings.push({ level: underline.trim()[0] === '=' ? 1 : 2, title: text.trim().toLowerCase(), start: offset, end: offset + line.length + next.length });
+        offset += next.length;
+      }
+    }
+    offset += line.length;
+  }
+  return headings;
+}
 async function resource(directory: string, name: string): Promise<string> {
   const path = resolve(directory, name); const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink() || info.size > 262144) throw new Error('RESOURCE_INVALID');
@@ -46,6 +77,8 @@ export async function loadScaffoldCatalog(directory = fileURLToPath(new URL('../
       if (new Set(keys).size !== keys.length || keys.some(k => keys.some(other => other.startsWith(`${k}/`))) || template.files.some(f => !safeTemplatePath(f.path) || Buffer.byteLength(f.content) > 65536) ||
         template.files.some(f => f.path.toLowerCase() === '.gitignore' && f.path !== '.gitignore') ||
         template.files.some(f => ['docs/agents/issue-tracker.md', 'docs/agents/domain.md', 'docs/agents/triage-labels.md'].includes(f.path.toLowerCase()))) throw new Error('TEMPLATE_INVALID');
+      renderEngineering(template.files, engineering, false);
+      renderEngineering(template.files, engineering, true);
       return { ...template, digest: scaffoldDigest([digest, template]) };
     });
     if (new Set(templates.map(t => t.id)).size !== templates.length) throw new Error('TEMPLATE_DUPLICATED');
@@ -57,12 +90,12 @@ export function renderEngineering(files: readonly TemplateFile[], resources: rea
   const original = result.find(f => f.path.toLowerCase() === 'agents.md');
   if (original && original.path !== 'AGENTS.md') throw new OperationError(400, 'TEMPLATE_INVALID', 'The instructions filename must be AGENTS.md.');
   let content = original?.content ?? '';
-  const headings = [...content.matchAll(/^## Agent skills\s*$/gm)];
+  const headings = instructionHeadings(content).filter(heading => heading.level === 2 && heading.title === 'agent skills');
   if (headings.length > 1) throw new OperationError(400, 'TEMPLATE_INVALID', 'Agent skills sections must be unique.');
   if (headings.length === 0) content = `${content ? `${content.trimEnd()}\n\n` : ''}## Agent skills\n`;
-  const start = /^## Agent skills\s*$/m.exec(content)!.index;
-  const next = content.slice(start + 15).search(/^## /m);
-  const end = next < 0 ? content.length : start + 15 + next;
+  const allHeadings = instructionHeadings(content);
+  const start = allHeadings.find(heading => heading.level === 2 && heading.title === 'agent skills')!.start;
+  const end = allHeadings.find(heading => heading.start > start && heading.level <= 2)?.start ?? content.length;
   let section = content.slice(start, end);
   for (const [heading, pointer] of [
     ['Issue tracker', 'Before reading or publishing tickets, read `docs/agents/issue-tracker.md` for the GitHub workflow.'],
@@ -70,20 +103,26 @@ export function renderEngineering(files: readonly TemplateFile[], resources: rea
     ...(triageEnabled ? [['Triage labels', 'Before triaging an issue, read `docs/agents/triage-labels.md` for the configured role mapping.']] : []),
   ]) {
     if (!heading || !pointer) continue;
-    if (!section.includes(pointer.match(/`([^`]+)`/)?.[1] ?? pointer)) {
-      const existing = new RegExp(`^### ${heading}\\s*$`, 'm').exec(section);
-      if (existing) { const at = existing.index + existing[0].length; section = section.slice(0,at) + `\n\n${pointer}\n` + section.slice(at); }
-      else section += `\n### ${heading}\n\n${pointer}\n`;
-    }
+    const sectionHeadings = instructionHeadings(section);
+    const matches = sectionHeadings.filter(candidate => candidate.level === 3 && candidate.title === heading.toLowerCase());
+    if (matches.length > 1) throw new OperationError(400, 'TEMPLATE_INVALID', 'Engineering instruction subsections must be unique.');
+    const existing = matches[0];
+    const subsectionEnd = existing ? sectionHeadings.find(candidate => candidate.start > existing.start && candidate.level <= 3)?.start ?? section.length : 0;
+    if (existing && section.slice(existing.end, subsectionEnd).includes(pointer.match(/`([^`]+)`/)?.[1] ?? pointer)) continue;
+    if (existing) section = section.slice(0,existing.end) + `\n${pointer}\n\n` + section.slice(existing.end);
+    else section += `${section.endsWith('\n') ? '' : '\n'}\n### ${heading}\n\n${pointer}\n\n`;
   }
   content = content.slice(0, start) + section + content.slice(end);
   if (original) original.content = content; else result.push({ path: 'AGENTS.md', content });
   const ignore = result.find(f => f.path === '.gitignore');
-  const exclusions = ['.env', '.env.*', '!.env.example', '!.env.*.example', 'node_modules/', 'dist/', 'build/', 'coverage/', '.cache/', '*.log', '*.pem', '*.key'];
-  const ignoreContent = `${ignore?.content.trimEnd() ?? ''}\n${exclusions.filter(p => !ignore?.content.split(/\r?\n/).includes(p)).join('\n')}\n`;
+  const exclusions = ['.env', '.env.*', '!.env.example', '!.env.*.example', 'credentials', 'credentials.*', 'id_rsa', 'node_modules/', 'dist/', 'build/', 'coverage/', '.cache/', '*.log', '*.pem', '*.key'].join('\n');
+  const previousIgnore = ignore?.content ?? '';
+  const ignoreContent = previousIgnore.replace(/\r\n/g, '\n').trimEnd().endsWith(exclusions) ? previousIgnore
+    : `${previousIgnore}${previousIgnore && !previousIgnore.endsWith('\n') ? '\n' : ''}\n${exclusions}\n`;
   if (ignore) ignore.content = ignoreContent; else result.push({ path: '.gitignore', content: ignoreContent });
   result.push({ path: 'docs/agents/issue-tracker.md', content: resources[0]! }, { path: 'docs/agents/domain.md', content: resources[1]! });
   if (triageEnabled) result.push({ path: 'docs/agents/triage-labels.md', content: resources[2]! });
+  validateRenderedPaths(result);
   result.sort((a, b) => a.path < b.path ? -1 : 1);
   if (result.reduce((n, f) => n + Buffer.byteLength(f.content), 0) > 262144 || result.some(f => Buffer.byteLength(f.content) > 65536)) throw new OperationError(400, 'TEMPLATE_TOO_LARGE', 'Rendered scaffold exceeds its resource limits.');
   return result;

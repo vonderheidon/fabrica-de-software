@@ -48,9 +48,23 @@ export function readOperation(db: Database.Database, operationId: string): Store
   ).get(operationId);
   const receipt: unknown = row.receipt_json === null ? undefined : JSON.parse(row.receipt_json);
   if (receipt !== undefined && !Value.Check(OperationReceipt, receipt)) throw new StorageError('OPERATION_DATA_INVALID');
+  if (row.operation_kind === 'diagnostics.check' && row.resource_type === 'diagnostic') {
+    const run = db.prepare<[string], { state: StoredOperation['state'] }>('SELECT state FROM diagnostic_runs WHERE operation_id=?').get(operationId);
+    if (!run || !receipt || !event || event.entity_type !== 'diagnostic' || event.entity_id !== operationId ||
+      row.resource_id !== operationId || receipt.eventCursor !== String(event.seq) || receipt.revision !== 1) throw new StorageError('OPERATION_DATA_INVALID');
+    return { operationId, kind: row.operation_kind, resource: { type: 'diagnostic', id: operationId }, state: run.state, receipt,
+      ...(['failed', 'unknown'].includes(run.state) ? { error: { code: run.state === 'unknown' ? 'DIAGNOSTIC_INTERRUPTED' : 'DIAGNOSTIC_CONTEXT_CHANGED',
+        message: 'Inspect the contextual diagnosis before requesting a new check.', recovery: 'Read /diagnostics for the original context.', affectedRequirements: ['RF-88'] } } : {}) };
+  }
   if (row.operation_kind === 'queue.update' && row.resource_type === 'queue') {
     if (!receipt || !event || event.entity_type !== 'queue' || event.entity_id !== 'local' || receipt.revision !== event.entity_revision || receipt.eventCursor !== String(event.seq)) throw new StorageError('OPERATION_DATA_INVALID');
     return { operationId, kind: row.operation_kind, resource: { type: 'queue', id: 'local' }, state: 'succeeded', receipt };
+  }
+  if (row.operation_kind === 'scaffold.reconcile' && row.resource_type === 'creation') {
+    const request = db.prepare<[string,string],{ state: StoredOperation['state']; diagnostic: string | null }>('SELECT state,diagnostic FROM creation_reconciliations WHERE operation_id=? AND creation_id=?').get(operationId,row.resource_id);
+    if (!request || !receipt || !event || event.entity_type !== 'creation' || event.entity_id !== row.resource_id || receipt.revision !== event.entity_revision || receipt.eventCursor !== String(event.seq)) throw new StorageError('OPERATION_DATA_INVALID');
+    return { operationId,kind: row.operation_kind,resource: { type: 'creation',id: row.resource_id },state: request.state,receipt,
+      ...(request.diagnostic ? { error: { code: request.diagnostic,message: 'Inspect the remaining creation effects.',operationId } } : {}) };
   }
   if (row.operation_kind === 'scaffold.create' && row.resource_type === 'creation') {
     const creation = db.prepare<[string, string], { state: string; diagnostic: string | null }>('SELECT state,diagnostic FROM project_creations WHERE id=? AND operation_id=?').get(row.resource_id,operationId);

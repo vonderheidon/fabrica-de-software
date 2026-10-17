@@ -6,7 +6,9 @@ const closed = { additionalProperties: false } as const;
 const text = Type.String({ minLength: 1, maxLength: 4096 });
 const nullable = <T extends import('@sinclair/typebox').TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 export const EffectIdentity = Type.Object({
-  repositoryId: GitHubId, issueId: GitHubId,
+  repositoryId: Type.Optional(GitHubId), issueId: Type.Optional(GitHubId),
+  ownerId: Type.Optional(GitHubId), visibility: Type.Optional(Type.Union([Type.Literal('private'), Type.Literal('public')])),
+  planHash: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
   contentIdentity: Type.Optional(Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' })),
   parentSha: Type.Optional(Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' })),
   branchRef: Type.Optional(text), issueNumber: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -22,11 +24,12 @@ export type EffectIdentity = Static<typeof EffectIdentity>;
 export const EffectReceipt = Type.Object({ id: GitHubId, url: Type.Optional(text), optionId: Type.Optional(GitHubId),
   contentIdentity: Type.Optional(text), parentSha: Type.Optional(text), branchRef: Type.Optional(text), operationId: Type.Optional(OperationId),
   commitSha: Type.Optional(text), repositoryId: Type.Optional(GitHubId), baseBranch: Type.Optional(text),
+  ownerId: Type.Optional(GitHubId), repositoryName: Type.Optional(text), visibility: Type.Optional(Type.Union([Type.Literal('private'), Type.Literal('public')])),
 }, closed);
 export type EffectReceipt = Static<typeof EffectReceipt>;
 export const EffectView = Type.Object({
   operationId: OperationId, attemptId: nullable(OperationId), creationId: nullable(OperationId), deliveryId: nullable(OperationId),
-  kind: Type.Union([Type.Literal('issue_comment'), Type.Literal('project_status'), Type.Literal('local_commit'), Type.Literal('push'), Type.Literal('pull_request')]), scopeKey: text,
+  kind: Type.Union([Type.Literal('issue_comment'), Type.Literal('project_status'), Type.Literal('local_commit'), Type.Literal('push'), Type.Literal('pull_request'), Type.Literal('create_repository'), Type.Literal('associate_origin'), Type.Literal('baseline_push')]), scopeKey: text,
   state: Type.Union(['not_requested', 'not_started', 'running', 'confirmed', 'failed_known', 'unknown', 'not_applicable'].map(v => Type.Literal(v))),
   expectedIdentity: EffectIdentity, confirmedIdentity: nullable(EffectReceipt), receipt: nullable(EffectReceipt),
   reason: nullable(Type.String({ maxLength: 128 })), authorized: Type.Boolean(), revision: Type.Integer({ minimum: 1 }),
@@ -54,7 +57,7 @@ export const PublicationSummary = Type.Object({
   completeCapability: Capability, reconcileCapability: Capability,
 }, closed);
 export type PublicationSummary = Static<typeof PublicationSummary>;
-export const GitHubMutationResult = Type.Object({ state: Type.Union(['confirmed', 'failed_known', 'unknown'].map(v => Type.Literal(v))),
+export const GitHubMutationResult = Type.Object({ state: Type.Union((['confirmed', 'failed_known', 'unknown'] as const).map(v => Type.Literal(v))),
   receipt: nullable(EffectReceipt), reason: nullable(Type.String({ maxLength: 128 })), retryAtMs: nullable(Type.Integer()),
 }, closed);
 export type GitHubMutationResult = Static<typeof GitHubMutationResult>;

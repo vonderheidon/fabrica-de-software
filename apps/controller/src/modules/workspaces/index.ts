@@ -9,6 +9,7 @@ import { createReviewValidator } from './review.js';
 import { createEnvironmentRecovery } from './recovery.js';
 import { createRetainedVerifier } from './retention.js';
 import { createLocalScaffolder } from './scaffold.js';
+import { createScaffoldRemoteGit } from './remote-scaffold.js';
 import { createLocalPublisher } from './publication.js';
 import { createRemotePublisher, type PushAuthorization } from './remote-publication.js';
 export type { LocalCommitResult } from './publication.js';
@@ -20,10 +21,10 @@ import type { ToolObservation } from '#contracts';
 export { WorkspacePreparationError } from './prepare.js';
 
 export type { GitContext } from './git.js';
-export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'>; context?: GitContext; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization }
+export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'>; context?: GitContext; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization }
 export function createWorkspaces(options: WorkspaceOptions) {
   const git = options.context ? createGitReader(options.context) : undefined;
-  return { ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder), prepareAttempt: createWorkspacePreparer(options.dataDirectory, git),
+  return { ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder), prepareAttempt: createWorkspacePreparer(options.dataDirectory, git),
     captureDelivery: createCapturer(options.dataDirectory, git), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git),
     verifyRetainedDelivery: createRetainedVerifier(options.dataDirectory, git),
     ...createLocalPublisher(options.dataDirectory, git),

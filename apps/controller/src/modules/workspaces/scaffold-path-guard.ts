@@ -52,9 +52,11 @@ public sealed class ScaffoldDirectories : IDisposable {
     if (handles.ContainsKey(path)) return;
     string parent = Path.GetDirectoryName(path);
     if (!String.IsNullOrEmpty(parent)) Pin(parent);
-    // FILE_READ_ATTRIBUTES; FILE_SHARE_READ only; OPEN_EXISTING;
+    // FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES; FILE_SHARE_READ only;
+    // Attribute-only access does not enforce sharing restrictions on rename.
+    // OPEN_EXISTING;
     // FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT.
-    SafeFileHandle handle = CreateFileW(@"\\?\" + path, 0x80, 1, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+    SafeFileHandle handle = CreateFileW(@"\\?\" + path, 0x81, 1, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
     if (handle.IsInvalid) { handle.Dispose(); throw new IOException("SCAFFOLD_PATH_GUARD_UNAVAILABLE"); }
     Information information;
     if (!GetFileInformationByHandle(handle, out information)) {

@@ -12,7 +12,7 @@ import type { Execution, PassageRequest } from '../../apps/controller/src/module
 import { digest, loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
 
 export const complete = <T>(data: T): GitHubQueryResult<T> => ({ state: 'complete', data, diagnostics: [], retryAtMs: null });
-export async function attemptFixture(temporaryRoot = tmpdir()) {
+export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40)) {
   const directory = mkdtempSync(join(temporaryRoot, 'factory-attempt-'));
   const storage = openStorage({ dataDirectory: directory, busyTimeoutMs: 10 });
   const db = new Database(join(directory, 'factory.sqlite')); db.pragma('foreign_keys = ON');
@@ -46,8 +46,8 @@ export async function attemptFixture(temporaryRoot = tmpdir()) {
   const project: GitHubProjectDetails = { project: { id: mapping.id, number: 1, title: 'Project', url: 'https://github.com/orgs/test-org/projects/1', owner: { id: mapping.ownerId, login: 'test-org', kind: 'organization' }, closed: false },
     singleSelectFields: [{ id: mapping.statusFieldId, name: 'Status', options: Object.values(mapping.statusOptionIds).map(id => ({ id, name: id })) }] };
   const observation: OriginInspection = { state: 'identified', source: storage.getConfiguration(projectId).view.configuration.source,
-    local: null, base: { branch: 'main', sha: 'a'.repeat(40), observedFrom: 'github' },
-    remote: { name: null, url: repository.url, confirmed: true, repository, branch: { repositoryId: repository.id, name: 'main', sha: 'a'.repeat(40) } }, diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false };
+    local: null, base: { branch: 'main', sha: baseSha, observedFrom: 'github' },
+    remote: { name: null, url: repository.url, confirmed: true, repository, branch: { repositoryId: repository.id, name: 'main', sha: baseSha } }, diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false };
   const github: PreparationDependencies['github'] = {
     getIdentity: vi.fn(async () => complete({ id: 'ACCOUNT_test', login: 'test-user' })),
     getIssueContextById: vi.fn(async () => complete(structuredClone(issue))),

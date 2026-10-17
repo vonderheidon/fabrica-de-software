@@ -80,7 +80,7 @@ it('does not retry an unobserved push and refuses forged push receipts', async (
   await f.approve(); complete(f); await f.pipeline.drain(); complete(f); await f.pipeline.drain();
   expect(f.workspaces.pushApproved).toHaveBeenCalledOnce(); expect(effect(f,'push').state).toBe('unknown'); expect(effect(f,'pull_request')).toBeUndefined();
   const e = effect(f,'push');
-  expect(() => f.storage.finishEffect(e.operationId,e.revision,'confirmed',{ id: 'f'.repeat(40),commitSha: 'f'.repeat(40),branchRef: e.expectedIdentity.branchRef!,repositoryId: e.expectedIdentity.repositoryId },null)).toThrow(expect.objectContaining({ code: 'EFFECT_RECEIPT_INVALID' }));
+  expect(() => f.storage.finishEffect(e.operationId,e.revision,'confirmed',{ id: 'f'.repeat(40),commitSha: 'f'.repeat(40),branchRef: e.expectedIdentity.branchRef!,repositoryId: e.expectedIdentity.repositoryId! },null)).toThrow(expect.objectContaining({ code: 'EFFECT_RECEIPT_INVALID' }));
 });
 
 it.each(['intent','receipt'] as const)('blocks the next remote effect when the push %s transaction fails', async stage => {
@@ -225,7 +225,7 @@ it('migrates actual v14 journals without fabricating upgrades, preserving receip
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(16); expect(storage.getSettings().installationId).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
+    expect(storage.getDiagnostics().schemaVersion).toBe(18); expect(storage.getSettings().installationId).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }

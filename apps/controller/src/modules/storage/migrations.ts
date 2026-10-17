@@ -14,7 +14,7 @@ export interface Migration {
 
 export function loadMigrations(): readonly Migration[] {
   const directory = new URL('./migrations/', import.meta.url);
-    const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql'];
+    const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql'];
   try {
     const actual = readdirSync(directory).filter((name) => name.endsWith('.sql')).sort();
     if (JSON.stringify(files) !== JSON.stringify(actual)) {

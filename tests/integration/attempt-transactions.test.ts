@@ -166,7 +166,7 @@ describe('atomic attempt acceptance', () => {
     } finally { db.close(); }
     const storage = openStorage({ dataDirectory: directory });
     try {
-      expect(storage.getDiagnostics().schemaVersion).toBe(16); expect(storage.getSettings()).toMatchObject({ installationId: identity, revision: 2 });
+      expect(storage.getDiagnostics().schemaVersion).toBe(18); expect(storage.getSettings()).toMatchObject({ installationId: identity, revision: 2 });
       expect(storage.getOperation(operationId)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
       const probe = new Database(join(directory, 'factory.sqlite'));
       try {

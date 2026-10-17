@@ -15,7 +15,7 @@ const projectsRoot = join(directory, 'projects');
 const outside = join(directory, 'outside');
 mkdirSync(projectsRoot);
 mkdirSync(outside);
-const files = [{ path: 'README.md', content: '# Scaffold\n' }];
+const files = [{ path: 'README.md', content: '# Scaffold\n' }, { path: 'docs/agents/domain.md', content: '# Domain\n' }];
 const calls = [];
 const git = async (cwd, args) => {
   calls.push([...args]);
@@ -48,8 +48,24 @@ try {
   assert(blocked, 'The ancestor must remain pinned through the write.');
   assert.equal(failure, undefined);
   assert(existsSync(join(projectsRoot, 'new-project', 'README.md')));
+  assert(existsSync(join(projectsRoot, 'new-project', 'docs', 'agents', 'domain.md')));
   assert.equal(calls.filter(args => args.includes('commit')).length, 1);
-  console.log('Windows scaffold: ancestor replacement blocked before mkdir; no outside writes; controlled baseline OK');
+  const releasedRoot = join(directory, 'released-projects');
+  renameSync(projectsRoot, releasedRoot);
+  renameSync(releasedRoot, projectsRoot);
+
+  const failedDestination = await inspectScaffoldDestination(projectsRoot, 'partial-project');
+  const partialPlan = { ...plan, ...failedDestination, input: { ...plan.input, destinationRelative: 'partial-project' } };
+  const interrupted = new Error('Controlled failure after writing scaffold files.');
+  const previousCalls = calls.length;
+  await assert.rejects(createLocalScaffolder(git).createLocalScaffold({ plan: partialPlan, files, record(step, state) {
+    if (step === 'files' && state === 'confirmed') throw interrupted;
+  } }), error => error === interrupted);
+  assert(existsSync(join(projectsRoot, 'partial-project', 'docs', 'agents', 'domain.md')));
+  assert.equal(calls.length, previousCalls, 'A partial file write must not start Git.');
+  renameSync(projectsRoot, releasedRoot);
+  renameSync(releasedRoot, projectsRoot);
+  console.log('Windows scaffold: ancestor replacement blocked; nested files and controlled baseline OK; handles released after success/failure; partial files preserved');
 } finally {
   rmSync(directory, { recursive: true });
 }

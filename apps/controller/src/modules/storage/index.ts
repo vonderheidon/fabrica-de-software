@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
-import { acceptCreation, completeCreation, failCreation, interruptCreations, readCreation, recordCreationStep, recoverCreation, type CreationCommand } from './creations.js';
+import { acceptCreation, acceptCreationReconciliation, finishCreationReconciliation, completeCreation, failCreation, interruptCreations, readCreation, recordCreationStep, recoverCreation, type CreationCommand, type ReconcileCreationCommand } from './creations.js';
 import type { CreationStep } from '#contracts';
 export type { CreationCommand } from './creations.js';
 import { readAttemptPage, readAttemptDetail, readDeliveryDetail } from './queries.js';
@@ -37,6 +37,10 @@ export type { CaptureClaim, RetryCaptureCommand } from './deliveries.js';
 import type { ExecutionPersistence } from '../execution/index.js';
 import type { AttemptCapture, AttemptStatus } from '#contracts';
 import { readEvents } from './events.js';
+import { readOperationSummary } from './operation-summary.js';
+import { acceptDiagnostic, recoverDiagnostic, finishDiagnostic, readContextDiagnostics, diagnosticContext, interruptDiagnostics, type DiagnosticCommand } from './diagnostics.js';
+import type { DiagnosticContext, ContextDiagnostic, OperationSummaryQuery } from '#contracts';
+export type { DiagnosticCommand } from './diagnostics.js';
 import { readPreparation, recoverPreparationCommand, savePreparation, type PreparationCommand, type SavePreparation, type StoredPreparation } from './preparations.js';
 import { configurationETag, digest, guarded, readConfiguration, readProject, readProjects, readSettingsView } from './configuration-reads.js';
 import { recoverConfigurationCommand, registerProject, saveConfiguration, saveSettings, type ConfigurationCommand, type RegisterProject, type SaveConfiguration, type SaveSettings } from './configuration-writes.js';
@@ -63,7 +67,16 @@ export interface StorageDiagnostics {
 }
 
 export interface Storage {
+  getOperationSummary(query: OperationSummaryQuery): ReturnType<typeof readOperationSummary>;
+  getContextDiagnostics(context: DiagnosticContext): ReturnType<typeof readContextDiagnostics>;
+  getDiagnosticContext(context: DiagnosticContext): ReturnType<typeof diagnosticContext>;
+  acceptDiagnostic(command: DiagnosticCommand): ReturnType<typeof acceptDiagnostic>;
+  recoverDiagnostic(command: DiagnosticCommand): StoredOperation | null;
+  finishDiagnostic(command: DiagnosticCommand, results: ContextDiagnostic[]): void;
+  interruptDiagnostics(): void;
   acceptCreation(command: CreationCommand): ReturnType<typeof acceptCreation>;
+  acceptCreationReconciliation(command: ReconcileCreationCommand): ReturnType<typeof acceptCreationReconciliation>;
+  finishCreationReconciliation(operationId: string,diagnostic: string | null): void;
   recoverCreation(command: CreationCommand): StoredOperation | null;
   getCreation(id: string): ReturnType<typeof readCreation>;
   recordCreationStep(id: string, step: CreationStep['step'], state: CreationStep['state'], baselineSha?: string): void;
@@ -140,7 +153,7 @@ export interface Storage {
   getSettingsETag(): string;
   getOperation(operationId: string): StoredOperation | null;
   saveTimeDefaults(input: SaveTimeDefaults): StoredOperation;
-  getEvents(query: EventQuery): EventPage;
+  getEvents(query: EventQuery, through?: string): EventPage;
   getGlobalConfiguration(): Editable<SettingsView>;
   getProject(projectId: string): Editable<ProjectDetail>;
   listProjects(query: CatalogQuery): ProjectPage;
@@ -289,6 +302,8 @@ export function openStorage(options: StorageOptions): Storage {
       recoverPreparationCommand: (command) => guarded(() => connection.transaction(() => recoverPreparationCommand(connection, command))()),
       savePreparation: (input) => savePreparation(connection, input),
       acceptCreation: command => acceptCreation(connection, command),
+      acceptCreationReconciliation: command => acceptCreationReconciliation(connection,command),
+      finishCreationReconciliation: (operationId,diagnostic) => finishCreationReconciliation(connection,operationId,diagnostic),
       recoverCreation: command => guarded(() => connection.transaction(() => recoverCreation(connection, command))()),
       getCreation: id => guarded(() => connection.transaction(() => readCreation(connection, id))()),
       recordCreationStep: (id, step, state, sha) => recordCreationStep(connection, id, step, state, sha),
@@ -308,7 +323,14 @@ export function openStorage(options: StorageOptions): Storage {
         }
       },
       saveTimeDefaults: (input) => saveTimeDefaults(connection, input),
-      getEvents: (query) => readEvents(connection, query),
+      getEvents: (query, through) => readEvents(connection, query, through),
+      getOperationSummary: query => guarded(() => connection.transaction(() => readOperationSummary(connection, query))()),
+      getContextDiagnostics: context => guarded(() => connection.transaction(() => readContextDiagnostics(connection, context))()),
+      getDiagnosticContext: context => guarded(() => connection.transaction(() => diagnosticContext(connection, context))()),
+      acceptDiagnostic: command => acceptDiagnostic(connection, command),
+      recoverDiagnostic: command => guarded(() => connection.transaction(() => recoverDiagnostic(connection, command))()),
+      finishDiagnostic: (command, results) => finishDiagnostic(connection, command, results),
+      interruptDiagnostics: () => { if (connection.open) interruptDiagnostics(connection); },
       getGlobalConfiguration: () => guarded(() => connection.transaction(() => {
         const view = readSettingsView(connection); return { view, etag: configurationETag(view) };
       })()),

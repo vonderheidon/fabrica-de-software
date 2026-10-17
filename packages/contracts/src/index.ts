@@ -14,3 +14,4 @@ export * from './queue.js';
 export * from './publication.js';
 export * from './queries.js';
 export * from './scaffold.js';
+export * from './operation.js';

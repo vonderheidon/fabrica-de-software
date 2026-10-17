@@ -76,7 +76,7 @@ describe('operations and local ownership', () => {
     try { identity = snapshot.prepare('SELECT installation_id FROM factory_settings').get(); } finally { snapshot.close(); }
     const upgraded = openStorage({ dataDirectory: oldDirectory });
     resources.push(upgraded);
-    expect(upgraded.getDiagnostics().schemaVersion).toBe(16);
+    expect(upgraded.getDiagnostics().schemaVersion).toBe(18);
     expect({ installation_id: upgraded.getSettings().installationId }).toEqual(identity);
     expect(upgraded.getSettings().revision).toBe(1);
     expect(save(upgraded).state).toBe('succeeded');

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import * as directoryFs from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
@@ -9,6 +9,7 @@ import { CreationView, ScaffoldOptions, ScaffoldPlanned, type CreateScaffold, ty
 import { createScaffold } from '../../apps/controller/src/modules/projects/index.js';
 import { loadScaffoldCatalog, renderEngineering } from '../../apps/controller/src/modules/projects/scaffold-resources.js';
 import { createLocalScaffolder } from '../../apps/controller/src/modules/workspaces/scaffold.js';
+import { ScaffoldWorkspaceError } from '../../apps/controller/src/modules/workspaces/scaffold-path-guard.js';
 import type { GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -38,17 +39,38 @@ function fixture() {
     if (failGit && args.includes('commit')) return { exitCode: 1, stdout: '' };
     return { exitCode: 0, stdout: ['rev-parse','rev-list'].includes(args[0]!) ? 'a'.repeat(40) : args[0] === 'symbolic-ref' ? `refs/heads/${branch}` : '' };
   };
-  const workspaces = createLocalScaffolder(git);
+  // The deterministic suite controls directory pinning; the compiled Windows
+  // smoke exercises the actual sharing modes and ancestor replacement attempt.
+  const guard = {
+    createDirectory: vi.fn(async (path: string, exclusive: boolean) => {
+      try { await directoryFs.mkdir(path); }
+      catch (error) { if (exclusive || !(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error; }
+    }),
+    assertHeld: vi.fn(() => {}),
+    close: vi.fn(async () => {}),
+  };
+  const acquireGuard = vi.fn(async (_parent: string) => guard);
+  const workspaces = createLocalScaffolder(git, acquireGuard);
   const github = { getIdentity: vi.fn(async () => ({ state: 'complete' as const, data: { id: login, login }, diagnostics: [], retryAtMs: null })) };
   const logFailure = vi.fn(); const scaffold = createScaffold({ storage, github, workspaces, logFailure }); cleanup.push(() => scaffold.close());
   const db = new Database(join(directory,'data','factory.sqlite')); cleanup.push(() => { db.close(); });
-  return { directory, projectsRoot, storage, scaffold, workspaces, github, calls, db, logFailure, changeAccount: () => { login = 'other-user'; }, failGit: () => { failGit = true; } };
+  return { directory, projectsRoot, storage, scaffold, workspaces, github, calls, db, logFailure, guard, acquireGuard, changeAccount: () => { login = 'other-user'; }, failGit: () => { failGit = true; } };
 }
 async function choices(f: ReturnType<typeof fixture>, destinationRelative = 'new-project'): Promise<ScaffoldInput> {
   const options = await f.scaffold.getOptions(); const template = options.templates[0]!;
   return { name: 'Projeto á', templateId: template.id, templateDigest: template.digest, destinationRelative, creationMode: 'local', baseBranch: 'feature/baseline', triageEnabled: false };
 }
 async function authorized(f: ReturnType<typeof fixture>): Promise<CreateScaffold> { const p = await f.scaffold.plan(await choices(f)); return { planHash: p.planHash, plan: p.plan, authorized: true }; }
+async function customTemplate(f: ReturnType<typeof fixture>, files: { path: string; content: string }[]) {
+  const resourcesDirectory = join(f.directory, 'resources'); mkdirSync(join(resourcesDirectory, 'engineering'), { recursive: true });
+  const resources = (await loadScaffoldCatalog()).engineering;
+  for (const [index, name] of ['issue-tracker', 'domain', 'triage-labels'].entries()) writeFileSync(join(resourcesDirectory, 'engineering', `${name}.md`), resources[index]!, 'utf8');
+  const catalogPath = join(resourcesDirectory, 'catalog.v1.json');
+  writeFileSync(catalogPath, JSON.stringify({ formatVersion: 1, id: 'factory.engineering', templates: [{ id: 'custom.v1', label: 'Custom', files }] }), 'utf8');
+  const scaffold = createScaffold({ storage: f.storage, github: f.github, workspaces: f.workspaces, logFailure: f.logFailure, resourcesDirectory });
+  cleanup.push(() => scaffold.close());
+  return { scaffold, resourcesDirectory, catalogPath };
+}
 
 describe('local scaffold planning and durable creation (controlled Git and canonicalization)', () => {
   it('returns versioned options and a deterministic plan with no destination or Git effects', async () => {
@@ -59,6 +81,7 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     expect(first.plan).toMatchObject({ destination: join(f.projectsRoot,'new-project'), ownerId: null, engineering: { tracker: 'github', installsSkills: false, createsLabels: false }, account: { id: 'fixture-user' } });
     expect(first.plan.files.map(f => f.path)).toContain('AGENTS.md'); expect(first.plan.files.some(f => f.path.includes('triage-labels'))).toBe(false);
     expect(existsSync(first.plan.destination)).toBe(false); expect(f.calls).toEqual([]); expect(f.storage.getEvents({})).toEqual(before);
+    expect(f.acquireGuard).not.toHaveBeenCalled();
   });
   it('persists intent before files/Git, finishes with baseline and a configurable project on the same branch', async () => {
     const f = fixture(); const body = await authorized(f); const operationId = randomUUID();
@@ -71,6 +94,11 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     expect(project.prerequisites.map(p => p.code)).toEqual(expect.arrayContaining(['REMOTE_UNCONFIRMED','PROJECT_REQUIRED']));
     expect(f.storage.getOperation(operationId)?.state).toBe('succeeded');
     expect(readFileSync(join(body.plan.destination,'AGENTS.md'),'utf8')).toContain('docs/agents/domain.md');
+    expect(f.acquireGuard).toHaveBeenCalledExactlyOnceWith(dirname(body.plan.destination));
+    expect(f.guard.createDirectory).toHaveBeenCalledWith(body.plan.destination, true);
+    expect(f.guard.createDirectory).toHaveBeenCalledWith(join(body.plan.destination, 'docs', 'agents'), false);
+    expect(f.guard.createDirectory).toHaveBeenCalledWith(join(body.plan.destination, '.git', 'factory-hooks'), true);
+    expect(f.guard.assertHeld).toHaveBeenCalled(); expect(f.guard.close).toHaveBeenCalledTimes(1);
     expect(existsSync(join(body.plan.destination,'.agents'))).toBe(false);
     expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 });
     const previous = f.calls.length; const replay = await f.scaffold.create(body,operationId); await f.scaffold.drain();
@@ -99,12 +127,57 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     await expect(f.scaffold.plan(safeInput)).rejects.toMatchObject({ code: 'SCAFFOLD_PATH_REDIRECTED' }); expect(f.calls).toEqual([]);
     vi.mocked(directoryFs.realpath).mockImplementation(async path => resolve(String(path)));
   });
+  it.each(['docs', 'docs/agents', 'DOCS/AGENTS', 'docs/agents/domain.md/notes', 'docs/agents/triage-labels.md/notes', 'AGENTS.md/notes', '.gitignore/notes'])('rejects generated file collision %s before accepting intent or creating the destination', async path => {
+    const f = fixture(); const custom = await customTemplate(f, [{ path, content: 'Keep this template file.' }]);
+    const input = await choices(f);
+    await expect(custom.scaffold.getOptions()).rejects.toMatchObject({ code: 'SCAFFOLD_RESOURCE_INVALID' });
+    await expect(custom.scaffold.plan(input)).rejects.toMatchObject({ code: 'SCAFFOLD_RESOURCE_INVALID' });
+    expect(existsSync(join(f.projectsRoot, input.destinationRelative))).toBe(false);
+    expect(f.db.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 }); expect(f.calls).toEqual([]);
+  });
+  it.each(['template', 'required_resource'])('invalidates authorization when a distributed %s changes before creation', async change => {
+    const f = fixture(); const custom = await customTemplate(f, [{ path: 'README.md', content: 'Original template.' }]);
+    const options = await custom.scaffold.getOptions(); const template = options.templates[0]!;
+    const planned = await custom.scaffold.plan({ ...await choices(f), templateId: template.id, templateDigest: template.digest });
+    if (change === 'template') writeFileSync(custom.catalogPath, readFileSync(custom.catalogPath, 'utf8').replace('Original template.', 'Changed template.'), 'utf8');
+    else unlinkSync(join(custom.resourcesDirectory, 'engineering', 'domain.md'));
+    await expect(custom.scaffold.create({ planHash: planned.planHash, plan: planned.plan, authorized: true }, randomUUID())).rejects.toMatchObject({ code: change === 'template' ? 'SCAFFOLD_TEMPLATE_CHANGED' : 'SCAFFOLD_RESOURCE_INVALID' });
+    expect(existsSync(planned.plan.destination)).toBe(false); expect(f.calls).toEqual([]);
+    expect(f.db.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 });
+  });
   it('preserves partial files and uncertain baseline, with no blind replay or registration', async () => {
     const f = fixture(); f.failGit(); const body = await authorized(f); const id = randomUUID(); const op = await f.scaffold.create(body,id); await f.scaffold.drain();
     expect(f.scaffold.getCreation(op.resource.id)).toMatchObject({ creation: { state: 'partial', projectId: null, diagnostic: 'SCAFFOLD_GIT_FAILED' }, pendingEffects: [{ step: 'baseline',state: 'unknown' },{ step: 'registration',state: 'not_started' }] });
     expect(existsSync(join(body.plan.destination,'AGENTS.md'))).toBe(true); const count = f.calls.length;
     expect((await f.scaffold.create(body,id)).state).toBe('unknown'); await f.scaffold.drain(); expect(f.calls).toHaveLength(count);
     expect(f.storage.listProjects({}).items).toEqual([]);
+    expect(f.guard.close).toHaveBeenCalledTimes(1);
+  });
+  it('refuses an unavailable path guard before any filesystem or Git effects', async () => {
+    const f = fixture(); const body = await authorized(f);
+    f.acquireGuard.mockRejectedValueOnce(new ScaffoldWorkspaceError('SCAFFOLD_PATH_GUARD_UNAVAILABLE'));
+    const operation = await f.scaffold.create(body, randomUUID()); await f.scaffold.drain();
+    expect(f.scaffold.getCreation(operation.resource.id).creation).toMatchObject({ state: 'failed', diagnostic: 'SCAFFOLD_PATH_GUARD_UNAVAILABLE', projectId: null });
+    expect(existsSync(body.plan.destination)).toBe(false); expect(f.calls).toEqual([]);
+    expect(f.guard.createDirectory).not.toHaveBeenCalled(); expect(f.guard.close).not.toHaveBeenCalled();
+  });
+  it('revalidates the authorized destination while holding the guard and releases it on refusal', async () => {
+    const f = fixture(); const body = await authorized(f);
+    f.acquireGuard.mockImplementationOnce(async () => { mkdirSync(body.plan.destination); return f.guard; });
+    const operation = await f.scaffold.create(body, randomUUID()); await f.scaffold.drain();
+    expect(f.scaffold.getCreation(operation.resource.id).creation).toMatchObject({ state: 'failed', diagnostic: 'SCAFFOLD_DESTINATION_EXISTS', projectId: null });
+    expect(f.guard.createDirectory).not.toHaveBeenCalled(); expect(f.calls).toEqual([]);
+    expect(f.guard.close).toHaveBeenCalledTimes(1);
+  });
+  it('preserves the created directory and stops writes when the path guard is lost', async () => {
+    const f = fixture(); const body = await authorized(f);
+    f.guard.assertHeld.mockImplementation(() => {
+      if (existsSync(body.plan.destination)) throw new ScaffoldWorkspaceError('SCAFFOLD_PATH_GUARD_UNAVAILABLE');
+    });
+    const operation = await f.scaffold.create(body, randomUUID()); await f.scaffold.drain();
+    expect(f.scaffold.getCreation(operation.resource.id).creation).toMatchObject({ state: 'partial', diagnostic: 'SCAFFOLD_PATH_GUARD_UNAVAILABLE', projectId: null });
+    expect(existsSync(body.plan.destination)).toBe(true); expect(existsSync(join(body.plan.destination, 'AGENTS.md'))).toBe(false);
+    expect(f.calls).toEqual([]); expect(f.guard.close).toHaveBeenCalledTimes(1);
   });
   it('rolls back acceptance when its event cannot be persisted, before filesystem work', async () => {
     const f = fixture(); const body = await authorized(f);
@@ -141,6 +214,7 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const view = f.storage.getCreation(operation.resource.id);
     expect(view.creation.state).toBe('partial'); expect(view.pendingEffects).toContainEqual({ step: 'files',state: 'unknown' });
     expect(existsSync(join(body.plan.destination,'AGENTS.md'))).toBe(true); expect(f.calls).toEqual([]); expect(f.storage.listProjects({}).items).toEqual([]);
+    expect(f.guard.close).toHaveBeenCalledTimes(1);
   });
   it('upgrades real SQLite v12 preserving settings and receipts without manufacturing projects or creations', () => {
     const directory = mkdtempSync(resolve('.cache/scaffold-migration-')); directories.push(directory);
@@ -150,7 +224,7 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const receipt = saveTimeDefaults(db,{ operationId,expectedRevision: settingsETag(identity,old.revision),timeDefaults: { ...old.timeDefaults,pollingIntervalMs: 2000 } });
     expect(db.pragma('user_version',{ simple: true })).toBe(12); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getSettings()).toMatchObject({ installationId: identity,timeDefaults: { pollingIntervalMs: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(16);
+    expect(reopened.getSettings()).toMatchObject({ installationId: identity,timeDefaults: { pollingIntervalMs: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(18);
     expect(reopened.getOperation(operationId)).toEqual(receipt); expect(reopened.listProjects({}).items).toEqual([]);
     const probe = new Database(join(directory,'factory.sqlite')); try { expect(probe.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 }); expect(probe.pragma('foreign_key_check')).toEqual([]); } finally { probe.close(); }
   });
@@ -172,6 +246,36 @@ describe('local scaffold planning and durable creation (controlled Git and canon
 });
 
 describe('distributed engineering resources', () => {
+  it.each(['  ## Agent Skills ##\r\n', 'Agent skills\n------------\n'])('updates an existing Markdown section %j while preserving code examples and surrounding instructions', async heading => {
+    const catalog = await loadScaffoldCatalog();
+    const example = '```markdown\n## Agent skills\n### Issue tracker\n```\n';
+    const original = `# Existing\n\n${example}\n${heading}\nCustom guidance.\n\n  ### Domain docs ###\n\nKeep domain guidance.\n\n# Other\n\nKeep other byte for byte.\n`;
+    const files = renderEngineering([{ path: 'AGENTS.md', content: original }], catalog.engineering, true);
+    const agents = files.find(file => file.path === 'AGENTS.md')!.content;
+    expect(agents).toContain(example); expect(agents).toContain(heading); expect(agents).toContain('Keep domain guidance.');
+    expect(agents).toContain('# Other\n\nKeep other byte for byte.\n');
+    expect(agents).not.toMatch(/^### Domain docs$/m); expect(agents).toContain('docs/agents/domain.md');
+    expect(agents.slice(agents.indexOf('# Other'))).not.toContain('docs/agents/');
+    const again = renderEngineering(files.filter(file => !file.path.startsWith('docs/agents/')), catalog.engineering, true);
+    expect(again.find(file => file.path === 'AGENTS.md')!.content).toBe(agents);
+  });
+  it('rejects duplicate recognized instruction sections instead of creating ambiguous pointers', async () => {
+    const catalog = await loadScaffoldCatalog();
+    for (const content of ['## Agent skills\n\n  ## Agent skills ##\n', '## Agent skills\n\n### Domain docs\n\n### Domain docs ###\n']) {
+      expect(() => renderEngineering([{ path: 'AGENTS.md', content }], catalog.engineering, true)).toThrow();
+    }
+  });
+  it('places mandatory ignores after template exceptions, keeps examples versionable and remains stable on a second render', async () => {
+    const catalog = await loadScaffoldCatalog(); const original = '.env\nnode_modules/\n*.key\n!.env\n!node_modules/\n!private.key\n';
+    const files = renderEngineering([{ path: '.gitignore', content: original }, { path: '.env.example', content: 'PUBLIC_OPTION=value\n' }], catalog.engineering, false);
+    const ignore = files.find(file => file.path === '.gitignore')!.content;
+    expect(ignore.startsWith(original)).toBe(true);
+    for (const pattern of ['.env', 'node_modules/', '*.key']) expect(ignore.lastIndexOf(`\n${pattern}\n`)).toBeGreaterThan(ignore.indexOf(`\n!${pattern}`));
+    expect(ignore).toContain('!.env.example\n!.env.*.example'); expect(ignore).toContain('credentials\ncredentials.*\nid_rsa\n');
+    expect(files.find(file => file.path === '.env.example')!.content).toBe('PUBLIC_OPTION=value\n');
+    const again = renderEngineering(files.filter(file => !file.path.startsWith('docs/agents/')), catalog.engineering, false);
+    expect(again.find(file => file.path === '.gitignore')!.content).toBe(ignore);
+  });
   it('preserves surrounding AGENTS and CLAUDE instructions without duplicate sections; triage is conditional', async () => {
     const catalog = await loadScaffoldCatalog(); const original = '# Existing\n\nKeep this.\n\n## Agent skills\n\nCustom guidance.\n\n### Domain docs\n\nCustom domain guidance.\n\n## Other\n\nKeep other.\n';
     const files = [{ path: 'AGENTS.md',content: original }, { path: 'CLAUDE.md',content: 'Keep Claude exactly.\n' }];

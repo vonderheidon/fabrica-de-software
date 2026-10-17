@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { CreateScaffold, CreationParams, CreationView, EmptyQuery, ErrorResponse, OperationAccepted, ScaffoldInput, ScaffoldOptions, ScaffoldPlanned } from '#contracts';
+import { CreateScaffold, CreationParams, CreationView, EmptyBody, EmptyQuery, ErrorResponse, OperationAccepted, ScaffoldInput, ScaffoldOptions, ScaffoldPlanned } from '#contracts';
 import type { Scaffold } from '../../modules/projects/index.js';
 import type { Storage } from '../../modules/storage/index.js';
 import { commandHeaders, sendOperationAccepted } from '../security/index.js';
@@ -16,5 +16,10 @@ export function installScaffoldRoutes(instance: FastifyInstance, scaffold: Scaff
   app.get('/api/v1/scaffold/creations/:creationId', { schema: { querystring: EmptyQuery, params: CreationParams, response: { 200: CreationView, ...errors } } }, async (request, reply) => {
     const view = scaffold.getCreation(request.params.creationId);
     return reply.header('ETag', `"creation:${view.creation.id}:${view.creation.revision}"`).send(view);
+  });
+  app.post('/api/v1/scaffold/creations/:creationId/reconcile', { schema: { querystring: EmptyQuery,params: CreationParams,body: EmptyBody,response: { 202: OperationAccepted,...errors } } },async (request,reply) => {
+    const command = commandHeaders(request);
+    const operation = await scaffold.reconcile(request.params.creationId,command.operationId,command.expectedRevision);
+    return sendOperationAccepted(reply,request.id,storage,operation.operationId);
   });
 }

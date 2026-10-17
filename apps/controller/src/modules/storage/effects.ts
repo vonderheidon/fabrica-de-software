@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { EffectIdentity, EffectReceipt, EffectView, OperationId, type DeliveryMode } from '#contracts';
-import { digest, guarded } from './configuration-reads.js';
+import { EffectIdentity, EffectReceipt, EffectView, OperationId, type DeliveryMode, type CreationMode, type ScaffoldPlan } from '#contracts';
+import { configurationETag, readSettingsView, digest, guarded } from './configuration-reads.js';
 import { readSettings } from './settings.js';
 import { readAttempt, readCapture } from './attempts.js';
 import { assertPublicationEligible } from './publication.js';
@@ -13,7 +13,27 @@ import { authorizedMode } from './publication-modes.js';
 export type EffectOrigin = { attemptId: string; creationId?: never; deliveryId?: string } | { creationId: string; attemptId?: never; deliveryId?: never };
 export interface EffectIntent {
   origin: EffectOrigin; kind: EffectView['kind']; scopeKey: string; expectedIdentity: EffectIdentity;
-  authorization: { accountId: string; mode: DeliveryMode; sourceOperationId: string };
+  authorization: { accountId: string; mode: DeliveryMode | CreationMode; sourceOperationId: string };
+}
+function validateCreationEffect(db: Database.Database, creationId: string, kind: EffectView['kind'], identity: EffectIdentity, scope: string, authorization: EffectIntent['authorization']): void {
+  const s = readSettings(db);
+  const c = db.prepare<[string,string,string | null],{ operation_id: string; plan_hash: string; plan_json: string; state: string; baseline_sha: string | null; baseline_ref: string | null }>(
+    'SELECT * FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(creationId,s.installationId,s.accountId);
+  if (!c) throw new OperationError(404,'CREATION_NOT_FOUND','Creation not found in this account.');
+  const p = JSON.parse(c.plan_json) as ScaffoldPlan; const r = p.input.remote;
+  if (!r || !c.baseline_sha || c.baseline_ref !== `refs/heads/${p.input.baseBranch}` || !db.prepare("SELECT creation_id FROM creation_steps WHERE creation_id=? AND step='baseline' AND state='confirmed'").get(creationId) || !['pending','running'].includes(c.state) || p.settingsETag !== configurationETag(readSettingsView(db)) ||
+    p.account.id !== s.accountId || authorization.accountId !== p.account.id || authorization.sourceOperationId !== c.operation_id ||
+    authorization.mode !== p.input.creationMode || identity.planHash !== c.plan_hash || scope !== creationId || identity.issueId !== undefined ||
+    identity.ownerId !== r.ownerId || identity.repositoryOwner !== p.ownerLogin || identity.repositoryName !== r.name || identity.visibility !== r.visibility ||
+    !['create_repository','associate_origin','baseline_push'].includes(kind)) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The effect differs from the authorized creation plan.');
+  if (kind === 'create_repository') {
+    if (identity.repositoryId !== undefined || identity.marker !== `Factory-Creation:${p.installationId}:${creationId}:${c.plan_hash}`) throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','The repository intent differs from the plan.');
+  } else {
+    const remote = db.prepare<[string],{ receipt_json: string }>("SELECT receipt_json FROM effects WHERE creation_id=? AND kind='create_repository' AND state='confirmed'").get(creationId);
+    const receipt = remote ? JSON.parse(remote.receipt_json) as EffectReceipt : null;
+    if (!receipt || identity.repositoryId !== receipt.id || identity.commitSha !== c.baseline_sha || identity.branchRef !== c.baseline_ref) throw new OperationError(409,'REMOTE_IDENTITY_REQUIRED','Confirm the new repository and exact baseline first.');
+    if (kind === 'baseline_push' && (p.input.creationMode !== 'remote_push' || !db.prepare("SELECT operation_id FROM effects WHERE creation_id=? AND kind='associate_origin' AND state='confirmed'").get(creationId))) throw new OperationError(409,'PUSH_NOT_AUTHORIZED','Baseline publication requires the remote_push plan and confirmed origin.');
+  }
 }
 function explicitGrant(db: Database.Database, attemptId: string, deliveryId: string | null, operationId?: string): boolean {
   return Boolean(operationId && db.prepare("SELECT operation_id FROM publication_requests WHERE operation_id=? AND attempt_id=? AND delivery_id=? AND kind IN ('publication.complete','publication.authorize-upgrade') AND authorized_mode IN ('icr','commit','pr') AND state IN ('accepted','running')")
@@ -21,6 +41,7 @@ function explicitGrant(db: Database.Database, attemptId: string, deliveryId: str
 }
 function validateAttemptEffect(db: Database.Database, attemptId: string, deliveryId: string | null, kind: EffectView['kind'], identity: EffectIdentity, sourceOperationId: string): void {
   const a = readAttempt(db,attemptId); const capture = readCapture(db,attemptId);
+  if (!['issue_comment','project_status','local_commit','push','pull_request'].includes(kind)) throw new OperationError(409,'EFFECT_NOT_AUTHORIZED','Creation effects cannot originate in an attempt.');
   const explicit = explicitGrant(db,attemptId,deliveryId,sourceOperationId);
   if (identity.issueId !== capture.issue.id || identity.repositoryId !== capture.issue.repository.id ||
     (a.result && a.result !== 'delivered' && !(a.result === 'interrupted' && explicit)) || a.suspension || a.pendingQuestionId ||
@@ -90,13 +111,14 @@ export function effectEvent(db: Database.Database, id: string, type: string, rev
   db.prepare(`INSERT INTO events(entity_type,entity_id,attempt_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms)
     VALUES ('effect',?,?,?,?,?,'{}',?)`).run(id, e.attempt_id, id, type, revision, Date.now());
   if (e.attempt_id) db.prepare('UPDATE attempts SET revision=revision+1,updated_at_ms=? WHERE id=?').run(Date.now(),e.attempt_id);
+  if (e.creation_id) db.prepare('UPDATE project_creations SET revision=revision+1 WHERE id=?').run(e.creation_id);
 }
 export function recordEffectIntent(db: Database.Database, input: EffectIntent): EffectView {
   return guarded(() => db.transaction(() => {
     const s = readSettings(db); const { origin, authorization } = input;
     if (!Value.Check(EffectIdentity, input.expectedIdentity) || !Value.Check(OperationId, origin.attemptId ?? origin.creationId) ||
-      !Value.Check(OperationId, authorization.sourceOperationId) || authorization.accountId !== s.accountId || !['icr','commit','pr'].includes(authorization.mode) ||
-      !['issue_comment','project_status','local_commit','push','pull_request'].includes(input.kind) || input.scopeKey.length < 1 || input.scopeKey.length > 4096 ||
+      !Value.Check(OperationId, authorization.sourceOperationId) || authorization.accountId !== s.accountId || !['icr','commit','pr','local','remote_no_push','remote_push'].includes(authorization.mode) ||
+      !['issue_comment','project_status','local_commit','push','pull_request','create_repository','associate_origin','baseline_push'].includes(input.kind) || input.scopeKey.length < 1 || input.scopeKey.length > 4096 ||
       (['local_commit','push','pull_request'].includes(input.kind) && (input.scopeKey !== origin.deliveryId || !origin.attemptId)) ||
       (origin.attemptId !== undefined) === (origin.creationId !== undefined)) {
       throw new OperationError(400, 'EFFECT_INTENT_INVALID', 'The effect identity or authorization is invalid.');
@@ -109,10 +131,7 @@ export function recordEffectIntent(db: Database.Database, input: EffectIntent): 
       validateAttemptEffect(db,a.id,origin.deliveryId ?? null,input.kind,input.expectedIdentity,authorization.sourceOperationId);
       if (a.suspension) throw new OperationError(409, 'PUBLICATION_BLOCKED', 'The attempt is suspended.');
     } else {
-      // The scaffold consumer supplies its durable creation operation; no fictitious creation is seeded here.
-      const source = db.prepare("SELECT operation_id FROM operation_requests WHERE operation_id=? AND account_id IS ? AND resource_type='creation' AND resource_id=?")
-        .get(authorization.sourceOperationId, s.accountId, origin.creationId);
-      if (!source) throw new OperationError(409, 'EFFECT_AUTHORIZATION_INVALID', 'The creation requires a durable operation.');
+      validateCreationEffect(db,origin.creationId!,input.kind,input.expectedIdentity,input.scopeKey,authorization);
     }
     const prior = db.prepare<[string | null, string | null, string, string], Row>('SELECT * FROM effects WHERE attempt_id IS ? AND creation_id IS ? AND kind=? AND scope_key=?')
       .get(origin.attemptId ?? null, origin.creationId ?? null, input.kind, input.scopeKey);
@@ -134,7 +153,14 @@ export function recordEffectIntent(db: Database.Database, input: EffectIntent): 
 }
 export function assertEffectAuthorized(db: Database.Database,id: string,sourceOperationId: string): void {
   const e = readEffect(db,id);
-  if (e.state !== 'running' || !e.attemptId) throw new OperationError(409,'EFFECT_AUTHORIZATION_INVALID','The effect is no longer authorized for sending.');
+  if (e.state !== 'running') throw new OperationError(409,'EFFECT_AUTHORIZATION_INVALID','The effect is no longer authorized for sending.');
+  if (e.creationId) {
+    const row = db.prepare<[string],{ authorization_json: string }>('SELECT authorization_json FROM effects WHERE operation_id=?').get(id)!;
+    const authorization = JSON.parse(row.authorization_json) as EffectIntent['authorization'];
+    if (sourceOperationId !== authorization.sourceOperationId) throw new OperationError(409,'EFFECT_AUTHORIZATION_INVALID','Creation authorization changed.');
+    validateCreationEffect(db,e.creationId,e.kind,e.expectedIdentity,e.scopeKey,authorization); return;
+  }
+  if (!e.attemptId) throw new OperationError(409,'EFFECT_AUTHORIZATION_INVALID','The effect origin is missing.');
   validateAttemptEffect(db,e.attemptId,e.deliveryId,e.kind,e.expectedIdentity,sourceOperationId);
   if (db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND operation_id<>? AND state IN ('running','unknown')").get(e.attemptId,id)) throw new OperationError(409,'EFFECT_UNRESOLVED','Another effect requires reconciliation.');
 }
@@ -149,6 +175,10 @@ export function claimEffect(db: Database.Database, id: string, revision: number,
       if (db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND operation_id<>? AND state IN ('running','unknown')").get(e.attemptId, id)) {
         throw new OperationError(409, 'EFFECT_UNRESOLVED', 'Reconcile the previous unknown effect before sending another.');
       }
+    } else if (e.creationId) {
+      const row = db.prepare<[string],{ authorization_json: string }>('SELECT authorization_json FROM effects WHERE operation_id=?').get(id)!;
+      validateCreationEffect(db,e.creationId,e.kind,e.expectedIdentity,e.scopeKey,JSON.parse(row.authorization_json) as EffectIntent['authorization']);
+      if (db.prepare("SELECT operation_id FROM effects WHERE creation_id=? AND operation_id<>? AND state IN ('running','unknown')").get(e.creationId,id)) throw new OperationError(409,'EFFECT_UNRESOLVED','Reconcile the previous creation effect first.');
     }
     db.prepare("UPDATE effects SET state='running',sent_at_ms=?,reason=NULL,revision=revision+1 WHERE operation_id=? AND revision=?").run(Date.now(), id, revision);
     effectEvent(db, id, 'effect.sent', revision + 1); return true;
@@ -166,6 +196,12 @@ export function finishEffect(db: Database.Database, id: string, revision: number
     }
     if (receipt && e.kind === 'project_status' && (receipt.id !== e.expectedIdentity.itemId || receipt.optionId !== e.expectedIdentity.optionId)) {
       throw new OperationError(409, 'EFFECT_RECEIPT_INVALID', 'The Status receipt does not match the intended item and option.');
+    }
+    if (receipt && e.creationId) {
+      const i = e.expectedIdentity;
+      if (receipt.ownerId !== i.ownerId || receipt.repositoryName !== i.repositoryName || receipt.visibility !== i.visibility ||
+        receipt.operationId !== e.operationId || (e.kind !== 'create_repository' && (receipt.repositoryId !== i.repositoryId || receipt.commitSha !== i.commitSha || receipt.branchRef !== i.branchRef || receipt.id !== (e.kind === 'baseline_push' ? i.commitSha : i.repositoryId))) ||
+        (e.kind === 'create_repository' && (receipt.repositoryId !== receipt.id || receipt.url !== `https://github.com/${i.repositoryOwner}/${i.repositoryName}`))) throw new OperationError(409,'EFFECT_RECEIPT_INVALID','The creation receipt differs from its durable identity.');
     }
     if (e.kind === 'local_commit' && receipt && (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(receipt.id) ||
       receipt.contentIdentity !== e.expectedIdentity.contentIdentity || receipt.parentSha !== e.expectedIdentity.parentSha ||

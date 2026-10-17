@@ -117,18 +117,25 @@ export const ControllerEvent = Type.Object({
   entityType: text(128), entityId: text(256), operationId: OperationId,
   eventType: text(128), entityRevision: revision, occurredAtMs: timestamp,
   facts: Type.Object({}, { additionalProperties: false }),
+  projectId: Type.Optional(OperationId), attemptId: Type.Optional(OperationId),
 }, { additionalProperties: false });
 export type ControllerEvent = Static<typeof ControllerEvent>;
 export const EventQuery = Type.Object({
   cursor: Type.Optional(Type.String({ pattern: '^(0|[1-9][0-9]{0,15})$' })),
   limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|100)$' })),
   operationId: Type.Optional(OperationId),
+  projectId: Type.Optional(OperationId), attemptId: Type.Optional(OperationId),
 }, { additionalProperties: false });
 export type EventQuery = Static<typeof EventQuery>;
 export const EventListQuery = Type.Object({
   cursor: Type.Optional(Type.String({ pattern: '^[A-Za-z0-9_-]+$', minLength: 1, maxLength: 256 })),
   limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|100)$' })),
   operationId: Type.Optional(OperationId),
+  projectId: Type.Optional(OperationId), attemptId: Type.Optional(OperationId),
+}, { additionalProperties: false });
+export const EventStreamQuery = Type.Object({
+  cursor: Type.Optional(Type.String({ maxLength: 256 })),
+  projectId: Type.Optional(OperationId), attemptId: Type.Optional(OperationId), operationId: Type.Optional(OperationId),
 }, { additionalProperties: false });
 export function Page<T extends import('@sinclair/typebox').TSchema>(item: T) {
   return Type.Object({

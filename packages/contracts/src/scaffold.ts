@@ -1,6 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Capability, OperationId } from './base.js';
 import { Prerequisite } from './projects.js';
+import { EffectReceipt } from './publication.js';
 
 const closed = { additionalProperties: false } as const;
 const text = (maxLength = 4096) => Type.String({ minLength: 1, maxLength });
@@ -21,7 +22,8 @@ export const ScaffoldPlan = Type.Object({
   formatVersion: Type.Literal(1), input: ScaffoldInput, installationId: OperationId, settingsETag: text(256),
   projectsRoot: text(), destination: text(), parentIdentity: digest, templateDigest: digest,
   files: Type.Array(ScaffoldFile, { minItems: 1, maxItems: 50 }), engineering: ScaffoldEngineering,
-  account: ScaffoldAccount, ownerId: Type.Null(), effects: Type.Array(text(128), { maxItems: 10 }),
+  account: ScaffoldAccount, ownerId: Type.Union([text(256), Type.Null()]),
+  ownerLogin: Type.Optional(text(100)), effects: Type.Array(text(128), { maxItems: 10 }),
 }, closed);
 export type ScaffoldPlan = Static<typeof ScaffoldPlan>;
 export const ScaffoldPlanned = Type.Object({ planHash: digest, plan: ScaffoldPlan, prerequisites: Type.Array(Prerequisite, { maxItems: 100 }) }, closed);
@@ -45,5 +47,22 @@ export const ProjectCreation = Type.Object({
   diagnostic: nullable, createdAtMs: Type.Integer({ minimum: 0 }),
 }, closed);
 export type ProjectCreation = Static<typeof ProjectCreation>;
-export const CreationView = Type.Object({ creation: ProjectCreation, confirmedEffects: Type.Array(CreationStep), pendingEffects: Type.Array(CreationStep), prerequisites: Type.Array(Prerequisite), diagnostics: Type.Array(text(128)), eventCursor: Type.String({ pattern: '^[0-9]+$' }) }, closed);
+export const CreationEffectIdentity = Type.Object({
+  planHash: Type.Optional(digest), ownerId: Type.Optional(text(256)), repositoryOwner: Type.Optional(text(256)), repositoryName: Type.Optional(text(100)),
+  visibility: Type.Optional(Type.Union([Type.Literal('private'), Type.Literal('public')])), marker: Type.Optional(text(512)),
+  repositoryId: Type.Optional(text(256)), commitSha: Type.Optional(Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' })), branchRef: Type.Optional(text(1024)),
+}, closed);
+export const CreationEffect = Type.Object({
+  operationId: OperationId, attemptId: Type.Null(), creationId: Type.Union([OperationId, Type.Null()]), deliveryId: Type.Null(),
+  kind: Type.Union([Type.Literal('create_repository'), Type.Literal('associate_origin'), Type.Literal('baseline_push')]), scopeKey: text(256),
+  state: Type.Union(['not_requested', 'not_started', 'running', 'confirmed', 'failed_known', 'unknown', 'not_applicable'].map(state => Type.Literal(state))),
+  expectedIdentity: CreationEffectIdentity, confirmedIdentity: Type.Union([EffectReceipt, Type.Null()]), receipt: Type.Union([EffectReceipt, Type.Null()]),
+  reason: Type.Union([text(128), Type.Null()]), authorized: Type.Boolean(), revision: Type.Integer({ minimum: 1 }),
+  sentAtMs: Type.Union([Type.Integer(), Type.Null()]), confirmedAtMs: Type.Union([Type.Integer(), Type.Null()]),
+}, closed);
+export type CreationEffect = Static<typeof CreationEffect>;
+export const CreationView = Type.Object({ creation: ProjectCreation, confirmedEffects: Type.Array(CreationStep), pendingEffects: Type.Array(CreationStep), effects: Type.Array(CreationEffect, { maxItems: 3 }),
+  remoteEffects: Type.Array(Type.Object({ kind: Type.Union([Type.Literal('create_repository'),Type.Literal('associate_origin'),Type.Literal('baseline_push')]),
+    state: CreationEffect.properties.state,operationId: Type.Union([OperationId,Type.Null()]),identity: CreationEffectIdentity,reason: Type.Union([text(128),Type.Null()]) },closed),{ maxItems: 3 }),
+  prerequisites: Type.Array(Prerequisite), diagnostics: Type.Array(text(128)), eventCursor: Type.String({ pattern: '^[0-9]+$' }) }, closed);
 export type CreationView = Static<typeof CreationView>;

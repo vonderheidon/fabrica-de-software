@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import { CreateScaffold, ScaffoldInput, type ScaffoldOptions, type ScaffoldPlan, type ScaffoldPlanned, type Prerequisite } from '#contracts';
+import { CreateScaffold, ScaffoldInput, type EffectIdentity, type EffectView, type ScaffoldOptions, type ScaffoldPlan, type ScaffoldPlanned, type Prerequisite } from '#contracts';
 import { OperationError, type Storage } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import { ScaffoldWorkspaceError, validateScaffoldBranch, type Workspaces } from '../workspaces/index.js';
@@ -8,8 +8,8 @@ import { engineeringSummary, fileDigest, loadScaffoldCatalog, renderEngineering,
 
 export interface ScaffoldDependencies {
   storage: Storage;
-  github: Pick<GitHub, 'getIdentity'>;
-  workspaces: Pick<Workspaces, 'scaffoldCapability' | 'inspectScaffoldDestination' | 'createLocalScaffold'>;
+  github: Pick<GitHub, 'getIdentity'> & Partial<Pick<GitHub, 'scaffoldRemoteCapability' | 'inspectScaffoldRemote' | 'createScaffoldRepository' | 'reconcileScaffoldRepository'>>;
+  workspaces: Pick<Workspaces, 'scaffoldCapability' | 'inspectScaffoldDestination' | 'createLocalScaffold'> & Partial<Pick<Workspaces, 'executeScaffoldGit' | 'reconcileScaffoldGit'>>;
   logFailure: (code: string) => void;
   resourcesDirectory?: string;
 }
@@ -28,7 +28,8 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
   };
   async function plan(input: ScaffoldInput): Promise<ScaffoldPlanned> {
     if (!Value.Check(ScaffoldInput, input) || !input.name.trim()) throw new OperationError(400, 'SCAFFOLD_INPUT_INVALID', 'Scaffold choices are invalid.');
-    if (input.creationMode !== 'local' || input.remote) throw new OperationError(409, 'CREATION_MODE_UNAVAILABLE', 'This creation service supports only the local modality.');
+    if ((input.creationMode === 'local') === Boolean(input.remote)) throw new OperationError(400,'SCAFFOLD_INPUT_INVALID','Remote choices are required only for remote modalities.');
+    if (input.creationMode !== 'local' && (!github.inspectScaffoldRemote || !github.createScaffoldRepository || !github.reconcileScaffoldRepository || !workspaces.executeScaffoldGit || !workspaces.reconcileScaffoldGit)) throw new OperationError(409,'CREATION_MODE_UNAVAILABLE','The authorized remote scaffold adapters are unavailable.');
     try { validateScaffoldBranch(input.baseBranch); }
     catch { throw new OperationError(400, 'SCAFFOLD_BRANCH_INVALID', 'Select a valid Git branch name.'); }
     const configuration = storage.getGlobalConfiguration(); const s = configuration.view.settings;
@@ -40,10 +41,21 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
     });
     const files = renderEngineering(template.files, catalog.engineering, input.triageEnabled);
     const observed = await account();
+    let ownerLogin: string | undefined;
+    if (input.remote) {
+      if (observed.state !== 'complete' || !s.accountId || observed.id !== s.accountId) throw new OperationError(409,'SCAFFOLD_ACCOUNT_CHANGED','Observe the configured account before remote creation.');
+      if (!github.scaffoldRemoteCapability?.(input.remote,s.accountId,input.creationMode === 'remote_push').available) throw new OperationError(409,'CREATION_TARGET_NOT_AUTHORIZED','The trusted host has not authorized this exact remote target and effects.');
+      const remote = await github.inspectScaffoldRemote!(input.remote,s.accountId);
+      if (remote.state !== 'complete' || !remote.data) throw new OperationError(409,'SCAFFOLD_REMOTE_UNAVAILABLE','The remote owner and name could not be completely observed.');
+      if (remote.data.repositoryId) throw new OperationError(409,'SCAFFOLD_REMOTE_EXISTS','The selected repository already exists and will not be adopted.');
+      ownerLogin = remote.data.ownerLogin;
+    }
     if (configuration.etag !== storage.getGlobalConfiguration().etag) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration changed while planning. Review a new plan.');
     const value: ScaffoldPlan = { formatVersion: 1, input, installationId: s.installationId, settingsETag: configuration.etag,
       ...destination, templateDigest: template.digest, files: files.map(f => ({ path: f.path, bytes: Buffer.byteLength(f.content), sha256: fileDigest(f.content) })),
-      engineering: engineeringSummary(input.triageEnabled), account: observed, ownerId: null, effects: ['create_directory', 'write_template_and_engineering', 'initialize_git', 'create_conventional_baseline', 'register_local_project'] };
+      engineering: engineeringSummary(input.triageEnabled), account: observed, ownerId: input.remote?.ownerId ?? null, ...(ownerLogin ? { ownerLogin } : {}),
+      effects: ['create_directory', 'write_template_and_engineering', 'initialize_git', 'create_conventional_baseline',
+        ...(input.remote ? ['create_repository','associate_origin',...(input.creationMode === 'remote_push' ? ['baseline_push'] : [])] : []),'register_local_project'] };
     return { planHash: scaffoldDigest(value), plan: value, prerequisites: prerequisites() };
   }
   async function revalidate(body: CreateScaffold) {
@@ -63,6 +75,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
         if (closing && state === 'running') throw new OperationError(409, 'CREATION_INTERRUPTED', 'Controller is closing.');
         storage.recordCreationStep(id,step,state,sha);
       } });
+      if (current.plan.input.remote) await executeRemote(id,current.plan);
       storage.completeCreation(id);
     } catch (error) {
       const code = error instanceof OperationError || error instanceof ScaffoldWorkspaceError ? error.code : 'SCAFFOLD_CREATION_FAILED';
@@ -70,6 +83,43 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       logFailure(code);
     }
   }
+  async function currentAuthority(id: string,plan: ScaffoldPlan) {
+    const observed = await account(); const current = storage.getCreation(id).creation;
+    if (closing || current.state !== 'running' || current.planHash !== scaffoldDigest(plan) || storage.getGlobalConfiguration().etag !== plan.settingsETag ||
+      observed.state !== 'complete' || observed.id !== plan.account.id || observed.login !== plan.account.login || observed.id !== storage.getSettings().accountId) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The creation account, plan or continuity changed.');
+    const catalog = await loadScaffoldCatalog(resourcesDirectory);
+    if (!catalog.templates.some(t => t.id === plan.input.templateId && t.digest === plan.templateDigest)) throw new OperationError(409,'SCAFFOLD_TEMPLATE_CHANGED','Scaffold resources changed before the effect.');
+  }
+  async function executeRemote(id: string,plan: ScaffoldPlan) {
+    const c = storage.getCreation(id).creation; const remote = plan.input.remote!;
+    const common: EffectIdentity = { planHash: c.planHash,ownerId: remote.ownerId,repositoryOwner: plan.ownerLogin!,repositoryName: remote.name,visibility: remote.visibility };
+    let repository: EffectView | undefined;
+    for (const kind of ['create_repository','associate_origin',...(plan.input.creationMode === 'remote_push' ? ['baseline_push'] as const : [])] as const) {
+      await currentAuthority(id,plan);
+      const identity: EffectIdentity = kind === 'create_repository' ? { ...common,marker: `Factory-Creation:${plan.installationId}:${id}:${c.planHash}` }
+        : { ...common,repositoryId: repository!.receipt!.id,commitSha: c.baselineSha!,branchRef: c.baselineRef! };
+      const effect = storage.recordEffectIntent({ origin: { creationId: id },kind,scopeKey: id,expectedIdentity: identity,
+        authorization: { accountId: plan.account.id!,mode: plan.input.creationMode,sourceOperationId: c.operationId } });
+      if (effect.state !== 'not_started' || !storage.claimEffect(effect.operationId,effect.revision,c.operationId)) throw new OperationError(409,'CREATION_EFFECT_UNRESOLVED','Inspect the existing effect before continuing.');
+      const claimed = storage.getEffect(effect.operationId);
+      const authorize = async () => {
+        await currentAuthority(id,plan);
+        if (repository) {
+          const confirmed = await github.reconcileScaffoldRepository!(repository,plan.account.id!);
+          if (confirmed.state !== 'confirmed' || confirmed.receipt?.id !== repository.receipt?.id) throw new OperationError(409,'CREATION_REMOTE_IDENTITY_CONFLICT','The confirmed remote identity changed.');
+        }
+        await currentAuthority(id,plan); storage.assertEffectAuthorized(effect.operationId,c.operationId);
+      };
+      await authorize();
+      const result = kind === 'create_repository' ? await github.createScaffoldRepository!(claimed,plan.account.id!,authorize)
+        : await workspaces.executeScaffoldGit!(plan,claimed,plan.account.id!,authorize);
+      storage.finishEffect(claimed.operationId,claimed.revision,result.state,result.receipt,result.reason);
+      if (result.state !== 'confirmed') throw new OperationError(409,result.reason ?? 'CREATION_EFFECT_UNRESOLVED','The effect was not confirmed. Inspect the preserved creation.');
+      if (kind === 'create_repository') repository = storage.getEffect(effect.operationId);
+    }
+    await currentAuthority(id,plan);
+  }
+  function schedule(job: () => Promise<void>) { const promise = Promise.resolve().then(job); jobs.add(promise); void promise.finally(() => jobs.delete(promise)); }
   return {
     async getOptions(): Promise<ScaffoldOptions> {
       const catalog = await loadScaffoldCatalog(resourcesDirectory); const configuration = storage.getGlobalConfiguration();
@@ -78,12 +128,13 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
         try { await workspaces.inspectScaffoldDestination(projectsRoot, randomUUID()); }
         catch { pending.push({ code: 'PROJECTS_ROOT_UNAVAILABLE', message: 'The configured projects root is inaccessible or redirected.', recovery: 'Choose an accessible local directory.' }); }
       }
+      const observed = await account();
       return { catalog: { id: catalog.id, version: catalog.version, digest: catalog.digest },
         templates: catalog.templates.map(t => ({ id: t.id, digest: t.digest, label: t.label, engineeringSummary: 'GitHub tracker, domain consumer rules, AGENTS.md pointers and optional triage vocabulary. No skills or labels are installed.' })),
         projectsRoot, creationModes: (['local', 'remote_no_push', 'remote_push'] as const).map(mode => ({ mode, capability: mode === 'local'
           ? { ...workspaces.scaffoldCapability(), ...(pending.length ? { available: false, reasonCode: pending[0]!.code, reason: pending[0]!.message, recovery: pending[0]!.recovery } : {}) }
-          : { available: false, reasonCode: 'CREATION_MODE_UNAVAILABLE', reason: 'Remote creation is not implemented in this slice.', recovery: 'Use the local modality.' } })),
-        account: await account(), prerequisites: pending, eventCursor: configuration.view.eventCursor };
+          : { available: pending.length === 0 && observed.state === 'complete' && observed.id === configuration.view.settings.accountId && Boolean(workspaces.executeScaffoldGit && github.scaffoldRemoteCapability?.(undefined,observed.id!,mode === 'remote_push').available), reasonCode: 'CREATION_TARGET_NOT_AUTHORIZED', reason: 'Remote creation requires an exact target authorization from the trusted host.', recovery: 'Configure the host authorization for the selected owner, name, visibility and push.' } })),
+        account: observed, prerequisites: pending, eventCursor: configuration.view.eventCursor };
     },
     plan,
     async create(body: CreateScaffold, operationId: string) {
@@ -101,6 +152,35 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       return accepted.operation;
     },
     getCreation: (id: string) => storage.getCreation(id),
+    async reconcile(id: string,operationId: string,expectedRevision: string | undefined) {
+      if (closing || jobs.size >= 8) throw new OperationError(503,'CREATION_CAPACITY_EXCEEDED','Wait for current creations to finish.');
+      const accepted = storage.acceptCreationReconciliation({ creationId: id,operationId,expectedRevision });
+      if (accepted.created) schedule(async () => {
+        let diagnostic: string | null = null;
+        try {
+          const view = storage.getCreation(id); const observed = await account();
+          if (observed.state !== 'complete' || observed.id !== view.creation.plan.account.id) throw new OperationError(409,'SCAFFOLD_ACCOUNT_CHANGED','The observed account differs from this creation.');
+          for (const effect of view.effects) {
+            if (!['running','unknown'].includes(effect.state)) continue;
+            const repository = storage.getCreation(id).effects.find(e => e.kind === 'create_repository' && e.state === 'confirmed');
+            if (effect.kind !== 'create_repository') {
+              if (!repository) throw new OperationError(409,'REMOTE_IDENTITY_REQUIRED','Confirm the created repository before observing its Git effects.');
+              const confirmed = await github.reconcileScaffoldRepository!(repository,observed.id!);
+              if (confirmed.state !== 'confirmed' || confirmed.receipt?.id !== repository.receipt?.id) throw new OperationError(409,'CREATION_REMOTE_IDENTITY_CONFLICT','The remote repository changed.');
+            }
+            const result = effect.kind === 'create_repository' ? await github.reconcileScaffoldRepository!(effect,observed.id!) : await workspaces.reconcileScaffoldGit!(view.creation.plan,effect);
+            if (result.state === 'confirmed') storage.finishEffect(effect.operationId,effect.revision,'confirmed',result.receipt,null);
+            else diagnostic = result.reason ?? 'CREATION_EFFECT_UNRESOLVED';
+          }
+          const current = storage.getCreation(id);
+          const required = current.creation.plan.input.creationMode === 'local' ? [] : current.creation.plan.input.creationMode === 'remote_push' ? ['create_repository','associate_origin','baseline_push'] : ['create_repository','associate_origin'];
+          if (current.creation.state !== 'completed' && current.confirmedEffects.filter(s => s.step !== 'registration').length === 4 && required.every(k => current.effects.some(e => e.kind === k && e.state === 'confirmed'))) storage.completeCreation(id);
+          if (storage.getCreation(id).creation.state !== 'completed') diagnostic ??= 'CREATION_INCOMPLETE';
+        } catch (e) { diagnostic = e instanceof OperationError || e instanceof ScaffoldWorkspaceError ? e.code : 'CREATION_RECONCILIATION_FAILED'; logFailure(diagnostic); }
+        try { storage.finishCreationReconciliation(operationId,diagnostic); } catch { logFailure('CREATION_DIAGNOSTIC_NOT_DURABLE'); }
+      });
+      return accepted.operation;
+    },
     async drain() { while (jobs.size) await Promise.all([...jobs]); },
     async close() { closing = true; await Promise.all([...jobs]); },
   };

@@ -310,12 +310,12 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
   </form>;
 }
 
-export function ProjectConfigurationForm({ projectId }: { projectId: string | null }) {
+export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId: string | null; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
   const identity = projectId ?? 'global-settings';
   const identityRef = useRef(identity);
   const saveLifecycleRef = useRef(createSaveLifecycle(identity));
   identityRef.current = identity;
-  const { load, setLoad, retry: retryConfiguration } = useConfiguration(projectId);
+  const { load, setLoad, retry: retryConfiguration, refreshError, clearRefreshError } = useConfiguration(projectId);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const draftRef = useRef<EditorDraft | null>(null);
   const [options, setOptions] = useState<{ key: string; data: ConfigurationOptions } | null>(null);
@@ -513,6 +513,7 @@ export function ProjectConfigurationForm({ projectId }: { projectId: string | nu
       setDraft(nextDraft); persistEditedFields(expectedIdentity, nextDraft);
       setLoad({ status: 'ready', identity, view: saved, etag }); setConflictView(null);
       setSaveState({ status: 'saved', operationId, message: 'Salvo após confirmação do recibo de commit.' });
+      onSaveIssue(null, expectedIdentity);
     } catch (error: unknown) {
       const http = error instanceof HttpError ? error : null;
       if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
@@ -520,9 +521,13 @@ export function ProjectConfigurationForm({ projectId }: { projectId: string | nu
         let currentLoaded = false;
         try { await refreshCurrent(operation); currentLoaded = saveLifecycleRef.current.isCurrent(identityRef.current, operation); } catch { /* Keep the existing draft and report the original conflict. */ }
         if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
-        setSaveState({ status: 'conflict', message: currentLoaded ? 'A configuração mudou desde a leitura. Seu rascunho foi preservado; os dados atuais e a revisão nova estão carregados separadamente.' : 'A configuração mudou desde a leitura. Seu rascunho foi preservado, mas a consulta dos dados atuais falhou; tente consultar novamente antes de salvar.', requestId: http.requestId });
+        const message = currentLoaded ? 'A configuração mudou desde a leitura. Seu rascunho foi preservado; os dados atuais e a revisão nova estão carregados separadamente.' : 'A configuração mudou desde a leitura. Seu rascunho foi preservado, mas a consulta dos dados atuais falhou; tente consultar novamente antes de salvar.';
+        setSaveState({ status: 'conflict', message, requestId: http.requestId });
+        onSaveIssue({ identity: expectedIdentity, message, requestId: http.requestId, kind: 'conflict' }, expectedIdentity);
       } else {
-        setSaveState({ status: 'error', message: http?.message ?? (error instanceof Error ? error.message : 'A gravação não foi confirmada.'), requestId: http?.requestId ?? null });
+        const message = http?.message ?? (error instanceof Error ? error.message : 'A gravação não foi confirmada.');
+        setSaveState({ status: 'error', message, requestId: http?.requestId ?? null });
+        onSaveIssue({ identity: expectedIdentity, message, requestId: http?.requestId ?? null, kind: 'error' }, expectedIdentity);
       }
     }
   }
@@ -532,7 +537,8 @@ export function ProjectConfigurationForm({ projectId }: { projectId: string | nu
   if (!draft) return <section className="card read-state" role="status"><p>Preparando edição…</p></section>;
 
   return <div className="configuration-editor">
-    <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><p><b>Host observado</b> · Indisponível nesta superfície</p><p><b>Host executor designado</b> · {hostLabel}</p></div><p className="muted">A conta vinculada é um ID persistido do controlador; conectividade do host não é fornecida por esta API. Nenhum campo de credencial ou Wire é solicitado.</p></div>
+    {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p>{refreshError.requestId && <small className="mono">Solicitação {refreshError.requestId}</small>}<div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
+    <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><p><b>Host observado</b> · Indisponível nesta superfície</p><p><b>Host executor designado</b> · {hostLabel}</p><a href={projectId ? `#principal/registros?projectId=${encodeURIComponent(projectId)}` : '#principal/registros'}>Abrir registros e diagnóstico deste contexto</a></div><p className="muted">A conta vinculada é um ID persistido do controlador; conectividade do host não é fornecida por esta API. Nenhum campo de credencial ou Wire é solicitado.</p></div>
     {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Revisão global {conflictView.settings.revision}{'configuration' in conflictView ? ` · revisão do projeto ${conflictView.configuration.revision}` : ''}. Seu rascunho continua aberto. Os valores abaixo vêm da revisão atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
     <section className="card form-section"><div className="panel-title"><span className="eyebrow">Host e operação</span><h2>Configuração global</h2></div><div className="form-grid">
       <TextField label="Host executor designado" value={draft.global.designatedHost ?? ''} onChange={(value) => updateGlobal('designatedHost', value || null)} help="Identificador persistido; a presença do valor não prova conectividade." />

@@ -13,6 +13,7 @@ import type { Workspaces } from '../workspaces/index.js';
 import { createQueue } from './queue.js';
 export { createPreparations, type Preparations, type PreparationDependencies } from './preparations.js';
 export { createScaffold, type Scaffold, type ScaffoldDependencies } from './scaffold.js';
+export { loadScaffoldCatalog as validateScaffoldResources } from './scaffold-resources.js';
 export { interpretIssue } from '../pipeline/index.js';
 
 export interface ProjectDependencies {

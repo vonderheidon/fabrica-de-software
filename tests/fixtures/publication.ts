@@ -1,15 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { vi } from 'vitest';
-import type { GitHubMutationResult, ImplementerResult, ReviewerResult } from '#contracts';
+import type { CheckDefinition, GitHubMutationResult, ImplementerResult, ReviewerResult } from '#contracts';
 import { attemptFixture, complete } from './attempt.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import type { GitHubEffectRequest } from '../../apps/controller/src/modules/github/index.js';
 import type { Workspaces } from '../../apps/controller/src/modules/workspaces/index.js';
 
-export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true) {
-  const f = await attemptFixture(); await f.pipeline.close();
+export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
+  options: { temporaryRoot?: string; checks?: CheckDefinition[]; baseSha?: string } = {}) {
+  const f = await attemptFixture(options.temporaryRoot, options.baseSha); await f.pipeline.close();
+  if (options.checks) {
+    const current = f.storage.getConfiguration(f.projectId);
+    const { id: _id, projectId: _project, revision: _revision, createdAtMs: _time, ...configuration } = current.view.configuration;
+    f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
+      body: { projectChanges: { checks: options.checks } }, configuration: { ...configuration, checks: options.checks }, globalChanges: {} });
+  }
   const verifyRetainedDelivery = vi.fn(async () => {});
   const folderCapability = vi.fn(async () => ({ available: false, reason: 'NATIVE_OPEN_UNAVAILABLE' }));
   const getArtifact = vi.fn(async () => { throw new Error('Artifact not used by this fixture'); });
@@ -22,7 +29,7 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
       return { state: 'unknown', receipt: null, reason: 'STATUS_READBACK_REQUIRED', retryAtMs: null };
     }
     if (effect.kind === 'pull_request') {
-      const result: GitHubMutationResult = { state: 'confirmed',receipt: { id: 'PR_test',url: `https://github.com/${identity.repositoryOwner}/${identity.repositoryName}/pull/123`,commitSha: identity.commitSha!,branchRef: identity.branchRef!,repositoryId: identity.repositoryId,baseBranch: identity.baseBranch! },reason: null,retryAtMs: null };
+      const result: GitHubMutationResult = { state: 'confirmed',receipt: { id: 'PR_test',url: `https://github.com/${identity.repositoryOwner}/${identity.repositoryName}/pull/123`,commitSha: identity.commitSha!,branchRef: identity.branchRef!,repositoryId: identity.repositoryId!,baseBranch: identity.baseBranch! },reason: null,retryAtMs: null };
       remotePRs.set(effect.operationId,result); return result;
     }
     const id = `COMMENT_${randomUUID()}`; const url = `${f.issue.url}#issuecomment-123`;
@@ -38,7 +45,7 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
         : { state: 'not_applicable', receipt: null, reason: 'APPROVED_NO_DELTA' };
     }),
     reconcileLocalCommit: vi.fn<Workspaces['reconcileLocalCommit']>(async () => ({ state: 'unknown', receipt: null, reason: 'COMMIT_NOT_OBSERVED' })),
-    pushApproved: vi.fn<Workspaces['pushApproved']>(async (_d,e,_account,authorize) => { await authorize(); return { state: 'confirmed',receipt: { id: e.expectedIdentity.commitSha!,commitSha: e.expectedIdentity.commitSha!,branchRef: e.expectedIdentity.branchRef!,repositoryId: e.expectedIdentity.repositoryId },reason: null }; }),
+    pushApproved: vi.fn<Workspaces['pushApproved']>(async (_d,e,_account,authorize) => { await authorize(); return { state: 'confirmed',receipt: { id: e.expectedIdentity.commitSha!,commitSha: e.expectedIdentity.commitSha!,branchRef: e.expectedIdentity.branchRef!,repositoryId: e.expectedIdentity.repositoryId! },reason: null }; }),
     reconcilePush: vi.fn<Workspaces['reconcilePush']>(async () => ({ state: 'unknown',receipt: null,reason: 'REMOTE_REF_NOT_OBSERVED' })),
     captureDelivery: vi.fn(async (input: { deliveryId: string }) => ({ gitRef: `refs/factory/deliveries/${input.deliveryId}`, contentIdentity: digest(input).slice(0,40), commitSha: digest({ commit: input }).slice(0,40), hasDelta, warnings: [] })),
     materializeReview: vi.fn(async (d: { attemptId: string }, id: string) => join(f.directory,'work',d.attemptId,'reviews',id,'checkout')) };

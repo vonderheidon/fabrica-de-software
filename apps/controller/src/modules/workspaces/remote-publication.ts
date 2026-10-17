@@ -14,7 +14,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     if (!Value.Check(Delivery,delivery) || !Value.Check(EffectView,effect) || effect.kind !== 'push' || !effect.authorized || !['running','unknown'].includes(effect.state) ||
       effect.attemptId !== delivery.attemptId || effect.deliveryId !== delivery.id || effect.scopeKey !== delivery.id ||
       i.contentIdentity !== delivery.contentIdentity || i.parentSha !== delivery.baseSha || !i.commitSha || !i.commitOperationId ||
-      !i.issueNumber || i.branchRef !== `refs/heads/factory/${i.issueNumber}/${delivery.attemptId}` ||
+       !i.repositoryId || !i.issueNumber || i.branchRef !== `refs/heads/factory/${i.issueNumber}/${delivery.attemptId}` ||
       !i.repositoryOwner || !/^[A-Za-z0-9-]{1,100}$/.test(i.repositoryOwner) || !i.repositoryName || !/^[A-Za-z0-9_.-]{1,100}$/.test(i.repositoryName)) throw new CaptureError('PUSH_IDENTITY_INVALID');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
     const root = await managedRoot(dataDirectory,canonicalize); const parent = resolve(root,'git'); const repository = resolve(parent,`${delivery.attemptId}.git`);
@@ -39,7 +39,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     const lines = r.stdout.trim().split(/\r?\n/).filter(Boolean);
     if (!lines.length) return { state: 'unknown',receipt: null,reason: 'REMOTE_REF_NOT_OBSERVED' };
     if (lines.length !== 1 || lines[0] !== `${c.i.commitSha}\t${c.i.branchRef}`) return { state: 'unknown',receipt: null,reason: 'REMOTE_REF_CONFLICT' };
-    return { state: 'confirmed',receipt: { id: c.i.commitSha!,commitSha: c.i.commitSha!,branchRef: c.i.branchRef!,repositoryId: c.i.repositoryId },reason: null };
+    return { state: 'confirmed',receipt: { id: c.i.commitSha!,commitSha: c.i.commitSha!,branchRef: c.i.branchRef!,repositoryId: c.i.repositoryId! },reason: null };
   }
   return {
     async reconcilePush(delivery: Delivery,effect: EffectView): Promise<LocalCommitResult> {
@@ -49,7 +49,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     async pushApproved(delivery: Delivery,effect: EffectView,accountId: string,authorize: () => Promise<void>): Promise<LocalCommitResult> {
       let sent = false;
       try {
-        if (!authorization || authorization.accountId !== accountId || !authorization.repositoryIds.includes(effect.expectedIdentity.repositoryId)) return { state: 'failed_known',receipt: null,reason: 'PUSH_NOT_AUTHORIZED' };
+        if (!effect.expectedIdentity.repositoryId || !authorization || authorization.accountId !== accountId || !authorization.repositoryIds.includes(effect.expectedIdentity.repositoryId)) return { state: 'failed_known',receipt: null,reason: 'PUSH_NOT_AUTHORIZED' };
         const c = await context(delivery,effect); const prior = await inspect(c);
         if (prior.state === 'confirmed') return prior;
         if (prior.reason !== 'REMOTE_REF_NOT_OBSERVED' || effect.state !== 'running') return { ...prior,state: 'failed_known' };

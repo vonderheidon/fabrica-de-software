@@ -17,9 +17,9 @@ export function createEffectWriter(reader: GraphQLReader, authorization?: GitHub
   return async ({ effect, accountId, body, authorize }: GitHubEffectRequest): Promise<GitHubMutationResult> => {
     const denied = (reason: string): GitHubMutationResult => ({ state: 'failed_known', receipt: null, reason, retryAtMs: null });
     if (!Value.Check(EffectView, effect) || !Value.Check(OperationId, effect.operationId) || !Value.Check(GitHubId, accountId) || effect.state !== 'running') return denied('EFFECT_INPUT_INVALID');
-    if (effect.kind === 'local_commit' || effect.kind === 'push') return denied('EFFECT_INPUT_INVALID');
+    if (!['issue_comment','project_status','pull_request'].includes(effect.kind) || !effect.attemptId || effect.creationId) return denied('EFFECT_INPUT_INVALID');
     const identity = effect.expectedIdentity;
-    if (!authorization || authorization.accountId !== accountId || !authorization.repositoryIds.includes(identity.repositoryId) ||
+    if (!identity.repositoryId || !authorization || authorization.accountId !== accountId || !authorization.repositoryIds.includes(identity.repositoryId) ||
       (effect.kind === 'project_status' && (!identity.projectId || !authorization.projectIds.includes(identity.projectId)))) return denied('MUTATION_NOT_AUTHORIZED');
     if ((effect.kind === 'issue_comment' || effect.kind === 'pull_request') && (typeof body !== 'string' || body.length > 60_000 || !identity.marker || !body.startsWith(identity.marker+'\n') || createHash('sha256').update(body).digest('hex') !== identity.bodyHash)) return denied('EFFECT_INPUT_INVALID');
     if (effect.kind === 'pull_request') {

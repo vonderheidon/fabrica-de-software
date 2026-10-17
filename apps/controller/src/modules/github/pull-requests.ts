@@ -19,7 +19,7 @@ export const prUnknown = (reason: string): GitHubMutationResult => ({ state: 'un
 export async function inspectPullRequest(reader: GraphQLReader, effect: EffectView, accountId: string): Promise<GitHubMutationResult> {
   if (!Value.Check(EffectView,effect) || effect.kind !== 'pull_request') return prUnknown('EFFECT_INPUT_INVALID');
   const i = effect.expectedIdentity;
-  if (!i.branchRef?.startsWith('refs/heads/') || !i.baseBranch || !i.marker || !i.bodyHash || !i.commitSha || !i.title) return prUnknown('EFFECT_INPUT_INVALID');
+  if (!i.repositoryId || !effect.attemptId || effect.creationId || !i.branchRef?.startsWith('refs/heads/') || !i.baseBranch || !i.marker || !i.bodyHash || !i.commitSha || !i.title) return prUnknown('EFFECT_INPUT_INVALID');
   const head = i.branchRef.slice('refs/heads/'.length);
   const response = await collect(reader.scope(),query,{ repositoryId: i.repositoryId,head,headRef: i.branchRef,baseRef: `refs/heads/${i.baseBranch}` }, data => {
     const node = object(data.node);
