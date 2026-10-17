@@ -1,0 +1,315 @@
+{
+  "inputHash": "7513082ef583bde5111a812eb659a29800626ff67efcea715fbc9e7fc505a2e5",
+  "plan": {
+    "version": "1.0",
+    "product": {
+      "name": "Nova fábrica de software",
+      "oneLine": "Aplicacao baseada nas user stories aprovadas.",
+      "primaryUser": "usuario principal definido no discovery",
+      "domainTerms": [
+        "dashboard",
+        "registros",
+        "configuracao"
+      ],
+      "forbiddenCopy": [
+        "acesse seu ambiente",
+        "painel operacional",
+        "eleve sua produtividade"
+      ]
+    },
+    "screens": [
+      {
+        "id": "login",
+        "title": "Login",
+        "route": "#login",
+        "purpose": "Autenticar usuario antes de acessar dados protegidos.",
+        "userStoryIds": [
+          "US-01"
+        ],
+        "primaryActions": [
+          {
+            "id": "action-login",
+            "label": "Entrar",
+            "type": "submit",
+            "userStoryIds": [
+              "US-01"
+            ]
+          }
+        ],
+        "states": [
+          "idle",
+          "loading",
+          "error",
+          "success"
+        ],
+        "components": [
+          "login-form"
+        ],
+        "dataShownOrEdited": [
+          "email",
+          "password"
+        ],
+        "apiExpectations": [
+          "POST /auth/login"
+        ]
+      },
+      {
+        "id": "principal",
+        "title": "Principal",
+        "route": "#principal",
+        "purpose": "Executar as principais tarefas do produto usando dados das stories aprovadas.",
+        "userStoryIds": [
+          "US-01",
+          "US-02",
+          "US-03",
+          "US-04",
+          "US-05",
+          "US-06",
+          "US-07",
+          "US-08",
+          "US-09",
+          "US-10",
+          "US-11",
+          "US-12",
+          "US-13",
+          "US-14",
+          "US-15",
+          "US-16",
+          "US-17",
+          "US-18",
+          "US-19",
+          "US-20"
+        ],
+        "primaryActions": [
+          {
+            "id": "action-primary",
+            "label": "Executar acao principal",
+            "type": "button",
+            "userStoryIds": [
+              "US-01",
+              "US-02",
+              "US-03",
+              "US-04",
+              "US-05",
+              "US-06",
+              "US-07",
+              "US-08",
+              "US-09",
+              "US-10",
+              "US-11",
+              "US-12",
+              "US-13",
+              "US-14",
+              "US-15",
+              "US-16",
+              "US-17",
+              "US-18",
+              "US-19",
+              "US-20"
+            ]
+          }
+        ],
+        "states": [
+          "loading",
+          "empty",
+          "success",
+          "error"
+        ],
+        "components": [
+          "primary-list",
+          "detail-panel",
+          "form-drawer"
+        ],
+        "dataShownOrEdited": [
+          "entidade_principal"
+        ],
+        "apiExpectations": [
+          "GET /resources",
+          "POST /resources"
+        ]
+      }
+    ],
+    "navigation": [
+      {
+        "id": "nav-principal",
+        "label": "Principal",
+        "targetScreenId": "principal",
+        "userStoryIds": [
+          "US-01",
+          "US-02",
+          "US-03",
+          "US-04",
+          "US-05",
+          "US-06",
+          "US-07",
+          "US-08",
+          "US-09",
+          "US-10",
+          "US-11",
+          "US-12",
+          "US-13",
+          "US-14",
+          "US-15",
+          "US-16",
+          "US-17",
+          "US-18",
+          "US-19",
+          "US-20"
+        ]
+      }
+    ],
+    "sampleData": [],
+    "coverage": [
+      {
+        "userStoryId": "US-01",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-02",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-03",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-04",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-05",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-06",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-07",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-08",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-09",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-10",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-11",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-12",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-13",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-14",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-15",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-16",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-17",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-18",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-19",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      },
+      {
+        "userStoryId": "US-20",
+        "screenIds": [
+          "principal"
+        ],
+        "notes": "Cobertura deterministica."
+      }
+    ],
+    "deltas": [],
+    "openDesignInstructions": [
+      "Gere uma SPA operacional, nao uma landing page.",
+      "Use entidades concretas das user stories e evite copy generica.",
+      "Nao escreva regras de negocio na tela; mostre apenas dados, estados, formularios e acoes.",
+      "Gere os fluxos de todas as telas necessarias com navegacao clicavel.",
+      "Arquivo unico index.html e permitido, mas telas empilhadas no scroll sao proibidas. Use [hidden] e JS real para mostrar apenas uma section por vez."
+    ]
+  },
+  "fallback": false,
+  "source": "deterministic"
+}

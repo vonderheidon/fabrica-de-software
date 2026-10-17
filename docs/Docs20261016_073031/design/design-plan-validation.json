@@ -1,0 +1,33 @@
+{
+  "inputHash": "7513082ef583bde5111a812eb659a29800626ff67efcea715fbc9e7fc505a2e5",
+  "validation": {
+    "ok": true,
+    "errors": [],
+    "warnings": [],
+    "knownStoryIds": [
+      "US-01",
+      "US-02",
+      "US-03",
+      "US-04",
+      "US-05",
+      "US-06",
+      "US-07",
+      "US-08",
+      "US-09",
+      "US-10",
+      "US-11",
+      "US-12",
+      "US-13",
+      "US-14",
+      "US-15",
+      "US-16",
+      "US-17",
+      "US-18",
+      "US-19",
+      "US-20"
+    ]
+  },
+  "validatorReport": null,
+  "fallback": false,
+  "source": "deterministic"
+}

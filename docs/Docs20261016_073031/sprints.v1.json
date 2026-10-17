@@ -1,0 +1,2879 @@
+{
+  "project": {
+    "id": "b2cf1f75205e33793a9cf71100c5f4d7",
+    "name": "Nova fábrica de software",
+    "description": "Implementar a nova fábrica de software definida nos documentos existentes deste workspace canônico. Ler primeiro AGENTS.md, SPEC.md integral, INTEGRACAO-MAESTRI-OMP.md e GLOSSARY.md. Essas são as fontes normativas; preservar decisões consolidadas e usar a SPEC existente como entrada, sem redescobrir produto ou ampliar escopo. Consultar documentos de ensaios e .agents/skills quando pertinentes. PESQUISA-PONTE-LIONCLAW-MAESTRI.md é pesquisa histórica, não backlog. Implementar do zero com TypeScript strict, Node 24 LTS, Fastify, React/Vite e SQLite, conforme SPEC seções 8 e 10. Seguir fatias integradas, começando pelo percurso conectar repositório, início manual, clone por tentativa, OMP nativo no Maestri, resultado durável, checks, revisão independente e ICR consultável. Incluir posteriormente publicação nos três modos, fila Ready, scaffold e UI conforme matriz AC/INT completa. Git guarda conteúdo versionado; persistência guarda configuração, critérios, resultados, referências Git imutáveis, metadados e evidências pertinentes, sem cópias serializadas de checkout/índice/ignorados/caches; medir AC-29. Preservar TUI e gerenciamento MCP nativos do OMP. Não construir sandbox, harness geral, resolver MCP próprio ou supervisor completo. Não analisar/copiar legado Aula-IA. Trabalhar somente neste repositório canônico, preservar alterações e não criar worktrees/floors/cópias concorrentes para implementar a fábrica. Os clones por tentativa são requisito do produto, contexto distinto. Scaffold deve usar referência setup-matt-pocock-skills conforme SPEC 3.2, sem executar setup neste workspace por leitura. Ensaios históricos comprovam apenas acesso/correção/verificação simples; ACCESS-01 está parcial quanto ao perfil Luna/high e não comprova produto. Não fixar esse perfil para toda a fábrica. Perguntar apenas lacunas reais de produto/escopo; resolver manutenção operacional reversível autonomamente. Sem Desktop Commander. Push, publicação externa, tracker e chamadas reais com custo precisam de autorização correspondente. Modo semi: gates de controle e Design Lock do usuário. Problema anterior: executor de fases falhava antes de ler arquivos com helper_unknown_error: setup refresh had errors; shell principal agora lê arquivos normalmente, mas execução das fases ainda não foi comprovada. Na primeira ação confirmar acesso real lendo arquivos do workspace; se falhar, reportar erro concreto e não fabricar leitura, stories, validação ou aprovação. Produzir todos os artefatos exigidos pela fase, inclusive stories antes da validação correspondente.",
+    "path": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software",
+    "stack": [],
+    "config": {
+      "max_rounds_per_sprint": 3,
+      "use_playwright": false,
+      "evaluator_agent_id": "harness-evaluator",
+      "planner_agent_id": "harness-planner"
+    }
+  },
+  "sprints": [
+    {
+      "id": "sprint-001",
+      "index": 0,
+      "name": "Fundação executável e persistência inicial",
+      "description": "Preparar a aplicação nova no repositório canônico e estabelecer a base mínima de contratos, compilação e armazenamento. Cobertura: RNF-16/22/23/24/25.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "Fastify",
+        "SQLite",
+        "better-sqlite3",
+        "TypeBox",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-001",
+          "name": "Projeto compilável com dependências fixadas",
+          "description": "Disponibilizar a estrutura executável inicial do controlador e dos contratos compartilhados.",
+          "acceptance_criteria": [
+            "A configuração declara TypeScript strict e Node.js 24; as dependências resolvidas estão fixadas em lockfile e a produção executa JavaScript compilado.",
+            "Os comandos de instalação, compilação e testes efetivamente configurados estão documentados e funcionam a partir do repositório canônico.",
+            "A suíte padrão não acessa providers, recruta terminais nem modifica GitHub; nenhuma implementação do Aula-IA é analisada ou incorporada."
+          ]
+        },
+        {
+          "id": "feat-002",
+          "name": "Banco inicial e migrations verificáveis",
+          "description": "Disponibilizar storage com ledger de migrations e configuração singleton real.",
+          "acceptance_criteria": [
+            "O banco usa tabelas STRICT, foreign_keys habilitado, WAL, synchronous FULL e timeout finito, com os valores efetivos conferidos.",
+            "A inicialização aplica migrations em ordem com checksum e recusa sequência desconhecida, checksum divergente ou banco mais novo sem substituir os dados.",
+            "O seed contém somente a instalação e seus defaults normativos: automação desligada, sem conta, host, perfil ou projeto fictício e sem caminhos pessoais."
+          ]
+        },
+        {
+          "id": "feat-003",
+          "name": "Contratos e continuidade entre Coders",
+          "description": "Estabelecer os contratos comuns iniciais e o registro de progresso consumido pelas próximas sprints.",
+          "acceptance_criteria": [
+            "packages/contracts/src/index.ts disponibiliza schemas TypeBox e tipos derivados para os contratos comuns usados nesta sprint, sem importar IO ou runtime.",
+            "SPEC_PROGRESS.md registra fontes normativas, comandos reais, arquivos criados, interfaces públicas, cobertura comprovada e pendências; esse registro é atualizado em todas as sprints seguintes.",
+            "A regra de dependências mantém SQL em storage e impede imports de internos entre módulos; novas tabelas e operações serão acrescentadas nas sprints consumidoras."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "AGENTS.md",
+          "SPEC.md",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "GLOSSARY.md",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md",
+          "docs/Docs20261016_073031/stories-requisitos20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "ErrorResponse",
+          "DeliveryMode",
+          "MeasuredValue",
+          "Capability"
+        ],
+        "architecture_notes": "A leitura real confirmou documentos e design, sem aplicação implementada. Os caminhos de código da SPEC são entregáveis futuros. Ler a SPEC da raiz integralmente e a SPEC derivada §§1–3 e 5. Usar Context7 antes de definir configuração ou sintaxe de dependências. Preservar alterações existentes, sem cópias concorrentes. Não executar Git/GH sem o contexto autorizado com keyring; se indisponível, registrar a limitação. Não executar o setup de scaffold neste workspace."
+      },
+      "dependencies": [],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-002",
+      "index": 1,
+      "name": "Proteção HTTP e operações consultáveis",
+      "description": "Disponibilizar a fronteira HTTP local protegida, precondições e infraestrutura mínima de recibos. Cobertura: RNF-02/03/05/06/07/12/13.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "TypeBox",
+        "@fastify/cookie",
+        "SQLite"
+      ],
+      "features": [
+        {
+          "id": "feat-004",
+          "name": "Sessão técnica automática",
+          "description": "Implementar POST /api/v1/session e proteção das leituras e mutações conforme a SPEC §5.1.",
+          "acceptance_criteria": [
+            "O bootstrap exige Host e Origin configurados, JSON vazio e X-Factory-Client:web; recusa Origin ausente, null, externo, porta divergente e Sec-Fetch-Site incompatível quando presente.",
+            "Cookie e CSRF independentes têm 32 bytes aleatórios, associação somente em memória, atributos previstos e reutilização do cookie válido da mesma instância.",
+            "Leituras e SSE exigem sessão; mutações exigem também Origin, JSON e CSRF. Nenhum GET emite sessão ou produz efeito de negócio."
+          ]
+        },
+        {
+          "id": "feat-005",
+          "name": "Idempotência, concorrência e consulta de operação",
+          "description": "Disponibilizar operation_requests, eventos e GET /operations/:operationId para os comandos de domínio posteriores.",
+          "acceptance_criteria": [
+            "Idempotency-Key identifica a operação pelo mesmo UUID conhecido pelo cliente; repetição semântica idêntica recupera o recibo e conteúdo ou escopo diferente gera 409.",
+            "A recuperação de operação aceita precede a avaliação de novas revisões; edição sem If-Match recebe 428 e revisão desatualizada recebe 412.",
+            "202 somente é emitido depois da intenção e do recurso de domínio duráveis; falha de escrita não produz ACK, recibo de sucesso ou execução seguinte."
+          ]
+        },
+        {
+          "id": "feat-006",
+          "name": "Limites, isolamento local e erros sanitizados",
+          "description": "Aplicar os limites operacionais e o envelope de erro comuns ao controlador.",
+          "acceptance_criteria": [
+            "O servidor usa loopback, origem confiável e CORS fechado; um segundo controlador da mesma instalação não adquire o lock mesmo usando outra porta.",
+            "Corpo, headers, conexões, sessões e esperas têm limites finitos documentados; payload excessivo recebe 413 e erros seguem ErrorResponse com requestId.",
+            "Cookie, CSRF, Authorization, bootstrap, handles e marcadores sintéticos de segredo não aparecem em logs, respostas de erro ou eventos."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "packages/contracts/src/index.ts",
+          "apps/controller/src/main.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "OperationAccepted",
+          "OperationView",
+          "ErrorResponse",
+          "Page",
+          "schema_migrations"
+        ],
+        "architecture_notes": "Consultar a SPEC derivada §§3.2–3.3 e 5. O registro de operações é índice de intenções de domínio, não engine de jobs. Não criar comandos genéricos de shell ou endpoints públicos para resultados de agentes. Sessão técnica não autentica pessoa nem concede autoridade GitHub. Documentar em SPEC_PROGRESS.md os caminhos públicos de http/security, http/errors.ts e storage."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-003",
+      "index": 2,
+      "name": "Consulta GitHub e identificação das origens Git",
+      "description": "Fornecer consultas reais de identidade, repositório, Project e issue e inspeção não destrutiva da origem. Cobertura: RF-01/04/17/24/26/38; AC-01/05/21.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js",
+        "Git",
+        "GH CLI",
+        "GraphQL"
+      ],
+      "features": [
+        {
+          "id": "feat-007",
+          "name": "Identidade GitHub e consultas completas",
+          "description": "Disponibilizar a interface pública de github para conta, repositórios e Projects pessoais ou organizacionais.",
+          "acceptance_criteria": [
+            "A conta efetiva é identificada pelo ID GitHub textual, sem converter IDs externos para number nem fabricar conta quando a autenticação estiver ausente.",
+            "As consultas distinguem resultado completo, parcial, autenticação inválida e rate limit, respeitando Retry-After/reset.",
+            "Somente github executa GH; ausência do contexto autorizado com keyring produz diagnóstico sem login, mudança de credenciais ou exposição de tokens."
+          ]
+        },
+        {
+          "id": "feat-008",
+          "name": "Inspeção da origem e branch-base",
+          "description": "Disponibilizar identificação Git e resolução da base sem alterar a pasta informada pelo operador.",
+          "acceptance_criteria": [
+            "Origem local e URL GitHub são identificadas por propriedades Git e identidade remota, independentemente do nome da pasta.",
+            "Inspecionar origem dirty preserva bytes, índice e HEAD; origem sem remoto continua identificável e informa os pré-requisitos ausentes.",
+            "Branch inexistente, origem inválida e remoto não confirmado recebem diagnóstico específico; somente workspaces conhece a representação Git."
+          ]
+        },
+        {
+          "id": "feat-009",
+          "name": "Opções e contexto de issues",
+          "description": "Fornecer os dados necessários para configuração e preparação sem realizar mutações GitHub.",
+          "acceptance_criteria": [
+            "As consultas retornam IDs de Project, campo Status e opções acessíveis, distinguindo referências inacessíveis sem escolher substitutos.",
+            "O contexto da issue inclui identidade, título, corpo, referências, comentários pertinentes, assignees, vínculo ao Project, Status e bloqueadores.",
+            "PRs e drafts permanecem identificados como não executáveis; as consultas não atribuem responsáveis, criam campos ou alteram Status."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "SPEC.md",
+          "packages/contracts/src/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "INTEGRACAO-MAESTRI-OMP.md"
+        ],
+        "key_interfaces": [
+          "Capability",
+          "ErrorResponse",
+          "ProjectConfiguration",
+          "accounts"
+        ],
+        "architecture_notes": "Consultar SPEC §§2–5 e SPEC derivada §§3.2/3.5. Criar as interfaces públicas de github/index.ts e workspaces/index.ts para as capacidades desta sprint, registrando seus nomes reais no progresso. Consultar Context7 e ajuda oficial da versão para APIs e CLIs. Testes padrão usam respostas controladas e Git temporário; consulta real depende de contexto autorizado, sem efeitos remotos."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-004",
+      "index": 3,
+      "name": "Cadastro e configuração persistida de projetos",
+      "description": "Entregar APIs de cadastro, catálogo, configuração global e perfis com gravação atômica. Cobertura: US-01/04/05; RF-01–03/14–22; AC-01/04/05.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "SQLite",
+        "TypeBox",
+        "Git",
+        "GH CLI"
+      ],
+      "features": [
+        {
+          "id": "feat-010",
+          "name": "Cadastro e catálogo reais",
+          "description": "Implementar GET/POST /projects e GET /projects/:projectId.",
+          "acceptance_criteria": [
+            "O cadastro aceita nome, origem local ou GitHub e branch-base, persiste identidade independente da pasta e permite origem local sem remoto.",
+            "Catálogo filtrável e paginado retorna resumos, revisão, pré-requisitos e cursor estável, sem carregar conteúdo do repositório.",
+            "Cadastro e leitura não modificam bytes, índice ou HEAD da origem, não iniciam clone de tentativa e não recrutam agentes."
+          ]
+        },
+        {
+          "id": "feat-011",
+          "name": "Configuração global e perfis exatos",
+          "description": "Implementar GET/PUT /settings com os campos globais e perfis previstos.",
+          "acceptance_criteria": [
+            "São persistidos host designado, diretórios, configuração Maestri não sensível, perfis completos e defaults separados de tempo, custo e artefatos.",
+            "Perfis usam maestri-omp e provider/modelo/esforço/orientação exatos, sem fixar Luna/high ou preencher valores demonstrativos.",
+            "Dados omitidos não são resetados; gravação com ETag composto é atômica e falha ou conflito não retorna Salvo."
+          ]
+        },
+        {
+          "id": "feat-012",
+          "name": "Revisões imutáveis de configuração",
+          "description": "Implementar GET/PUT configuration e GET configuration-options por projeto.",
+          "acceptance_criteria": [
+            "A configuração cobre todos os campos de ProjectConfiguration, checks com cwd relativo, correções 0–5 com padrão 2 e modo padrão ICR.",
+            "saveConfiguration verifica todas as revisões envolvidas e confirma revisão imutável, ponteiro atual, alterações globais explícitas e evento em uma transação.",
+            "Guards e validações impedem reescrever revisões históricas, vincular revisão de outro projeto ou aceitar mapeamentos Project/Status inválidos como configurados."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "packages/contracts/src/index.ts",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "ProjectConfiguration",
+          "GlobalConfiguration",
+          "ExecutionProfile",
+          "saveConfiguration"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§2.1–2.4 e catálogo de endpoints §3.2. Acrescentar projects, project_revisions e execution_profiles conforme seus consumidores. A revisão corrente deve pertencer ao projeto e existir ao concluir o cadastro. Documentar projects/index.ts e as rotas reais. Não aceitar SQL fora de storage ou chamadas GH fora de github."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-005",
+      "index": 4,
+      "name": "Principal e acesso técnico no design aprovado",
+      "description": "Disponibilizar o shell React da Principal com entrada direta, navegação e cliente HTTP seguro. Cobertura: C-02; RF-86/87; RNF-17–19.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "Vite",
+        "CSS",
+        "fetch"
+      ],
+      "features": [
+        {
+          "id": "feat-013",
+          "name": "Entrada direta e cliente protegido",
+          "description": "Conectar a montagem da Principal ao bootstrap técnico e aos contratos HTTP existentes.",
+          "acceptance_criteria": [
+            "A aplicação abre na Principal sem formulário, guard, dados de e-mail/senha ou Sair demonstrativo; #login normaliza para a Principal.",
+            "O bootstrap é serializado por interface, mantém CSRF somente em memória e usa URLs relativas /api/v1.",
+            "401 admite recuperação técnica limitada sem repetir comando de negócio; 403 mostra diagnóstico sem liberar CORS ou repetir bootstrap indefinidamente."
+          ]
+        },
+        {
+          "id": "feat-014",
+          "name": "Shell visual e navegação por hash",
+          "description": "Implementar a composição aprovada e as seis abas internas.",
+          "acceptance_criteria": [
+            "Existem somente dashboard, projetos, fila, tentativas, registros e configuracao sob #principal, com seleção e aria-current coerentes.",
+            "O shell preserva CSS, tokens, overrides grafite, breakpoints, densidade e composição do artefato conciliado, sem criar menu, tema ou tela adicional.",
+            "Voltar, avançar e reload reconstituem contexto de leitura; rota inválida informa erro e nenhuma navegação executa POST de negócio."
+          ]
+        },
+        {
+          "id": "feat-015",
+          "name": "Estado local e modal compartilhado",
+          "description": "Disponibilizar as bases de interação e feedback para os formulários seguintes.",
+          "acceptance_criteria": [
+            "O modal existente tem nome acessível, foco inicial, contenção de Tab, fundo inerte, Escape e retorno ao acionador; existe somente um modal aberto.",
+            "Loading, vazio, erro de leitura e erro de ação têm estados distintos; respostas obsoletas são descartadas por contexto.",
+            "Rascunhos ficam somente em memória por identidade; sessionStorage é reservado ao registro mínimo não secreto de operações incertas, sem body, resposta humana ou token."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "packages/contracts/src/index.ts",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md",
+          "docs/Docs20261016_073031/design/artifact.html",
+          "docs/Docs20261016_073031/design/design-contract.json"
+        ],
+        "key_interfaces": [
+          "ErrorResponse",
+          "OperationAccepted",
+          "OperationView",
+          "Capability"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§4–5. Criar os caminhos app/AppShell.tsx, app/PrincipalScreen.tsx, app/hash-route.ts, app/useHashRoute.ts, app/styles/tokens.css, app/styles/artifact.css e api/http.ts, documentando as interfaces efetivas. Não incorporar scripts demonstrativos como regras de produção. Preservar manifest e histórico de hashes; a remoção C-02 já está autorizada. A configuração use_playwright=false não elimina o aceite visual futuro por Playwright MCP/Chrome."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal",
+          "login"
+        ],
+        "affectedComponentIds": [
+          "app-shell"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-006",
+      "index": 5,
+      "name": "Projetos e configuração na Principal",
+      "description": "Conectar cadastro, catálogo e configuração completos às APIs persistentes. Cobertura: US-01/04/05; F-01/F-02; AC-01/04.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "fetch"
+      ],
+      "features": [
+        {
+          "id": "feat-016",
+          "name": "Catálogo e cadastro",
+          "description": "Disponibilizar seleção, filtro e cadastro de origem no project-form existente.",
+          "acceptance_criteria": [
+            "Nome, tipo/origem e branch-base são submetidos ao cadastro real, com erros por campo e sucesso somente após confirmação.",
+            "Projetos locais sem remoto permanecem consultáveis e configuráveis, com aviso sobre histórico commitado e pré-requisitos de execução.",
+            "Filtro e paginação distinguem vazio válido, ausência de correspondência e falha; selecionar projeto atualiza a URL sem iniciar trabalho."
+          ]
+        },
+        {
+          "id": "feat-017",
+          "name": "Formulários completos de projeto e host",
+          "description": "Disponibilizar todos os campos F-02 nos agrupamentos existentes da Configuração.",
+          "acceptance_criteria": [
+            "Os campos cobrem configuração global, perfis completos e configuração por projeto, incluindo checks com cwd, correções 0–5 e mapeamentos por ID.",
+            "Trocar Project invalida campo/opções dependentes; trocar campo Status invalida opções; referência salva inacessível permanece identificada com motivo.",
+            "Não existem campos de credenciais ou Wire; conta e host são dados reais ou indisponibilidade explícita, inclusive no celular."
+          ]
+        },
+        {
+          "id": "feat-018",
+          "name": "Gravação e conflito preservando edição",
+          "description": "Apresentar recibos reais e permitir reaplicar edição após conflito.",
+          "acceptance_criteria": [
+            "Saving, saved, error e conflict são distintos; Salvo depende do recibo de commit e não de toast ou polling.",
+            "412 preserva o rascunho, permite consultar dados e ETag atuais separadamente e salvar novamente; novo conflito preserva a edição outra vez.",
+            "Trocar aba ou fechar/reabrir o conteúdo conserva somente os campos editados da identidade correta em memória, sem sobrescrita por respostas atrasadas."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/api/http.ts",
+          "apps/web/src/app/AppShell.tsx",
+          "apps/web/src/app/PrincipalScreen.tsx",
+          "apps/controller/src/modules/projects/index.ts",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "useProjects",
+          "useConfiguration",
+          "ProjectConfiguration",
+          "GlobalConfiguration",
+          "ExecutionProfile"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§3.2 e 4.2–4.6. Implementar features/projects/ProjectForm.tsx e os hooks por funcionalidade, registrando arquivos reais no progresso. Reutilizar modal e campos aprovados. Nesta sprint cadastro não se confunde com scaffold, ainda não implementado. Não criar store global que replique banco ou cache persistente de formulários."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "project-form"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-007",
+      "index": 6,
+      "name": "Preparação de issue e ambiente independente",
+      "description": "Entregar preparação revisável, critérios capturáveis e criação de ambiente a partir de histórico commitado. Cobertura: RF-22–26/48; AC-01/05/17.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "SQLite",
+        "Git",
+        "GH CLI"
+      ],
+      "features": [
+        {
+          "id": "feat-019",
+          "name": "Preparação persistente",
+          "description": "Implementar seleção de issues e GET/POST/PUT de preparações.",
+          "acceptance_criteria": [
+            "A preparação contém modo, orientação, overrides tipados, revisão e origem das escolhas, sem modificar defaults ou lançar processos.",
+            "As consultas apresentam configuração efetiva, critérios, efeitos e pré-requisitos; qualquer edição invalida a autorização do resumo anterior.",
+            "Updates usam CAS e recibo durável; vínculos inválidos e respostas de revisão antiga não substituem a preparação atual."
+          ]
+        },
+        {
+          "id": "feat-020",
+          "name": "Critérios por identidade e resumo autorizável",
+          "description": "Disponibilizar interpretação da issue executável e o resumo material do início.",
+          "acceptance_criteria": [
+            "São aceitas listas sob Critérios de aceite ou Acceptance criteria; IDs explícitos duplicados são recusados e IDs ausentes são atribuídos por ocorrência.",
+            "Textos repetidos continuam critérios distintos; comentário livre não introduz critérios e issue sem título, objetivo/escopo ou lista válida não é executável.",
+            "O resumo identifica issue, base, configuração, modo e efeitos; mudança material exige nova revisão e gera SUMMARY_CHANGED no início posterior."
+          ]
+        },
+        {
+          "id": "feat-021",
+          "name": "Clone próprio de base fixa",
+          "description": "Disponibilizar em workspaces a preparação do ambiente de uma tentativa identificada.",
+          "acceptance_criteria": [
+            "O ambiente fica sob <data>/work/<attemptId>/implementation, com branch factory/<issueNumber>/<attemptId> e base SHA fixa.",
+            "Origem dirty não é importada nem alterada, e o clone não depende dela por hard links ou alternates.",
+            "Falha parcial identifica o recurso próprio e preserva diagnóstico; cwd e caminhos com espaços e Unicode são suportados sem aceitar escape da raiz gerenciada."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/projects/index.ts",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "packages/contracts/src/index.ts"
+        ],
+        "key_interfaces": [
+          "Preparation",
+          "CheckDefinition",
+          "ExecutionProfile",
+          "ProjectConfiguration"
+        ],
+        "architecture_notes": "Consultar SPEC §§2/5.1/5.2 e SPEC derivada §§2.1/3.2/3.4. Esta sprint não expõe início aceito sem executor; a integração POST /attempts vem na sprint-009. workspaces recebe identidade de tentativa do chamador. Preparar a captura por valor sem persistir arquivos ou índice. Documentar as operações públicas reais em SPEC_PROGRESS.md."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-008",
+      "index": 7,
+      "name": "Passagem OMP real no Maestri",
+      "description": "Entregar o adapter mínimo de execução que preserva TUI e ferramentas nativas. Cobertura: RF-43–47; AC-15/23/24/25; INT-01–05/09/10/12–14.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js",
+        "Maestri",
+        "OMP",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-022",
+          "name": "Contexto herdado e lançamento identificável",
+          "description": "Disponibilizar início de passagem no terminal Maestri com handshake e perfil efetivo.",
+          "acceptance_criteria": [
+            "Uma consulta real valida o contexto herdado do terminal-âncora; contexto ausente ou stale recebe diagnóstico sem modificar ACL ou configuração global.",
+            "startPassage somente informa ready após handshake; criação parcial conserva identidade própria consultável e não é tratada como sessão pronta.",
+            "Provider, modelo e esforço efetivos correspondem ao perfil solicitado; incompatibilidade não usa fallback silencioso."
+          ]
+        },
+        {
+          "id": "feat-023",
+          "name": "TUI e MCPs nativos preservados",
+          "description": "Manter uma sessão operacional real por papel/passagem e a superfície de interação correspondente.",
+          "acceptance_criteria": [
+            "A sessão que executa o trabalho é a TUI apresentada, com stdin/stdout, comandos, regras, skills, LSP e ferramentas normais durante trabalho e após resultado.",
+            "MCPs seguem configuração e lifecycle do OMP, respeitam disabled e permitem recuperação de argumento inválido; não existe resolver ou launcher sanitizador próprio.",
+            "interactionSurface retorna referência sanitizada e capacidade de abrir a sessão existente, sem recrutar substituta; GitNexus requerido usa o clone pertinente."
+          ]
+        },
+        {
+          "id": "feat-024",
+          "name": "Transporte privado de resultado e pergunta",
+          "description": "Disponibilizar os canais correlacionados execution_complete e execution_question.",
+          "acceptance_criteria": [
+            "O transporte injeta tentativa, passagem, papel, rodada e versão pertinentes; o modelo não escolhe identidade privada e não existe endpoint público de impersonação.",
+            "Português e emoji fragmentados são preservados; malformed, oversize e EOF encerram esperas com diagnóstico e buffers finitos.",
+            "Lançamento Windows preserva argv/cwd com espaços e Unicode, usa mecanismo suportado para prompt grande e não submete a mesma tarefa duas vezes."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "packages/contracts/src/index.ts",
+          "SPEC.md"
+        ],
+        "key_interfaces": [
+          "startPassage",
+          "observe",
+          "getResult",
+          "answerQuestion",
+          "cancelAttempt",
+          "interactionSurface"
+        ],
+        "architecture_notes": "Consultar SPEC §8.3 e integração integral. Publicar execution/index.ts e manter detalhes em execution/adapters/maestri-omp. Consultar documentação e ajuda da versão instalada antes de escolher CLI/SDK. Não executar provider ou recrutar terminal sem autorização correspondente. Os testes locais comprovam contratos; a prova real será registrada na sprint-018. Bridge própria exige impedimento concreto documentado e escopo mínimo. Wire dos ensaios não é conexão do produto."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-009",
+      "index": 8,
+      "name": "Início manual e resultado oficial durável",
+      "description": "Integrar preparação, tentativa, clone e executor no primeiro despacho real, com aceitação atômica do resultado. Cobertura: RF-22–28/44/51/52; AC-05/06/20; INT-06.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "SQLite",
+        "Maestri",
+        "OMP",
+        "Git"
+      ],
+      "features": [
+        {
+          "id": "feat-025",
+          "name": "Tentativa criada antes do despacho",
+          "description": "Implementar POST /attempts e a composição inicial de pipeline.",
+          "acceptance_criteria": [
+            "O início revalida conta, issue aberta, assignee exclusivo, Ready no primeiro início, Project, vínculo, remoto, base e dependências em todos os modos.",
+            "startAttempt persiste operação, tentativa, critérios, configuração por valor, base, rodada inicial e intenção de despacho antes de clone ou processo.",
+            "Uma resposta perdida é recuperável por operationId; concorrência da mesma issue gera conflito com referência à tentativa existente quando permitida, sem segundo lançamento."
+          ]
+        },
+        {
+          "id": "feat-026",
+          "name": "Resultado vinculado e idempotente",
+          "description": "Implementar acceptResult para a passagem implementadora e preparar a extensão do mesmo contrato ao Revisor.",
+          "acceptance_criteria": [
+            "O resultado exige schema, vínculo e conjunto exato de criterionIds sem duplicatas, incluindo evidência/veredito por critério e campos próprios do papel.",
+            "O primeiro resultado válido é commitado com hash, recibo, summary, critérios e evento antes do ACK; mesma repetição recebe o mesmo recibo e outro hash conflita.",
+            "Payload inválido ou falha SQL não ocupa resultado nem recibo; texto, fim de turno e scrollback não finalizam a passagem."
+          ]
+        },
+        {
+          "id": "feat-027",
+          "name": "Estado operacional e autoria dos recursos",
+          "description": "Persistir o vínculo das passagens e recursos próprios necessários ao acompanhamento.",
+          "acceptance_criteria": [
+            "Tentativa, rodada, passagem, critérios e recursos mantêm vínculos da mesma tentativa, reforçados por constraints e operações atômicas.",
+            "Fase, suspensão, resultado e tracking são eixos distintos; perda de vínculo não vira sucesso e criação parcial permanece diagnosticável.",
+            "Guards impedem alterar campos capturados da tentativa e resultados aceitos; atualizações legítimas de fase, recibos e acompanhamento continuam possíveis."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/projects/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/execution/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "packages/contracts/src/index.ts"
+        ],
+        "key_interfaces": [
+          "startAttempt",
+          "acceptResult",
+          "startPassage",
+          "OperationAccepted",
+          "Preparation"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§2.1/2.3/3.2/3.4. Criar pipeline/index.ts com composição explícita. Acrescentar as tabelas de tentativas, critérios, rodadas, passagens, resultados por critério e recursos necessárias. Unicidade ativa é por conta/repositório/issue, inclusive entre cadastros duplicados. Nenhum IO externo ocorre dentro de transação SQLite; nenhuma rota aguarda a duração da tentativa."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007",
+        "sprint-008"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-010",
+      "index": 9,
+      "name": "Versão Git imutável e repetição de captura",
+      "description": "Identificar a entrega após concluir as escritas próprias e preservar o conteúdo no Git independente dos ambientes removíveis. Cobertura: RF-49/53/84; AC-09/13/29; INT-18.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js",
+        "Git",
+        "SQLite"
+      ],
+      "features": [
+        {
+          "id": "feat-028",
+          "name": "Captura fiel de conteúdo",
+          "description": "Disponibilizar captura da entrega sem alterar o índice de implementação.",
+          "acceptance_criteria": [
+            "A captura só começa após resultado oficial e conclusão das escritas/processos próprios; checks e revisão não começam antes de captured.",
+            "Tracked, inclusões pertinentes não ignoradas, exclusões, renomes e modos são representados corretamente, incluindo nomes com espaços, Unicode e quebras de linha.",
+            "Ignorados e segredos conhecidos não são coletados automaticamente; arquivos especiais, submodules ou LFS incompatíveis e concorrência externa geram diagnóstico antes da revisão."
+          ]
+        },
+        {
+          "id": "feat-029",
+          "name": "Retenção independente da versão",
+          "description": "Preservar base e conteúdo capturado no armazenamento Git gerenciado.",
+          "acceptance_criteria": [
+            "A entrega é ancorada em <data>/git/<attemptId>.git por refs/factory/deliveries/<deliveryId>, com contentIdentity e base verificáveis.",
+            "A ref capturada não é sobrescrita e seus objetos continuam recuperáveis após encerramento do runtime ou remoção do ambiente de trabalho.",
+            "O banco guarda somente refs, hashes e metadados; não persiste checkout, índice, conteúdo de arquivo ou diff completo, e commit técnico privado não é commit de entrega."
+          ]
+        },
+        {
+          "id": "feat-030",
+          "name": "Recuperação técnica da captura",
+          "description": "Implementar capture/retry e disponibilizar diff paginado por versão.",
+          "acceptance_criteria": [
+            "Falha técnica preserva o trabalho e permite repetir somente a captura da passagem concluída elegível, sem novo Implementador.",
+            "Estado alterado, captura simultânea, versão já capturada/aprovada ou continuidade revogada geram CAPTURE_RETRY_NOT_ALLOWED.",
+            "O diff deriva da ref imutável, tem continuação explícita e indicação binária/não suportada; mudança de conteúdo após uma captura exige outra versão."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "acceptResult",
+          "deliveries",
+          "contentIdentity",
+          "OperationAccepted"
+        ],
+        "architecture_notes": "Consultar SPEC §5.2 e SPEC derivada §§2.1/3.2/3.4, incluindo a representação Git mínima obrigatória. Nomes Git são delimitados por NUL. A captura usa índice temporário independente da implementação, inicializado da base, sem persistir cópia do índice. Materializações futuras devem conferir ref, tree e base. Não adicionar vigilância contínua nem autorização por arquivo."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-011",
+      "index": 10,
+      "name": "Checks reais e evidências íntegras",
+      "description": "Executar os checks configurados sobre a versão capturada e tornar a evidência consultável. Cobertura: RF-18/50/84; AC-06/13; RNF-11/16.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js",
+        "Git",
+        "SQLite",
+        "Fastify"
+      ],
+      "features": [
+        {
+          "id": "feat-031",
+          "name": "Verificação da versão capturada",
+          "description": "Disponibilizar verification e seu consumo pelo pipeline.",
+          "acceptance_criteria": [
+            "Cada check usa materialização da versão capturada e cwd relativo contido no ambiente, nunca o clone mutável como fonte do conteúdo.",
+            "São registrados comando configurado, versão, execução, estado, exit code, tempos e motivo de erro ou não aplicabilidade.",
+            "Timeout e falha de lançamento são distinguíveis de reprovação; declaração de check pelo agente não substitui a execução do controlador."
+          ]
+        },
+        {
+          "id": "feat-032",
+          "name": "Evidência externa com integridade",
+          "description": "Persistir apenas arquivos pertinentes de evidência e implementar GET /artifacts/:artifactId.",
+          "acceptance_criteria": [
+            "Artefatos têm vínculo, path relativo, SHA-256 e tamanho, com gravação externa concluída antes da confirmação de metadados.",
+            "Consulta verifica vínculo, raiz, tamanho e checksum; ausência retorna ARTIFACT_MISSING e corrupção retorna ARTIFACT_INTEGRITY_FAILED.",
+            "Conteúdo ativo recebe tratamento seguro, nosniff e attachment quando pertinente; não existe endpoint genérico de path ou upload."
+          ]
+        },
+        {
+          "id": "feat-033",
+          "name": "Histórico de checks e falhas sem falso sucesso",
+          "description": "Manter execuções anteriores e integrar os resultados às consultas de entrega.",
+          "acceptance_criteria": [
+            "Reexecução cria outro run_number e não sobrescreve o check anterior; cada resultado continua ligado à mesma versão.",
+            "Erro de persistência ou artefato não produz sucesso e deixa diagnóstico recuperável sem aprovar a entrega.",
+            "Acrescentar uma definição de check não exige alterar o lifecycle do pipeline nem introduzir comandos livres em endpoints."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "packages/contracts/src/index.ts"
+        ],
+        "key_interfaces": [
+          "CheckDefinition",
+          "MeasuredValue",
+          "deliveries",
+          "artifacts"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§2.1/3.2/3.4/5.2. Criar verification/index.ts e registrar sua interface pública. Executáveis de checks são configuração autorizada, não comandos recebidos por endpoint de controle. Evidência não contém cópia do projeto, índice, transcript completo ou diff completo. Manter transações curtas e IO de arquivos fora delas."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-012",
+      "index": 11,
+      "name": "Revisão independente e correções limitadas",
+      "description": "Concluir o ciclo de julgamento por critério, achados e novas rodadas. Cobertura: US-12; RF-54–57; AC-07/08/13; INT-03/06/18.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Git",
+        "Maestri",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-034",
+          "name": "Passagem revisora independente",
+          "description": "Executar o Revisor em sessão e clone próprios da entrega capturada.",
+          "acceptance_criteria": [
+            "O Revisor recebe critérios, versão e achados pertinentes, sem a conversa do Implementador, em sessão e ambiente independentes.",
+            "O perfil efetivo é conferido e a identidade do conteúdo revisado coincide com a entrega dos checks.",
+            "Alteração do produto pelo Revisor invalida o parecer, mesmo se o resultado declarar approved."
+          ]
+        },
+        {
+          "id": "feat-035",
+          "name": "Parecer e achados completos",
+          "description": "Estender acceptResult para registrar a revisão e a resolução independente dos achados.",
+          "acceptance_criteria": [
+            "A revisão cobre exatamente os criterionIds e registra veredito/evidência, parecer e achados com identidade, problema, evidência e resultado esperado.",
+            "Achado sem criterionIds exige categoria técnica explícita; vínculos a critérios, entrega, passagem e tentativa são validados.",
+            "Aprovação exige critérios aprovados, independência válida, nenhum novo impedimento e resolução independente de todos os impedimentos anteriores."
+          ]
+        },
+        {
+          "id": "feat-036",
+          "name": "Rodadas de correção preservando histórico",
+          "description": "Conduzir correções na mesma tentativa até aprovação ou esgotamento.",
+          "acceptance_criteria": [
+            "A rodada inicial é 1 e o máximo é 1 + correctionLimit, respeitando 0–5 e padrão 2; cada correção produz nova versão, checks e revisão independente.",
+            "Reprovação fornece contexto estruturado ao Implementador acompanhado; perda de sessão não recruta substituto oculto.",
+            "Resultados, achados e resoluções anteriores são imutáveis; esgotamento termina como rejected com pendências consultáveis e sem reutilizar aprovação de outra versão."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/execution/index.ts",
+          "apps/controller/src/modules/verification/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/storage/index.ts"
+        ],
+        "key_interfaces": [
+          "startPassage",
+          "acceptResult",
+          "criterion_results",
+          "reviews",
+          "findings",
+          "finding_resolutions"
+        ],
+        "architecture_notes": "Consultar SPEC §§5.2–5.4 e SPEC derivada §§2.1/2.3/3.4. Acrescentar migrations, guards e recursos versionados de papel em resources/roles. Aceitação do Revisor mantém o mesmo contrato de durabilidade e recibos do Implementador. A aprovação técnica ainda precisa do gate atual de entrega. Não transformar o Revisor em corretor."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-013",
+      "index": 12,
+      "name": "Decisão humana, tempos e limites",
+      "description": "Entregar pergunta formal e resposta correlacionada, mantendo fase e sessão. Cobertura: RF-29/58–62; AC-14/15; INT-05/07.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "SQLite",
+        "OMP",
+        "Maestri"
+      ],
+      "features": [
+        {
+          "id": "feat-037",
+          "name": "Pergunta formal e suspensão vinculada",
+          "description": "Aceitar execution_question e controlar somente a suspensão pertinente.",
+          "acceptance_criteria": [
+            "Pergunta contém decisão, contexto e alternativas e é validada por schema e vínculo, sem classificador semântico de manutenção.",
+            "A pergunta mantém fase, TUI e ferramentas, pausa avanço/publicação e não consome correção; resultado durante pergunta pendente recebe erro corrigível.",
+            "Mudança semântica dos critérios permite decisão de manter o escopo capturado; adotar critérios novos exige atualização GitHub e outra tentativa."
+          ]
+        },
+        {
+          "id": "feat-038",
+          "name": "Resposta durável na mesma passagem",
+          "description": "Implementar consulta da pergunta e POST de resposta com operação consultável.",
+          "acceptance_criteria": [
+            "recordAnswer grava resposta, hash, operação e evento antes de enviar à passagem original acompanhada.",
+            "Somente recibo correlacionado muda o estado para delivered e libera a suspensão correspondente; timeout permanece delivery_unknown sem reenvio cego.",
+            "Pergunta expirada, cancelada, já respondida ou com revisão antiga recusa submissão incompatível; consulta de recibo não reenvia resposta."
+          ]
+        },
+        {
+          "id": "feat-039",
+          "name": "Tempos e limites sem valores fictícios",
+          "description": "Disponibilizar medições e expirações pertinentes à tentativa e à pergunta.",
+          "acceptance_criteria": [
+            "Tempo ativo e espera humana são separados; TTL da pergunta, tempo ativo e custo têm limites e estados próprios.",
+            "Zero medido, não configurado, indisponível e não aplicável são distintos; indisponibilidade registra causa, requisito afetado e pendência.",
+            "Expiração é registrada e a ação correspondente não afirma parada sem recibo; silêncio de terminal não é usado como prova de falha."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/execution/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "packages/contracts/src/index.ts",
+          "INTEGRACAO-MAESTRI-OMP.md"
+        ],
+        "key_interfaces": [
+          "answerQuestion",
+          "recordAnswer",
+          "MeasuredValue",
+          "questions",
+          "execution_question"
+        ],
+        "architecture_notes": "Consultar SPEC §§5.3–5.5 e SPEC derivada §§2.1/3.2/3.4. Resposta gravada não equivale a resposta entregue. Conversa livre não resolve pergunta formal. Contratos de papel orientam autonomia para manutenção; impossibilidade técnica recebe diagnóstico sem pedido genérico de permissão. Nenhum dashboard financeiro ou sistema adicional de telemetria."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-014",
+      "index": 13,
+      "name": "Cancelamento, interrupção e nova tentativa",
+      "description": "Entregar recuperação operacional com recursos próprios e histórico preservado. Cobertura: RF-63–68; AC-16–18/26; INT-08/15–17.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js",
+        "Windows",
+        "SQLite",
+        "Git",
+        "Maestri",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-040",
+          "name": "Revogação e parada acompanhada",
+          "description": "Implementar cancelamento idempotente e acompanhamento de lançamentos tardios.",
+          "acceptance_criteria": [
+            "Cancelar grava a revogação antes de novos avanços/efeitos e solicita parada somente dos recursos próprios conhecidos, sem exigir ETag obsoleto.",
+            "Lançamento conhecido que retorna tarde é identificado e recebe parada; pedido aceito, parada confirmada e limpeza incerta permanecem distintos.",
+            "Não há busca de processos por nome ou controle por PID arbitrário; recursos manuais e arquivos com parada incerta são preservados."
+          ]
+        },
+        {
+          "id": "feat-041",
+          "name": "Perda de acompanhamento e retry explícito",
+          "description": "Interromper coordenação antiga e disponibilizar outra tentativa independente.",
+          "acceptance_criteria": [
+            "Perda de vínculo interrompe a coordenação correspondente; restart marca trabalho não terminado interrupted e revoga canais antigos sem restaurar provider/conversa.",
+            "Nova preparação referencia a tentativa anterior e usa issue/base atuais e parâmetros revisáveis; o início cria outro clone/processo sem importar alterações antigas.",
+            "Retry dispensa Ready, mas revalida demais vínculos e ausência de tentativa ativa; residual separado não bloqueia toda a instalação nem recupera autoridade antiga."
+          ]
+        },
+        {
+          "id": "feat-042",
+          "name": "Remoção delimitada e abertura nativa",
+          "description": "Implementar removal-plan/remove, interação/open e folder/open pelos IDs registrados.",
+          "acceptance_criteria": [
+            "Remoção mostra perdas, preservações e planHash; exige confirmação, parada comprovada e retenção das refs/objetos necessários.",
+            "Plano alterado, parada incerta ou conteúdo em risco impedem exclusão; remover ambiente conserva histórico, resultados e evidências.",
+            "Abertura revalida capacidade atual e usa somente sessão/pasta própria existente; contexto não suportado recebe motivo, sem path/comando arbitrário ou terminal substituto."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/execution/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "INTEGRACAO-MAESTRI-OMP.md"
+        ],
+        "key_interfaces": [
+          "cancelAttempt",
+          "interactionSurface",
+          "resources",
+          "Preparation",
+          "OperationAccepted"
+        ],
+        "architecture_notes": "Consultar SPEC §7, integração §§5–6 e complementos F-03 da SPEC derivada §3.2. Dois cenários representativos bastam para a prova real: inicialização e trabalho com filho. Não construir supervisor geral ou prometer contenção de brokers/daemons. Exclusões durante o desenvolvimento só podem atingir recursos de teste identificados dentro da raiz autorizada; a implementação do endpoint não autoriza apagar ambientes reais."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-015",
+      "index": 14,
+      "name": "ICR consultável e efeitos de acompanhamento",
+      "description": "Fechar o percurso backend até ICR com gate atual, comentário identificado e consultas por tentativa/versão. Cobertura: RF-38–42/69/73/77–79/82–84; AC-09/12/22.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "SQLite",
+        "Git",
+        "GH CLI"
+      ],
+      "features": [
+        {
+          "id": "feat-043",
+          "name": "Gate atual e journal de efeitos",
+          "description": "Disponibilizar publication e efeitos duráveis para conclusão ICR e projeção de etapas.",
+          "acceptance_criteria": [
+            "A conclusão exige versão aprovada, passagem concluída, modo autorizado, vínculos atuais e ausência de pergunta, cancelamento ou efeito incompatível.",
+            "Conta alterada pausa despachos; responsável alterado revoga publicação e solicita cancelamento; Status incompatível suspende sem forçar o quadro.",
+            "Cada comentário ou atualização de Status tem intenção antes da mutação, identidade, estado e recibo; timeout enviado permanece unknown e falha SQL impede o efeito seguinte."
+          ]
+        },
+        {
+          "id": "feat-044",
+          "name": "Conclusão ICR e projeções reconciliáveis",
+          "description": "Concluir ICR sem commit de entrega e registrar acompanhamento GitHub autorizado.",
+          "acceptance_criteria": [
+            "ICR preserva versão, diff, evidências e ambiente, sem commit de entrega ou push, e publica resultado/evidências em comentário identificado reconciliável por marcador.",
+            "In progress representa implementação/checks/correção, In review representa revisão e Delivered depende do modo concluído; Done e checkboxes da issue não são alterados.",
+            "Falha de comentário ou Status preserva aprovação e resultado local, expõe pendência e não reimplementa, rearma consumo ou duplica efeito desconhecido."
+          ]
+        },
+        {
+          "id": "feat-045",
+          "name": "Consultas leves e detalhe por versão",
+          "description": "Implementar GET /attempts, detalhe da tentativa e GET /deliveries/:deliveryId.",
+          "acceptance_criteria": [
+            "Listagens usam resumos e cursores estáveis; detalhe permite páginas independentes de rodadas, passagens, critérios, checks, revisões, achados, perguntas, efeitos e recursos.",
+            "Os DTOs distinguem fase, suspensão, resultado, revisão, publicação, parada, limpeza, tempos, limites e capacidades na identidade selecionada.",
+            "Metadados e evidências permanecem consultáveis após terminar processos ou reiniciar; diff e artifacts são obtidos somente sob demanda e nenhum GET altera autoridade."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "recordEffectIntent",
+          "EffectView",
+          "Page",
+          "Capability",
+          "OperationView"
+        ],
+        "architecture_notes": "Consultar SPEC §§4.3–4.4/6/8.4 e SPEC derivada §§2.1/3.2/3.4. Criar publication/index.ts e queries/index.ts e registrar suas interfaces. O journal suporta as origens criação/tentativa sem engine distribuída. Revalidar remove somente a suspensão resolvida. Mutações GitHub reais exigem autorização e alvo conhecidos; esta sprint não os autoriza automaticamente."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-016",
+      "index": 15,
+      "name": "Preparação e início manual pela interface",
+      "description": "Conectar preparação, resumo autorizado e consulta do início à Principal. Cobertura: US-06/15; F-02; RF-20/23/28/67.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "fetch",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-046",
+          "name": "Preparação com escolhas efetivas",
+          "description": "Disponibilizar preparação e Nova tentativa nos diálogos existentes.",
+          "acceptance_criteria": [
+            "O formulário mostra projeto/issue/modo/orientação, base, perfis, checks, correções, limites, origem das escolhas e pré-requisitos reais.",
+            "Nova tentativa referencia a anterior sem reutilizar sessão ou alterações e informa issue/base atuais e impedimentos.",
+            "Troca de identidade descarta resultados obsoletos e conserva rascunhos separados somente em memória."
+          ]
+        },
+        {
+          "id": "feat-047",
+          "name": "Autosave e autorização do resumo atual",
+          "description": "Vincular Iniciar à última revisão confirmada.",
+          "acceptance_criteria": [
+            "Existe no máximo uma gravação de preparação em voo; edições posteriores são agregadas e Iniciar aguarda a última confirmação.",
+            "O diálogo mostra critérios, configuração e efeitos do resumo atual; edição ou SUMMARY_CHANGED invalida a autorização e exige revisar o resumo atualizado.",
+            "Conflito mantém os campos, distingue dados atuais de rascunho e não apresenta revisão numérica como tarefa do operador."
+          ]
+        },
+        {
+          "id": "feat-048",
+          "name": "Início consultável sem duplicação",
+          "description": "Apresentar os estados reais do comando de início.",
+          "acceptance_criteria": [
+            "O cliente gera operationId antes do envio e conserva chave/payload enquanto incerto; 202 informa aceitação, sem afirmar execução pronta.",
+            "Timeout consulta a operação original sem reenviar o início; reload recupera somente o registro mínimo não secreto da operação.",
+            "Conflito com início de outra aba ou automação mantém o diálogo e permite consultar a tentativa identificada sem criar outra ou trocar silenciosamente a seleção."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/api/http.ts",
+          "apps/web/src/app/PrincipalScreen.tsx",
+          "apps/web/src/app/hash-route.ts",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "packages/contracts/src/index.ts"
+        ],
+        "key_interfaces": [
+          "usePreparation",
+          "Preparation",
+          "OperationAccepted",
+          "OperationView",
+          "useDialogs"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§4.2–4.6 e endpoints de preparação/início §3.2. Manter PreparationDialog e confirmação como conteúdos do modal existente. Modos não implementados integralmente ainda não podem fingir sucesso; suas capacidades devem explicar disponibilidade real até as sprints de publicação. Nenhum Effect React inicia tentativa ou salva por repetição de montagem."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "attempt-detail"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-017",
+      "index": 16,
+      "name": "Detalhe, decisão e recuperação da tentativa",
+      "description": "Disponibilizar acompanhamento e ações do primeiro percurso integrado nas superfícies aprovadas. Cobertura: US-10–15/19; F-03/F-05.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "fetch",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-049",
+          "name": "Detalhe por rodada e versão",
+          "description": "Implementar AttemptDetailDialog e inspeção sob demanda.",
+          "acceptance_criteria": [
+            "O detalhe apresenta os eixos operacionais separados, critérios/evidências, checks, parecer, achados/resoluções, tempos, limites e recursos da rodada/versão selecionada.",
+            "Versão não capturada, revisão não realizada e revisão sem achados têm mensagens diferentes; erro de uma seção ou continuação preserva as demais e a página atual.",
+            "Diff e evidências abrem no próprio conteúdo sob demanda, com escape e erros de integridade próprios; polling não troca histórico, foco ou scroll."
+          ]
+        },
+        {
+          "id": "feat-050",
+          "name": "Decisão e resposta com recibo",
+          "description": "Conectar os estados de pergunta e resposta aos dados reais.",
+          "acceptance_criteria": [
+            "O diálogo distingue pendente, resposta gravada, envio, entregue, entrega incerta, expirada e cancelada, mantendo tempos e TTL separados.",
+            "Texto digitado é preservado por pergunta em memória se outra aba responder ou o estado mudar, mas a submissão incompatível é impedida.",
+            "Consulta de recibo não reenvia resposta e somente delivered permite apresentar a suspensão como resolvida."
+          ]
+        },
+        {
+          "id": "feat-051",
+          "name": "Parada e ações nativas por capacidade",
+          "description": "Conectar Cancelar, Repetir captura, Nova tentativa, Remover ambiente, Abrir terminal e Abrir pasta.",
+          "acceptance_criteria": [
+            "Cancelar distingue pedido aceito, parada comprovada e limpeza incerta; fechar o modal não cancela a operação.",
+            "Remoção mostra perdas/preservações e exige o plano atual confirmado; captura/retry aparece somente na falha técnica elegível.",
+            "Capacidades e motivos são atualizados mesmo com diálogo aberto; cópia só informa sucesso após clipboard confirmado e abertura nativa não é simulada por cópia."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/api/http.ts",
+          "apps/web/src/app/PrincipalScreen.tsx",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/queries/index.ts",
+          "docs/Docs20261016_073031/design/artifact.html"
+        ],
+        "key_interfaces": [
+          "useAttempt",
+          "useDelivery",
+          "useDecision",
+          "useAttemptActions",
+          "Capability",
+          "MeasuredValue"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§3.2/4.3/4.5–4.6. Criar features/attempts/AttemptDetailDialog.tsx e registrar os hooks reais. Usar apenas os componentes oficiais app-shell e attempt-detail. Cancelar continua disponível quando seu próprio contexto é válido, mesmo se outra seção falhar. Não converter interrupção em prova de parada física."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "attempt-detail"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-018",
+      "index": 17,
+      "name": "Prova integrada da primeira fatia",
+      "description": "Comprovar o percurso implementado de cadastro até ICR, pergunta, cancelamento e nova tentativa. Esta sprint produz evidência atual, sem tratar fixtures como aceite real.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Vitest",
+        "Fastify",
+        "Git",
+        "SQLite",
+        "Maestri",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-052",
+          "name": "Percurso real até ICR",
+          "description": "Disponibilizar e executar, quando autorizado, a prova integrada da primeira fatia.",
+          "acceptance_criteria": [
+            "O roteiro identifica versão do produto, versões Maestri/OMP/MCPs, alvo GitHub, perfil, custos e efeitos autorizados antes da execução real.",
+            "A evidência correlaciona cadastro preservando origem dirty, início consultável, clone próprio, artefato implementado, resultado durável, checks, revisão independente e ICR sem commit de entrega.",
+            "A aprovação da fatia exige a execução real; ausência de autorização ou ferramenta é registrada como pendência e não como sucesso."
+          ]
+        },
+        {
+          "id": "feat-053",
+          "name": "TUI, ferramenta útil e transporte",
+          "description": "Comprovar os contratos INT da execução no produto atual.",
+          "acceptance_criteria": [
+            "Há evidência de perfil efetivo, TUI utilizável durante trabalho/pergunta e após resultado e chamada MCP útil com recuperação de argumento inválido.",
+            "A prova usa cwd/argv com espaços e Unicode e resultados em português/emoji; contratos de malformed, oversize e EOF têm diagnóstico reproduzível.",
+            "GitNexus requerido retorna informação útil da raiz do clone pertinente; catálogo, fixture ou ajuda CLI não substituem a chamada real."
+          ]
+        },
+        {
+          "id": "feat-054",
+          "name": "Pergunta, cancelamento e recuperação",
+          "description": "Comprovar os cenários representativos de interação e parada.",
+          "acceptance_criteria": [
+            "Pergunta/resposta retorna à mesma passagem com recibo, e resposta incerta mantém suspensão sem reenvio automático.",
+            "Cancelamento na inicialização e no trabalho com filho registra o que parou, lançamentos tardios e limites, preservando recurso manual e ambiente incerto.",
+            "Restart preserva histórico e revoga vínculo antigo; nova tentativa usa outro clone/processo sem reset global nem retorno obrigatório a Ready."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "SPEC.md",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "tests/integration",
+          "tests/acceptance"
+        ],
+        "key_interfaces": [
+          "startPassage",
+          "acceptResult",
+          "answerQuestion",
+          "cancelAttempt",
+          "OperationView"
+        ],
+        "architecture_notes": "Cobertura principal: AC-01/05–09/13–18/20/23–26 e INT-01–10/12–18, conforme o cenário. Criar evidências em docs/integration com identificadores e resultados sanitizados. A suíte padrão continua isolada de providers e efeitos externos. Não repetir ensaios históricos como requisito adicional. Esta sprint não altera UI; correções encontradas devem identificar seu escopo e preservar resultados anteriores."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-019",
+      "index": 18,
+      "name": "Publicação privada e commit local",
+      "description": "Entregar o modo Commit usando exclusivamente o conteúdo aprovado. Cobertura: RF-70/74/76/77; AC-10/13; INT-18.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Git",
+        "SQLite",
+        "Node.js"
+      ],
+      "features": [
+        {
+          "id": "feat-055",
+          "name": "Materialização privada da versão aprovada",
+          "description": "Disponibilizar ambiente de publicação independente do clone mutável.",
+          "acceptance_criteria": [
+            "A materialização confere ref, base e contentIdentity da entrega aprovada e não recaptura a implementação.",
+            "Mudanças posteriores, caches e evidências de teste do clone mutável não entram no conteúdo publicado.",
+            "A versão continua materializável após remover o ambiente de implementação, com refs/objetos necessários preservados."
+          ]
+        },
+        {
+          "id": "feat-056",
+          "name": "Conventional Commit local reconciliável",
+          "description": "Concluir o efeito de commit no modo autorizado.",
+          "acceptance_criteria": [
+            "O commit local tem tree correspondente à versão aprovada, parent/base coerentes e referência à issue/tentativa, sem push.",
+            "A intenção é durável antes do Git; perda de resposta é reconciliada por tree, parent e operationId sem criar segundo commit.",
+            "Falha preserva aprovação e efeitos anteriores e não reinicia o Implementador."
+          ]
+        },
+        {
+          "id": "feat-057",
+          "name": "Entrega sem delta e conclusão Commit",
+          "description": "Tratar ausência de alterações e completar os efeitos pertinentes ao modo.",
+          "acceptance_criteria": [
+            "Entrega sem delta só é aceita com revisão/evidência; commit vazio fica not_applicable com motivo, sem fabricar alterações.",
+            "O modo Commit conclui com resultado/evidências em comentário identificado e sem push, PR, auto-close ou Done.",
+            "Capacidades e consultas de entrega refletem commit confirmado, não aplicável ou pendente separadamente da revisão e limpeza."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/publication/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/storage/index.ts"
+        ],
+        "key_interfaces": [
+          "recordEffectIntent",
+          "EffectView",
+          "deliveries",
+          "contentIdentity"
+        ],
+        "architecture_notes": "Consultar SPEC §6 e SPEC derivada §§3.2/3.4. Git permanece encapsulado em workspaces. Commit técnico de retenção, baseline de scaffold e commit de entrega são identidades e autorizações distintas. Exercitar contratos com Git temporário no contexto autorizado; indisponibilidade desse contexto é limitação, não motivo para refazer login."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-020",
+      "index": 19,
+      "name": "PR, reconciliação e aumento de modo",
+      "description": "Concluir o backend dos três modos e a recuperação de publicação. Cobertura: RF-71/72/75/78–80; AC-11/12/18/22; INT-18.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "Git",
+        "GH CLI",
+        "SQLite"
+      ],
+      "features": [
+        {
+          "id": "feat-058",
+          "name": "Push e PR do conteúdo aprovado",
+          "description": "Concluir o modo PR com efeitos autorizados e confirmados.",
+          "acceptance_criteria": [
+            "A escolha PR autoriza uma vez o push necessário da branch gerenciada, e a confirmação verifica ref/SHA remoto e PR para a base configurada.",
+            "O corpo inclui escopo, base/versão, checks, parecer, pendências não impeditivas e attemptId, sem palavras de auto-close, merge ou force-push.",
+            "Ausência de delta registra os efeitos pertinentes como not_applicable com motivo, sem PR vazia."
+          ]
+        },
+        {
+          "id": "feat-059",
+          "name": "Reconciliação e conclusão de pendências",
+          "description": "Implementar publication/reconcile e publication/complete.",
+          "acceptance_criteria": [
+            "Commit, push, PR e comentário são reconciliados por suas identidades normativas; recurso apenas semelhante não é adotado.",
+            "Timeout após envio permanece unknown e bloqueia retry cego; complete executa somente pendências já autorizadas após gate atual e reconciliação.",
+            "Após restart, a conclusão exige ação explícita delimitada; cancelamento ou retorno tardio não restaura autorização e confirmados permanecem preservados."
+          ]
+        },
+        {
+          "id": "feat-060",
+          "name": "Autorização adicional de modo superior",
+          "description": "Implementar resumo de acréscimos e publication/authorize-upgrade.",
+          "acceptance_criteria": [
+            "Somente tentativa encerrada com versão aprovada oferece modos estritamente superiores, com efeitos adicionais e summaryHash atuais.",
+            "A confirmação única registra autorização durável e usa a mesma versão aprovada, preservando efeitos confirmados; complete não pede a mesma autorização outra vez.",
+            "Revisão ou resumo alterado, modo inválido e gate bloqueado recebem conflito com motivos, sem reimplementar nem substituir a entrega."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/publication/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "apps/controller/src/modules/pipeline/index.ts"
+        ],
+        "key_interfaces": [
+          "EffectView",
+          "OperationAccepted",
+          "recordEffectIntent",
+          "DeliveryMode",
+          "Capability"
+        ],
+        "architecture_notes": "Consultar SPEC §6.1 e SPEC derivada §3.2, incluindo F-03. O journal precede cada mutação e registra efeito remoto que termine após cancelamento, impedindo os seguintes. Sem restaurar sessão antiga ou auto-completar publicação no restart. Testes padrão simulam respostas remotas; mutações reais exigem autorização, alvo e efeitos conhecidos."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-021",
+      "index": 20,
+      "name": "Entrega e publicação na interface",
+      "description": "Disponibilizar os três modos completos, reconciliação e aumento de modo nos diálogos aprovados, fechando a segunda fatia.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "fetch"
+      ],
+      "features": [
+        {
+          "id": "feat-061",
+          "name": "Entrega por efeito e versão",
+          "description": "Conectar DeliveryDialog e PublicationDialog aos resultados reais.",
+          "acceptance_criteria": [
+            "Modo inicial/autorizado, versão, commit, push, PR, comentário, Status e efeitos incertos têm identidade, motivo e recibo pertinentes.",
+            "Aprovação isolada não aparece como PR concluída; falha de publicação mantém diff, parecer e confirmados.",
+            "Os três modos são selecionáveis quando suas capacidades reais estiverem disponíveis e seus efeitos são mostrados antes do início."
+          ]
+        },
+        {
+          "id": "feat-062",
+          "name": "Reconciliação, conclusão e aumento de modo",
+          "description": "Conectar as ações de recuperação sem criar novo fluxo.",
+          "acceptance_criteria": [
+            "Reconciliação e complete usam attemptId/deliveryId selecionados e não executam automaticamente por timer, montagem ou consulta.",
+            "Aumentar modo oferece somente superiores, mostra acréscimos e confirma uma vez; resumo alterado exige revisão no mesmo diálogo.",
+            "Timeout mantém operationId e estado incerto; consulta não amplia autorização e contexto creation não é enviado às rotas de publicação."
+          ]
+        },
+        {
+          "id": "feat-063",
+          "name": "Prova dos modos e resposta perdida",
+          "description": "Registrar a conclusão verificável da segunda fatia com alvos autorizados.",
+          "acceptance_criteria": [
+            "Os contratos cobrem ICR sem commit, Commit sem push e PR com ref/SHA confirmados, incluindo no-op e alteração posterior do clone mutável.",
+            "A prova real autorizada registra publicação/reconciliação sem duplicar PR, commit ou comentário e sem reexecutar implementação.",
+            "Se a execução real ou observação Playwright MCP/Chrome estiver indisponível, o relatório mantém os critérios afetados pendentes sem declarar aceite."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx",
+          "apps/web/src/api/http.ts",
+          "apps/controller/src/modules/publication/index.ts",
+          "apps/controller/src/modules/queries/index.ts",
+          "docs/Docs20261016_073031/design/artifact.html"
+        ],
+        "key_interfaces": [
+          "useDelivery",
+          "useAttemptActions",
+          "EffectView",
+          "DeliveryMode",
+          "OperationView"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§4.3–4.6 e US-16/17. Manter o modal e a composição visual aprovados. Não iniciar publicação real por esta instrução de implementação sem autorização correspondente. A configuração use_playwright=false permanece; a comprovação visual exigida precisa ser executada explicitamente por Playwright MCP/Chrome ou ficar pendente."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "attempt-detail"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-022",
+      "index": 21,
+      "name": "Observação completa da fila Ready",
+      "description": "Entregar a consulta de elegibilidade e o resumo autorizável da fila, sem despacho automático ainda. Cobertura: RF-30–33/35; AC-19/22.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "GH CLI",
+        "GraphQL",
+        "SQLite"
+      ],
+      "features": [
+        {
+          "id": "feat-064",
+          "name": "Elegibilidade por conta e vínculos",
+          "description": "Implementar GET /queue e regras determinísticas dos candidatos.",
+          "acceptance_criteria": [
+            "Somente issue aberta no repo/Project configurados, Ready, com assignee único da conta e sem bloqueador aberto é elegível.",
+            "Sem responsável, outro responsável, múltiplos responsáveis, draft e PR têm tratamento e motivos corretos, sem atribuição automática.",
+            "Bloqueador de uma issue não invalida o Project inteiro e Ready antes/depois da atribuição produz a mesma elegibilidade quando a condição completa é observada."
+          ]
+        },
+        {
+          "id": "feat-065",
+          "name": "Leitura completa e ordem explícita",
+          "description": "Consultar todos os itens necessários antes de produzir observação autorizável.",
+          "acceptance_criteria": [
+            "eligibleTotal representa a consulta completa, independentemente da página exibida; parcial, auth inválida ou rate limit torna a observação não autorizável.",
+            "A ordem usa prioridade configurada, posição documentada quando disponível e desempate número/ID; fallback para número crescente é explícito.",
+            "Polling e backoff são configuráveis e respeitam Retry-After/reset; erro não se apresenta como fila vazia válida."
+          ]
+        },
+        {
+          "id": "feat-066",
+          "name": "Observação e resumo de habilitação",
+          "description": "Disponibilizar escopo, modos e hash do resumo da fila.",
+          "acceptance_criteria": [
+            "A resposta identifica observação, instante, completude, validade, escopo, quantidade total, ordem e modos por projeto.",
+            "Mudança material de conta, escopo, quantidade ou modos invalida o resumo anterior para habilitação.",
+            "Consultas não consomem candidatos nem iniciam tentativas e não persistem cópia integral do quadro GitHub."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/queries/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "GLOSSARY.md"
+        ],
+        "key_interfaces": [
+          "Page",
+          "Capability",
+          "ProjectConfiguration",
+          "queueOrder"
+        ],
+        "architecture_notes": "Consultar SPEC §4 e SPEC derivada §§3.2/3.4. Ready é conjunto observado, não evento temporal obrigatório. Ampliar as consultas existentes de github, sem controlador paralelo ou cache que conceda autoridade. A habilitação e o consumo serão implementados na sprint-023."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-023",
+      "index": 22,
+      "name": "Scheduler e consumo durável da fila",
+      "description": "Habilitar trabalho automático usando a mesma operação de início manual e governança existente. Cobertura: RF-27/34/36–42; AC-19–22.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js",
+        "SQLite",
+        "Fastify",
+        "GH CLI"
+      ],
+      "features": [
+        {
+          "id": "feat-067",
+          "name": "Habilitação e pausa autorizadas",
+          "description": "Implementar PUT /queue para escopo de conta ou projetos.",
+          "acceptance_criteria": [
+            "Habilitar exige ETag e resumo completo/atual autorizado, revalidando quantidade, escopo, modos e autoridade.",
+            "Mudança material recebe QUEUE_SUMMARY_CHANGED com resumo atual; não habilita usando observação antiga.",
+            "Pausar impede novos inícios sem cancelar tentativa ativa, limpar consumo ou apagar histórico."
+          ]
+        },
+        {
+          "id": "feat-068",
+          "name": "Consumo atômico por ciclo observado",
+          "description": "Persistir queue_consumptions e integrar o scheduler a startAttempt.",
+          "acceptance_criteria": [
+            "Consumo e tentativa são confirmados na mesma transação; uma issue aguardando por ocupação ou leitura degradada não é consumida.",
+            "Polling, restart, Ready residual, resposta perdida e falha de projeção não repetem ciclo consumido; falha/cancelamento não geram retry automático.",
+            "Novo ciclo exige observar saída de Ready e retorno elegível; transições offline não são reconstruídas."
+          ]
+        },
+        {
+          "id": "feat-069",
+          "name": "Concorrência e autoridade do worker",
+          "description": "Aplicar os limites de execução e mudanças externas no caminho automático.",
+          "acceptance_criteria": [
+            "Há no máximo um trabalho automático ativo por conta e o lock local impede segundo executor da instalação/conta independentemente da porta ou projeto.",
+            "Várias interfaces não criam workers; cada despacho revalida conta, issue, responsável, Project, Status e dependências pela mesma operação manual.",
+            "Troca de conta pausa despachos, responsável alterado cancela a tentativa e divergência de Status exige resolução/revalidação sem takeover ou escrita forçada."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "apps/controller/src/modules/publication/index.ts",
+          "SPEC.md"
+        ],
+        "key_interfaces": [
+          "startAttempt",
+          "queue_consumptions",
+          "recordEffectIntent",
+          "OperationView"
+        ],
+        "architecture_notes": "Consultar SPEC §§4–5.1 e SPEC derivada §§2.1/3.4. Scheduler permanece no processo controlador, sem broker ou runtime adicional. Manter índice único de issue ativa e índice parcial de trabalho automático ativo. Lock local não oferece exclusão entre instalações independentes; documentar handoff exigindo encerrar/cancelar antes de atribuir e rearmar Ready."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-024",
+      "index": 23,
+      "name": "Fila e divergência na Principal",
+      "description": "Conectar fila, habilitação, pausa e autoridade aos dados reais, fechando a terceira fatia. Cobertura: US-07–09; F-04; AC-19–22/27.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "fetch"
+      ],
+      "features": [
+        {
+          "id": "feat-070",
+          "name": "Fila paginada e elegibilidade visível",
+          "description": "Implementar QueuePanel com ordem, consumo e estado da observação.",
+          "acceptance_criteria": [
+            "A lista mostra issue, responsabilidade, Status, elegibilidade/motivo, consumo e critério de ordem, com paginação sem acumular todo o quadro.",
+            "Quantidade total completa difere da página visível; consulta degradada ou erro não aparece como ausência de candidatos.",
+            "Reordenação não muda seleção histórica e falha em seção independente não bloqueia Pausar quando o próprio contexto da ação continua válido."
+          ]
+        },
+        {
+          "id": "feat-071",
+          "name": "Resumo de habilitação e divergência",
+          "description": "Conectar EnableQueueDialog e AuthorityDialog nos conteúdos existentes.",
+          "acceptance_criteria": [
+            "Antes de habilitar, são mostrados quantidade, escopo, modos, conta/host, validade e ordem; resumo alterado exige revisar no mesmo diálogo.",
+            "A pausa informa que só impede novos inícios; estado ligado/pausado depende do recibo real.",
+            "Divergência mostra observado/esperado e orientação GitHub, com Revalidar/Cancelar pertinentes; não existe bloqueio global por tentativa de amostra."
+          ]
+        },
+        {
+          "id": "feat-072",
+          "name": "Prova integrada da fila",
+          "description": "Registrar os cenários de deduplicação, autoridade e concorrência.",
+          "acceptance_criteria": [
+            "Contratos cobrem múltiplos assignees, drafts, PRs, paginação parcial, ocupado, rate limit, pausa e saída/retorno observado a Ready.",
+            "A prova real autorizada demonstra consumo único, revalidação, projeção e preservação de tentativa/histórico após pausa e restart.",
+            "Cenários não executados e aceite visual indisponível permanecem explicitamente pendentes, sem usar fixture como prova de produto."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/app/PrincipalScreen.tsx",
+          "apps/web/src/api/http.ts",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx",
+          "apps/controller/src/modules/pipeline/index.ts",
+          "docs/Docs20261016_073031/design/artifact.html"
+        ],
+        "key_interfaces": [
+          "useQueue",
+          "useOperation",
+          "useAttemptActions",
+          "Capability",
+          "Page"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§4.3–4.6 e RF-30–42. Fila é projeção do GitHub, sem editor paralelo ou atribuição automática. Ações de candidato relêem fila; ação de tentativa usa revalidate da tentativa. Mutações GitHub e execução automática de providers só ocorrem nos alvos expressamente autorizados para a prova."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "attempt-detail"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-025",
+      "index": 24,
+      "name": "Plano de scaffold e criação somente local",
+      "description": "Entregar recursos distribuídos, plano sem efeitos e criação local com engenharia autocontida. Cobertura: RF-05–08/11/12; AC-02/05.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js",
+        "Fastify",
+        "Git",
+        "SQLite"
+      ],
+      "features": [
+        {
+          "id": "feat-073",
+          "name": "Catálogo versionado e configuração de engenharia",
+          "description": "Disponibilizar templates e os apontadores previstos pela referência de scaffold.",
+          "acceptance_criteria": [
+            "GET /scaffold/options retorna identidade/digest, resumo de engenharia, raiz configurada, modalidades e pré-requisitos reais.",
+            "Os recursos geram tracker GitHub, orientação de domínio, seção Agent skills e triagem quando aplicável em AGENTS.md, preservando conteúdo e sem duplicar seções.",
+            "Skills não são copiadas/instaladas no destino e labels não são criadas implicitamente; recursos são autocontidos e resolvidos sem caminhos pessoais."
+          ]
+        },
+        {
+          "id": "feat-074",
+          "name": "Plano sem efeitos e revalidação do destino",
+          "description": "Implementar POST /scaffold/plans e os gates anteriores à criação.",
+          "acceptance_criteria": [
+            "O plano apresenta destino canônico, template/digest, metadados de arquivos, engenharia, branch, modalidade, conta/owner pertinentes e efeitos, sem criar diretório ou remoto.",
+            "Destino existente, escape por junction/symlink, template inválido e recurso obrigatório ausente são recusados antes de escrever.",
+            "Mudança inicial de plano, conta, template, destino ou branch invalida a autorização anterior sem produzir efeitos."
+          ]
+        },
+        {
+          "id": "feat-075",
+          "name": "Criação local com baseline e cadastro",
+          "description": "Implementar intenção, execução e consulta de criação somente local.",
+          "acceptance_criteria": [
+            "A intenção e creationId são duráveis antes da escrita; o destino é criado exclusivamente, com Git e baseline Conventional Commit na branch escolhida.",
+            "O projeto cadastrado usa a mesma branch e informa remoto/Project ausentes, permanecendo configurável sem iniciar issue ou agente.",
+            "Falha parcial preserva arquivos e efeitos registrados, sem rollback destrutivo; sucesso informa pasta, baseline, branch e projectId reais."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "SPEC.md",
+          ".agents/skills/setup-matt-pocock-skills/SKILL.md",
+          ".agents/skills/setup-matt-pocock-skills/issue-tracker-github.md",
+          ".agents/skills/setup-matt-pocock-skills/domain.md",
+          "apps/controller/src/modules/projects/index.ts"
+        ],
+        "key_interfaces": [
+          "CreationMode",
+          "recordEffectIntent",
+          "OperationAccepted",
+          "project_creations"
+        ],
+        "architecture_notes": "Consultar SPEC §3.2 integralmente e os recursos referenciados pela skill, inclusive triagem quando aplicável. A SPEC fixa AGENTS.md mesmo se houver CLAUDE.md e substitui a entrevista da skill pelo formulário/plano com confirmação única. Não executar o setup no workspace canônico por leitura. Usar os módulos storage/workspaces existentes e recursos versionados em resources/templates."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-026",
+      "index": 25,
+      "name": "Scaffold remoto e criação parcial reconciliável",
+      "description": "Completar as três modalidades de criação com efeitos delimitados. Cobertura: RF-09/10/13/77/78; AC-02/03/12.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Git",
+        "GH CLI",
+        "SQLite",
+        "Fastify"
+      ],
+      "features": [
+        {
+          "id": "feat-076",
+          "name": "Remoto sem push",
+          "description": "Criar o remoto escolhido e associar origin sem publicar o baseline.",
+          "acceptance_criteria": [
+            "Owner, nome remoto e visibilidade correspondem ao plano autorizado, com conta revalidada antes do efeito.",
+            "A identidade do novo remoto é confirmada antes de associar origin; remoto existente ou resposta inesperada não é adotado automaticamente.",
+            "O baseline permanece local e nenhum push, GitHub Project, issue ou agente é criado implicitamente."
+          ]
+        },
+        {
+          "id": "feat-077",
+          "name": "Remoto com push do baseline",
+          "description": "Publicar somente o baseline escolhido na branch-base do plano.",
+          "acceptance_criteria": [
+            "Somente remote_push envia o baseline, com intenção durável anterior e confirmação por ref/SHA remoto.",
+            "A branch publicada coincide com a branch do baseline e do cadastro; não há force-push ou ampliação de efeitos.",
+            "Conta/plano alterado antes dos efeitos recusa a execução; falha posterior conserva os efeitos já confirmados."
+          ]
+        },
+        {
+          "id": "feat-078",
+          "name": "Consulta e reconciliação de criação parcial",
+          "description": "Completar GET creation e POST creation/reconcile.",
+          "acceptance_criteria": [
+            "Criação parcial informa confirmados, falhos, pendentes e desconhecidos com identidade/motivo, sem sucesso integral.",
+            "Reconcile consulta os efeitos por identidade e persiste fatos, sem criar/adotar remoto ou repetir mutação desconhecida.",
+            "Resposta perdida recupera a operação original; arquivos, baseline e histórico são preservados e o contexto creation não usa rotas de publicação de tentativa."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/projects/index.ts",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "CreationMode",
+          "EffectView",
+          "project_creations",
+          "recordEffectIntent",
+          "OperationView"
+        ],
+        "architecture_notes": "Consultar SPEC §§3.2/6.1 e SPEC derivada §§2.1/3.2. Efeito tem exatamente uma origem criação ou tentativa, com unicidade por tipo/escopo pertinente. Reutilizar os contratos de journal/reconciliação sem transformar criação em tentativa. Mutações reais de repositório remoto requerem autorização e alvo conhecidos; testes padrão usam adapters controlados."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-027",
+      "index": 26,
+      "name": "Criação, plano e parcial na interface",
+      "description": "Completar project-form e os conteúdos de criação existentes, fechando a quarta fatia. Cobertura: US-02/03; F-01; AC-02/03/27.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "fetch"
+      ],
+      "features": [
+        {
+          "id": "feat-079",
+          "name": "Escolhas reais de criação",
+          "description": "Disponibilizar template, destino, branch e três modalidades.",
+          "acceptance_criteria": [
+            "O formulário oferece exatamente Somente local, Remoto sem push e Remoto com push, com owner/nome remoto/visibilidade somente quando pertinentes.",
+            "Campos remotos ocultos não entram na submissão local; sugestões de owner/destino não sobrescrevem edição manual.",
+            "Mudança de escolha invalida plano/autorização e resultado atrasado não valida uma escolha anterior."
+          ]
+        },
+        {
+          "id": "feat-080",
+          "name": "Plano autorizado e conclusão consultável",
+          "description": "Conectar revisão do plano, confirmação única e acompanhamento da criação.",
+          "acceptance_criteria": [
+            "O plano real mostra destino, template/digest, arquivos, engenharia, branch, conta e efeitos antes de Criar, sem produzir efeitos.",
+            "Criar confirma uma vez o plano atual e acompanha a operação pelo creationId; timeout não repete a criação.",
+            "Conclusão mostra pasta, baseline, branch e efeitos reais; Abrir projeto não inicia issue ou sessão."
+          ]
+        },
+        {
+          "id": "feat-081",
+          "name": "Criação parcial e prova das modalidades",
+          "description": "Apresentar recuperação contextual e registrar evidências da quarta fatia.",
+          "acceptance_criteria": [
+            "O conteúdo parcial distingue confirmados/falhos/desconhecidos e permite reconciliação da mesma criação, preservando campos e diagnóstico.",
+            "Os contratos cobrem destino existente, escape de raiz, recurso ausente, conta alterada, resposta perdida e as três modalidades.",
+            "A prova autorizada registra baseline/origin/ref/SHA pertinentes e ausência de agente iniciado; execução ou observação visual indisponível permanece pendente."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/projects/ProjectForm.tsx",
+          "apps/web/src/api/http.ts",
+          "apps/controller/src/modules/projects/index.ts",
+          "docs/Docs20261016_073031/design/artifact.html",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md"
+        ],
+        "key_interfaces": [
+          "useProjectCreation",
+          "CreationMode",
+          "EffectView",
+          "OperationAccepted",
+          "useDialogs"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§4.3/4.5–4.6. Usar os mesmos contêineres de cadastro/plano/conclusão/parcial; não acrescentar wizard, menu ou tela. Reconcile discrimina creation/publication por contexto tipado. A autorização do formulário pertence ao produto e não autoriza executar efeitos reais durante a implementação sem alvo correspondente."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "project-form"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-028",
+      "index": 27,
+      "name": "Operação, eventos e diagnóstico contextual",
+      "description": "Completar APIs de resumo, registros, stream e verificações não pagas. Cobertura: RF-81/82/86–88; US-18/20.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify",
+        "SQLite",
+        "SSE",
+        "Node.js"
+      ],
+      "features": [
+        {
+          "id": "feat-082",
+          "name": "Resumo operacional e eventos paginados",
+          "description": "Implementar GET /operation e GET /events com projeções leves.",
+          "acceptance_criteria": [
+            "O resumo contém conta, host, automação, tentativa ativa, próximos candidatos, resultados recentes, impedimentos e integração real, sem dados demonstrativos.",
+            "Eventos são filtráveis por projeto/tentativa/operação com ordem durável e cursor estável; diagnóstico inclui code, cause, affectedRequirements, facts e recovery.",
+            "Snapshot e eventCursor são consistentes e as consultas não carregam código, diff, transcript ou resultados completos desnecessários."
+          ]
+        },
+        {
+          "id": "feat-083",
+          "name": "SSE com recuperação sem efeitos",
+          "description": "Implementar GET /events/stream e recuperação por sequência.",
+          "acceptance_criteria": [
+            "Snapshot seguido de stream não perde eventos; reconexão usa Last-Event-ID com precedência sobre cursor inicial e deduplicação por seq.",
+            "Cursor inválido ou replay indisponível gera resync; buffers são finitos, cliente lento pode reconectar e os frames contêm somente fatos leves sanitizados.",
+            "Sessão revogada fecha seu stream; queda do browser/SSE não cancela tentativa nem repete POST ou restaura autoridade."
+          ]
+        },
+        {
+          "id": "feat-084",
+          "name": "Diagnóstico e verificações delimitadas",
+          "description": "Implementar GET/POST /diagnostics por contexto discriminado.",
+          "acceptance_criteria": [
+            "GET consulta fatos existentes sem efeitos; POST aceita somente configuration, github_identity, maestri_context e resources suportados no contexto.",
+            "Verificação persiste operação/diagnóstico sem provider pago, comandos livres, modificação de ACL/credencial ou criação de recursos externos para testar acesso.",
+            "Host, projeto, criação e tentativa mantêm vínculos corretos e recibos sanitizados, com causa e recuperação para ausência de contexto, perfil, credencial ou acompanhamento."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/queries/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/execution/index.ts",
+          "packages/contracts/src/index.ts"
+        ],
+        "key_interfaces": [
+          "Page",
+          "ErrorResponse",
+          "OperationAccepted",
+          "events",
+          "Capability"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§3.2–3.3 e RF-81–88. SSE notifica fatos e invalida consultas pertinentes, sem engine de eventos ou transcript. Diagnóstico usa serviços públicos existentes; não é preflight pago obrigatório por rodada. Não criar busca/indexação de telas inexistentes."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-027"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-029",
+      "index": 28,
+      "name": "Dashboard, registros e atualização estável",
+      "description": "Completar as jornadas de operação e diagnóstico e conectar uma assinatura SSE por interface. Cobertura: US-18–20; F-04/F-05; AC-27.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "EventSource",
+        "fetch",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-085",
+          "name": "Dashboard real por seção",
+          "description": "Conectar o painel operacional às projeções do controlador.",
+          "acceptance_criteria": [
+            "O dashboard mostra conta/host, automação, ativa, próximos candidatos, resultados e impedimentos reais com ações por capacidade.",
+            "Cada seção distingue carga, atualização, erro, vazio válido e dado anterior desatualizado; falha da fila não oculta tentativa ativa já consultada.",
+            "Conta/host continuam acessíveis no celular e a integração é Maestri nativo, sem configuração Wire ou amostras apresentadas como fatos."
+          ]
+        },
+        {
+          "id": "feat-086",
+          "name": "Registros e diagnóstico acionável",
+          "description": "Disponibilizar filtros, paginação e diagnóstico nos conteúdos existentes.",
+          "acceptance_criteria": [
+            "Consulta sem eventos, filtro sem correspondência e falha são distintos; erro de continuação conserva a página corrente.",
+            "Diagnóstico discrimina host/projeto/criação/tentativa e mostra causa, requisitos afetados, fatos, recibos e recuperação sanitizados.",
+            "Durante nova verificação, o resultado anterior pode permanecer identificado como anterior; falha não o transforma em confirmação atual."
+          ]
+        },
+        {
+          "id": "feat-087",
+          "name": "SSE e contexto de leitura estáveis",
+          "description": "Conectar notificações sem substituir histórico ou rascunhos.",
+          "acceptance_criteria": [
+            "useControllerEvents mantém uma conexão por interface, deduplica sequências e recupera resync com GETs pertinentes, sem repetir mutações.",
+            "Polling, SSE e save não mudam aba, projeto, tentativa, versão, foco ou scroll selecionados; histórico não é substituído pela ativa.",
+            "Falhas de ação/gravação permanecem visíveis até tratamento pertinente e não são apagadas por leitura bem-sucedida de outra seção."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/app/AppShell.tsx",
+          "apps/web/src/app/PrincipalScreen.tsx",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx",
+          "apps/web/src/features/projects/ProjectForm.tsx",
+          "apps/controller/src/modules/queries/index.ts"
+        ],
+        "key_interfaces": [
+          "useOperation",
+          "useRecords",
+          "useControllerEvents",
+          "useDialogs",
+          "Page"
+        ],
+        "architecture_notes": "Consultar SPEC derivada §§4.2–4.6, inclusive os oito grupos de edge cases. Reutilizar regiões de aviso, toast role=status, tabelas e modal aprovados, sem anunciar cada evento SSE. Configuração/rascunho são locais por identidade; servidor continua dono da autoridade e dos resultados. Registrar todos os arquivos e consumidores no progresso."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-027",
+        "sprint-028"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "attempt-detail",
+          "project-form"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    },
+    {
+      "id": "sprint-030",
+      "index": 29,
+      "name": "Prova de persistência e manutenção modular",
+      "description": "Comprovar AC-29 nas consultas finais e AC-28 nas fronteiras implementadas. Cobertura: RNF-01/11/15/16/24.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Vitest",
+        "SQLite",
+        "Git",
+        "Node.js"
+      ],
+      "features": [
+        {
+          "id": "feat-088",
+          "name": "Medição antes e depois de caches volumosos",
+          "description": "Disponibilizar ensaio reproduzível AC-29 sobre o produto implementado.",
+          "acceptance_criteria": [
+            "O relatório registra massa gerada e tamanhos de banco, WAL e artefatos auxiliares antes/depois, distinguindo dados operacionais Git de persistência oficial.",
+            "São medidos payloads e latências de catálogo/listagens, histórico e polling; os caminhos de consulta não leem nem serializam conteúdo do projeto.",
+            "Crescimento de ignorados/caches não introduz seus conteúdos na persistência ou payloads; diferenças legítimas de metadados são discriminadas, sem inventar SLA."
+          ]
+        },
+        {
+          "id": "feat-089",
+          "name": "Recuperação Git e integridade após remoção",
+          "description": "Comprovar retenção da versão e de evidências pertinentes sem snapshots auxiliares.",
+          "acceptance_criteria": [
+            "A entrega aprovada é recuperada pela ref/tree/base após encerrar processos, reiniciar controlador e remover ambiente de teste elegível.",
+            "Inspeção confirma ausência de checkout, índice, ignorados, caches e diff completo em SQLite, JSON, Base64 ou arquivos auxiliares.",
+            "Evidência ausente/corrompida e objeto Git necessário indisponível recebem diagnóstico, sem reconstrução presumida ou conteúdo vazio."
+          ]
+        },
+        {
+          "id": "feat-090",
+          "name": "Fronteiras e extensibilidade verificáveis",
+          "description": "Conferir a arquitetura implementada contra AC-28.",
+          "acceptance_criteria": [
+            "Regra estática identifica SQL fora de storage, GH fora de github, Maestri/OMP fora de execution e acesso externo a internos de módulos.",
+            "Um check adicional pode ser configurado e executado sem mudar lifecycle; contracts não importa IO e UI não importa runtime interno.",
+            "Teste de contrato da interface de execution demonstra que uma implementação de teste pode ser composta sem alterar SQL ou UI, sem alegar suporte a executor de produção não implementado."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "SPEC.md",
+          "apps/controller/src/modules/storage/index.ts",
+          "apps/controller/src/modules/queries/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/execution/index.ts"
+        ],
+        "key_interfaces": [
+          "Page",
+          "startPassage",
+          "CheckDefinition",
+          "deliveries",
+          "artifacts"
+        ],
+        "architecture_notes": "Consultar AC-28/29, SPEC §8 e SPEC derivada §§2.1/3.1. Usar recursos temporários identificados e comandos configurados. Não introduzir compressão/deduplicação para preservar conteúdo proibido ou exigir variação zero de bytes do SQLite causada por eventos legítimos. Corrigir a causa se o ensaio mostrar carga excessiva; registrar medições e limites sem metas inventadas."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-027",
+        "sprint-028",
+        "sprint-029"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-031",
+      "index": 30,
+      "name": "Inicialização distribuível e operação documentada",
+      "description": "Completar a distribuição local e os procedimentos de inicialização, atualização e recuperação sem depender desta máquina. Cobertura: AC-18/21/24/25; RNF-14/16/21–23.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "Windows",
+        "Fastify",
+        "SQLite",
+        "Maestri",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-091",
+          "name": "Pacote autocontido e configuração de bootstrap",
+          "description": "Disponibilizar a aplicação compilada com bundle, migrations e recursos distribuídos.",
+          "acceptance_criteria": [
+            "A distribuição contém controlador compilado, cliente, migrations, contratos dos papéis e templates necessários, resolvidos por runtime.",
+            ".env.example contém somente as opções não sensíveis previstas, sem tokens, Wire, senha humana ou segredo em VITE_*.",
+            "A aplicação funciona em raiz distinta com espaços/Unicode e não depende de caminhos pessoais, skills instaladas nesta máquina ou do workspace de elaboração."
+          ]
+        },
+        {
+          "id": "feat-092",
+          "name": "Inicialização e encerramento coerentes",
+          "description": "Completar o ciclo de vida de produção pelo terminal-âncora.",
+          "acceptance_criteria": [
+            "Antes de scheduler/despacho são verificados contexto Maestri real, lock, configuração e migrations; contexto inválido não é contornado por ACL ou login.",
+            "Produção entrega assets e API na mesma origem loopback; desenvolvimento preserva validação exata de Host/Origin sem CORS global.",
+            "Shutdown revoga sessões/canais e encerra esperas com diagnóstico; restart preserva registros e marca trabalho não concluído interrupted sem retomar agentes."
+          ]
+        },
+        {
+          "id": "feat-093",
+          "name": "Manual de operação e recuperação",
+          "description": "Documentar os procedimentos reais e limites da primeira entrega.",
+          "acceptance_criteria": [
+            "A documentação contém comandos existentes, configuração de host/perfis, execução dos testes e opt-in separado para Maestri/OMP/GitHub e aceite visual.",
+            "Há procedimentos para conflito, pergunta incerta, captura falha, parada incerta, retry, publicação pendente, criação parcial e handoff entre contas.",
+            "Os limites de cliente remoto, lock local, credenciais confiáveis e contenção parcial são explícitos; não se anuncia backup de projeto, túnel provisionado ou suporte a múltiplos executores."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/main.ts",
+          "apps/controller/src/modules/execution/index.ts",
+          "apps/controller/src/modules/storage/index.ts",
+          "resources/roles",
+          "resources/templates"
+        ],
+        "key_interfaces": [
+          "GlobalConfiguration",
+          "OperationView",
+          "schema_migrations",
+          "interactionSurface"
+        ],
+        "architecture_notes": "Consultar SPEC §§8–11 e SPEC derivada §§3.3/3.5/5.1/5.3. Não provisionar deployment, proxy, túnel, TLS ou novo instalador de infraestrutura sem impedimento concreto. Caminhos absolutos do design são referências documentais, nunca dependências de runtime. Não apagar WAL/SHM manualmente ou substituir banco incompatível por vazio."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-027",
+        "sprint-028",
+        "sprint-029",
+        "sprint-030"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2,
+      "metadata": {
+        "touchesUI": false,
+        "affectedScreenIds": [],
+        "affectedComponentIds": []
+      }
+    },
+    {
+      "id": "sprint-032",
+      "index": 31,
+      "name": "Aceite transversal e revisão da versão entregue",
+      "description": "Fechar a matriz integral de comportamento, segurança e UI da versão final, corrigindo regressões comprovadas sem alterar o design ou presumir aprovação do pipeline.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "Fastify",
+        "SQLite",
+        "Git",
+        "Maestri",
+        "OMP",
+        "Playwright MCP",
+        "Google Chrome"
+      ],
+      "features": [
+        {
+          "id": "feat-094",
+          "name": "Aceite visual e navegação das jornadas",
+          "description": "Comprovar Projetos, Operação, Tentativa e Configuração no design conciliado.",
+          "acceptance_criteria": [
+            "Playwright MCP/Chrome de teste registra conteúdo, ações, screenshots e viewport em desktop/celular, incluindo três modos, conflito, paginação, atualização e leitura histórica.",
+            "Teclado, nomes acessíveis, foco, modal, contraste e zoom são verificados e medidos; falhas são corrigidas ou registradas sem inventar novos limiares de conformidade.",
+            "Não existe Login/Sair antigo, sobreposição ou corte impeditivo; o navegador iniciado pelo teste é fechado e nenhum perfil pessoal é usado."
+          ]
+        },
+        {
+          "id": "feat-095",
+          "name": "Segurança e edge cases finais",
+          "description": "Conferir os controles implementados e os oito grupos de situações alternativas da SPEC.",
+          "acceptance_criteria": [
+            "Os contratos comprovam proteção de todas as leituras/SSE e mutações, idempotência/CAS, revogação no restart e ausência de segredos usando marcadores sintéticos.",
+            "Há evidência de resposta perdida, conflito entre abas, capacidades alteradas em diálogo aberto, pergunta expirada/respondida por outra aba e falhas isoladas de seção/continuação.",
+            "Nenhum cenário produz sucesso otimista, retry cego de efeito, troca silenciosa de identidade ou conteúdo remoto executável; diferenças autorizadas por C-02 não são restauradas."
+          ]
+        },
+        {
+          "id": "feat-096",
+          "name": "Matriz de cobertura e revisão independente",
+          "description": "Consolidar evidências da versão entregue e resultados da revisão.",
+          "acceptance_criteria": [
+            "A matriz final relaciona US-01–20, RF-01–88, RNF-01–25, AC-01–29 e INT-01–18 a testes, código e evidências atuais, distinguindo comprovado, falhou e pendente.",
+            "A revisão independente identifica a referência Git imutável da versão avaliada e preserva achados/resultados anteriores; correções são reavaliadas na versão correspondente.",
+            "Sem autorização para efeito real, ferramenta de aceite ou contexto exigido, o critério permanece pendente e o produto não é declarado integralmente aceito; nenhum gate de fase, Design Lock, push ou publicação é simulado."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "SPEC.md",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "docs/Docs20261016_073031/SPEC20261016_073031.md",
+          "docs/Docs20261016_073031/stories-requisitos20261016_073031.md",
+          "docs/Docs20261016_073031/design/artifact.html",
+          "tests/acceptance"
+        ],
+        "key_interfaces": [
+          "useControllerEvents",
+          "OperationView",
+          "Capability",
+          "EffectView",
+          "MeasuredValue"
+        ],
+        "architecture_notes": "Consultar as matrizes AC/INT e SPEC derivada §§4.5/4.7/5.2. use_playwright=false é configuração do harness, não dispensa de AC-27/INT-11: executar o aceite explicitamente pela ferramenta prescrita quando disponível ou registrar a pendência. Não usar Portal ou screenshots históricos como substituto. P7/F-06 está encerrado sem novos números ou entrevista. Preservar manifest/hashes históricos; revisão final e aprovação pertencem aos mecanismos reais do pipeline."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-027",
+        "sprint-028",
+        "sprint-029",
+        "sprint-030",
+        "sprint-031"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3,
+      "metadata": {
+        "touchesUI": true,
+        "affectedScreenIds": [
+          "principal"
+        ],
+        "affectedComponentIds": [
+          "app-shell",
+          "attempt-detail",
+          "project-form"
+        ],
+        "designArtifactPath": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\docs\\Docs20261016_073031\\design\\artifact.html"
+      }
+    }
+  ],
+  "metadata": {
+    "version": 1,
+    "created_at": "2026-10-16T16:49:28.244Z",
+    "total_sprints": 32,
+    "total_features": 96
+  }
+}
