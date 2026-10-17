@@ -100,6 +100,7 @@ export function createPublication(deps: PublicationDependencies) {
       if (result?.state === 'confirmed') storage.finishEffect(effect.operationId,effect.revision,'confirmed',result.receipt,null);
       return;
     }
+    if (!effect.expectedIdentity.issueId) return;
     const response = await github.getIssueContextById(effect.expectedIdentity.issueId);
     if (response.state !== 'complete' || !response.data || !('body' in response.data)) return;
     const issue: IssueContext = response.data; const wanted = effect.expectedIdentity;

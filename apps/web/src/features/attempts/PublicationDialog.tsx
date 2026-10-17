@@ -17,6 +17,7 @@ const modeOrder: readonly DeliveryMode[] = ['icr', 'commit', 'pr'];
 const modeLabel: Record<DeliveryMode, string> = { icr: 'ICR', commit: 'ICR + Commit local', pr: 'ICR + Commit + PR' };
 const effectLabel: Record<EffectView['kind'], string> = {
   issue_comment: 'Comentário de entrega', project_status: 'Projeção de Status', local_commit: 'Commit local', push: 'Push', pull_request: 'Pull request',
+  create_repository: 'Criação do repositório', associate_origin: 'Associação do origin', baseline_push: 'Publicação do baseline',
 };
 
 function messageFor(error: unknown): string {

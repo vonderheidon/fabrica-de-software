@@ -4,12 +4,15 @@ import { useHashRoute } from './useHashRoute.js';
 import { PrincipalScreen } from './PrincipalScreen.js';
 import { HttpError } from '../api/http.js';
 import { ProjectRegistrationForm } from '../features/projects/ProjectForm.js';
+import { ProjectCreationDialog } from '../features/projects/ProjectCreationDialog.js';
 import { QueueEnableDialog } from '../features/queue/QueueEnableDialog.js';
 import { QueueAuthorityDialog } from '../features/queue/QueueAuthorityDialog.js';
 import { PreparationDialog } from '../features/preparations/PreparationDialog.js';
 import { AttemptDetailDialog } from '../features/attempts/AttemptDetailDialog.js';
 import type { AttemptDetail } from '#contracts';
 import { readUncertainOperations } from '../api/uncertain-operations.js';
+import { useControllerEvents } from './useControllerEvents.js';
+import { useDialogs } from './useDialogs.js';
 
 type DialogState = { status: 'ready'; message: string } | { status: 'action-error'; message: string; requestId: string | null };
 
@@ -19,7 +22,9 @@ const navSymbols: Record<(typeof tabs)[number], string> = {
 
 export function AppShell() {
   const route = useHashRoute();
-  const [dialog, setDialog] = useState<DialogId | null>(null);
+  const dialogs = useDialogs(route);
+  const { dialog, setDialog } = dialogs;
+  const eventState = useControllerEvents();
   const [dialogState, setDialogState] = useState<DialogState>({ status: 'ready', message: '' });
   const dialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -43,14 +48,8 @@ export function AppShell() {
   }, [route.params, route.tab]);
 
   useEffect(() => {
-    const next = route.params.get('dialog') as DialogId | null;
-    if (next && next !== dialog) {
-      setDialog(next);
-      setDialogState({ status: 'ready', message: 'Este conteúdo será carregado pela funcionalidade correspondente.' });
-    } else if (!next && dialog) {
-      setDialog(null);
-    }
-  }, [route.params, dialog]);
+    if (dialog) setDialogState({ status: 'ready', message: 'Este conteúdo será carregado pela funcionalidade correspondente.' });
+  }, [dialog]);
 
   useEffect(() => {
     if (!dialog) {
@@ -82,13 +81,7 @@ export function AppShell() {
     if (!['register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation', 'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication', 'diagnostic', 'interaction'].includes(id)) return;
     returnFocusRef.current = trigger;
     setDialogState({ status: 'ready', message: id === 'diagnostic' ? 'Revise a origem local autorizada e a proteção da solicitação. O navegador não libera CORS nem repete o bootstrap automaticamente.' : 'O conteúdo desta ação será conectado à funcionalidade correspondente.' });
-    setDialog(id as DialogId);
-    const params = new URLSearchParams(route.params);
-    params.set('dialog', id);
-    if (context?.projectId) params.set('projectId', context.projectId);
-    if (context?.previousAttemptId) params.set('attemptId', context.previousAttemptId);
-    if (context?.attemptId) params.set('attemptId', context.attemptId);
-    window.location.hash = buildHash(route.tab, params);
+    dialogs.open(id, context);
   }
 
   function openAttempt(attemptId: string): void {
@@ -104,11 +97,7 @@ export function AppShell() {
   }
 
   function closeDialog(): void {
-    setDialog(null);
-    const params = new URLSearchParams(route.params);
-    params.delete('dialog');
-    window.history.pushState(null, '', buildHash(route.tab, params));
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
+    dialogs.close();
   }
 
   return <>
@@ -118,10 +107,10 @@ export function AppShell() {
         <div className="sidebar-navigation"><div className="eyebrow workspace-label">Workspace local</div><nav className="nav" aria-label="Navegação principal">
           {tabs.map((tab) => <a key={tab} href={buildHash(tab, route.params)} className={`nav-link${route.tab === tab && !route.error ? ' active' : ''}`} aria-current={route.tab === tab && !route.error ? 'page' : undefined}><span className="symbol" aria-hidden="true">{navSymbols[tab]}</span>{labelForTab(tab)}</a>)}
         </nav></div>
-        <footer className="sidebar-footer"><span className="avatar" aria-hidden="true">NF</span><div><b>Controlador local</b><br /><small>Sessão técnica do navegador</small></div><button type="button" className="quiet-button" onClick={(event) => openDialog('diagnostic', event.currentTarget)}>Diagnóstico</button></footer>
+        <footer className="sidebar-footer"><span className="avatar" aria-hidden="true">NF</span><div><b>Controlador local</b><br /><small>Sessão técnica do navegador</small></div><a className="quiet-button quiet-link" href="#principal/registros">Registros e diagnóstico</a></footer>
       </aside>
       <main className="main">
-        <header className="topbar"><span>Workspace <span className="crumb-separator">/</span><b>{title}</b></span><div className="row"><span className="pill neutral">Acesso local</span><span className="mono muted">Controlador técnico</span></div></header>
+        <header className="topbar"><span>Workspace <span className="crumb-separator">/</span><b>{title}</b></span><div className="row"><span className={`pill ${eventState === 'connected' ? '' : 'warn'}`} role="status" aria-label={`Eventos do controlador: ${eventState}`}>Eventos {eventState === 'connected' ? 'conectados' : eventState === 'reconnecting' ? 'reconectando' : eventState === 'unavailable' ? 'indisponíveis' : 'conectando'}</span><span className="pill neutral">Acesso local</span><span className="mono muted">Controlador técnico</span></div></header>
         <div className="content"><PrincipalScreen route={route} onOpenDialog={openDialog} onActionError={reportActionError} /></div>
       </main>
     </div>
@@ -133,7 +122,31 @@ export function AppShell() {
           setDialog(null);
           const params = new URLSearchParams({ projectId });
           window.location.hash = buildHash('configuracao', params);
-        }} /> : <>
+        }} /> : dialog === 'create' || dialog === 'creation-plan' || dialog === 'partial' ? <ProjectCreationDialog
+          creationId={route.params.get('creationId')}
+          onCreationId={(creationId) => {
+            const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+            params.set('creationId', creationId);
+            params.set('dialog', 'partial');
+            window.location.hash = buildHash(route.tab, params);
+          }}
+          onPlanReview={() => {
+            const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+            params.delete('creationId');
+            params.set('dialog', 'creation-plan');
+            window.location.hash = buildHash(route.tab, params);
+          }}
+          onPlanEdit={() => {
+            const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+            params.delete('creationId');
+            params.set('dialog', 'create');
+            window.location.hash = buildHash(route.tab, params);
+          }}
+          onOpenProject={(projectId) => {
+            setDialog(null);
+            window.location.hash = buildHash('configuracao', new URLSearchParams({ projectId }));
+          }}
+        /> : <>
           {dialogState.status === 'action-error' && <div className="read-state" role="alert"><h3>A ação não foi concluída</h3><p>{dialogState.message}</p>{dialogState.requestId && <p className="mono muted">Solicitação {dialogState.requestId}</p>}</div>}
           {dialog === 'preparation' || dialog === 'start-confirmation' ? <PreparationDialog key={`${route.params.get('projectId') ?? ''}:${route.params.get('dialog') === 'preparation' ? route.params.get('attemptId') ?? 'new' : 'new'}`} projectId={route.params.get('projectId')} previousAttemptId={route.params.get('dialog') === 'preparation' ? route.params.get('attemptId') : null} onOpenAttempt={openAttempt} /> : dialog === 'detail' && route.params.get('attemptId') ? <AttemptDetailDialog attemptId={route.params.get('attemptId')!} selectedRound={route.params.get('roundId')} selectedDeliveryId={route.params.get('deliveryId')} onSelectionChange={(roundId, deliveryId) => {
             const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');

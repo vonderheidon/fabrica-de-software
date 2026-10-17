@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { AttemptPage } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
+import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 
 type Props = {
   projectId: string;
@@ -31,6 +32,25 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
   const cursor = cursorStack[pageIndex] ?? null;
 
   useEffect(() => { setProjectDraft(projectId); }, [projectId]);
+
+  useEffect(() => {
+    const onControllerEvent = (event: Event): void => {
+      const notice = (event as CustomEvent<ControllerEventNotice>).detail;
+      if (!notice) return;
+      const changedAttemptId = notice.attemptId ?? (notice.entity.type === 'attempt' ? notice.entity.id : null);
+      if (!changedAttemptId) return;
+      const currentPageContainsAttempt = state.page?.items.some((attempt) => attempt.id === changedAttemptId) ?? false;
+      const matchesProject = !projectId || notice.projectId === projectId || currentPageContainsAttempt;
+      if (matchesProject) setReload((current) => current + 1);
+    };
+    const onResync = (): void => { setReload((current) => current + 1); };
+    window.addEventListener('factory-controller-event', onControllerEvent);
+    window.addEventListener('factory-controller-resync', onResync);
+    return () => {
+      window.removeEventListener('factory-controller-event', onControllerEvent);
+      window.removeEventListener('factory-controller-resync', onResync);
+    };
+  }, [projectId, state.page]);
 
   useEffect(() => {
     let active = true;

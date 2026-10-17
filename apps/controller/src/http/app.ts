@@ -1,14 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Writable } from 'node:stream';
-import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { EmptyQuery, ErrorResponse, HealthResponse, OperationParams, OperationView } from '#contracts';
 import type { ControllerConfiguration } from '../config.js';
 import type { Storage } from '../modules/storage/index.js';
 import { installErrors, HttpError } from './errors.js';
+import { installAssets } from './assets.js';
 import { httpLimits, installSecurity } from './security/index.js';
 import { installEventRoutes } from './routes/events.js';
 import { createProjects, type ProjectDependencies } from '../modules/projects/index.js';
@@ -26,8 +25,10 @@ import { createVerification } from '../modules/verification/index.js';
 import type { ToolObservation } from '#contracts';
 import { createScaffold, type ScaffoldDependencies } from '../modules/projects/index.js';
 import { installScaffoldRoutes } from './routes/scaffold.js';
+import { createDiagnostics, type DiagnosticDependencies } from '../modules/diagnostics/index.js';
+import { installOperationRoutes } from './routes/operation.js';
 
-export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: Pick<ProjectDependencies, 'github' | 'workspaces'>, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>) {
+export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: Pick<ProjectDependencies, 'github' | 'workspaces'>, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>) {
   const app = Fastify({
     logger: {
       level: configuration.logLevel,
@@ -61,17 +62,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
 
   app.addHook('onClose', async () => { storage.close(); });
   const webRoot = resolve(import.meta.dirname, '../../../../web');
-  if (existsSync(resolve(webRoot, 'index.html'))) {
-    app.register(fastifyStatic, {
-      root: webRoot,
-      prefix: '/',
-      index: ['index.html'],
-      dotfiles: 'ignore',
-      setHeaders(response, filePath) {
-        response.setHeader('Cache-Control', filePath.endsWith('index.html') ? 'no-store' : 'public, max-age=31536000, immutable');
-      },
-    });
-  }
+  installAssets(app, webRoot);
   app.server.maxHeadersCount = httpLimits.headerCount;
   app.server.maxConnections = httpLimits.connections;
   app.server.headersTimeout = httpLimits.headersTimeoutMs;
@@ -94,7 +85,6 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   const scaffold = createScaffold({ storage, github: scaffoldDependencies?.github ?? github, workspaces: scaffoldDependencies?.workspaces ?? verificationWorkspaces,
     logFailure: code => app.log.error({ code }, 'Scaffold creation stopped') });
   installScaffoldRoutes(app,scaffold,storage);
-  app.addHook('preClose', async () => { await scaffold.close(); });
   const verification = createVerification({ storage, workspaces: verificationWorkspaces, dataDirectory: configuration.dataDirectory, logFailure: code => app.log.error({ code }, 'Verification failed') });
   const pipeline = providedPipeline ?? createPipeline({ storage, preparations, execution: execution!,
     workspaces: verificationWorkspaces, verification, github: preparationDependencies?.github ?? defaultGitHub, queue: { observe: projects.getQueue },
@@ -105,7 +95,19 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
         ...(['git', 'gh'] as const).map(tool => ({ tool, state: 'unavailable' as const, version: null, cause: 'CONTEXT_UNAVAILABLE', affectedRequirements: ['RF-22'], observedAtMs: now }))];
       return [...tools, ...await execution!.observeVersions()];
     }, logFailure: code => app.log.error({ code }, 'Pipeline dispatch failed') });
-  app.addHook('preClose', async () => { await pipeline.close(); });
+  storage.interruptDiagnostics();
+  const diagnostics = createDiagnostics({ storage, github, ...(diagnosticDependencies?.execution ? { execution: diagnosticDependencies.execution } : execution ? { execution } : {}),
+    logFailure: code => app.log.error({ code }, 'Contextual diagnostic failed') });
+  installOperationRoutes(app, storage, diagnostics);
+  app.addHook('preClose', async () => {
+    // Revoke every coordinator synchronously before awaiting any pending IO.
+    const outcomes = await Promise.allSettled([pipeline.close(), scaffold.close(), diagnostics.close()]);
+    if (outcomes.some(outcome => outcome.status === 'rejected')) {
+      app.log.error({ code: 'COORDINATION_SHUTDOWN_FAILED' }, 'Controller coordination did not close cleanly');
+      // Report failure while allowing Fastify to finish HTTP/storage/lock cleanup.
+      process.exitCode = 1;
+    }
+  });
   installAttemptRoutes(app, pipeline, storage);
   installDeliveryRoutes(app, pipeline, storage);
 

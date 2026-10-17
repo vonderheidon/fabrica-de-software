@@ -301,7 +301,77 @@ td:first-child, th:first-child { padding-left: 0; }
 .decision-refresh { min-height: 44px; }
 .decision-receipt { padding: 12px; border: 1px solid #cadaca; border-radius: 6px; background: #edf3ed; color: #34573e; }
 @media (max-width: 650px) { .decision-criteria-compare, .decision-timing { grid-template-columns: 1fr; } .decision-answer button { width: 100%; } }
+
+.queue-page-notice { margin: 0 0 14px; padding: 11px 14px; border-left: 3px solid var(--accent); background: #fff2e7; color: #63320d; font-size: 12px; }
+.queue-table td { vertical-align: top; }
+.queue-table td:first-child { min-width: 250px; }
+.queue-authority-values dd { overflow-wrap: anywhere; }
+@media (max-width: 650px) {
+  .queue-heading, .queue-actions { align-items: stretch; flex-direction: column; }
+  .queue-actions button, .queue-dialog-actions button { width: 100%; }
+  .queue-pagination { gap: 8px; }
+  .queue-pagination button { flex: 1 1 120px; }
+  .queue-pagination span { flex-basis: 100%; order: -1; text-align: center; }
+}
 @media (max-width: 950px) { .attempt-detail-sections { grid-template-columns: 1fr; } .attempt-version-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 650px) { .attempt-filters, .attempt-version-controls { grid-template-columns: 1fr; } .attempt-filter-actions { flex-direction: column; } .attempt-pagination, .attempt-section-pagination { flex-wrap: wrap; justify-content: center; } .attempt-pagination span, .attempt-section-pagination span { flex-basis: 100%; order: -1; } .attempt-evidence-columns { grid-template-columns: 1fr; } .attempt-record dl { grid-template-columns: 1fr; } }
 @media (max-width: 950px) { .preparation-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 650px) { .preparation-facts { grid-template-columns: 1fr; } .preparation-actions { align-items: stretch; flex-direction: column; } .preparation-actions button { width: 100%; } }
+
+.dashboard-panels, .records-panel { display: grid; gap: 18px; min-width: 0; }
+.dashboard-context-card { min-width: 0; }
+.dashboard-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 18px; margin: 20px 0; }
+.dashboard-facts > div { min-width: 0; padding: 12px 0; border-top: 1px solid var(--border); }
+.dashboard-facts dt, .diagnostic-facts dt { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.dashboard-facts dd, .diagnostic-facts dd { margin: 0; overflow-wrap: anywhere; }
+.dashboard-facts dd small { display: block; margin-top: 5px; font-weight: 400; }
+.dashboard-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+.dashboard-grid > .card { min-width: 0; }
+.dashboard-record, .diagnostic-record, .diagnostic-report { min-width: 0; padding: 13px 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.dashboard-record p, .diagnostic-record p, .diagnostic-report p { margin: 7px 0; font-size: 12px; }
+.dashboard-record > button { margin-top: 8px; }
+.dashboard-candidates { list-style: none; margin: 8px 0 14px; padding: 0; }
+.dashboard-candidates li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.dashboard-candidates li > div { min-width: 0; }
+.dashboard-candidates small { display: block; margin-top: 5px; overflow-wrap: anywhere; }
+.dashboard-candidates button { flex: 0 0 auto; }
+.dashboard-projects { grid-column: 1 / -1; }
+.read-state-inline { margin: 12px 0; padding: 12px; }
+.read-state-inline p { margin: 7px 0; font-size: 12px; }
+.stale-note { color: #765716; font-size: 12px; margin: 8px 0; }
+.empty-inline { color: var(--muted); font-size: 13px; padding: 12px 0; }
+.compact-notice { margin: 10px 0; padding: 10px 12px; font-size: 12px; }
+.records-filters .form-grid { align-items: end; }
+.records-filters label { margin: 8px 0; }
+.records-filter-actions { align-self: end; padding-bottom: 8px; }
+.record-event { grid-template-columns: minmax(110px, 180px) minmax(0, 1fr); }
+.record-event button.inline-link { min-height: auto; padding: 3px 8px; margin: 5px 8px 0 0; color: var(--accent); border: 0; background: transparent; font-size: 11px; }
+.records-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
+.records-pagination span { color: var(--muted); font-size: 12px; text-align: center; }
+.diagnostics-panel > p { max-width: 820px; }
+.diagnostic-checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 16px; margin: 14px 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.diagnostic-checks legend { padding: 0 8px; font-size: 12px; font-weight: 650; }
+.diagnostic-checks label { min-width: 0; margin: 4px 0; }
+.diagnostic-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; margin: 12px 0; }
+.diagnostic-facts > div { min-width: 0; padding: 9px 0; border-top: 1px solid var(--border); }
+.diagnostic-record.is-previous { background: #fbfaf7; padding: 14px; border: 1px solid #e7dfc7; border-radius: 6px; margin: 10px 0; }
+.diagnostic-operation { overflow-wrap: anywhere; margin-top: 14px; font-size: 12px; }
+.diagnostic-actions { justify-content: flex-end; margin-top: 12px; }
+.diagnostic-report { margin-top: 18px; }
+.diagnostic-report > .diagnostic-record { padding-left: 12px; border-left: 2px solid var(--border); }
+.quiet-link { display: block; text-align: center; text-decoration: none; }
+@media (max-width: 950px) {
+  .dashboard-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 650px) {
+  .dashboard-facts, .diagnostic-facts, .diagnostic-checks { grid-template-columns: 1fr; }
+  .dashboard-candidates li { align-items: stretch; flex-direction: column; }
+  .dashboard-candidates button { width: 100%; }
+  .record-event { grid-template-columns: 1fr; gap: 5px; }
+  .records-pagination { flex-wrap: wrap; justify-content: center; }
+  .records-pagination span { flex-basis: 100%; order: -1; }
+  .records-pagination button, .records-filter-actions button, .diagnostic-actions button { flex: 1 1 150px; }
+  .records-filter-actions, .diagnostic-actions { align-items: stretch; }
+  .dashboard-grid .panel-title, .dashboard-context-card .panel-title { align-items: flex-start; }
+}

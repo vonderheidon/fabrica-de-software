@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Artifact, AttemptDetail, AttemptResource, DeliveryDiff, DetailItem, DetailPage, DetailSection, EffectView, Question } from '#contracts';
 import { HttpError, requestJsonWithMetadata, requestText } from '../../api/http.js';
 import { QuestionDecisionCard } from './QuestionDecisionCard.js';
@@ -63,12 +63,33 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
   const actions = useAttemptActions(attemptId, attempt, attemptEtag, effectiveDeliveryId, delivery?.delivery.captureState === 'failed');
   const [confirmedResources, setConfirmedResources] = useState<Record<string, string>>({});
   const refreshDetail = useCallback(() => setReload((value) => value + 1), []);
+  const sectionIdentity = `${attemptId}:${selectedRound ?? ''}:${effectiveDeliveryId ?? ''}`;
+  const sectionIdentityRef = useRef('');
   useEffect(() => { setDiff({ loading: false, value: null, error: null }); setEvidence({}); }, [effectiveDeliveryId]);
+
+  useEffect(() => {
+    const onEvent = (event: Event): void => {
+      const detail = (event as CustomEvent<{ attemptId?: string; entity?: { type: string; id: string } }>).detail;
+      if (detail?.attemptId === attemptId || detail?.entity?.type === 'attempt' && detail.entity.id === attemptId) refreshDetail();
+    };
+    const onResync = (): void => refreshDetail();
+    window.addEventListener('factory-controller-event', onEvent);
+    window.addEventListener('factory-controller-resync', onResync);
+    return () => {
+      window.removeEventListener('factory-controller-event', onEvent);
+      window.removeEventListener('factory-controller-resync', onResync);
+    };
+  }, [attemptId, refreshDetail]);
 
   useEffect(() => {
     let active = true;
     const controllers = sections.map(() => new AbortController());
-    setSectionStates(emptySections());
+    if (sectionIdentityRef.current !== sectionIdentity) {
+      sectionIdentityRef.current = sectionIdentity;
+      setSectionStates(emptySections());
+    } else {
+      setSectionStates((current) => Object.fromEntries(sections.map((section) => [section, { ...sectionStateFor(current, section), loading: true }])) as Record<DetailSection, SectionState>);
+    }
     const sectionQuery = (section: DetailSection): string => {
       const query = new URLSearchParams({ section, limit: '25' });
       if (selectedRound) query.set('roundId', selectedRound);
@@ -87,7 +108,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       }
     }));
     return () => { active = false; controllers.forEach((controller) => controller.abort()); };
-  }, [attemptId, selectedRound, effectiveDeliveryId, reload]);
+  }, [attemptId, selectedRound, effectiveDeliveryId, reload, sectionIdentity]);
 
   function loadMore(section: DetailSection): void {
     const current = sectionStateFor(sectionStates, section);
@@ -157,7 +178,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attemptError && <div className="queue-error" role="alert"><h3>Falha ao consultar esta tentativa</h3><p>{attemptError}</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar novamente</button></div>}
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
-      <div className="attempt-detail-heading"><div className="eyebrow">Tentativa · <span className="mono">{attempt.id}</span></div><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a></div>
+      <div className="attempt-detail-heading"><div className="eyebrow">Tentativa · <span className="mono">{attempt.id}</span></div><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Registros e diagnóstico</a></div></div>
       <div className="attempt-version-controls"><label htmlFor="attempt-round">Rodada
         <select id="attempt-round" value={selectedRoundValue} onChange={(event) => {
           const value = event.currentTarget.value;
@@ -182,6 +203,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         </div>
       </section>
 
+      {Object.entries(actions.actionErrors).map(([key, message]) => <div className="queue-error" role="alert" key={key}><p>{message}</p><p>{key.startsWith('copy:') ? 'A falha permanece visível até uma nova tentativa de cópia.' : 'A falha permanece visível até uma nova tentativa desta ação ser aceita.'}</p></div>)}
       {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Atualizar capacidades</button></div>}
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
       {actions.resources && <section className="attempt-axis-card card" aria-labelledby="attempt-resources-title">
@@ -261,6 +283,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         return <section className="card attempt-section" key={section} aria-labelledby={`attempt-section-${section}`}>
           <div className="line"><h3 id={`attempt-section-${section}`}>{labels[section]}</h3>{section === 'criteria' && deliveryState === 'not-captured' && <span className="pill neutral">Sem versão</span>}</div>
           {sectionState.loading && !sectionState.page && <p className="muted" role="status">Consultando {(labels[section] ?? section).toLocaleLowerCase('pt-BR')}…</p>}
+          {sectionState.loading && sectionState.page && <p className="stale-note" role="status">Atualizando; os registros da mesma versão continuam visíveis.</p>}
           {sectionState.error && <div className="queue-error" role="alert"><p>{sectionState.error}</p><button type="button" onClick={() => retrySection(section)} disabled={sectionState.loading}>Tentar carregar novamente</button></div>}
           {section === 'reviews' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'A revisão não foi realizada porque esta rodada ainda não tem uma versão capturada.' : 'Esta versão ainda não tem parecer de revisão.'}</p>}
           {section === 'findings' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">A revisão desta versão não registrou achados.</p>}

@@ -23,7 +23,7 @@ export type HashRoute = {
   error: string | null;
 };
 
-const contextIds = ['projectId', 'attemptId', 'deliveryId', 'roundId', 'creationId', 'questionId'] as const;
+const contextIds = ['projectId', 'attemptId', 'deliveryId', 'roundId', 'creationId', 'questionId', 'operationId'] as const;
 
 export function routeIdentity(route: HashRoute): string {
   return JSON.stringify([route.tab, ...contextIds.map((key) => route.params.get(key) ?? ''), route.params.get('filter') ?? '']);

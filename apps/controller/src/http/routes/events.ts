@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { EventListQuery, EventPage, EventQuery, ErrorResponse } from '#contracts';
+import { EventListQuery, EventPage, EventStreamQuery, ErrorResponse } from '#contracts';
 import type { Storage } from '../../modules/storage/index.js';
 import { httpLimits, type installSecurity } from '../security/index.js';
 import { HttpError } from '../errors.js';
@@ -12,26 +12,29 @@ export function installEventRoutes(base: FastifyInstance, storage: Storage, secu
   const app = base.withTypeProvider<TypeBoxTypeProvider>();
   app.get('/api/v1/events', { schema: { querystring: EventListQuery, response: { 200: EventPage, 400: ErrorResponse, 401: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse } } }, async (request) => {
     const settings = storage.getSettings();
-    const scope = createHash('sha256').update(JSON.stringify([settings.installationId, settings.accountId, request.query.operationId ?? null, 'seq:asc'])).digest('hex');
+    const scope = createHash('sha256').update(JSON.stringify([settings.installationId, settings.accountId, request.query.operationId ?? null,
+      request.query.projectId ?? null, request.query.attemptId ?? null, 'seq:asc:v2'])).digest('hex');
     let cursor = '0';
+    let through: string | undefined;
     if (request.query.cursor) {
       const decoded = Buffer.from(request.query.cursor, 'base64url').toString('utf8');
       const parts = decoded.split(':');
-      if (!/^(0|[1-9][0-9]{0,15})$/.test(parts[0] ?? '') || parts[1] !== scope || parts.length !== 2
+      if (!/^(0|[1-9][0-9]{0,15})$/.test(parts[0] ?? '') || parts[1] !== scope || parts.length !== 3
+        || !/^(0|[1-9][0-9]{0,15})$/.test(parts[2] ?? '')
         || Buffer.from(decoded).toString('base64url') !== request.query.cursor) {
         throw new HttpError(400, 'CURSOR_INVALID', 'Event cursor does not match the query scope.');
       }
       cursor = parts[0]!;
+      through = parts[2]!;
     }
-    const page = storage.getEvents({ ...request.query, cursor });
-    return { ...page, nextCursor: page.nextCursor ? Buffer.from(`${page.nextCursor}:${scope}`).toString('base64url') : null };
+    const page = storage.getEvents({ ...request.query, cursor }, through);
+    return { ...page, nextCursor: page.nextCursor ? Buffer.from(`${page.nextCursor}:${scope}:${page.eventCursor}`).toString('base64url') : null };
   });
-  app.get('/api/v1/events/stream', { schema: { querystring: EventQuery } }, async (request, reply) => {
+  // Fastify's handler deadline includes streaming; allow the bounded SSE lifetime to finish first.
+  app.get('/api/v1/events/stream', { handlerTimeout: httpLimits.streamLifetimeMs + httpLimits.handlerTimeoutMs, schema: { querystring: EventStreamQuery } }, async (request, reply) => {
     const header = request.headers['last-event-id'];
-    if (header !== undefined && (typeof header !== 'string' || !/^(0|[1-9][0-9]{0,15})$/.test(header))) {
-      throw new HttpError(400, 'CURSOR_INVALID', 'Last-Event-ID is invalid.');
-    }
-    let cursor = header ?? request.query.cursor ?? '0';
+    const initialCursor = header ?? request.query.cursor ?? '0';
+    let cursor = typeof initialCursor === 'string' ? initialCursor : '';
     const controller = new AbortController();
     const release = security.trackStream(request, controller);
     const deadline = globalThis.setTimeout(() => controller.abort(), httpLimits.streamLifetimeMs);
@@ -44,11 +47,17 @@ export function installEventRoutes(base: FastifyInstance, storage: Storage, secu
     };
     const body = Readable.from((async function* () {
       try {
+        if (!/^(0|[1-9][0-9]{0,15})$/.test(cursor) || !Number.isSafeInteger(Number(cursor))) {
+          yield 'event: resync\ndata: {"code":"EVENT_RESYNC_REQUIRED"}\n\n';
+          return;
+        }
         yield ': connected\n\n';
         while (!controller.signal.aborted) {
           const page = storage.getEvents({ ...request.query, cursor, limit: '100' });
           for (const event of page.items) {
-            yield `id: ${event.seq}\nevent: ${event.eventType}\ndata: ${JSON.stringify({ entity: { type: event.entityType, id: event.entityId }, revision: event.entityRevision, operationId: event.operationId, facts: event.facts })}\n\n`;
+            const data = JSON.stringify({ entity: { type: event.entityType, id: event.entityId }, revision: event.entityRevision, operationId: event.operationId, eventType: event.eventType,
+              ...(event.projectId ? { projectId: event.projectId } : {}), ...(event.attemptId ? { attemptId: event.attemptId } : {}), facts: event.facts });
+            yield `id: ${event.seq}\nevent: controller-event\ndata: ${data}\n\n`;
             cursor = event.seq;
           }
           if (page.hasMore) continue;

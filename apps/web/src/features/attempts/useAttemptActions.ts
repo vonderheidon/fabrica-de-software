@@ -10,7 +10,7 @@ type PassageInteraction = Static<typeof PassageInteractionSchema>;
 type OperationKind = 'cancel' | 'capture' | 'remove' | 'open-terminal' | 'open-folder';
 type ActionOperation = { kind: OperationKind; id: string; accepted: OperationAccepted | null; view: OperationView | null; uncertain: boolean };
 type Snapshot = { resources: AttemptResources | null; producerResult: ProducerResult; plans: Record<string, { value: RemovalPlan; etag: string | null }>; folders: Record<string, FolderSurface>; interactions: Record<string, PassageInteraction>; surfaceErrors: Record<string, string>; error: string | null };
-type ActionState = Snapshot & { operation: ActionOperation | null; busy: boolean; error: string | null; copied: string | null };
+type ActionState = Snapshot & { operation: ActionOperation | null; busy: boolean; actionErrors: Record<string, string>; copied: string | null };
 
 const emptySnapshot = (): Snapshot => ({ resources: null, producerResult: null, plans: {}, folders: {}, interactions: {}, surfaceErrors: {}, error: null });
 
@@ -19,7 +19,7 @@ function messageFor(error: unknown): string {
 }
 
 export function useAttemptActions(attemptId: string, attempt: AttemptDetail | null, attemptEtag: string | null, deliveryId: string | null, captureEligible: boolean) {
-  const [state, setState] = useState<ActionState>({ ...emptySnapshot(), operation: null, busy: false, error: null, copied: null });
+  const [state, setState] = useState<ActionState>({ ...emptySnapshot(), operation: null, busy: false, actionErrors: {}, copied: null });
   const commandIds = useRef(new Map<string, string>());
   const active = useRef(true);
   const refreshSequence = useRef(0);
@@ -94,17 +94,20 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
   const send = useCallback(async (key: string, kind: OperationKind, path: `/api/v1/${string}`, body: unknown, headers: Record<string, string> = {}): Promise<void> => {
     const id = commandIds.current.get(key) ?? crypto.randomUUID();
     commandIds.current.set(key, id);
-    setState(current => ({ ...current, busy: true, error: null, operation: null }));
+    setState(current => ({ ...current, busy: true, operation: null }));
     try {
       const { data } = await requestJsonWithMetadata<OperationAccepted>(path, { method: 'POST', headers: { ...headers, 'Idempotency-Key': id }, body: JSON.stringify(body) });
       if (data.operationId !== id) throw new Error('O recibo não corresponde à operação solicitada.');
-      setState(current => ({ ...current, busy: false, operation: { kind, id, accepted: data, view: null, uncertain: false } }));
+      setState(current => {
+        const actionErrors = { ...current.actionErrors };
+        delete actionErrors[key];
+        return { ...current, busy: false, actionErrors, operation: { kind, id, accepted: data, view: null, uncertain: false } };
+      });
       void refresh();
     } catch (reason: unknown) {
       const error = reason instanceof HttpError && reason.status < 500 ? messageFor(reason) : null;
       if (error) commandIds.current.delete(key);
-      setState(current => ({ ...current, busy: false, error, operation: error ? current.operation : { kind, id, accepted: null, view: null, uncertain: true } }));
-      if (!error) setState(current => ({ ...current, operation: { kind, id, accepted: null, view: null, uncertain: true } }));
+      setState(current => ({ ...current, busy: false, actionErrors: { ...current.actionErrors, [key]: messageFor(reason) }, operation: error ? current.operation : { kind, id, accepted: null, view: null, uncertain: true } }));
     }
   }, [refresh]);
 
@@ -137,9 +140,13 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
   const copyReference = useCallback(async (key: string, reference: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(reference);
-      setState(current => ({ ...current, copied: key, error: null }));
+      setState(current => {
+        const actionErrors = { ...current.actionErrors };
+        delete actionErrors[`copy:${key}`];
+        return { ...current, copied: key, actionErrors };
+      });
     } catch {
-      setState(current => ({ ...current, copied: null, error: 'A cópia foi recusada pelo navegador. Selecione a referência exibida e copie manualmente.' }));
+      setState(current => ({ ...current, copied: null, actionErrors: { ...current.actionErrors, [`copy:${key}`]: 'A cópia foi recusada pelo navegador. Selecione a referência exibida e copie manualmente.' } }));
     }
   }, []);
 

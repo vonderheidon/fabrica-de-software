@@ -311,6 +311,7 @@ describe('durable operation HTTP boundary', () => {
     const resync = await app.inject({ url: '/api/v1/events/stream?cursor=99', headers: readHeaders });
     expect(resync.headers['content-type']).toBe('text/event-stream');
     expect(resync.body).toContain('event: resync');
-    expect((await app.inject({ url: '/api/v1/events/stream', headers: { ...readHeaders, 'last-event-id': 'SYNTHETIC_SECRET' } })).statusCode).toBe(400);
+    const invalidReconnect = await app.inject({ url: '/api/v1/events/stream', headers: { ...readHeaders, 'last-event-id': 'SYNTHETIC_SECRET' } });
+    expect(invalidReconnect.statusCode).toBe(200); expect(invalidReconnect.body).toContain('event: resync'); expect(invalidReconnect.body).not.toContain('SYNTHETIC_SECRET');
   });
 });

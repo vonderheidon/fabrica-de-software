@@ -7,6 +7,7 @@ export function createQueries(storage: Storage) {
     listAttempts: (query: AttemptListQuery) => storage.listAttempts(query),
     getAttempt: (id: string, query: AttemptDetailQuery) => storage.getAttemptDetail(id,query),
     getDelivery: (id: string, query: DeliveryDetailQuery) => storage.getDeliveryDetail(id,query),
+    getOperation: (query: import('#contracts').OperationSummaryQuery) => storage.getOperationSummary(query),
   };
 }
 export type Queries = ReturnType<typeof createQueries>;

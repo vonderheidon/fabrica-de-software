@@ -7,6 +7,12 @@ import type { ControllerConfiguration } from '../../config.js';
 import { HttpError } from '../errors.js';
 import type { Storage } from '../../modules/storage/index.js';
 
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    publicAsset?: boolean;
+  }
+}
+
 export const httpLimits = Object.freeze({
   bodyBytes: 16_384, headerBytes: 8192, headerCount: 64, connections: 128,
   connectionTimeoutMs: 10_000, requestTimeoutMs: 15_000, headersTimeoutMs: 10_000,
@@ -48,6 +54,7 @@ export function installSecurity(app: FastifyInstance, configuration: ControllerC
     return undefined;
   };
   app.addHook('onRequest', async (request, reply) => {
+    const publicAsset = (request.method === 'GET' || request.method === 'HEAD') && request.routeOptions.config.publicAsset === true;
     reply.header('Cache-Control', 'no-store').header('X-Content-Type-Options', 'nosniff');
     if (request.raw.rawHeaders.length / 2 > httpLimits.headerCount) throw new HttpError(431, 'HEADERS_TOO_LARGE', 'Too many headers.');
     if (request.headers.host !== new URL(configuration.browserOrigin).host) {
@@ -57,7 +64,9 @@ export function installSecurity(app: FastifyInstance, configuration: ControllerC
     if (origin !== undefined && origin !== configuration.browserOrigin) {
       throw new HttpError(403, 'ORIGIN_NOT_ALLOWED', 'Origin is not allowed.');
     }
-    if (request.headers['sec-fetch-site'] !== undefined && request.headers['sec-fetch-site'] !== 'same-origin') {
+    const fetchSite = request.headers['sec-fetch-site'];
+    // Address-bar navigation has no initiating origin; only public files allow it.
+    if (fetchSite !== undefined && fetchSite !== 'same-origin' && !(publicAsset && fetchSite === 'none')) {
       throw new HttpError(403, 'FETCH_SITE_NOT_ALLOWED', 'Fetch context is not allowed.');
     }
     if (Date.now() - windowStart >= 60_000) { windowStart = Date.now(); bootstrapCount = 0; requestCount = 0; }
@@ -80,7 +89,7 @@ export function installSecurity(app: FastifyInstance, configuration: ControllerC
         reply.header('Retry-After', '60');
         throw new HttpError(429, 'BOOTSTRAP_RATE_LIMITED', 'Bootstrap limit reached.');
       }
-    } else if (!health) {
+    } else if (!health && !publicAsset) {
       const csrf = sessionFor(request);
       if (!csrf) throw new HttpError(401, 'SESSION_REQUIRED', 'A local session is required.');
       if (!['GET', 'HEAD'].includes(request.method) && !equalSecret(request.headers['x-csrf-token'], csrf)) {
@@ -126,7 +135,7 @@ export function commandHeaders(request: FastifyRequest) {
 
 export function sendOperationAccepted(reply: FastifyReply, requestId: string, storage: Storage, operationId: string) {
   const operation = storage.getOperation(operationId);
-  const durableUncertainAnswer = operation && ['scaffold.create', 'question.answer', 'resource.remove', 'folder.open', 'interaction.open', 'publication.complete', 'publication.reconcile', 'attempt.revalidate'].includes(operation.kind) && operation.receipt !== undefined;
+  const durableUncertainAnswer = operation && ['scaffold.create', 'scaffold.reconcile', 'question.answer', 'resource.remove', 'folder.open', 'interaction.open', 'publication.complete', 'publication.reconcile', 'attempt.revalidate'].includes(operation.kind) && operation.receipt !== undefined;
   if (!operation || (operation.state === 'unknown' && !durableUncertainAnswer)) throw new HttpError(503, 'OPERATION_NOT_DURABLE', 'Operation acceptance could not be confirmed.');
   const statusUrl = `/api/v1/operations/${operation.operationId}`;
   return reply.code(202).header('Location', statusUrl).send({

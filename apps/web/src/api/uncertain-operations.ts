@@ -1,4 +1,4 @@
-export type UncertainOperationKind = 'project-create' | 'project-register' | 'settings-save' | 'queue-toggle' | 'attempt-start' | 'attempt-decision' | 'attempt-cancel' | 'delivery-publish';
+export type UncertainOperationKind = 'project-create' | 'project-register' | 'scaffold-create' | 'scaffold-reconcile' | 'settings-save' | 'queue-toggle' | 'queue-enable' | 'queue-pause' | 'attempt-start' | 'attempt-decision' | 'attempt-cancel' | 'delivery-publish';
 
 export type UncertainOperation = {
   operationId: string;
@@ -7,7 +7,7 @@ export type UncertainOperation = {
 };
 
 const storageKey = 'factory.uncertain-operations.v1';
-const kinds: readonly UncertainOperationKind[] = ['project-create', 'project-register', 'settings-save', 'queue-toggle', 'attempt-start', 'attempt-decision', 'attempt-cancel', 'delivery-publish'];
+const kinds: readonly UncertainOperationKind[] = ['project-create', 'project-register', 'scaffold-create', 'scaffold-reconcile', 'settings-save', 'queue-toggle', 'queue-enable', 'queue-pause', 'attempt-start', 'attempt-decision', 'attempt-cancel', 'delivery-publish'];
 
 function isUncertainOperation(value: unknown): value is UncertainOperation {
   if (typeof value !== 'object' || value === null) return false;
