@@ -7,6 +7,7 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createGitHub } from '../../apps/controller/src/modules/github/index.js';
+import { createWorkspaces } from '../../apps/controller/src/modules/workspaces/index.js';
 import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
 import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
 
@@ -98,6 +99,56 @@ describe('authorized queue changes', () => {
 });
 
 describe('durable scheduler', () => {
+  it.each(['account', 'assignee', 'status'])('applies existing authority governance to an automatic attempt after %s changes', async kind => {
+    const { f, queue } = await fixture(); await f.pipeline.close();
+    const github = { ...createGitHub(), ...f.github, getRepository: vi.fn(async () => complete(structuredClone(f.issue.repository))),
+      mutateEffect: vi.fn(async () => ({ state: 'failed_known' as const, receipt: null, reason: 'TEST_PROJECTION_FAILED', retryAtMs: null })) };
+    const workspaces = { ...createWorkspaces({ github }), ...f.workspaces };
+    const verification = { verifyDelivery: vi.fn(async () => {}), getArtifact: vi.fn(async () => { throw new Error('Unused fixture capability'); }) };
+    f.pipeline = createPipeline({ ...f.dependencies, github, queue, workspaces, publication: { github, workspaces, verification } });
+    const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
+    expect(first).toBeDefined(); expect(f.execution.startPassage).toHaveBeenCalledOnce();
+    expect(f.storage.getEffects(first.id)[0]?.state).toBe('failed_known');
+    const calls = github.mutateEffect.mock.calls.length;
+    if (kind === 'account') vi.mocked(github.getIdentity).mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));
+    if (kind === 'assignee') f.issue.assignees = [];
+    if (kind === 'status') f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
+    clock.mockReturnValue(base + 15_001); await f.pipeline.tick(); await f.pipeline.drain();
+    const current = f.storage.getAttempt(first.id);
+    if (kind === 'assignee') { expect(current.result).toBe('cancelled'); expect(f.execution.cancelAttempt).toHaveBeenCalled(); }
+    else expect(current.suspension).toBe(kind === 'account' ? 'ACCOUNT_CHANGED' : 'KANBAN_DIVERGENCE');
+    if (kind === 'account') expect(f.db.prepare('SELECT dispatch_paused FROM controller_authority').get()).toEqual({ dispatch_paused: 1 });
+    expect(github.mutateEffect).toHaveBeenCalledTimes(calls); expect(f.storage.listAttempts({}).items).toHaveLength(1);
+    expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 1 });
+  });
+
+  it('does not execute the same residual Ready cycle through a duplicate project registration', async () => {
+    const { f, automation } = await fixture(); const duplicate = f.register(); automation(duplicate, true);
+    const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
+    expect(f.storage.getQueueCycle('ACCOUNT_test', duplicate, f.issue.id)?.consumedAttemptId).toBe(first.id);
+    expect(f.storage.getQueueCycle('ACCOUNT_test', f.projectId, f.issue.id)?.consumedAttemptId).toBe(first.id);
+    f.persistence.recordCancellation(first.id, randomUUID()); clock.mockReturnValue(base + 15_001);
+    await f.pipeline.tick(); await f.pipeline.drain(); expect(f.storage.listAttempts({}).items).toHaveLength(1);
+    expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 1 });
+  });
+
+  it('enforces automatic account concurrency in SQLite even for a different issue', async () => {
+    const { f } = await fixture(); await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
+    const operationId = f.storage.getAttempt(first.id).operationId;
+    expect(f.db.prepare('SELECT source FROM attempts WHERE id=?').get(first.id)).toEqual({ source: 'automatic' });
+    const duplicate = () => f.db.transaction(() => {
+      const op = randomUUID(); const id = randomUUID();
+      f.db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
+        SELECT ?,installation_id,account_id,operation_kind,resource_type,?,request_hash,expected_revision_json,receipt_json FROM operation_requests WHERE operation_id=?`).run(op, id, operationId);
+      f.db.prepare(`INSERT INTO attempts(id,operation_id,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,issue_id,capture_json,phase,suspension,diagnostic,created_at_ms,updated_at_ms,source)
+        SELECT ?,?,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,'OTHER_ISSUE',capture_json,'preparing',NULL,NULL,created_at_ms,updated_at_ms,'automatic' FROM attempts WHERE id=?`).run(id, op, first.id);
+    })();
+    expect(duplicate).toThrow('UNIQUE constraint failed: attempts.account_id');
+    expect(f.storage.listAttempts({}).items).toHaveLength(1);
+  });
+
   it.each(['queue_consumptions', 'rounds', 'events'])('rolls back consumption and attempt together on %s failure', async table => {
     const { f } = await fixture();
     const condition = table === 'events' ? " WHEN NEW.event_type='attempt.accepted'" : '';

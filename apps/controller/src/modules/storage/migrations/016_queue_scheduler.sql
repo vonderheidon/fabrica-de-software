@@ -1,7 +1,11 @@
-ALTER TABLE attempts ADD COLUMN source TEXT NOT NULL DEFAULT 'manual' CHECK(source IN ('manual','automatic','retry'));
+-- Historical execution source was not recorded; NULL preserves that uncertainty.
+ALTER TABLE attempts ADD COLUMN source TEXT CHECK(source IN ('manual','automatic','retry'));
 CREATE UNIQUE INDEX attempts_active_automatic_account ON attempts(account_id) WHERE source='automatic' AND result IS NULL;
+CREATE INDEX attempts_issue_history ON attempts(account_id,repository_id,issue_id,created_at_ms DESC,id DESC);
 CREATE TRIGGER attempts_source_immutable BEFORE UPDATE OF source ON attempts
-WHEN NEW.source<>OLD.source BEGIN SELECT RAISE(ABORT,'attempt source is immutable'); END;
+WHEN NEW.source IS NOT OLD.source BEGIN SELECT RAISE(ABORT,'attempt source is immutable'); END;
+CREATE TRIGGER attempts_source_required BEFORE INSERT ON attempts
+WHEN NEW.source IS NULL BEGIN SELECT RAISE(ABORT,'new attempts require execution source'); END;
 
 ALTER TABLE queue_cycles ADD COLUMN ready_exit_observed_at_ms INTEGER CHECK(ready_exit_observed_at_ms IS NULL OR ready_exit_observed_at_ms>=0);
 ALTER TABLE queue_cycles ADD COLUMN ready_return_observed_at_ms INTEGER CHECK(ready_return_observed_at_ms IS NULL OR ready_return_observed_at_ms>=0);

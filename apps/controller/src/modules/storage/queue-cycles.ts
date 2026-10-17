@@ -78,4 +78,10 @@ export function consumeQueueCycle(db: Database.Database, accountId: string, proj
     SELECT ?,c.account_id,c.project_id,a.repository_id,c.issue_id,c.cycle_number,c.ready_exit_observed_at_ms,c.ready_return_observed_at_ms,?,a.id
     FROM queue_cycles c JOIN attempts a ON a.id=? WHERE c.account_id=? AND c.project_id=? AND c.issue_id=?`)
     .run(randomUUID(), Date.now(), attemptId, accountId, projectId, issueId);
+  // A duplicate project registration cannot turn the same observed Ready into a new job.
+  db.prepare(`UPDATE queue_cycles SET consumed_attempt_id=?,updated_at_ms=? WHERE account_id=? AND issue_id=?
+    AND last_ready=1 AND consumed_attempt_id IS NULL AND project_id IN (
+      SELECT p.id FROM projects p JOIN project_revisions r ON r.id=p.current_revision_id
+      JOIN attempts a ON a.id=? AND a.repository_id=r.repository_id)`)
+    .run(attemptId, Date.now(), accountId, issueId, attemptId);
 }

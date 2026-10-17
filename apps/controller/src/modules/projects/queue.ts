@@ -93,8 +93,8 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       for (const item of items.data ?? []) {
         const projectLabel = projectSummary.name;
         const cycle = item.contentId && settings.view.settings.accountId ? storage.getQueueCycle(settings.view.settings.accountId, projectSummary.id, item.contentId) : null;
-        const prior = cycle ? (cycle.consumedAttemptId ? { id: cycle.consumedAttemptId, active: storage.getAttempt(cycle.consumedAttemptId).result === null } : undefined)
-          : item.contentId ? storage.getLatestIssueAttempt(configuration.source.repositoryId, item.contentId) : null;
+        const prior = cycle?.consumedAttemptId ? { id: cycle.consumedAttemptId, active: storage.getAttempt(cycle.consumedAttemptId).result === null }
+          : (!cycle || cycle.cycleNumber === 1) && item.contentId ? storage.getLatestIssueAttempt(configuration.source.repositoryId, item.contentId) : null;
         const kind = item.kind;
         let eligible = false;
         let reasons: QueueItem['reasons'][number][] = [];
