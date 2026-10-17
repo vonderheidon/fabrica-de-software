@@ -409,10 +409,13 @@ export function createPipeline(deps: PipelineDependencies) {
         closed = true; clearInterval(timer); unsubscribe(); abort.abort(); waitingForAuthority.clear();
         closing = (async () => {
           try {
-            await Promise.all([...pending]);
-            const observations = await Promise.allSettled([...scopeReads.values()]);
-            if (observations.some(result => result.status === 'rejected')) deps.logFailure('SCOPE_OBSERVATION_UNAVAILABLE');
-            await execution.close();
+            // Revoke channels/answer waits before draining work that may await them.
+            const outcomes = await Promise.allSettled([execution.close(), (async () => {
+              await Promise.all([...pending]);
+              const observations = await Promise.allSettled([...scopeReads.values()]);
+              if (observations.some(result => result.status === 'rejected')) deps.logFailure('SCOPE_OBSERVATION_UNAVAILABLE');
+            })()]);
+            if (outcomes.some(result => result.status === 'rejected')) throw new ExecutionError('TRACKING_LOST');
           }
           finally { storage.interruptAttempts(); }
         })();

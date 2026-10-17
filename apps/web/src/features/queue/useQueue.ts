@@ -2,16 +2,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { QueueObservation } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 
+type QueueFailure = { message: string; requestId: string | null };
 export type QueueLoad =
-  | { status: 'loading'; observation: QueueObservation | null; etag: string | null }
+  | { status: 'loading'; observation: QueueObservation | null; etag: string | null; previousError: QueueFailure | null }
   | { status: 'ready'; observation: QueueObservation; etag: string | null }
   | { status: 'error'; observation: QueueObservation | null; etag: string | null; message: string; requestId: string | null };
 
 export function useQueue(projectId: string | null, enabled: boolean) {
-  const [load, setLoad] = useState<QueueLoad>({ status: 'loading', observation: null, etag: null });
+  const [load, setLoad] = useState<QueueLoad>({ status: 'loading', observation: null, etag: null, previousError: null });
   const [reloadKey, setReloadKey] = useState(0);
   const [cursor, setCursor] = useState<string | null>(null);
   const [history, setHistory] = useState<Array<string | null>>([]);
+  const [pageNotice, setPageNotice] = useState('');
   const version = useRef(0);
   const readFailures = useRef(0);
   const refresh = useCallback(() => setReloadKey((current) => current + 1), []);
@@ -21,7 +23,8 @@ export function useQueue(projectId: string | null, enabled: boolean) {
     let active = true;
     const controller = new AbortController();
     const currentVersion = ++version.current;
-    setLoad((current) => ({ status: 'loading', observation: current.observation, etag: current.etag }));
+    setLoad((current) => ({ status: 'loading', observation: current.observation, etag: current.etag,
+      previousError: current.status === 'error' ? { message: current.message, requestId: current.requestId } : current.status === 'loading' ? current.previousError : null }));
     const params = new URLSearchParams({ limit: '25' });
     if (projectId) params.set('projectId', projectId);
     if (cursor) params.set('cursor', cursor);
@@ -32,6 +35,13 @@ export function useQueue(projectId: string | null, enabled: boolean) {
       }
     }).catch((error: unknown) => {
       if (!active || currentVersion !== version.current || (error instanceof DOMException && error.name === 'AbortError')) return;
+      if (cursor && error instanceof HttpError && error.status === 409) {
+        setPageNotice('A ordem ou o conjunto da fila mudou. A consulta foi reiniciada na primeira página; a seleção continua vinculada aos IDs observados.');
+        setHistory([]);
+        setCursor(null);
+        setReloadKey((current) => current + 1);
+        return;
+      }
       readFailures.current = Math.min(readFailures.current + 1, 6);
       setLoad((current) => ({ status: 'error', observation: current.observation, etag: current.etag,
         message: error instanceof HttpError ? error.message : 'Não foi possível consultar a fila.',
@@ -44,11 +54,18 @@ export function useQueue(projectId: string | null, enabled: boolean) {
     if (!enabled) return;
     const onUpdated = (): void => refresh();
     window.addEventListener('factory-queue-updated', onUpdated);
+    window.addEventListener('factory-controller-event', onUpdated);
+    window.addEventListener('factory-controller-resync', onUpdated);
     const polling = load.observation?.polling;
     const delay = load.status === 'ready' && polling ? Math.max(1, polling.nextPollAtMs - Date.now())
       : Math.min(polling?.backoffMaxMs ?? 60_000, (polling?.intervalMs ?? 15_000) * 2 ** readFailures.current);
     const timer = load.status === 'loading' ? undefined : window.setTimeout(refresh, Math.min(delay, 2_147_483_647));
-    return () => { window.clearTimeout(timer); window.removeEventListener('factory-queue-updated', onUpdated); };
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('factory-queue-updated', onUpdated);
+      window.removeEventListener('factory-controller-event', onUpdated);
+      window.removeEventListener('factory-controller-resync', onUpdated);
+    };
   }, [enabled, refresh, load.status, load.observation]);
 
   const nextPage = useCallback(() => {
@@ -66,7 +83,7 @@ export function useQueue(projectId: string | null, enabled: boolean) {
       return next;
     });
   }, []);
-  const resetPages = useCallback(() => { setHistory([]); setCursor(null); refresh(); }, [refresh]);
+  const resetPages = useCallback(() => { setHistory([]); setCursor(null); setPageNotice(''); refresh(); }, [refresh]);
 
-  return { load, refresh, nextPage, previousPage, resetPages, canGoBack: history.length > 0 };
+  return { load, refresh, nextPage, previousPage, resetPages, pageNotice, canGoBack: history.length > 0 };
 }

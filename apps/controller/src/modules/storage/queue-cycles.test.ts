@@ -10,7 +10,7 @@ describe('durable Ready cycles', () => {
     database = new Database(':memory:');
     database.exec(`CREATE TABLE attempts(id TEXT PRIMARY KEY,account_id TEXT NOT NULL,project_id TEXT NOT NULL,issue_id TEXT NOT NULL);
       CREATE TABLE queue_cycles(ready_exit_observed_at_ms INTEGER,ready_return_observed_at_ms INTEGER,account_id TEXT NOT NULL,project_id TEXT NOT NULL,issue_id TEXT NOT NULL,cycle_number INTEGER NOT NULL,
-        last_ready INTEGER NOT NULL,consumed_attempt_id TEXT,updated_at_ms INTEGER NOT NULL,PRIMARY KEY(account_id,project_id,issue_id));
+        last_ready INTEGER NOT NULL,consumed_attempt_id TEXT,updated_at_ms INTEGER NOT NULL,last_eligible INTEGER,observed_ordinal INTEGER,PRIMARY KEY(account_id,project_id,issue_id));
       INSERT INTO attempts(id,account_id,project_id,issue_id) VALUES ('attempt-first','account-one','project-one','issue-one');
       INSERT INTO queue_cycles(account_id,project_id,issue_id,cycle_number,last_ready,consumed_attempt_id,updated_at_ms)
         VALUES ('account-one','project-one','issue-one',1,1,'attempt-first',0);`);

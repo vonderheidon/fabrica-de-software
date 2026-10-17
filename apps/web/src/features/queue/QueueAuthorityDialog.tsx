@@ -1,29 +1,41 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AttemptDetail, OperationAccepted, OperationView, QueueItem, QueueObservation } from '#contracts';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 
 type DetailState = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; detail: AttemptDetail; etag: string };
+type CurrentIssueState = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; item: QueueItem | null };
 
 export function QueueAuthorityDialog({ attemptId, onClose, onChanged }: { attemptId: string; onClose: () => void; onChanged: () => void }) {
   const [state, setState] = useState<DetailState>({ status: 'loading' });
-  const [currentIssue, setCurrentIssue] = useState<QueueItem | null>(null);
+  const [currentIssue, setCurrentIssue] = useState<CurrentIssueState>({ status: 'loading' });
   const [action, setAction] = useState<'idle' | 'submitting' | 'accepted' | 'failed'>('idle');
   const [message, setMessage] = useState('');
+  const requestVersion = useRef(0);
 
   async function reload(): Promise<void> {
+    const version = ++requestVersion.current;
     setState({ status: 'loading' });
+    setCurrentIssue({ status: 'loading' });
     try {
       const { data, etag } = await requestJsonWithMetadata<AttemptDetail>(`/api/v1/attempts/${encodeURIComponent(attemptId)}`);
       if (!etag) throw new Error('O controlador não retornou a revisão da tentativa.');
+      if (version !== requestVersion.current) return;
       setState({ status: 'ready', detail: data, etag });
       const params = new URLSearchParams({ projectId: data.projectId, limit: '100' });
-      void findCurrentIssue(params, data.issue.id).then(setCurrentIssue).catch(() => setCurrentIssue(null));
+      void findCurrentIssue(params, data.issue.id).then((item) => {
+        if (version === requestVersion.current) setCurrentIssue({ status: 'ready', item });
+      }).catch((error: unknown) => {
+        if (version === requestVersion.current) setCurrentIssue({ status: 'error', message: error instanceof HttpError ? error.message : 'Não foi possível confirmar uma observação completa da issue.' });
+      });
     } catch (error: unknown) {
-      setState({ status: 'error', message: error instanceof HttpError ? error.message : 'Não foi possível carregar a autoridade atual da tentativa.' });
+      if (version === requestVersion.current) setState({ status: 'error', message: error instanceof HttpError ? error.message : 'Não foi possível carregar a autoridade atual da tentativa.' });
     }
   }
 
-  useEffect(() => { void reload(); }, [attemptId]);
+  useEffect(() => {
+    void reload();
+    return () => { requestVersion.current += 1; };
+  }, [attemptId]);
 
   async function run(kind: 'revalidate' | 'cancel'): Promise<void> {
     if (state.status !== 'ready' || action === 'submitting') return;
@@ -82,9 +94,9 @@ export function QueueAuthorityDialog({ attemptId, onClose, onChanged }: { attemp
       <dl className="queue-authority-values">
         <div><dt>Motivo observado</dt><dd>{authority?.reason ?? 'Nenhuma divergência registrada'}</dd></div>
         <div><dt>Responsável esperado</dt><dd className="mono">{state.detail.expectedAccountId}</dd></div>
-        <div><dt>Responsáveis observados</dt><dd>{currentIssue?.assignees.length ? currentIssue.assignees.map((assignee) => `@${assignee.login} · ${assignee.id}`).join(', ') : 'Consulta atual indisponível ou sem assignee'}</dd></div>
+        <div><dt>Responsáveis observados</dt><dd>{currentIssue.status === 'loading' ? 'Consultando leitura atual…' : currentIssue.status === 'error' ? `Não confirmado · ${currentIssue.message}` : currentIssue.item ? currentIssue.item.assignees.length ? currentIssue.item.assignees.map((assignee) => `@${assignee.login} · ${assignee.id}`).join(', ') : 'Nenhum responsável observado' : 'Issue não localizada na consulta completa do Project'}</dd></div>
         <div><dt>Status esperado</dt><dd className="mono">{authority?.expectedStatusId ?? 'Não aplicável'}</dd></div>
-        <div><dt>Status observado</dt><dd>{currentIssue?.status ?? authority?.observedStatusId ?? 'Não confirmado'}{authority?.observedStatusId ? ` · ${authority.observedStatusId}` : ''}</dd></div>
+        <div><dt>Status observado</dt><dd>{currentIssue.status === 'ready' && currentIssue.item ? currentIssue.item.status ?? 'Sem valor de Status observado' : authority?.observedStatusId ?? (currentIssue.status === 'error' ? `Não confirmado · ${currentIssue.message}` : 'Não confirmado')}{authority?.observedStatusId ? ` · ${authority.observedStatusId}` : ''}</dd></div>
         <div><dt>Observado em</dt><dd>{authority ? new Date(authority.observedAtMs).toLocaleString('pt-BR') : 'Ainda não observado'}</dd></div>
       </dl>
       {authority?.reason && <div className="notice"><b>{divergence ? 'Corrija o Status no GitHub' : 'A autoridade precisa ser reconciliada'}</b><p>{authority.recovery}</p><p>A fábrica não altera a responsabilidade nem move o card para resolver divergências.</p></div>}
@@ -104,7 +116,8 @@ async function findCurrentIssue(params: URLSearchParams, issueId: string): Promi
   do {
     if (cursor) params.set('cursor', cursor); else params.delete('cursor');
     const queue = await requestJson<QueueObservation>(`/api/v1/queue?${params.toString()}`);
-    const item = queue.page.items.find((candidate) => candidate.issueId === issueId);
+    if (!queue.complete) throw new Error('A consulta da fila está parcial; responsáveis e Status atuais não foram confirmados.');
+    const item = queue.page.items.find((candidate) => candidate.projectId === params.get('projectId') && candidate.issueId === issueId);
     if (item) return item;
     cursor = queue.page.hasMore ? queue.page.nextCursor : null;
   } while (cursor);

@@ -39,11 +39,11 @@ export function recordQueueObservations(db: Database.Database, observations: rea
   if (!observations.length) return;
   const write = db.transaction(() => {
     const now = Date.now();
-    for (const observation of observations) {
+    for (const [ordinal, observation] of observations.entries()) {
       const current = readQueueCycle(db, observation.accountId, observation.projectId, observation.issueId);
       if (!current) {
-        db.prepare(`INSERT INTO queue_cycles(account_id,project_id,issue_id,cycle_number,last_ready,consumed_attempt_id,updated_at_ms)
-          VALUES (?,?,?,1,?,?,?)`).run(observation.accountId, observation.projectId, observation.issueId, Number(observation.ready), observation.existingAttemptId, now);
+        db.prepare(`INSERT INTO queue_cycles(account_id,project_id,issue_id,cycle_number,last_ready,consumed_attempt_id,updated_at_ms,last_eligible,observed_ordinal)
+          VALUES (?,?,?,1,?,?,?,?,?)`).run(observation.accountId, observation.projectId, observation.issueId, Number(observation.ready), observation.existingAttemptId, now, Number(observation.eligible), ordinal);
         continue;
       }
       let cycleNumber = current.cycleNumber;
@@ -55,11 +55,11 @@ export function recordQueueObservations(db: Database.Database, observations: rea
         ready = true;
         if (consumedAttemptId === null && cycleNumber === 1 && observation.existingAttemptId) consumedAttemptId = observation.existingAttemptId;
       }
-      db.prepare(`UPDATE queue_cycles SET cycle_number=?,last_ready=?,consumed_attempt_id=?,updated_at_ms=?,
+      db.prepare(`UPDATE queue_cycles SET cycle_number=?,last_ready=?,consumed_attempt_id=?,updated_at_ms=?,last_eligible=?,observed_ordinal=?,
         ready_exit_observed_at_ms=CASE WHEN ?=0 AND last_ready=1 THEN ? ELSE ready_exit_observed_at_ms END,
         ready_return_observed_at_ms=CASE WHEN ?>cycle_number THEN ? ELSE ready_return_observed_at_ms END
         WHERE account_id=? AND project_id=? AND issue_id=?`)
-        .run(cycleNumber, Number(ready), consumedAttemptId, now, Number(observation.ready), now, cycleNumber, now, observation.accountId, observation.projectId, observation.issueId);
+        .run(cycleNumber, Number(ready), consumedAttemptId, now, Number(observation.eligible), ordinal, Number(observation.ready), now, cycleNumber, now, observation.accountId, observation.projectId, observation.issueId);
     }
   });
   try { write.immediate(); }

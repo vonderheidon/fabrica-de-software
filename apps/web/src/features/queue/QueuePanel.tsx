@@ -10,12 +10,18 @@ const reasonLabels: Record<QueueItem['reasons'][number], string> = {
   ASSIGNEE_MISSING: 'Sem responsável', ASSIGNEE_OTHER: 'Responsável de outra conta', MULTIPLE_ASSIGNEES: 'Múltiplos responsáveis',
 };
 
-export function QueuePanel({ load, onRefresh, onNextPage, onPreviousPage, canGoBack, onEnable, onPause, onAuthority }: {
+export function QueuePanel({ load, pageNotice, pauseNotice, pauseOperationId, pauseUncertain, onConsultPause, onRefresh, onNextPage, onPreviousPage, canGoBack, pausing, onEnable, onPause, onAuthority }: {
   load: QueueLoad;
+  pageNotice: string;
+  pauseNotice: string;
+  pauseOperationId: string | null;
+  pauseUncertain: boolean;
+  onConsultPause: () => void;
   onRefresh: () => void;
   onNextPage: () => void;
   onPreviousPage: () => void;
   canGoBack: boolean;
+  pausing: boolean;
   onEnable: (trigger: HTMLElement) => void;
   onPause: () => void;
   onAuthority: (attemptId: string, trigger: HTMLElement) => void;
@@ -28,7 +34,7 @@ export function QueuePanel({ load, onRefresh, onNextPage, onPreviousPage, canGoB
     <div className="card queue-summary-card">
       <div className="line queue-heading">
         <div><span className="eyebrow">Seleção automática</span><h2 id="queue-title">Fila Ready</h2></div>
-        <span className={`pill ${observation?.enabled ? '' : 'neutral'}`} aria-live="polite">{load.status === 'ready' ? queueState : observation ? `${queueState} · dado desatualizado` : 'Estado não observado'}</span>
+        <span className={`pill ${pauseUncertain ? 'warn' : observation?.enabled ? '' : 'neutral'}`} aria-live="polite">{pauseUncertain ? 'Alteração de fila sem recibo' : load.status === 'ready' ? queueState : observation ? `${queueState} · dado desatualizado` : 'Estado não observado'}</span>
       </div>
       <p className="muted">A fila projeta o GitHub. Pausá-la impede novos inícios automáticos; uma tentativa ativa continua acompanhada.</p>
       <dl className="queue-facts">
@@ -43,18 +49,22 @@ export function QueuePanel({ load, onRefresh, onNextPage, onPreviousPage, canGoB
       <div className="row queue-actions">
         <button type="button" onClick={onRefresh}>Revalidar fila</button>
         {observation?.enabled
-          ? <button type="button" className="danger-button" onClick={onPause} disabled={!canPause}>Pausar novos inícios</button>
+          ? <button type="button" className="danger-button" onClick={onPause} disabled={!canPause || pausing || pauseUncertain}>{pausing ? 'Aguardando recibo de pausa…' : 'Pausar novos inícios'}</button>
           : <button type="button" className="primary" onClick={(event) => onEnable(event.currentTarget)} disabled={!observation?.complete || !observation.valid || load.etag === null}>Habilitar fila</button>}
+        {pauseUncertain && <button type="button" onClick={onConsultPause} disabled={pausing}>Consultar operação</button>}
       </div>
+      {pauseNotice && <div className="queue-error" role={pauseUncertain ? 'alert' : 'status'}><p>{pauseNotice}</p>{pauseOperationId && <small className="mono">Operação {pauseOperationId}</small>}</div>}
       {load.status === 'loading' && <p className="queue-inline-status" role="status">Atualizando a observação da fila…</p>}
+      {load.status === 'loading' && load.previousError && <div className="queue-error" role="alert"><b>Última consulta falhou</b><p>{load.previousError.message}</p>{load.previousError.requestId && <small className="mono">Solicitação {load.previousError.requestId}</small>}<p>A observação abaixo é anterior e continua identificada como desatualizada.</p></div>}
       {load.status === 'error' && <div className="queue-error" role="alert"><b>Falha ao consultar a fila</b><p>{load.message}</p>{load.requestId && <small className="mono">Solicitação {load.requestId}</small>}<p>O erro não significa que não existam candidatos. A pausa continua disponível somente com estado e revisão confirmados.</p></div>}
     </div>
 
     <div className="card queue-list-card">
       <div className="line panel-title"><div><span className="eyebrow">Project observado</span><h2>Issues e elegibilidade</h2></div><span className="muted">{observation?.observedAtMs ? `Atualizado ${new Date(observation.observedAtMs).toLocaleTimeString('pt-BR')}` : 'Sem horário observado'}</span></div>
+      {pageNotice && <p className="queue-page-notice" role="status">{pageNotice}</p>}
       {observation?.page.items.length ? <div className="table-wrap"><table className="queue-table"><thead><tr><th>Ordem / issue</th><th>Responsável</th><th>Status</th><th>Elegibilidade</th><th>Consumo</th><th>Ação</th></tr></thead><tbody>
         {observation.page.items.map((item) => <tr key={`${item.projectId}:${item.itemId}`}>
-          <td><b>{String(item.order.position).padStart(2, '0')} · {item.number === null ? item.kind === 'draft' ? 'Rascunho' : item.kind === 'pull_request' ? 'Pull request' : 'Item inacessível' : `#${item.number}`} {item.title ?? 'Título indisponível'}</b><br /><small>{item.projectName} · {item.order.criterion}{item.order.value ? ` ${item.order.value}` : ''}</small>{item.url && <><br /><a href={item.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a></>}</td>
+          <td><b>{String(item.order.position).padStart(2, '0')} · {item.number === null ? item.kind === 'draft' ? 'Rascunho' : item.kind === 'pull_request' ? 'Pull request' : 'Item inacessível' : `#${item.number}`} {item.title ?? 'Título indisponível'}</b><br /><small>{item.projectName} · {item.order.criterion}{item.order.value !== null ? ` ${item.order.value}` : ''}</small>{item.url && <><br /><a href={item.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a></>}</td>
           <td>{item.assignees.length ? item.assignees.map((assignee) => `@${assignee.login}`).join(', ') : 'Sem responsável'}</td>
           <td>{item.status ?? 'Não observado'}</td>
           <td><span className={`pill ${item.eligible ? '' : 'warn'}`}>{item.eligible ? 'Elegível' : item.reasons.map((reason) => reasonLabels[reason]).join('; ') || 'Inelegível'}</span></td>
@@ -70,7 +80,7 @@ export function QueuePanel({ load, onRefresh, onNextPage, onPreviousPage, canGoB
 
 export function QueueEnableSummary({ observation }: { observation: QueueObservation }) {
   return <dl className="queue-enable-summary">
-    <div><dt>Quantidade elegível observada</dt><dd>{observation.eligibleTotal}</dd></div>
+    <div><dt>Quantidade elegível observada</dt><dd>{observation.eligibleTotal ?? 'Não confirmada'}</dd></div>
     <div><dt>Escopo</dt><dd>{observation.scope.kind === 'account' ? 'Conta' : `${observation.scope.projectIds.length} projeto(s)`}</dd></div>
     <div><dt>Modos por projeto</dt><dd>{observation.modesByProject.map((item) => modeLabel(item.mode)).join(', ') || 'Nenhum modo configurado'}</dd></div>
     <div><dt>Conta / host</dt><dd>{observation.account.login ? `@${observation.account.login}` : 'Conta indisponível'} · {observation.host.expected ?? 'Host não configurado'} ({observation.host.matches ? 'observado neste host' : 'host divergente'})</dd></div>

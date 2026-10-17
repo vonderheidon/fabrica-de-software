@@ -1,7 +1,9 @@
 import type Database from 'better-sqlite3';
+import { removeRemoteScaffoldSchema } from './scaffold-schema.js';
 
 /** Temporary historical fixture only; production never downgrades. */
 export function removeQueueSchedulerSchema(db: Database.Database): void {
+  removeRemoteScaffoldSchema(db);
   db.exec(`DROP TABLE queue_consumptions;
     DROP INDEX attempts_active_automatic_account; DROP INDEX attempts_issue_history; DROP TRIGGER attempts_source_immutable; DROP TRIGGER attempts_source_required;
     ALTER TABLE attempts DROP COLUMN source;
