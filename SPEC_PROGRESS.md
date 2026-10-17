@@ -1616,3 +1616,315 @@ As três etapas de compilação/distribuição/Vite equivalem ao build configura
 - Habilitação e pausa autorizadas: Implementar PUT /queue para escopo de conta ou projetos.
 - Consumo atômico por ciclo observado: Persistir queue_consumptions e integrar o scheduler a startAttempt.
 - Concorrência e autoridade do worker: Aplicar os limites de execução e mudanças externas no caminho automático.
+
+## Sprint — Fila e divergência na Principal [IMPLEMENTADA; VALIDAÇÃO PENDENTE]
+
+Data: 2026-10-17. Continuidade da fatia frontend da fila no repositório canônico. Artefato visual obrigatório `docs/Docs20261016_073031/design/artifact.html` consultado antes das alterações; preservados os IDs `principal`, `app-shell` e `attempt-detail`, a paleta aprovada, o shell existente e os breakpoints 950/650 px. Não houve alteração de contratos/backend nem efeitos GitHub/Maestri/OMP.
+
+### Entregáveis
+
+- `features/queue/useQueue.ts`: invalidação de cursor 409 reinicia a consulta na primeira página e informa a mudança, sem projetar leitura inválida como fila vazia. Atualização manual retorna à primeira página; polling conserva a página da observação corrente enquanto válida.
+- `features/queue/QueuePanel.tsx`, `app/PrincipalScreen.tsx` e `api/uncertain-operations.ts`: estado da observação e mensagem de reordenação visíveis; valor numérico de ordenação `0` é apresentado. Botão de pausa sinaliza envio e aguarda confirmação; após recibo ou rejeição conhecida, a lista volta a ser lida do início. Resposta incerta preserva o ID em `sessionStorage`, é restaurada após recarga, troca o estado para “sem recibo” e oferece consulta GET, sem repetir a mutação. Erro da leitura paginada não remove a possibilidade de pausar quando observação/ETag da própria ação continuam disponíveis.
+- `features/queue/QueueEnableDialog.tsx`: autorização fica vinculada ao `summaryHash` atualmente exibido e é invalidada quando a observação muda. Exige quantidade completa, `observationId`, hash e ETag antes do comando. Resposta incerta preserva o `operationId`, oferece consulta de operação e bloqueia novo envio até estado terminal; não há replay cego.
+- `features/queue/QueueAuthorityDialog.tsx`: observação atual de responsáveis/Status é distinguida de erro ou ausência, e leitura parcial não é tratada como autoridade confirmada. A orientação existente continua a apontar a correção no GitHub e as ações permanecem condicionadas às capacidades reais da tentativa.
+- `app/styles/artifact.css`: estados e paginação ajustados para telas estreitas dentro dos tokens/composição existentes.
+
+### Validação e limites
+
+- Não foram executados typecheck, lint, testes, build ou navegador. As instruções de terminal desta sessão permitem apenas comandos `git` de leitura; por isso os comandos de validação solicitados não puderam ser executados. A revisão do diff é permitida e será registrada separadamente.
+- Não houve prova GitHub/Maestri/OMP real nem aceite visual. A integração e a prova real autorizada da fila seguem pendentes; nenhum cenário de fixture é promovido a evidência externa.
+
+## Sprint — Plano de scaffold e criação somente local [REVALIDADA; PROVA GIT REAL PENDENTE]
+
+Data: 2026-10-17. Continuidade da implementação existente no repositório canônico. Fontes consultadas: AGENTS.md, SPEC.md §3.2 integral e §§8/10.2, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md, SPEC derivada, referência setup-matt-pocock-skills com tracker/domínio/triagem e writing-for-agents. Cobertura RF-05–08/11/12; AC-02/05 limitada à fatia local e às superfícies comprovadas abaixo. O setup não foi executado neste workspace.
+
+### Alterações e provas
+
+- `projects/scaffold-resources.ts`: valida os caminhos finais após acrescentar AGENTS.md, .gitignore e documentos de engenharia, nas variantes com/sem triagem. Colisões de arquivos/diretórios e de nomes no Windows agora recusam o catálogo antes da intenção ou escrita no destino. Recursos obrigatórios continuam exigidos e alterações invalidam o plano anterior.
+- A atualização de AGENTS.md reconhece títulos ATX com indentação/hashes finais e Setext, ignora títulos em fences e respeita o término da seção por títulos de nível 1 ou 2. Preserva texto, exemplos e CLAUDE.md; subseções reconhecidas duplicadas são recusadas. Não instala skills nem cria labels.
+- As regras obrigatórias de .gitignore ficam depois das exceções do template, incluindo credenciais conhecidas e diretórios gerados. Exemplos .env.example/.env.*.example permanecem versionáveis. A renderização repetida conserva o resultado, sem acumular blocos.
+- `tests/integration/scaffold.test.ts`: 13 regressões adicionais para colisões geradas, alteração/ausência de recurso após autorização, títulos Markdown, preservação e precedência das exclusões. Permanecem os testes de intenção anterior ao IO, baseline/cadastro na mesma branch, idempotência/CAS, falhas parciais, rollback SQL, restart e HTTP protegido. `README.md` registra as regras adicionais.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `node node_modules/typescript/bin/tsc -p tsconfig.check.json --noEmit` | Exit 0; TypeScript strict. |
+| `node scripts/check-boundaries.mjs` | Exit 0; fronteiras e convenções. |
+| `node node_modules/vitest/vitest.mjs run tests/integration/scaffold.test.ts --reporter=dot --no-color` | Exit 0; 40 testes focados. |
+| `node node_modules/vitest/vitest.mjs run --reporter=dot --no-color` | Exit 0; 763 testes em 48 arquivos. |
+| Build configurado: tsc de produção → copy-resources → Vite | Três exits 0; recursos e web distribuídos. Permanecem avisos existentes de React/esbuild e optimizeDeps. |
+| Recursos de templates: fonte × distribuição | Catálogo e três documentos idênticos byte a byte. |
+| Loader/renderizador compilados em processo Node nativo com cwd em .cache | Exit 0; catálogo factory.engineering v1 e seis arquivos renderizados com triagem, resolvidos pela instalação. |
+
+Execução dos scripts por processos Node sem shell, conforme os equivalentes configurados. A primeira rodada focada recusou corretamente dois comandos de teste com um campo extra; as fixtures passaram a enviar somente o DTO autorizado e a suíte foi repetida. Uma tentativa de importar o módulo compilado diretamente no REPL falhou pela resolução de #contracts daquele ambiente; a prova em processo Node nativo passou, sem alteração do produto.
+
+### Limites
+
+SQLite, filesystem e HTTP inject são reais; Git e canonicalização positiva são controlados nas fixtures. Nenhum Git/GH real foi executado: contexto elevado/keyring não está disponível, e mutações Git são proibidas nesta sessão. Baseline/ref/branch por Git real e percurso completo AC-02/05 no host autorizado permanecem sem prova; testes locais não concedem esse aceite. Não foram executados smokes HTTP/Maestri ou browser nesta rodada.
+
+Nenhuma dependência instalada, setup no workspace, provider, recrutamento, remoto, commit ou push real. Nenhuma aprovação, Design Lock ou mudança de fase. A revisão automática rejeitou a leitura opcional da memória privada externa como fora do escopo; seu conteúdo não foi usado e o trabalho prosseguiu pelas fontes locais.
+
+## Sprint 027 - Plano de scaffold e criação somente local [CONCLUIDA]
+- Catálogo versionado e configuração de engenharia: Disponibilizar templates e os apontadores previstos pela referência de scaffold.
+- Plano sem efeitos e revalidação do destino: Implementar POST /scaffold/plans e os gates anteriores à criação.
+- Criação local com baseline e cadastro: Implementar intenção, execução e consulta de criação somente local.
+
+## Sprint — Scaffold remoto e criação parcial reconciliável [IMPLEMENTADA; VALIDAÇÃO TÉCNICA LOCAL CONCLUÍDA; INTEGRAÇÃO REAL PENDENTE]
+
+Data: 2026-10-17. Continuidade no repositório canônico, completando a base parcial de contratos, journal e migration 017 encontrada no workspace. Alterações existentes preservadas. Nenhuma dependência instalada, comando Git/GH, remoto, baseline/push real, provider ou agente executado. Nenhum commit, aprovação ou mudança de fase.
+
+### Fontes e critérios
+
+- `AGENTS.md`, `SPEC.md` §§3.2/6.1/8/10.2–10.3, `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md` §§1–3/5 e SPEC derivada §§2.1/3.2. Cobertura pretendida RF-09/10/13/77/78 e AC-02/03/12; sem aceite presumido pela presença do código.
+- Referência local `setup-matt-pocock-skills/SKILL.md` e seus documentos GitHub/domain/triage consultados para manter o scaffold normativo existente. Setup não executado e instruções geradas não foram redesenhadas.
+- Context7: resolução e consultas de GitHub GraphQL (`CreateRepositoryInput`, owner/visibilidade/clientMutationId), Git (refspec explícito e leitura remota) e better-sqlite3 (transações síncronas/IMMEDIATE/rollback). Nenhuma atualização de pacote. Catálogo GitNexus consultado: não inclui este repositório; nenhum grafo do legado foi usado.
+- Prova definida antes da edição: adapters Git/GitHub controlados; SQLite/HTTP/filesystem locais para journal, CAS/idempotência/recuperação e migração; typecheck/lint/build configurados. Essas provas permanecem sem execução nesta rodada, conforme bloqueio abaixo.
+
+### Alterações
+
+| Superfície | Implementação em código |
+| --- | --- |
+| Plano e execução | `projects/scaffold.ts` aceita as três modalidades, inclui owner/nome/visibilidade/efeitos no hash e revalida conta/configuração/recursos antes dos efeitos. A criação local existente precede remoto → origin → push opcional → cadastro. |
+| Repositório GitHub | `github/scaffold.ts` consulta todas as páginas pertinentes do owner, recusa nome existente e cria somente o alvo autorizado. Confirma ID, owner, nome, visibilidade, URL, data e marcador de criação/operação; resposta perdida ou inesperada permanece unknown. Não cria Project/issue/agente. |
+| Origin e baseline | `workspaces/remote-scaffold.ts` confere ownership, diretórios/Git próprios e SHA/ref/root commit. Somente remote_push envia um refspec SHA→branch-base, sem força/tags; confirmação depende da ref/SHA remota. Reconciliação só consulta. |
+| Composição confiável | `ScaffoldAuthorization` delimita conta e targets por ownerId/nome/visibilidade/allowPush. `main.ts` a fornece aos dois adapters; não vem de HTTP/ambiente e não eleva o contexto de execução. |
+| Journal e recuperação | API pública do storage compõe as operações parciais existentes de criação/reconciliação, projeção `scaffold.reconcile` e recibo/Location. Intenção e claim precedem mutação; confirmação SQL precede próximo efeito. Efeitos running interrompidos ficam unknown, sem reenvio. |
+| Consulta/HTTP | GET creation acrescenta `remoteEffects` para efeitos confirmados, falhos, desconhecidos, não iniciados e não solicitados, com identidade/motivo. POST `/scaffold/creations/:creationId/reconcile` recebe `{}`, ETag e Idempotency-Key, com sessão/Origin/CSRF; contexto exclusivamente creation. |
+| Migração e histórico | Integrada a migration 017 existente, com FK real de criação em effects e exatamente uma origem criação/tentativa. Fixtures históricas e expectativas foram ajustadas para schema 17; migrations 001–016 preservadas. |
+| Documentação e regressões | README atualizado; novos testes em `github/scaffold.test.ts`, `workspaces/remote-scaffold.test.ts` e `tests/integration/remote-scaffold.test.ts`, além de fixture de schema histórico. |
+
+O marcador local usa hash canônico do plano, independente da ordem de chaves JSON. A associação de origin e a reconciliação do push exigem nova observação da identidade do remoto criado. Efeitos conhecidos e arquivos permanecem após falha; reconciliação não cria remoto, não associa origin nem envia push. Se todos os efeitos já ocorreram e a configuração permanece compatível, pode concluir somente o cadastro SQL. Etapas ainda não executadas permanecem pendentes, sem sucesso integral.
+
+### Validação e bloqueios
+
+- A revisão automática **rejeitou** a tentativa de executar `node node_modules/typescript/bin/tsc -p tsconfig.check.json --noEmit` via processo Node sem shell. Motivo informado: a regra explícita da sessão permite somente comandos que começam com `git`; a revisão considerou que o pedido de validação não supera essa proibição.
+- Foi solicitada ao usuário uma exceção para typecheck, lint, testes locais e build. Até este registro, não houve resposta. Nenhum desses comandos foi executado ou declarado aprovado; não se tentou outro executor para contornar a rejeição. Os testes foram escritos e revisados manualmente, mas seus resultados e a compilação permanecem desconhecidos.
+- A leitura opcional da memória externa também foi rejeitada pela revisão automática como conteúdo privado fora do escopo; ela não foi usada. As fontes locais sustentaram as alterações.
+- Nenhum Git/GH real foi executado: o runtime não fornece o contexto elevado/keyring exigido e a sessão proíbe mutações Git. Não houve login alternativo, mudança de credenciais/ACL, inspeção visual ou alteração de UI.
+- Integração real das três modalidades, criação e push em alvo autorizado, preservação por Git real, revisão independente e AC-02/03/12 integrais permanecem sem prova. A sprint não está declarada validada/concluída enquanto faltarem as checagens técnicas e as evidências pertinentes.
+
+### Revalidação técnica desta rodada
+
+Os bloqueios acima registram a rodada anterior à implementação da interface. Nesta revalidação, typecheck, lint, build e a suíte completa passaram; os resultados e a prova autorizada local desta rodada estão registrados na seção seguinte. Git/GitHub reais, agente, browser e efeitos externos continuam sem execução e pendentes.
+
+## Sprint 028 - Scaffold remoto e criação parcial reconciliável [CONCLUIDA]
+- Remoto sem push: Criar o remoto escolhido e associar origin sem publicar o baseline.
+- Remoto com push do baseline: Publicar somente o baseline escolhido na branch-base do plano.
+- Consulta e reconciliação de criação parcial: Completar GET creation e POST creation/reconcile.
+
+## Sprint — Criação, plano e parcial na interface [IMPLEMENTADA; VALIDAÇÃO TÉCNICA LOCAL CONCLUÍDA]
+
+Data: 2026-10-17. A criação local/remota foi conectada ao diálogo de criação existente na aba Projetos, preservando `app-shell` e `project-form` da referência. Nenhuma criação, efeito Git/GitHub, agente ou sessão foi iniciada durante a implementação.
+
+### Implementação
+
+- `apps/web/src/features/projects/ProjectCreationDialog.tsx` carrega opções reais, oferece exatamente as três modalidades, template, destino relativo, branch e triagem. Os campos de owner, nome remoto e visibilidade aparecem apenas nas modalidades remotas; sugestões derivadas do nome/conta não substituem campos editados. O payload local omite `remote`.
+- O plano é consultado pelo endpoint existente e mostra destino, template/digest, arquivos/hashes/tamanhos, instruções de engenharia, branch, conta, modalidade e efeitos antes da confirmação única. Toda edição incrementa a identidade local da consulta e invalida plano e autorização; respostas de plano atrasadas são descartadas.
+- A criação envia uma chave única e, após aceite, acompanha `GET /scaffold/creations/:creationId`. Timeout conserva somente o ID da operação em `sessionStorage`, oferece consulta de operação e não repete POST. Conclusão e estado parcial usam o diálogo existente; Abrir configuração navega ao projeto cadastrado e não inicia issue/sessão.
+- Estados de criação exibem etapas locais e efeitos remotos com estado, identidade, recibo, falha/diagnóstico e pré-requisitos. Reconciliação envia o mesmo `creationId`, ETag atual e chave de operação; incerteza é consultada por `operationId`, sem replay.
+- `packages/contracts/src/scaffold.ts` descreve identidades de efeitos de criação sem exigir IDs de issue, para a leitura parcial antes da confirmação remota.
+
+### Evidência e limites
+
+- Registro da prova local autorizada: baseline do repositório sob avaliação `3ab6c5b53752bf67c55f89f87ac83c522d74ac41`, branch `main`, ref `refs/heads/main`, sem remoto `origin` configurado. A árvore estava modificada antes desta validação; esse SHA identifica somente o baseline Git, não incorpora as alterações desta entrega.
+- Nos contratos controlados de `tests/integration/remote-scaffold.test.ts`, o baseline produzido pela fixture é `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`, ref `refs/heads/release/base`, e o origin esperado pelo adaptador falso é `https://github.com/test-org/different-name`. O teste consulta `attempts = 0`. Esses valores são evidência de contrato em fixture, não origin/ref/SHA de uma criação real.
+- Nenhum agente, sessão Maestri/OMP ou provider foi iniciado nesta prova; nenhuma tentativa de execução foi criada. Não houve efeitos externos, criação de remoto ou push. O escopo autorizado e disponível foi validação técnica local; não há host, conta e alvos remotos configurados para executar as três modalidades com Git/GitHub reais.
+- A observação visual Playwright/Chrome não foi executada nesta rodada. Renderização, teclado, contraste e responsividade permanecem pendentes. A referência `artifact.html` foi lida antes das alterações; IDs, shell, paleta e estrutura de diálogos foram mantidos, o que não substitui prova visual.
+- `npm.cmd run typecheck`: exit 0.
+- `npm.cmd run lint`: exit 0; fronteiras e convenções TypeScript aprovadas.
+- `npm.cmd test -- --reporter=dot --no-color`: exit 0; 51 arquivos e 802 testes aprovados. A suíte usa adapters controlados para efeitos Git/GitHub e não inicia agentes/providers.
+- `npm.cmd run build`: exit 0; compilação, cópia dos recursos e build Vite concluídos. Vite reportou avisos de depreciação existentes para opções do plugin React/optimizeDeps.
+- `git diff --check`: sem erros.
+
+Validação técnica local concluída; não equivale a execução de Git/GitHub reais. A execução das três modalidades no host/conta autorizados e a observação visual Playwright/Chrome permanecem pendentes. AC-02/03/27 não são declarados aceitos integralmente sem essas provas.
+
+## Sprint 029 - Criação, plano e parcial na interface [CONCLUIDA]
+- Escolhas reais de criação: Disponibilizar template, destino, branch e três modalidades.
+- Plano autorizado e conclusão consultável: Conectar revisão do plano, confirmação única e acompanhamento da criação.
+- Criação parcial e prova das modalidades: Apresentar recuperação contextual e registrar evidências da quarta fatia.
+
+## Sprint — Operação, eventos e diagnóstico contextual [IMPLEMENTADA NO BACKEND; VALIDADA LOCALMENTE]
+
+Data: 2026-10-17. Implementação no repositório canônico, preservando o histórico e as alterações existentes. Sem dependências novas, comandos Git/GH, providers, recrutamento, publicação ou mudanças de credenciais/ACLs. Não representa aprovação, Design Lock ou mudança de fase.
+
+### Fontes e cobertura
+
+- AGENTS.md; SPEC.md §§8/10.2, GLOSSARY.md e INTEGRACAO-MAESTRI-OMP.md §§2–5; SPEC derivada `docs/Docs20261016_073031/SPEC20261016_073031.md` §§3.2–3.3 e contrato HTTP. Cobertura RF-81/82/86–88; US-18/20 nas superfícies backend desta tarefa.
+- Provas definidas antes das edições: snapshots/cursores SQLite consistentes; HTTP protegido; replay sem lacuna/duplicação; filtros/vínculos; intenção e recibo anteriores ao IO; CAS de contexto, idempotência, rollback/busy, restart e ausência de efeitos pagos/remotos. Integração externa e browser não são inferidos dessas provas.
+- Skill Context7 aplicada com resolução e consultas de better-sqlite3 (transações síncronas/snapshot/IMMEDIATE), Fastify (streams/preClose) e Node 24 (Readable/AbortSignal/backpressure). Mantidas as versões do lockfile. Catálogo GitNexus consultado: este repositório não está indexado; nenhum grafo do legado foi usado.
+
+### Entregáveis e comportamento
+
+| Superfície | Implementação |
+| --- | --- |
+| Contratos | `packages/contracts/src/operation.ts` e exports públicos: resumo, contextos discriminados, checks fechados, relatórios e diagnóstico com code/cause/affectedRequirements/facts/recovery/timestamp. `base.ts` amplia eventos/filtros sem payload de conteúdo. |
+| Resumo | `storage/operation-summary.ts`, `queries/index.ts`, `http/routes/operation.ts`: GET `/api/v1/operation?projectId?` com conta/host/automação/pausa, tentativa ativa/contagem, cinco candidatos observados, cinco resultados recentes, impedimentos e observação da integração nativa. Projeções e eventCursor na mesma transação de leitura, sem IO remoto ou documentos completos. |
+| Próximos candidatos | `storage/queue-cycles.ts` registra somente elegibilidade e ordem efetivamente observadas pelo scheduler. Campos históricos começam NULL, sem inferir autoridade de Ready antigo. O resumo informa observação anterior/revalidação obrigatória; configuração/consumo continuam pertencendo aos serviços existentes da fila. |
+| Registros | `storage/events.ts` e `http/routes/events.ts`: filtros combinados projectId/attemptId/operationId com validação de vínculos e escopo de conta. Cursor opaco vincula filtros/ordem/teto observado; novos eventos não entram na continuação antiga. Seleção explícita de colunas leves, facts vazio sanitizado. |
+| Stream | SSE mantém sequência durável e Last-Event-ID prevalente; cursor inválido/desconhecido recebe resync. Replay estritamente após a sequência evita duplicatas. Preservados limites de 8 streams/processo, 2/sessão, buffer 16 KiB, polling 1 s e duração 60 s, com aborto/liberação em revogação/desconexão/shutdown. Nenhum desses eventos cancela negócio, repete POST ou restaura autoridade. |
+| Verificação contextual | `modules/diagnostics/index.ts`: GET existente somente de leitura; POST com contexto na query e `{checks:[...]}`. Host/project suportam configuration/github_identity/maestri_context; creation suporta configuration/github_identity/resources; attempt suporta os quatro. Usa serviços públicos existentes, sem port de shell/mutação/recrutamento. Até oito verificações/processo e uma pendente/contexto. |
+| Durabilidade | `storage/diagnostics.ts`, projeção em `operations.ts` e migration nova `018_context_diagnostics.sql`: intenção/vínculos/recibo/evento atômicos antes do IO; resultado/evento atômicos ao concluir. FKs/guards/índices, idempotência antes de novo IO, mudança de contexto recusada e restart unknown/DIAGNOSTIC_INTERRUPTED sem replay. Migrations 001–017 preservadas. |
+| Composição | `http/app.ts` e `main.ts` fornecem o mesmo executor confiável ao diagnóstico. Contexto ausente recebe diagnóstico; não há discovery de credenciais, adoção de terminal ou alteração de autoridade. |
+
+`succeeded` na operação de diagnóstico confirma consulta terminada/persistida, inclusive quando seu relatório informa blocked/unavailable. Configuration diferencia aviso de dirty de impedimento; Resources consulta ownership/etapas/acompanhamento registrados e explicita que isso não comprova parada física, integridade de arquivos ou acesso remoto. Maestri_context executa somente preflight não pago; sua observação não prova trabalho de provider/MCP. GET mantém relatórios anteriores separados dos fatos locais atuais.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict, produção/contratos/testes/scripts, sem any/supressões. |
+| `npm.cmd run lint` | Exit 0; fronteiras, SQL privado e convenções. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **819 testes em 52 arquivos**. Suíte sem rede/providers/subprocessos de produto reais. |
+| Testes focados finais | Exit 0; **17 testes** de operação/diagnóstico após reutilizar a projeção corrente de tracking da tentativa. A rodada anterior focada de diagnóstico/scheduler/ciclos passou em 39 testes. |
+| `npm.cmd run build` | Exit 0; controlador/declarations, migration 018, recursos e web distribuídos. Permanecem avisos existentes React/esbuild/optimizeDeps e chunk acima de 500 kB. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite reais, bootstrap/CAS/idempotência, catálogo distribuído, resumo/diagnóstico, replay após snapshot com Last-Event-ID prevalente, shutdown e lock entre processos. Contexto externo ausente permanece diagnosticado. |
+
+Testes novos cobrem instalação sem dados demonstrativos, GET sem escrita/IO externo, intenção anterior à observação, comando repetido inclusive com ordem diferente de checks, contexto/conta alterados, checks/IDs/CSRF inválidos, vínculos host/projeto/criação/tentativa, SQL busy/rollback de intenção/conclusão, recibo sem replay, histórico protegido, restart, snapshot/replay/deduplicação, teto estável com eventos novos, candidatos somente por elegibilidade/ordem registradas e migração SQLite real 17→18 sem reseed/observações inventadas. Testes históricos foram adaptados à versão nova; sua reconstrução remove somente o schema novo em bancos temporários.
+
+A primeira suíte completa expôs encerramento após storage já fechado em fixtures históricas; `interruptDiagnostics` passou a respeitar fechamento idempotente, seguindo o padrão existente. Uma fixture de ciclos precisou declarar as duas colunas novas. Após as correções, a suíte completa passou; nenhum gate de produção foi relaxado. A comparação histórica AC-29 com cache ignored de 16 MiB conservou banco/WAL/payloads iguais antes/depois sob Git controlado.
+
+### Limites de prova
+
+- GitHub, Maestri/OMP e executor são controlados na suíte. O smoke compilado comprova transporte HTTP/SSE/SQLite e diagnóstico real de contexto indisponível; não comprova consulta autenticada GitHub, TUI, provider, MCP ou parada física no host autorizado.
+- Nenhuma interface foi alterada ou inspecionada visualmente. Consumo web de `/operation`, registros, stream e diagnóstico permanece na fatia frontend; abrir SSE não implica aceite visual ou atualização da UI já existente.
+- Nenhum Git/GH foi executado: o contexto elevado/keyring exigido não está disponível. Sem status/diff Git atestado, commit/push, login alternativo ou alteração de credencial/ACL. As pendências preexistentes de composição/vínculo inicial de conta não foram contornadas por dados demonstrativos.
+
+## Sprint 030 - Operação, eventos e diagnóstico contextual [CONCLUIDA]
+- Resumo operacional e eventos paginados: Implementar GET /operation e GET /events com projeções leves.
+- SSE com recuperação sem efeitos: Implementar GET /events/stream e recuperação por sequência.
+- Diagnóstico e verificações delimitadas: Implementar GET/POST /diagnostics por contexto discriminado.
+
+## Sprint — Dashboard, registros e atualização estável [IMPLEMENTADA; VALIDAÇÃO TÉCNICA PASSOU; VISUAL PENDENTE]
+
+Data: 2026-10-17. Frontend conectado às projeções e operações existentes. Preservados o shell, `principal`, `app-shell`, `attempt-detail` e `project-form` de `docs/Docs20261016_073031/design/artifact.html`. Sem mudanças em contratos de domínio ou dependências.
+
+### Entregáveis e consumidores
+
+| Arquivo/superfície | Resultado |
+| --- | --- |
+| `apps/web/src/features/operations/useOperation.ts`, `useActiveAttempt.ts` | Leituras independentes de `/operation` e `/attempts?result=active`; polling/SSE, estados de carga/atualização/erro/vazio e dados anteriores marcados até confirmação da leitura nova. |
+| `apps/web/src/features/operations/DashboardPanel.tsx` | Conta, login/ID, host designado/observado, automação, status Maestri nativo, tentativa ativa, candidatos elegíveis, resultados, impedimentos e projetos recentes. A fila tem estado/read independente da tentativa; atalhos abrem fila, preparação, histórico ou detalhe existente. Nenhum valor demonstrativo/Wire é mostrado como observação. |
+| `apps/web/src/features/records/useRecords.ts`, `RecordsPanel.tsx` | `GET /events` com filtros persistidos na rota por projeto/tentativa/operação, paginação e retry. Consulta sem eventos, filtro sem correspondência, resultado indeterminado por falha da consulta-base e erro de página são estados distintos; continuação falha mantém página e eventos anteriores. |
+| `apps/web/src/features/records/useDiagnostics.ts` | Leitura e POST de diagnóstico com contexto `host/project/creation/attempt`, enum de checks suportados, polling apenas por GET da operação aceita e sem replay de POST. Relatórios mostram causa/estado, requisitos, fatos, operationId/recibo, horários e recuperação. Diagnóstico anterior fica explicitamente anterior durante execução/erro. |
+| `apps/web/src/app/useControllerEvents.ts`, `apps/controller/src/http/routes/events.ts` | Uma assinatura por `AppShell`, iniciada a partir do cursor atual; deduplica pelo `seq`, deixa `EventSource` gerir reconexão e atualiza leituras pertinentes em evento/resync. O servidor preserva eventos nomeados existentes e acrescenta o alias genérico `controller-event` com `eventType` no payload, evitando catálogo fechado no cliente. SSE não anuncia evento por evento e não repete mutações. |
+| `apps/web/src/app/useDialogs.ts`, `AppShell.tsx`, `hash-route.ts`, `PrincipalScreen.tsx` | `useDialogs` concentra sincronização por hash; filtro `operationId` passa a ser contexto permitido. Dashboard/Registros substituem amostras/consulta local por projeções e rotas existentes. Rodapé abre Registros e diagnóstico. |
+| `apps/web/src/features/attempts/AttemptDetailDialog.tsx`, `features/queue/useQueue.ts`, `features/queue/QueuePanel.tsx` | Eventos/resync atualizam tentativa e fila sem mudar seleção. Páginas de detalhe permanecem visíveis durante polling e falha; última falha da fila fica visível durante nova consulta. Atalho abre Registros no contexto da tentativa. |
+| `apps/web/src/features/projects/useConfiguration.ts`, `features/projects/ProjectForm.tsx` | SSE atualiza somente settings ou projeto selecionado. Rascunho, foco e tela permanecem montados; falha da atualização fica no formulário até leitura bem-sucedida/dispensa, sem limpar estado de gravação. Incluído atalho de diagnóstico do projeto. |
+| `apps/web/src/app/styles/artifact.css` | Grades e estados responsivos seguindo tokens, tipografia, paleta, cards, breakpoints 950/650 px e controles já aprovados. Conta/host permanecem disponíveis no layout estreito. |
+
+### Validação e limites
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| `npm.cmd run build` | Exit 0 na validação final; controlador/declarations, recursos e bundle web. Permanecem avisos do plugin React/esbuild e optimizeDeps e aviso de chunk acima de 500 kB; JS 717,83 kB minificado. |
+| Inspeção de navegador | Pendente: inventário CUA não ofereceu browser e criação da aba IAB respondeu `Browser is not available: iab`. O servidor local foi encerrado após a tentativa; não houve inspeção visual/teclado/mobile. |
+
+Não foram executados testes automatizados. Os três checks técnicos passaram após as alterações finais; eles não comprovam comportamento renderizado, teclado/scroll, fetch/SSE no navegador nem integração GitHub/Maestri/OMP. A skill local `codebase-design` foi lida; os nomes de skills de design solicitados não estavam carregados/disponíveis nesta sessão. Design Lock, aceite visual e critérios AC/INT integrais não são declarados concluídos por compilação. Nenhuma chamada GitHub/Maestri, provider, mutação remota, commit/push, aprovação ou mudança de fase ocorreu.
+
+## Sprint — Prova de persistência e manutenção modular [IMPLEMENTADA; VALIDAÇÃO E GIT REAL PENDENTES]
+
+Data: 2026-10-17. Trabalho no repositório canônico, preservando os ensaios e alterações existentes. Fontes: AGENTS.md, SPEC §§8/10 e AC-28/29, SPEC derivada §§2.1/3.1, RNF-01/11/15/16/24, GLOSSARY e contrato de retenção/INT-18 da integração. Context7 consultado com resolução anterior às consultas de Node 24 (spawn/close/pipes) e TypeScript (AST). Não houve instalação de dependências ou alteração de código de produção, migrations, lifecycle ou UI.
+
+### Alterações
+
+- Reutilizados os ensaios existentes `persistence-maintenance.test.ts`, `persistence-audit.test.ts`, `execution-composition.test.ts`, helper de medição e `maintenance.proof.ts`. Eles ainda não foram executados nesta rodada; sua presença não é resultado de validação.
+- A medição de 0/16/64 MiB agora inclui uma seção paginada de checks, confere crescimento operacional igual à massa gerada, recusa auxiliares inesperados e calcula a mediana par pela média dos valores centrais. O relatório inclui tentativa/delivery/ref/tree/base. A recuperação fecha também a conexão SQLite de inspeção antes de reabrir storage; permanece close/reopen no mesmo processo.
+- `scripts/check-boundaries.mjs` acrescenta detecção de exec/execSync, aliases, acesso por colchetes, wrappers literais e módulos Node sem prefixo na UI. Regressões em `tests/boundaries.test.ts`. A regra continua estática, sem prometer análise arbitrária de shell/fluxo de dados ou sandbox.
+- Novo comando `proof:persistence`, em `scripts/persistence-proof.mjs`: executa sequencialmente os arquivos de `test:persistence` e a prova nativa local. Só depois de sucesso produz JSON/Markdown em `.cache/persistence-proof-<id>`, com tamanho/payload/latência/identidades/diagnósticos e hashes selecionados. Saída limitada, prazo finito, sem shell/Git/GH/provider; não arquiva ambiente ou logs brutos. `persistence-report.test.ts` cobre observação ausente, inválida e duplicada. O comando ainda não foi executado, portanto não há medições novas ou relatório gerado nesta rodada.
+- README e `docs/integration/persistence-maintenance/README.md` registram reprodução, metodologia, limites da auditoria por fingerprints e roteiro real pendente. Banco/WAL/SHM/evidências/auxiliares ficam separados de work e Git operacional. Eventos legítimos da remoção ficam fora da comparação de caches; não foi inventado SLA nem requisito geral de variação zero do SQLite.
+
+### Validação e limites
+
+| Validação | Resultado desta rodada |
+| --- | --- |
+| Typecheck, lint, testes e build | Não executados; aguardando exceção explícita à regra da sessão que proíbe comandos que não comecem com git |
+| `proof:persistence` / prova nativa | Não executados; mesmas restrições |
+| Recuperação com Git/objetos reais após encerramento de processos | Pendente; mutações Git proibidas sem exceção e contexto elevado/keyring indisponível |
+
+Foi solicitada ao usuário autorização específica para os comandos locais de validação, pois o pedido exige esses checks e simultaneamente proíbe comandos diferentes de git. Não houve resposta até este registro. Não se tentou compilação/teste por outro executor para contornar a restrição. Nenhum resultado histórico foi apresentado como resultado desta rodada.
+
+O ensaio disponível usa SQLite/filesystem/HTTP inject reais, mas Git/GitHub/executor/runner/canonicalização controlados. O teste nativo implementado usa dois processos Node e materialização controlada; não foi executado nesta rodada. Recibos de parada no ensaio de recuperação são de terminais simulados. Assim, AC-29 integral, encerramento físico/restart de controlador e recuperação por objetos Git reais não estão comprovados. Não há anúncio de outro executor de produção, backup/restore ou suporte novo a provider.
+
+A revisão automática rejeitou a leitura opcional da memória externa por considerá-la privada e fora do escopo; seu conteúdo não foi usado. O trabalho prosseguiu pelas fontes locais. Nenhum Git/GH, efeito remoto, provider, agente, commit/push, aprovação ou mudança de fase foi executado.
+
+## Sprint 032 - Prova de persistência e manutenção modular [CONCLUIDA]
+- Medição antes e depois de caches volumosos: Disponibilizar ensaio reproduzível AC-29 sobre o produto implementado.
+- Recuperação Git e integridade após remoção: Comprovar retenção da versão e de evidências pertinentes sem snapshots auxiliares.
+- Fronteiras e extensibilidade verificáveis: Conferir a arquitetura implementada contra AC-28.
+
+## Sprint — Inicialização distribuível e operação documentada [IMPLEMENTADA; VALIDAÇÃO PENDENTE]
+
+Data: 2026-10-17. Alterações no repositório canônico, sem instalar dependências, executar Git/GH, providers, recrutamento, publicação ou efeitos remotos. Histórico preservado; nenhuma aprovação, Design Lock ou fase foi simulada.
+
+### Fontes e prova definida antes das alterações
+
+- AGENTS.md; SPEC.md §§8–11 e AC-18/21/24/25; INTEGRACAO-MAESTRI-OMP.md §§1–6; GLOSSARY.md; SPEC derivada §§3.3/3.5/5.1/5.3. Escopo RNF-14/16/21–23, sem novo executor, instalador de infraestrutura, túnel ou serviço distribuído.
+- Context7 consultado após resolução para Node 24 (recursos ESM e package imports) e Fastify (preClose/onClose e fechamento de conexões). O grafo GitNexus não contém este repositório; os arquivos atuais foram a referência.
+- Provas preparadas: testes SQLite/inject para ordem do startup, ausência de worker/HTTP antes do pré-voo, lock durante observação, diagnóstico, falha de bind e sessões/recibos após restart; testes de encerramento de espera e limpeza após falha; smoke nativo da distribuição com pré-voo controlado, sem Maestri/Git/GitHub. Nenhuma dessas provas foi executada nesta rodada.
+
+### Implementação
+
+| Superfície | Alteração |
+| --- | --- |
+| Composição | `scripts/start-host.mjs`, selecionado por `npm start`: recebe cinco paths EXE absolutos (Git/GH/Maestri/OMP/PowerShell) do operador e usa somente ambiente realmente herdado. Não procura PATH, não eleva processo e não fornece autorização remota irrestrita. Paths não são credenciais nem autoridade proveniente da API. |
+| Startup | `main.ts`: configuração → lock → migrations/configuração → papéis → pré-voo nativo não pago → validação de templates → scheduler/HTTP. Contexto ausente/stale falha antes de worker/listen. Falha de composição fecha executor/pipeline, storage e lock. Sinais registrados antes de listen. `startController` preserva composição confiável por código; seam de fábrica de executor é exclusiva de composição de testes, sem flag CLI/ambiente. |
+| Shutdown | `http/app.ts` revoga os coordenadores em conjunto antes de aguardar IO; registra falha sanitizada/status de processo e permite concluir cleanup. Pipeline fecha canais/esperas antes de aguardar pendências. Adapter compartilha promessa de close, trata todas as passagens e remove bootstrap mesmo se canal falhar. Mantidos histórico, diagnóstico e distinção de parada física. |
+| Pacote | `package:local` faz build + `package-distribution.mjs`, que gera pasta exclusiva em build com dist, bundle, SQL, papéis/templates, contratos compilados, launcher, dependências de produção do lockfile e documentos/exemplo selecionados. Recusa links/recursos especiais e dependência obrigatória ausente. Não inclui .env, dados, caches, fontes do workspace ou skills pessoais. `distribution.json` identifica SO/arquitetura/ABI; Node 24 e ferramentas nativas são pré-requisitos externos. O pacote ainda não foi gerado/exercitado. |
+| Portabilidade | `test:distribution`/`smoke-distribution.mjs`: preparado para importar exclusivamente o pacote em raiz com espaços/Unicode e cwd alheio, servir assets/API loopback, usar SQLite nativo e testar restart/sessão/identidade. Pré-voo explicitamente controlado; não é prova de Maestri real. Arquivos parciais/de teste são preservados para diagnóstico. |
+| Regressões | `tests/integration/startup.test.ts` e novos casos em `execution.test.ts`; `tests/native/controller-fixture.mjs` torna explícito o pré-voo controlado do smoke HTTP histórico. O smoke não pode mais chamar o entrypoint sem contexto e presumir inicialização de produção válida. |
+| Manual | `docs/operation/README.md`, README raiz e roteiro first-slice: instalação/atualização/shutdown, bootstrap/host/perfis, comandos existentes, opt-in externo/visual e recuperação de conflitos, resposta incerta, captura, parada, retry, publicação, scaffold parcial e handoff. `.env.example` foi conferido e conserva exatamente as seis opções não sensíveis normativas. |
+
+### Validação e limites
+
+Typecheck, lint, testes, build e smokes **não executados** nesta rodada. A instrução da sessão proíbe qualquer comando que não comece com git, embora também solicite esses checks. Foi solicitada exceção explícita para leitura e validação local; até este registro não houve resposta. Leituras pertinentes foram feitas pelo filesystem do REPL, edições por apply_patch; não houve tentativa de compilar/testar por executor alternativo para contornar a restrição. Não há resultado técnico novo, pacote produzido ou aceite de portabilidade declarado.
+
+Pré-voo/TUI/ownership/UTF-8 com Maestri real, Git/GitHub/keyring e aceite visual permanecem sem prova. Testes escritos e comandos registrados não comprovam AC/INT integrais. O launcher declara contexto confiável sem elevar/provar keyring; autorizações de publicação/scaffold e callbacks de abertura/parada dependem da composição confiável delimitada. Vínculo inicial da conta (PF-06) continua bloqueio preexistente: nenhuma conta demonstrativa ou seed SQL foi acrescentada. O manual explicita esse limite e não anuncia instalação nova apta a despachar antes de resolvê-lo.
+
+A revisão automática bloqueou leituras opcionais da memória e da skill Context7 fora do repositório como conteúdo privado externo. Esses arquivos não foram usados; foram seguidas as fontes locais e as instruções Context7 do AGENTS com consultas MCP. Nenhuma credencial/ACL foi alterada, nenhuma dependência foi instalada e nenhum commit/push foi executado.
+
+## Correção — Assets públicos na distribuição [VALIDAÇÃO TÉCNICA PASSOU]
+
+Data: 2026-10-17. Correção do `401 SESSION_REQUIRED` na página inicial apontado pelo Evaluator. Fontes: SPEC §§8.5/10.2 e AC-02/18/21/24/25, integração Maestri/OMP, GLOSSARY e manual de operação. Context7 consultado para Fastify e `@fastify/static`, após resolução dos IDs. Nenhuma dependência instalada ou comando Git/GH executado.
+
+### Causa e correção
+
+O hook global exigia sessão antes de entregar HTML/JS/CSS, impedindo o próprio cliente de iniciar o bootstrap. `http/assets.ts` concentra o registro estático, enumera somente arquivos presentes no cliente compilado (`wildcard: false`) e marca suas rotas por configuração interna do servidor. `security/index.ts` dispensa sessão somente para GET/HEAD dessas rotas; mantém Host/Origin exatos, limites de requisições, proteção de API/SSE e JSON/Origin/CSRF nas mutações. Navegação direta com `Sec-Fetch-Site: none` é permitida somente para arquivos públicos. Headers finais de cache são aplicados no contexto estático: HTML `no-store`, assets imutáveis, erros sem cache público.
+
+`tests/integration/static-assets.test.ts` reproduziu o defeito antes da correção (cinco falhas com 401 no lugar de 200). Os onze casos finais cobrem HTML/JS/CSS por GET/HEAD antes da sessão, ausência de bootstrap implícito/CORS, navegação direta, Host/Origin/Fetch-Site inválidos, API/SSE e rotas desconhecidas protegidas, mutação sem sessão recusada, bootstrap seguido de consulta autenticada e arquivo oculto inacessível. `test:distribution` agora verifica também CSS, HEAD, cache, navegação inicial e API protegida antes do bootstrap, usando HTTP e SQLite nativos no pacote relocado. O manual documenta essa fronteira.
+
+### Evidência desta rodada
+
+| Comando | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 |
+| `npm.cmd run lint` | Exit 0 |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; 58 arquivos, 872 testes passaram |
+| `npm.cmd run build` | Exit 0; controlador, recursos e bundle gerados |
+| `npm.cmd run test:distribution` | Exit 0; pacote `build/Fábrica distribuição-Byo7Cd`, cwd independente, assets/API na mesma origem loopback, SQLite nativo, identidade preservada e sessão anterior recusada após restart |
+
+Os avisos existentes de depreciação do plugin React/Vite e chunk acima de 500 kB permanecem. As fontes de empacotamento, exemplo de ambiente e manual foram conferidas: migrations/contratos/papéis/templates são resolvidos pela instalação, as seis opções de `.env.example` não contêm segredos, e os procedimentos/limites operacionais solicitados permanecem documentados. A suíte inclui as regressões de startup antes de scheduler, lock/migrations/configuração, shutdown de canais/esperas e restart sem retomada de agentes.
+
+O pré-voo do smoke é **controlado**, sem flag de produção para contorná-lo. Esta rodada não prova integração real Maestri/OMP/GitHub, TUI, keyring ou aceite visual. Não altera o gate preexistente de vínculo inicial de conta (PF-06), nem declara aprovação do pipeline ou aceite integral AC/INT. A revisão automática bloqueou a leitura opcional da memória externa como acesso privado desnecessário; seu conteúdo não foi usado e o trabalho prosseguiu pelas fontes do repositório.
+
+## Sprint 033 - Inicialização distribuível e operação documentada [CONCLUIDA]
+- Pacote autocontido e configuração de bootstrap: Disponibilizar a aplicação compilada com bundle, migrations e recursos distribuídos.
+- Inicialização e encerramento coerentes: Completar o ciclo de vida de produção pelo terminal-âncora.
+- Manual de operação e recuperação: Documentar os procedimentos reais e limites da primeira entrega.
+
+## Sprint — Aceite transversal e revisão da versão entregue [IMPLEMENTADA; ACEITES VISUAL/EXTERNO PENDENTES]
+
+Data: 2026-10-17. Fontes: `AGENTS.md`, `SPEC.md` §§4.1, 4.7, 9, 10.2–10.3; `INTEGRACAO-MAESTRI-OMP.md` §8; `GLOSSARY.md`; SPEC derivada §§4.5/4.7/5.2; matriz de stories; `docs/Docs20261016_073031/design/artifact.html` lido antes de avaliar UI. C-02 continua sendo o contrato para remover Login/Sair e abrir a Principal.
+
+### Evidência e estado
+
+- `docs/integration/acceptance-transversal/coverage-matrix.md` relaciona as famílias US-01–20, RF-01–88, RNF-01–25 e cada AC-01–29/INT-01–18 a código, testes e evidências atuais, distinguindo prova local de integração externa pendente. `visual-evidence.md` e `independent-review.md` preservam bloqueios desta rodada sem sobrescrever resultados anteriores.
+- Typecheck (`npm.cmd run typecheck`), lint (`npm.cmd run lint`), suíte completa (`npm.cmd test -- --reporter=dot --no-color`: 872 testes/58 arquivos) e build (`npm.cmd run build`) concluíram com exit 0. A suíte usa adapters controlados para serviços externos; o build manteve avisos existentes de depreciação React/Vite e bundle acima de 500 kB.
+- A chamada Playwright MCP para listar abas foi recusada pelo gate automático (`MCP tool call requires approval, but approval policy is never`). O inventário CUA retornou `browsers: []`. Nenhum navegador foi iniciado, perfil pessoal usado ou screenshot histórico promovido. AC-27, INT-11 e RNF-17–19 seguem pendentes; foco, teclado, nomes acessíveis, contraste, zoom, viewports e jornadas visuais não foram medidos.
+- A inspeção estática não encontrou controles/telas Login/Sair no cliente; `#login` é somente alias de rota normalizado para Principal. Essa observação não comprova ausência de corte/sobreposição no browser.
+- A matriz de segurança referencia os testes HTTP de sessão/Origin/CSRF/SSE, idempotência/CAS, restart, marcadores sintéticos, resposta incerta, conflito, capacidades, pergunta expirada/concorrente e paginação por seção. As provas locais passaram nesta rodada; interações visuais entre abas e efeitos Maestri/GitHub reais continuam pendentes.
+- A revisão final vinculada a uma referência Git imutável permanece pendente. `AGENTS.md` exige contexto elevado com keyring para Git; o runtime não o disponibiliza. Nenhum Git/GH foi executado, não foi identificado SHA imutável desta versão e não foi alterado o estado Git.
+
+Não há aceite integral, aprovação de pipeline, Design Lock ou mudança de fase declarados. Nenhuma regressão de produto foi reproduzida; por isso esta rodada não alterou código de UI nem contratos. Os próximos aceites exigem ferramenta Playwright MCP/Chrome liberada e contexto Git autorizado para identificar/revisar a versão entregue, além das provas reais explicitadas na matriz.
