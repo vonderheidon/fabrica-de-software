@@ -51,6 +51,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   const live = new Map<string, LivePassage>();
   const starts = new Map<string, { hash: string; promise: Promise<PassageRecord> }>();
   let closed = false;
+  let closing: Promise<void> | undefined;
   const native = () => {
     if (dependencies.native) return dependencies.native;
     if (!options.host) throw new ExecutionError('CONTEXT_MISSING');
@@ -339,15 +340,22 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           await open({ terminalId: session.terminalId, workspaceId: session.workspaceId });
         } : null };
     },
-    close: async () => {
-      if (closed) return;
+    close: () => {
+      if (closing) return closing;
       closed = true;
-      for (const entry of live.values()) {
-        interrupt(entry, 'TRACKING_LOST');
-        await entry.channel?.close();
-        await entry.bootstrap?.removeSecret();
-        if (entry.storageFailed) throw new ExecutionError('STORAGE_FAILED');
-      }
+      closing = (async () => {
+        const outcomes = await Promise.allSettled([...live.values()].map(async entry => {
+          try { interrupt(entry, 'TRACKING_LOST'); }
+          finally {
+            try { await entry.channel?.close(); }
+            finally { await entry.bootstrap?.removeSecret(); }
+          }
+          if (entry.storageFailed) throw new ExecutionError('STORAGE_FAILED');
+        }));
+        const failure = outcomes.find(outcome => outcome.status === 'rejected');
+        if (failure?.status === 'rejected') throw new ExecutionError(codeOf(failure.reason, 'TRACKING_LOST'));
+      })();
+      return closing;
     },
   };
 }

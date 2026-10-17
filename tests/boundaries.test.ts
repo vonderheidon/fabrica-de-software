@@ -1,10 +1,39 @@
 import { describe, expect, it } from 'vitest';
-import { inspectSource } from '../scripts/check-boundaries.mjs';
+import { inspectSource, inspectTree } from '../scripts/check-boundaries.mjs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 describe('static dependency boundaries', () => {
   it('accepts public interfaces and storage private seams', () => {
     expect(inspectSource('apps/controller/src/main.ts', "import { openStorage } from './modules/storage/index.js'" )).toEqual([]);
     expect(inspectSource('apps/controller/src/modules/storage/settings.ts', "import { StorageError } from './errors.js'" )).toEqual([]);
+  });
+  it('actually scans TSX files and excludes test fixtures from production lint', () => {
+    const cache = resolve('.cache'); mkdirSync(cache, { recursive: true });
+    const directory = mkdtempSync(resolve(cache, 'boundaries-proof-'));
+    try {
+      writeFileSync(resolve(directory, 'Card.tsx'), 'const value: any = <p>Card</p>;');
+      writeFileSync(resolve(directory, 'Card.test.tsx'), 'const testValue: any = 1;');
+      expect(inspectTree(directory)).toHaveLength(1);
+      expect(inspectTree(directory)[0]).toContain('explicit any is forbidden');
+    } finally { rmSync(directory, { recursive: true }); }
+  });
+  it.each([
+    "import { openStorage } from '../../../controller/src/modules/storage/index.js'",
+    "export { createExecution } from '../../../controller/src/modules/execution/index.js'",
+    "type Runtime = import('../../../controller/src/modules/execution/index.js').Execution",
+    "const runtime = import('../../../controller/src/main.js')",
+    "import runtime = require('../../../controller/src/main.js')",
+  ])('keeps controller runtime out of UI even through a public index: %s', source => {
+    expect(inspectSource('apps/web/src/app/Card.tsx', source)).toContain('apps/web/src/app/Card.tsx: UI cannot import controller runtime');
+  });
+  it('allows UI DTO imports and rejects contracts IO through reexports and dynamic imports', () => {
+    expect(inspectSource('apps/web/src/app/Card.tsx', "import type { Delivery } from '#contracts'; export const Card = () => <p>Delivery</p>;")).toEqual([]);
+    for (const source of ["export { readFile } from 'node:fs/promises'", "const fs = import('node:fs')", "type Runtime = import('node:fs').Stats"]) {
+      expect(inspectSource('packages/contracts/src/index.ts', source)).toContain('packages/contracts/src/index.ts: contracts must contain schemas/types only; IO/runtime imports are forbidden');
+    }
+    expect(inspectSource('apps/web/src/app/Card.tsx', "import fs from 'node:fs'")).toContain('apps/web/src/app/Card.tsx: UI cannot import server IO/runtime');
+    expect(inspectSource('apps/web/src/app/Card.tsx', "import { spawn } from 'child_process'")).toContain('apps/web/src/app/Card.tsx: UI cannot import server IO/runtime');
   });
   it.each([
     "import { readSettings } from '../storage/settings.js'",
@@ -37,5 +66,18 @@ describe('static dependency boundaries', () => {
     expect(inspectSource('apps/controller/src/main.ts', "execFile('maestri', ['list'])")).toContain('apps/controller/src/main.ts: Maestri/OMP belongs to execution');
     expect(inspectSource('apps/controller/src/modules/pipeline/index.ts', "import { createAgentSession } from '@oh-my-pi/pi-coding-agent'")).toContain('apps/controller/src/modules/pipeline/index.ts: OMP belongs to execution');
     expect(inspectSource('apps/controller/src/modules/execution/adapters/native.ts', "spawn('omp.exe', [])")).toEqual([]);
+  });
+  it.each([
+    "import { spawn as launch } from 'node:child_process'; launch('gh', [])",
+    "import * as processes from 'node:child_process'; processes.execFile('maestri.exe', [])",
+    "import processes from 'node:child_process'; const executable = 'omp'; processes.spawn(executable, [])",
+    "const executable = 'gh'; spawn(executable, [])",
+    "import { exec as run } from 'node:child_process'; run('gh api graphql')",
+    "import * as processes from 'node:child_process'; processes['spawn']('omp.exe', [])",
+    "import processes from 'node:child_process'; processes.execSync('\"C:/Program Files/Maestri/maestri.exe\" list')",
+    "execFile('gh.cmd', ['api', 'graphql'])",
+    "spawn('C:/Program Files/Maestri/omp.exe', [])",
+  ])('detects literal launchers through imports and constants: %s', source => {
+    expect(inspectSource('apps/controller/src/modules/projects/service.ts', source).some(e => /GH belongs|Maestri\/OMP belongs/.test(e))).toBe(true);
   });
 });

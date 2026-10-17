@@ -112,6 +112,28 @@ describe('distributed role contracts', () => {
   });
 });
 
+describe('shutdown coordination', () => {
+  it('settles answer waits without replay and shares an idempotent close promise', async () => {
+    const f = fixture(); const ready = await f.start();
+    const question = await f.call('execution_question', { formatVersion: 1, decision: 'Escolha?', context: 'Contexto 😀', alternatives: ['Manter', 'Alterar'] });
+    const questionId = (question as { questionId: string }).questionId;
+    const answering = f.execution.answerQuestion(ready.handle, questionId, 'Manter', randomUUID());
+    const first = f.execution.close(); const second = f.execution.close();
+    expect(second).toBe(first); await first;
+    expect((await answering).state).toBe('delivery_unknown');
+    expect(f.store.getPassage(ready.handle).diagnostic).toBe('TRACKING_LOST');
+    expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    expect(f.execution.interactionSurface(ready.handle).available).toBe(false);
+  });
+  it('removes the bootstrap even when closing a channel fails, with a sanitized error', async () => {
+    const f = fixture(); await f.start(); f.removed.mockClear();
+    f.close.mockRejectedValue(new Error('Synthetic private runtime detail'));
+    await expect(f.execution.close()).rejects.toThrow('TRACKING_LOST');
+    expect(f.removed).toHaveBeenCalledOnce();
+    expect(f.store.getPassage({ passageId: f.request.binding.passageId }).state).toBe('interrupted');
+  });
+});
+
 describe('correction in the same tracked session', () => {
   it('rebinds a new passage only after continuation ACK, without another recruit', async () => {
     const f = fixture(); await f.start(); await f.call('execution_complete', payload());

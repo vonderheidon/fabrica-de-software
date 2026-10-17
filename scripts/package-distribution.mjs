@@ -1,0 +1,59 @@
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+
+/** Package a compiled installation, never project data, environment, caches or personal skills.
+ * Native dependencies make the result specific to this OS/architecture and Node 24 ABI.
+ */
+export function createDistribution() {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  for (const file of ['dist/apps/controller/src/main.js', 'dist/web/index.html',
+    'dist/packages/contracts/src/index.js', 'dist/resources/roles/implementer.v1.json',
+    'dist/resources/roles/reviewer.v1.json', 'dist/resources/templates/catalog.v1.json']) {
+    if (!existsSync(join(root, file))) throw new Error('DISTRIBUTION_BUILD_REQUIRED');
+  }
+  mkdirSync(join(root, 'build'), { recursive: true });
+  const target = mkdtempSync(join(root, 'build', 'Fábrica distribuição-'));
+  /** @param {string} source @param {string} destination @param {boolean} [excludeNestedModules] */
+  function copy(source, destination, excludeNestedModules = false) {
+    cpSync(source, destination, { recursive: true, errorOnExist: true, force: false, filter: current => {
+      if (excludeNestedModules && current !== source && basename(current) === 'node_modules') return false;
+      const info = lstatSync(current);
+      if (info.isSymbolicLink() || !(info.isFile() || info.isDirectory())) throw new Error('DISTRIBUTION_RESOURCE_REDIRECTED');
+      return true;
+    } });
+  }
+  copy(join(root, 'dist'), join(target, 'dist'));
+  for (const name of ['package-lock.json', '.env.example', 'SPEC.md', 'SPEC_PROGRESS.md', 'GLOSSARY.md', 'INTEGRACAO-MAESTRI-OMP.md']) copy(join(root, name), join(target, name));
+  copy(join(root, 'docs/operation'), join(target, 'docs/operation'));
+  copy(join(root, 'docs/integration/first-slice'), join(target, 'docs/integration/first-slice'));
+  writeFileSync(join(target, 'README.md'), '# Nova fábrica de software — pacote local\n\nConsulte [o manual de operação](docs/operation/README.md) para pré-requisitos, inicialização pelo terminal-âncora, atualização, recuperação e limites de validação.\n\nNode 24 e executáveis do host são pré-requisitos externos. As dependências nativas empacotadas correspondem à plataforma e ABI em distribution.json. Este pacote contém apenas o comando npm start; checks de desenvolvimento exigem o repositório canônico.\n', { flag: 'wx' });
+  mkdirSync(join(target, 'scripts'));
+  copy(join(root, 'scripts/start-host.mjs'), join(target, 'scripts/start-host.mjs'));
+  const runtimeManifest = { ...manifest, scripts: { start: manifest.scripts.start },
+    imports: { '#contracts': './dist/packages/contracts/src/index.js' } };
+  writeFileSync(join(target, 'package.json'), JSON.stringify(runtimeManifest, null, 2) + '\n', { flag: 'wx' });
+  let packages = 0;
+  for (const [name, entry] of Object.entries(lock.packages)) {
+    if (!name || entry.dev) continue;
+    if (!/^node_modules\/(?:@[^/]+\/)?[^/]+(?:\/node_modules\/(?:@[^/]+\/)?[^/]+)*$/.test(name) || entry.link) throw new Error('DISTRIBUTION_LOCK_INVALID');
+    const source = join(root, name);
+    if (!existsSync(source)) {
+      if (entry.optional) continue;
+      throw new Error('DISTRIBUTION_DEPENDENCY_MISSING');
+    }
+    copy(source, join(target, name), true);
+    packages++;
+  }
+  writeFileSync(join(target, 'distribution.json'), JSON.stringify({ formatVersion: 1, nodeMajor: 24,
+    platform: process.platform, architecture: process.arch, nativeModulesAbi: process.versions.modules, packages }, null, 2) + '\n', { flag: 'wx' });
+  return target;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try { console.log(JSON.stringify({ directory: createDistribution(), nativeIntegration: 'not_executed' })); }
+  catch { console.error(JSON.stringify({ code: 'DISTRIBUTION_FAILED', message: 'Check build, lockfile and installed production dependencies. Partial package is preserved under build.' })); process.exitCode = 1; }
+}

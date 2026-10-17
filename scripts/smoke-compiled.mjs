@@ -8,6 +8,7 @@ import { fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startController } from '../dist/apps/controller/src/main.js';
 import { openStorage } from '../dist/apps/controller/src/modules/storage/index.js';
+import { controlledDependencies } from '../tests/native/controller-fixture.mjs';
 
 // Explicit local HTTP smoke of compiled production code; no Git, provider or Maestri.
 const reservation = createServer();
@@ -29,7 +30,7 @@ const previousCwd = process.cwd();
 const signals = { SIGINT: process.listenerCount('SIGINT'), SIGTERM: process.listenerCount('SIGTERM') };
 let app;
 let child;
-const main = fileURLToPath(new URL('../dist/apps/controller/src/main.js', import.meta.url));
+const main = fileURLToPath(new URL('../tests/native/controller-fixture.mjs', import.meta.url));
 async function waitForExit(processHandle) {
   if (processHandle.exitCode !== null || processHandle.signalCode !== null) return processHandle.exitCode;
   return new Promise((resolve, reject) => {
@@ -44,7 +45,7 @@ function startChild(environment) {
 try {
   Object.assign(process.env, changes);
   process.chdir(directory);
-  app = await startController();
+  app = await startController({}, controlledDependencies);
   const response = await fetch(changes.FACTORY_BROWSER_ORIGIN + '/api/v1/health');
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: 'ok' });
@@ -102,6 +103,46 @@ try {
   const anonymous = await fetch(origin + '/api/v1/events/stream');
   assert.equal(anonymous.status, 401);
   await anonymous.arrayBuffer();
+  const operational = await fetch(origin + '/api/v1/operation', { headers: { cookie } });
+  assert.equal(operational.status, 200);
+  const snapshot = await operational.json();
+  assert.equal(snapshot.activeAttempt, null);
+  assert.deepEqual(snapshot.nextCandidates, []);
+  assert.equal(snapshot.integrationStatus.provesProviderExecution, false);
+  const priorDiagnosis = await fetch(origin + '/api/v1/diagnostics?scope=host', { headers: { cookie } });
+  assert.equal(priorDiagnosis.status, 200); assert.deepEqual((await priorDiagnosis.json()).reports, []);
+  const diagnosticId = randomUUID();
+  const diagnosticResponse = await fetch(origin + '/api/v1/diagnostics?scope=host', { method: 'POST',
+    headers: { ...settingsHeaders, 'idempotency-key': diagnosticId }, body: JSON.stringify({ checks: ['configuration', 'github_identity', 'maestri_context'] }) });
+  assert.equal(diagnosticResponse.status, 202);
+  assert.equal(diagnosticResponse.headers.get('location'), '/api/v1/operations/' + diagnosticId);
+  await diagnosticResponse.arrayBuffer();
+  const diagnosisDeadline = Date.now() + 5000;
+  let diagnosis;
+  do {
+    const response = await fetch(origin + '/api/v1/diagnostics?scope=host', { headers: { cookie } });
+    assert.equal(response.status, 200); diagnosis = await response.json();
+    if (diagnosis.reports[0]?.state === 'succeeded') break;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  } while (Date.now() < diagnosisDeadline);
+  assert.equal(diagnosis.reports[0]?.state, 'succeeded');
+  assert.equal(diagnosis.reports[0]?.operationId, diagnosticId);
+  assert.equal(diagnosis.reports[0]?.diagnostics.length, 3);
+  assert(Number(diagnosis.eventCursor) > Number(snapshot.eventCursor));
+  const replay = await fetch(origin + '/api/v1/events/stream?cursor=invalid', { headers: { cookie, 'last-event-id': snapshot.eventCursor } });
+  assert.equal(replay.status, 200);
+  const replayReader = replay.body?.getReader(); assert(replayReader);
+  let replayText = '';
+  while (!replayText.includes('event: diagnostic.completed')) {
+    const chunk = await replayReader.read(); assert(!chunk.done);
+    replayText += new TextDecoder().decode(chunk.value);
+  }
+  assert(replayText.includes(diagnosticId)); assert(!replayText.includes(bootstrap.csrfToken));
+  const replayIds = [...replayText.matchAll(/^id: ([0-9]+)$/gm)].map(match => match[1]);
+  assert.equal(new Set(replayIds).size, replayIds.length);
+  assert(replayIds.every(id => Number(id) > Number(snapshot.eventCursor)));
+  await replayReader.cancel();
+  await new Promise(resolve => setTimeout(resolve, 10));
   const malformedHeaders = await fetch(origin + '/api/v1/health', { headers: { 'x-large': 'S'.repeat(9000) } });
   assert.equal(malformedHeaders.status, 431);
   assert.equal(typeof (await malformedHeaders.json()).requestId, 'string');
@@ -168,11 +209,11 @@ try {
   assert(child.kill('SIGKILL'));
   await exited;
   child = undefined;
-  app = await startController();
+  app = await startController({}, controlledDependencies);
   const revoked = await fetch(origin + '/api/v1/operations/'+operationId, { headers: { cookie } });
   assert.equal(revoked.status, 401);
   await revoked.arrayBuffer();
-  console.log('Compiled controller: real HTTP/SSE/SQLite, settings/CAS/idempotency, distributed scaffold catalog, context diagnostics, shutdown and process lock OK');
+  console.log('Compiled controller: real HTTP/SSE/SQLite, settings/CAS/idempotency, distributed scaffold catalog, context diagnostics, shutdown and process lock OK; anchor preflight controlled, Maestri/OMP not executed');
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) {
     const exited = waitForExit(child);

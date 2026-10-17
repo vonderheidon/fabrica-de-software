@@ -21,8 +21,13 @@
     "test:execution-compiled": "node scripts/smoke-execution.mjs",
     "test:verification-compiled": "node scripts/smoke-verification.mjs",
     "test:acceptance": "vitest run tests/acceptance",
+    "test:persistence": "vitest run tests/acceptance/persistence-maintenance.test.ts tests/acceptance/persistence-audit.test.ts tests/acceptance/execution-composition.test.ts tests/acceptance/persistence-report.test.ts tests/boundaries.test.ts --reporter=verbose",
+    "proof:persistence": "node scripts/persistence-proof.mjs",
+    "test:maintenance-native": "npm run build && vitest run --config vitest.maintenance.config.ts --reporter=verbose",
     "acceptance:check": "node scripts/first-slice-evidence.mjs",
-    "start": "node dist/apps/controller/src/main.js"
+    "package:local": "npm run build && node scripts/package-distribution.mjs",
+    "test:distribution": "node scripts/smoke-distribution.mjs",
+    "start": "node scripts/start-host.mjs"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.3",
@@ -39,7 +44,7 @@
     "@types/node": "24.19.2",
     "@types/react": "18.3.24",
     "@types/react-dom": "18.3.7",
-    "@vitejs/plugin-react": "4.7.0",
+    "@vitejs/plugin-react": "5.2.0",
     "typescript": "5.9.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"
