@@ -10,6 +10,8 @@ node_modules/
 .pnp.*
 
 # Build and test output
+var/
+*.tsbuildinfo
 dist/
 build/
 coverage/
