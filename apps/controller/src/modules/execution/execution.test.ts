@@ -1,0 +1,380 @@
+import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
+import type { Socket } from 'node:net';
+import { describe, expect, it, vi } from 'vitest';
+import type { ExecutionEvent, ExecutionHost, ExecutionPersistence, PassageRecord, QuestionRecord, ResultRecord, AnswerRecord, PassageRequest } from './index.js';
+import { createExecution, ExecutionError } from './index.js';
+import { digest, loadRoleResources } from './roles.js';
+import { createMaestriOmp } from './adapters/maestri-omp/adapter.js';
+import { createNative, inheritedAnchor, launchCommand, type CliRunner } from './adapters/maestri-omp/native.js';
+import { connectWire, executionLimits, JsonLines } from './adapters/maestri-omp/wire.js';
+import type { ChannelCallbacks, Hello } from './adapters/maestri-omp/channel.js';
+
+/** Volatile fixture only. Production must supply domain transactions, never this implementation. */
+function fixtureStore() {
+  const records = new Map<string, PassageRecord>();
+  const results = new Map<string, ResultRecord>();
+  const questions = new Map<string, QuestionRecord>();
+  const answers = new Map<string, AnswerRecord>();
+  const events: ExecutionEvent[] = [];
+  const store: ExecutionPersistence = {
+    claimAnswer: () => true,
+    reserve: input => {
+      const prior = records.get(input.handle.passageId);
+      if (prior && prior.requestHash !== input.requestHash) throw new ExecutionError('RESULT_CONFLICT');
+      if (prior) return { created: false, record: structuredClone(prior) };
+      records.set(input.handle.passageId, structuredClone(input));
+      return { created: true, record: input };
+    },
+    getPassage: h => { const r = records.get(h.passageId); if (!r) throw new Error('NOT_FOUND'); return structuredClone(r); },
+    record: (h, state, diagnostic, type) => { const r = store.getPassage(h); records.set(h.passageId, { ...r, state, diagnostic }); events.push({ sequence: events.length + 1, type, code: diagnostic }); },
+    confirmReady: (h, effectiveProfile, executorVersion) => { store.record(h, 'ready', null, 'passage-ready'); records.set(h.passageId, { ...store.getPassage(h), effectiveProfile, executorVersion }); },
+    observe: (_h, after, limit) => events.filter(e => e.sequence > after).slice(0, limit),
+    acceptResult: input => {
+      const prior = results.get(input.binding.passageId);
+      if (prior && prior.sha256 !== input.sha256) throw new ExecutionError('RESULT_CONFLICT');
+      if (prior) return prior;
+      const result = { ...input, receiptId: randomUUID() }; results.set(input.binding.passageId, result); return result;
+    },
+    getResult: h => results.get(h.passageId) ?? null,
+    raiseQuestion: input => {
+      const prior = [...questions.values()].find(q => q.binding.passageId === input.binding.passageId && q.sha256 === input.sha256);
+      if (prior) return prior;
+      const result = { ...input, questionId: randomUUID() }; questions.set(result.questionId, result); return result;
+    },
+    recordAnswer: (h, questionId, answer, operationId) => {
+      if (questions.get(questionId)?.binding.passageId !== h.passageId) throw new ExecutionError('ANSWER_CONFLICT');
+      const prior = answers.get(operationId);
+      if (prior && (prior.questionId !== questionId || prior.answer !== answer)) throw new ExecutionError('ANSWER_CONFLICT');
+      if (prior) return prior;
+      const result: AnswerRecord = { operationId, questionId, answer, state: 'recorded' }; answers.set(operationId, result); return result;
+    },
+    confirmAnswer: (_h, operationId, state) => { const r = answers.get(operationId); if (!r) throw new Error('NOT_FOUND'); const result = { ...r, state }; answers.set(operationId, result); return result; },
+    recordCancellation: attemptId => {
+      const own = [...records.values()].filter(r => r.binding.attemptId === attemptId);
+      for (const r of own) store.record(r.handle, 'cancelled', 'CANCELLED', 'tracking-lost');
+      return own.map(r => r.handle);
+    },
+    recordStop: vi.fn(),
+  };
+  return { store, records, results, questions, answers };
+}
+const anchorId = randomUUID();
+const workspaceId = randomUUID();
+const host: ExecutionHost = {
+  maestriExecutable: 'C:\\Ferramentas ç\\maestri.exe', ompExecutable: 'C:\\Ferramentas ç\\omp.exe',
+  powershellExecutable: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
+  inheritedEnvironment: { MAESTRI_PIPE: '\\\\.\\pipe\\test-only', MAESTRI_TERMINAL_ID: anchorId, MAESTRI_WORKSPACE_ID: workspaceId },
+};
+const payload = () => ({ formatVersion: 1 as const, summary: 'Implementação concluída 😀', writesStopped: true as const,
+  criteria: [{ criterionId: 'ac-1', verdict: 'passed' as const, evidence: ['Teste observado'] }], checks: [] });
+function fixture(role: 'implementer' | 'reviewer' = 'implementer') {
+  const journal = fixtureStore();
+  const resources = loadRoleResources();
+  const request: PassageRequest = {
+    binding: { attemptId: randomUUID(), passageId: randomUUID(), role, round: 1, deliveryVersion: randomUUID() },
+    profile: { name: 'Exact', executor: 'maestri-omp', provider: 'provider', model: 'model', effort: 'high', guidance: 'Orientação real' },
+    cwd: 'C:\\Projetos ç\\tentativa 😀', task: 'Tarefa '.repeat(20000), criterionIds: ['ac-1'], previousFindingKeys: [], gitNexusRequired: true,
+    roleResource: resources.get(role)!.reference,
+  };
+  let callbacks: ChannelCallbacks | undefined;
+  const frames: unknown[] = [];
+  const close = vi.fn(async () => {});
+  const removed = vi.fn(async () => {});
+  const openExistingTerminal = vi.fn(async () => {});
+  const runtime = {
+    validate: vi.fn(async () => ({ anchor: { terminalId: anchorId, workspaceId }, ompVersion: '18.11.1' })),
+    recruit: vi.fn(async () => {}), stop: vi.fn(async () => 'uncertain' as const),
+  };
+  const execution = createMaestriOmp({ dataDirectory: 'C:\\Dados', host: { ...host, openExistingTerminal }, persistence: journal.store, validateReviewerResult: async () => {} }, resources, {
+    native: runtime,
+    channel: async value => { callbacks = value; return { port: 12345, token: 'x'.repeat(43), send: async frame => { frames.push(frame); }, close }; },
+    bootstrap: async () => ({ path: 'C:\\Dados ç\\launch.json', removeSecret: removed }),
+  });
+  const hello: Hello = { type: 'hello', protocolVersion: 1, token: 'x'.repeat(43),
+    sessionId: randomUUID(), terminalId: randomUUID(), workspaceId, cwd: request.cwd,
+    provider: 'provider', model: 'model', effort: 'high', tui: true, roleDigest: request.roleResource.sha256, ompVersion: '18.11.1' };
+  const waitLaunch = async () => { await vi.waitFor(() => expect(runtime.recruit).toHaveBeenCalledTimes(1)); };
+  const start = async () => { const promise = execution.startPassage(request); await waitLaunch(); await callbacks!.hello(hello); await callbacks!.frame({ type: 'task-submitted' }); return promise; };
+  const call = async (tool: string, value: unknown, extra = {}) => {
+    await callbacks!.frame({ type: 'call', id: randomUUID(), tool, payload: value, ...extra }); return frames.at(-1);
+  };
+  return { ...journal, execution, request, runtime, hello, frames, removed, close, openExistingTerminal, start, waitLaunch, call, callbacks: () => callbacks! };
+}
+
+describe('distributed role contracts', () => {
+  it('loads both exact schemas and stable file digests without personal skills', () => {
+    const roles = loadRoleResources();
+    expect([...roles.keys()]).toEqual(['implementer', 'reviewer']);
+    expect(roles.get('implementer')?.reference.path).toBe('resources/roles/implementer.v1.json');
+    expect(roles.get('reviewer')?.reference.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(() => loadRoleResources('missing-role-directory')).toThrow('RESOURCE_INVALID');
+  });
+});
+
+describe('correction in the same tracked session', () => {
+  it('rebinds a new passage only after continuation ACK, without another recruit', async () => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload());
+    const next = { ...f.request, binding: { ...f.request.binding, passageId: randomUUID(), round: 2, deliveryVersion: randomUUID() }, task: 'Structured correction context' };
+    const { cwd: _cwd, ...input } = next;
+    const continuing = f.execution.continuePassage({ passageId: f.request.binding.passageId }, input);
+    await vi.waitFor(() => expect(f.frames.at(-1)).toMatchObject({ type: 'continuation', passageId: next.binding.passageId, task: next.task }));
+    expect(f.store.getPassage({ passageId: next.binding.passageId }).state).toBe('starting');
+    await f.callbacks().frame({ type: 'continuation-receipt', passageId: next.binding.passageId });
+    expect((await continuing).state).toBe('ready'); expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    const raised = await f.call('execution_question', { formatVersion: 1, decision: 'Correction scope?', context: 'Current logical passage', alternatives: ['Keep', 'Change'] });
+    const questionId = (raised as { questionId: string }).questionId; const operationId = randomUUID();
+    const confirm = vi.spyOn(f.store, 'confirmAnswer');
+    const answering = f.execution.answerQuestion({ passageId: next.binding.passageId }, questionId, 'Keep', operationId);
+    await f.callbacks().frame({ type: 'answer-receipt', operationId });
+    expect((await answering).state).toBe('delivered');
+    expect(confirm).toHaveBeenCalledWith({ passageId: next.binding.passageId }, operationId, 'delivered');
+    expect(f.questions.get(questionId)?.binding).toEqual(next.binding);
+    const corrected = { ...payload(), summary: 'Correction result' };
+    await f.call('execution_complete', corrected);
+    expect(f.store.getResult({ passageId: next.binding.passageId })?.binding).toEqual(next.binding);
+    expect(f.store.getResult({ passageId: f.request.binding.passageId })?.result).toEqual(payload());
+    await f.execution.close();
+  });
+  it('refuses continuation without a live session and never starts a replacement', async () => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload());
+    f.callbacks().lost('TRACKING_LOST');
+    const { cwd: _cwd, ...input } = { ...f.request, binding: { ...f.request.binding, passageId: randomUUID(), round: 2, deliveryVersion: randomUUID() } };
+    await expect(f.execution.continuePassage({ passageId: f.request.binding.passageId }, input)).rejects.toThrow('TRACKING_LOST');
+    expect(f.runtime.recruit).toHaveBeenCalledOnce(); await f.execution.close();
+  });
+  it('keeps an uncertain continuation interrupted and refuses a second send', async () => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload());
+    const { cwd: _cwd, ...input } = { ...f.request, binding: { ...f.request.binding, passageId: randomUUID(), round: 2, deliveryVersion: randomUUID() } };
+    vi.useFakeTimers();
+    try {
+      const pending = f.execution.continuePassage({ passageId: f.request.binding.passageId }, input);
+      const assertion = expect(pending).rejects.toThrow('TRACKING_LOST');
+      await vi.advanceTimersByTimeAsync(executionLimits.requestMs + 1); await assertion;
+      expect(f.store.getPassage({ passageId: input.binding.passageId }).state).toBe('interrupted');
+      await expect(f.execution.continuePassage({ passageId: input.binding.passageId }, { ...input, binding: { ...input.binding, round: 3 } })).rejects.toThrow();
+      expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); await f.execution.close(); }
+  });
+});
+describe('private UTF-8 framing', () => {
+  it('preserves Portuguese and emoji split at every byte and separates frames', () => {
+    const decoder = new JsonLines();
+    const bytes = Buffer.from(JSON.stringify({ text: 'Ação, revisão 😀🧪' }) + '\n' + JSON.stringify({ done: true }) + '\n');
+    const frames = [...bytes].flatMap(b => decoder.feed(Buffer.from([b])));
+    expect(frames).toEqual([{ text: 'Ação, revisão 😀🧪' }, { done: true }]); decoder.end();
+  });
+  it.each([Buffer.from('{oops}\n'), Buffer.from([0x22, 0xc3, 0x22, 10])])('rejects malformed JSON and UTF-8', bytes => {
+    expect(() => new JsonLines().feed(bytes)).toThrow('FRAME_INVALID');
+  });
+  it('bounds frames, queue, chunks and incomplete EOF', () => {
+    expect(() => new JsonLines().feed(Buffer.alloc(executionLimits.frameBytes + 1, 65))).toThrow('FRAME_OVERSIZE');
+    expect(() => new JsonLines().feed(Buffer.from('{}\n'.repeat(17)))).toThrow('FRAME_OVERSIZE');
+    expect(() => new JsonLines().feed(Buffer.alloc(executionLimits.socketBufferBytes + 1))).toThrow('FRAME_OVERSIZE');
+    const decoder = new JsonLines(); decoder.feed(Buffer.from('{')); expect(() => decoder.end()).toThrow('CHANNEL_EOF');
+  });
+  it('closes an actual wire callback with a finite diagnostic on EOF', () => {
+    const socket = new EventEmitter() as EventEmitter & { destroy: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn>; resume: ReturnType<typeof vi.fn> };
+    socket.destroy = vi.fn(); socket.pause = vi.fn(); socket.resume = vi.fn();
+    const lost = vi.fn(); connectWire(socket as unknown as Socket, async () => {}, lost);
+    socket.emit('end'); expect(lost).toHaveBeenCalledExactlyOnceWith('CHANNEL_EOF'); expect(socket.destroy).toHaveBeenCalledOnce();
+    socket.emit('close'); expect(lost).toHaveBeenCalledOnce();
+  });
+});
+describe('native Maestri and Windows launch', () => {
+  it('requires trusted observed termination to confirm stop and never accepts an arbitrary process target', async () => {
+    const run = vi.fn<CliRunner>(async () => ({ exitCode: 0, stdout: '' })); const name = `factory-${randomUUID()}`;
+    expect(await createNative(host, 'C:\\Data', run).stop(name)).toBe('uncertain');
+    const confirmStoppedTerminal = vi.fn(async () => true);
+    expect(await createNative({ ...host, confirmStoppedTerminal }, 'C:\\Data', run).stop(name)).toBe('confirmed');
+    expect(confirmStoppedTerminal).toHaveBeenCalledExactlyOnceWith({ workspaceId: workspaceId.toLowerCase(), terminalName: name });
+    confirmStoppedTerminal.mockResolvedValue(false);
+    expect(await createNative({ ...host, confirmStoppedTerminal }, 'C:\\Data', run).stop(name)).toBe('uncertain');
+    const count = run.mock.calls.length;
+    await expect(createNative(host, 'C:\\Data', run).stop('manual-terminal')).rejects.toMatchObject({ code: 'RESOURCE_INVALID' });
+    expect(run.mock.calls.length).toBe(count);
+  });
+  it('diagnoses missing and stale inherited context without launching', async () => {
+    const execution = createExecution({ dataDirectory: 'C:\\Data', persistence: fixtureStore().store });
+    expect(await execution.preflight()).toEqual({ ready: false, code: 'CONTEXT_MISSING', ompVersion: null });
+    expect(() => inheritedAnchor(undefined)).toThrow('CONTEXT_MISSING');
+    const run: CliRunner = vi.fn(async () => ({ exitCode: 1, stdout: '' }));
+    await expect(createNative(host, 'C:\\Data', run).validate()).rejects.toThrow('CONTEXT_STALE');
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+  it('uses only supported queries and exact argv/cwd/env; validates version without provider', async () => {
+    const run = vi.fn<CliRunner>(async (_exe, args) => ({ exitCode: 0, stdout: args[0] === 'list' ? 'You: Anchor\nConnected agents:' : args[0] === 'recruit' ? '--command --dir' : 'omp/18.11.1\n' }));
+    expect((await createNative(host, 'C:\\Dados ç', run).validate()).ompVersion).toBe('18.11.1');
+    expect(run.mock.calls.map(c => c[1])).toEqual([['list'], ['recruit', '--help'], ['--version']]);
+    expect(run.mock.calls.every(c => c[2] === 'C:\\Dados ç' && c[3] === host.inheritedEnvironment)).toBe(true);
+  });
+  it('encodes only a bootstrap path and preserves Unicode, quotes and spaces', () => {
+    const own = "C:\\Dados ç 😀\\O'Brien\\launch.json";
+    const command = launchCommand(host.powershellExecutable, own);
+    const script = Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le');
+    expect(script).toContain("C:\\Dados ç 😀\\O''Brien\\launch.json");
+    expect(script).toContain('[System.Text.Encoding]::UTF8');
+    expect(script).toContain('& $launch.ompExecutable @($launch.args)');
+    expect(script).not.toContain('--no-tools'); expect(command).not.toContain('token');
+  });
+});
+describe('passage coordination under controlled native dependencies', () => {
+  it('returns ready only after the effective handshake and task submission, deduplicates launch and opens the same session', async () => {
+    const f = fixture(); const pending = f.execution.startPassage(f.request); await f.waitLaunch();
+    expect(f.store.getPassage({ passageId: f.request.binding.passageId }).state).toBe('starting');
+    await f.callbacks().hello(f.hello);
+    expect(f.removed).toHaveBeenCalledOnce();
+    expect(f.store.getPassage({ passageId: f.request.binding.passageId }).state).toBe('starting');
+    await f.callbacks().frame({ type: 'task-submitted' });
+    const ready = await pending; expect(ready.state).toBe('ready');
+    expect(ready.effectiveProfile).toEqual(f.request.profile); expect(ready.executorVersion).toBe('18.11.1');
+    await f.execution.startPassage(f.request); expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    expect(f.frames).toEqual([{ type: 'run' }]);
+    await f.execution.interactionSurface(ready.handle).open?.();
+    expect(f.openExistingTerminal).toHaveBeenCalledWith({ terminalId: f.hello.terminalId, workspaceId });
+    await f.execution.close(); expect(f.store.getPassage(ready.handle).state).toBe('interrupted');
+  });
+  it('refuses profile fallback, mismatched version digest and anchor adoption', async () => {
+    for (const patch of [{ model: 'fallback' }, { roleDigest: '0'.repeat(64) }, { terminalId: anchorId }]) {
+      const f = fixture(); const pending = f.execution.startPassage(f.request); await f.waitLaunch();
+      await expect(f.callbacks().hello({ ...f.hello, ...patch })).rejects.toThrow();
+      f.callbacks().lost('PROFILE_MISMATCH');
+      expect((await pending).state).toBe('partial'); expect(f.frames).toHaveLength(0); await f.execution.close();
+    }
+  });
+  it('injects all private identities, allows corrected payloads, retains result before consumer and deduplicates complete', async () => {
+    const f = fixture(); const ready = await f.start();
+    expect(await f.call('execution_complete', { ...payload(), passageId: randomUUID() })).toMatchObject({ ok: false, code: 'RESULT_INVALID' });
+    expect(f.execution.getResult(ready.handle)).toBeNull();
+    expect(await f.call('execution_complete', { ...payload(), criteria: [] })).toMatchObject({ ok: false });
+    const receipt = await f.call('execution_complete', payload());
+    expect(receipt).toMatchObject({ ok: true });
+    expect(f.execution.getResult(ready.handle)?.binding).toEqual(f.request.binding);
+    expect(await f.call('execution_complete', payload())).toMatchObject({ ok: true, receiptId: (receipt as { receiptId: string }).receiptId });
+    expect(await f.call('execution_complete', { ...payload(), summary: 'different' })).toMatchObject({ ok: false, code: 'RESULT_CONFLICT' });
+    expect(f.execution.interactionSurface(ready.handle).available).toBe(true);
+    expect(f.store.getPassage(ready.handle).state).toBe('ready'); await f.execution.close();
+  });
+  it('never acknowledges a storage failure and permits a retry in the same TUI', async () => {
+    const f = fixture(); await f.start(); const accept = f.store.acceptResult;
+    f.store.acceptResult = () => { throw new Error('secret native database error'); };
+    expect(await f.call('execution_complete', payload())).toMatchObject({ ok: false, code: 'STORAGE_FAILED' });
+    expect(JSON.stringify(f.frames)).not.toContain('secret'); expect(f.results.size).toBe(0);
+    f.store.acceptResult = accept;
+    expect(await f.call('execution_complete', payload())).toMatchObject({ ok: true }); await f.execution.close();
+  });
+  it('requires exact review coverage, finding identity and prior resolution, rejects inconsistent approval', async () => {
+    const f = fixture('reviewer'); f.request.previousFindingKeys = ['F-1']; await f.start();
+    const review = { formatVersion: 1, summary: 'Revisão', verdict: 'approved', criteria: payload().criteria, findings: [], resolutions: [] };
+    expect(await f.call('execution_complete', review)).toMatchObject({ ok: false });
+    expect(await f.call('execution_complete', { ...review, resolutions: [{ findingKey: 'F-1', verdict: 'unresolved', evidence: ['still present'] }] })).toMatchObject({ ok: false });
+    expect(await f.call('execution_complete', { ...review, resolutions: [{ findingKey: 'F-1', verdict: 'resolved', evidence: ['observed'] }] })).toMatchObject({ ok: true }); await f.execution.close();
+  });
+  it('persists a correlated question, records an answer before send, and confirms only its receipt', async () => {
+    const f = fixture(); const ready = await f.start();
+    const response = await f.call('execution_question', { formatVersion: 1, decision: 'Escolha de escopo?', context: 'Contexto 😀', alternatives: ['A', 'B'] });
+    const questionId = (response as { questionId: string }).questionId;
+    expect(f.questions.get(questionId)?.binding).toEqual(f.request.binding);
+    const operationId = randomUUID(); const promise = f.execution.answerQuestion(ready.handle, questionId, 'Opção B ç', operationId);
+    expect(f.answers.get(operationId)?.state).toBe('recorded');
+    expect(f.frames.at(-1)).toEqual({ type: 'answer', questionId, operationId, answer: 'Opção B ç' });
+    await f.callbacks().frame({ type: 'answer-receipt', operationId });
+    expect((await promise).state).toBe('delivered');
+    const before = f.frames.length; await f.execution.answerQuestion(ready.handle, questionId, 'Opção B ç', operationId); expect(f.frames).toHaveLength(before);
+    await f.execution.close();
+  });
+  it('closes answer waits on channel EOF and reports delivery_unknown without replay', async () => {
+    const f = fixture(); const ready = await f.start();
+    const response = await f.call('execution_question', { formatVersion: 1, decision: 'Escolha?', context: 'Contexto', alternatives: ['A', 'B'] });
+    const operationId = randomUUID(); const promise = f.execution.answerQuestion(ready.handle, (response as { questionId: string }).questionId, 'A', operationId);
+    f.callbacks().lost('CHANNEL_EOF'); expect((await promise).state).toBe('delivery_unknown');
+    expect(f.store.getPassage(ready.handle).state).toBe('interrupted'); await f.execution.close();
+  });
+  it('keeps a timed out answer unknown, does not resend it and reconciles a late ACK', async () => {
+    const f = fixture(); const ready = await f.start();
+    const response = await f.call('execution_question', { formatVersion: 1, decision: 'Choose?', context: 'Context', alternatives: ['A', 'B'] });
+    const questionId = (response as { questionId: string }).questionId; const operationId = randomUUID();
+    vi.useFakeTimers();
+    try {
+      const waiting = f.execution.answerQuestion(ready.handle, questionId, 'A', operationId);
+      await vi.advanceTimersByTimeAsync(executionLimits.requestMs + 1);
+      expect((await waiting).state).toBe('delivery_unknown'); const frames = f.frames.length;
+      expect((await f.execution.answerQuestion(ready.handle, questionId, 'A', operationId)).state).toBe('delivery_unknown');
+      expect(f.frames).toHaveLength(frames);
+      await f.callbacks().frame({ type: 'answer-receipt', operationId });
+      expect(f.answers.get(operationId)?.state).toBe('delivered'); expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); await f.execution.close(); }
+  });
+  it('preserves an identifiable partial launch and never recruits again after lost response', async () => {
+    const f = fixture(); f.runtime.recruit.mockRejectedValue(new Error('native secret detail'));
+    const record = await f.execution.startPassage(f.request);
+    expect(record).toMatchObject({ state: 'partial', diagnostic: 'LAUNCH_UNCERTAIN', terminalName: `factory-${f.request.binding.passageId}` });
+    await f.execution.startPassage(f.request); expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    expect(JSON.stringify(record)).not.toContain('secret'); await f.execution.close();
+  });
+  it('tracks cancellation during pending creation and stops only that owned terminal when creation returns', async () => {
+    const f = fixture(); let returned: () => void = () => {};
+    f.runtime.recruit.mockImplementation(() => new Promise<void>(resolve => { returned = resolve; }));
+    const promise = f.execution.startPassage(f.request); await f.waitLaunch();
+    const receipts = await f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
+    expect(receipts[0]?.state).toBe('requested'); expect((await promise).state).toBe('cancelled');
+    expect(f.runtime.stop).not.toHaveBeenCalled(); returned();
+    await vi.waitFor(() => expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(`factory-${f.request.binding.passageId}`));
+    expect(f.store.recordStop).toHaveBeenLastCalledWith({ passageId: f.request.binding.passageId }, { passageId: f.request.binding.passageId, state: 'uncertain' }); await f.execution.close();
+  });
+  it('shares one physical stop request across concurrent cancellations of a ready terminal', async () => {
+    const f = fixture(); await f.start(); let release!: () => void;
+    const stopped = new Promise<void>(r => { release = r; });
+    f.runtime.stop.mockImplementation(async () => { await stopped; return 'uncertain'; });
+    const one = f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
+    const two = f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
+    await vi.waitFor(() => expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(`factory-${f.request.binding.passageId}`));
+    release(); expect((await one)[0]?.state).toBe('uncertain'); expect((await two)[0]?.state).toBe('uncertain');
+    await f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID()); expect(f.runtime.stop).toHaveBeenCalledTimes(1);
+    expect(f.execution.interactionSurface({ passageId: f.request.binding.passageId }).available).toBe(false);
+    await f.execution.close();
+  });
+  it('closes a lost channel and refuses further result authority without replacing its session', async () => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload()); const receipt = f.execution.getResult({ passageId: f.request.binding.passageId });
+    f.callbacks().lost('TRACKING_LOST');
+    expect(f.close).toHaveBeenCalledTimes(1); expect(f.execution.getResult({ passageId: f.request.binding.passageId })).toEqual(receipt);
+    await expect(f.call('execution_complete', payload())).rejects.toMatchObject({ code: 'FRAME_INVALID' });
+    expect(f.runtime.recruit).toHaveBeenCalledTimes(1); await f.execution.close();
+  });
+  it('requests stop on startup signal abort even when recruit already returned before handshake', async () => {
+    const f = fixture(); const signal = new AbortController();
+    const pending = f.execution.startPassage(f.request, signal.signal); await f.waitLaunch();
+    await Promise.resolve(); signal.abort();
+    expect((await pending).state).toBe('cancelled');
+    expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(`factory-${f.request.binding.passageId}`);
+    expect(f.frames).toHaveLength(0); await f.execution.close();
+  });
+  it('finishes a missing handshake with a finite diagnostic and releases the channel', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const pending = f.execution.startPassage(f.request);
+      await f.waitLaunch(); await vi.advanceTimersByTimeAsync(executionLimits.handshakeMs);
+      expect(await pending).toMatchObject({ state: 'partial', diagnostic: 'HANDSHAKE_TIMEOUT' });
+      expect(f.close).toHaveBeenCalled(); expect(f.removed).toHaveBeenCalled();
+      await f.execution.close();
+    } finally { vi.useRealTimers(); }
+  });
+  it('rejects conflicting re-submission without another task and marks stored sessions interrupted after restart', async () => {
+    const f = fixture(); const record = await f.start();
+    await expect(f.execution.startPassage({ ...f.request, task: 'another task' })).rejects.toThrow('RESULT_CONFLICT');
+    expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    const second = createMaestriOmp({ dataDirectory: 'C:\\Data', host, persistence: f.store }, loadRoleResources(), { native: f.runtime });
+    expect((await second.startPassage(f.request)).state).toBe('interrupted');
+    expect(second.interactionSurface(record.handle).available).toBe(false); await f.execution.close(); await second.close();
+  });
+  it('does not mask a failure to persist ready as a ready receipt', async () => {
+    const f = fixture(); const promise = f.execution.startPassage(f.request); await f.waitLaunch(); await f.callbacks().hello(f.hello);
+    const original = f.store.record; f.store.record = () => { throw new Error('storage failure'); };
+    await expect(f.callbacks().frame({ type: 'task-submitted' })).rejects.toThrow('STORAGE_FAILED');
+    f.callbacks().lost('STORAGE_FAILED'); await expect(promise).rejects.toThrow('STORAGE_FAILED');
+    f.store.record = original; await expect(f.execution.close()).rejects.toThrow('STORAGE_FAILED');
+  });
+  it('uses canonical result hashes independent of property ordering', () => {
+    expect(digest({ a: 1, b: 'ç' })).toBe(digest({ b: 'ç', a: 1 }));
+  });
+});

@@ -1,0 +1,134 @@
+import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { Writable } from 'node:stream';
+import fastifyStatic from '@fastify/static';
+import Fastify from 'fastify';
+import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
+import { EmptyQuery, ErrorResponse, HealthResponse, OperationParams, OperationView } from '#contracts';
+import type { ControllerConfiguration } from '../config.js';
+import type { Storage } from '../modules/storage/index.js';
+import { installErrors, HttpError } from './errors.js';
+import { httpLimits, installSecurity } from './security/index.js';
+import { installEventRoutes } from './routes/events.js';
+import { createProjects, type ProjectDependencies } from '../modules/projects/index.js';
+import { createGitHub } from '../modules/github/index.js';
+import { createWorkspaces } from '../modules/workspaces/index.js';
+import { installProjectRoutes } from './routes/projects.js';
+import { createPreparations, type PreparationDependencies } from '../modules/projects/index.js';
+import { installPreparationRoutes } from './routes/preparations.js';
+import { createPipeline, type Pipeline } from '../modules/pipeline/index.js';
+import { createExecution, ExecutionError } from '../modules/execution/index.js';
+import { installAttemptRoutes } from './routes/attempts.js';
+import { installQueueRoutes } from './routes/queue.js';
+import { installDeliveryRoutes } from './routes/deliveries.js';
+import { createVerification } from '../modules/verification/index.js';
+import type { ToolObservation } from '#contracts';
+import { createScaffold, type ScaffoldDependencies } from '../modules/projects/index.js';
+import { installScaffoldRoutes } from './routes/scaffold.js';
+
+export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: Pick<ProjectDependencies, 'github' | 'workspaces'>, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>) {
+  const app = Fastify({
+    logger: {
+      level: configuration.logLevel,
+      ...(logDestination ? { stream: logDestination } : {}),
+      redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-csrf-token"]', 'res.headers["set-cookie"]'],
+      // Do not log URL/query strings, headers, bodies or arbitrary error messages.
+      serializers: {
+        req: (request: { method: string }) => ({ method: request.method }),
+        res: (reply: { statusCode: number }) => ({ statusCode: reply.statusCode }),
+        err: () => ({ type: 'Error', code: 'INTERNAL_ERROR', message: 'Request failed', stack: '' }),
+      },
+    },
+    requestIdHeader: false,
+    genReqId: () => randomUUID(),
+    clientErrorHandler: (error, socket) => {
+      if (!socket.writable) return;
+      const status = error.code === 'HPE_HEADER_OVERFLOW' ? 431 : error.code === 'ERR_HTTP_REQUEST_TIMEOUT' ? 408 : 400;
+      const body = JSON.stringify({ code: 'REQUEST_REJECTED', message: 'The request format is invalid.', requestId: randomUUID() });
+      socket.end(`HTTP/1.1 ${status} Request Rejected\r\nConnection: close\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
+    },
+    bodyLimit: httpLimits.bodyBytes,
+    http: { maxHeaderSize: httpLimits.headerBytes },
+    connectionTimeout: httpLimits.connectionTimeoutMs,
+    requestTimeout: httpLimits.requestTimeoutMs,
+    handlerTimeout: httpLimits.handlerTimeoutMs,
+    keepAliveTimeout: httpLimits.keepAliveTimeoutMs,
+    maxRequestsPerSocket: httpLimits.requestsPerSocket,
+    forceCloseConnections: 'idle',
+    ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } },
+  }).withTypeProvider<TypeBoxTypeProvider>();
+
+  app.addHook('onClose', async () => { storage.close(); });
+  const webRoot = resolve(import.meta.dirname, '../../../../web');
+  if (existsSync(resolve(webRoot, 'index.html'))) {
+    app.register(fastifyStatic, {
+      root: webRoot,
+      prefix: '/',
+      index: ['index.html'],
+      dotfiles: 'ignore',
+      setHeaders(response, filePath) {
+        response.setHeader('Cache-Control', filePath.endsWith('index.html') ? 'no-store' : 'public, max-age=31536000, immutable');
+      },
+    });
+  }
+  app.server.maxHeadersCount = httpLimits.headerCount;
+  app.server.maxConnections = httpLimits.connections;
+  app.server.headersTimeout = httpLimits.headersTimeoutMs;
+  installErrors(app);
+  const security = installSecurity(app, configuration, storage.getSettings().installationId);
+  installEventRoutes(app, storage, security);
+  const defaultGitHub = createGitHub();
+  const github = projectDependencies?.github ?? defaultGitHub;
+  const workspaces = projectDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub });
+  const projects = createProjects({ storage, github, workspaces, directoryBase: configuration.dataDirectory });
+  installProjectRoutes(app, projects);
+  installQueueRoutes(app, projects);
+  const preparations = createPreparations({ storage, github: preparationDependencies?.github ?? defaultGitHub, workspaces: preparationDependencies?.workspaces ?? workspaces });
+  installPreparationRoutes(app, preparations);
+  storage.interruptAttempts();
+  const execution = providedPipeline ? null : createExecution({ dataDirectory: configuration.dataDirectory, persistence: storage.executionPersistence(),
+    validatePassageScope: async binding => { if (!await pipeline.revalidateScope(binding)) throw new ExecutionError('RESULT_INVALID'); } });
+  const verificationWorkspaces = createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory });
+  storage.interruptCreations();
+  const scaffold = createScaffold({ storage, github: scaffoldDependencies?.github ?? github, workspaces: scaffoldDependencies?.workspaces ?? verificationWorkspaces,
+    logFailure: code => app.log.error({ code }, 'Scaffold creation stopped') });
+  installScaffoldRoutes(app,scaffold,storage);
+  app.addHook('preClose', async () => { await scaffold.close(); });
+  const verification = createVerification({ storage, workspaces: verificationWorkspaces, dataDirectory: configuration.dataDirectory, logFailure: code => app.log.error({ code }, 'Verification failed') });
+  const pipeline = providedPipeline ?? createPipeline({ storage, preparations, execution: execution!,
+    workspaces: verificationWorkspaces, verification, github: preparationDependencies?.github ?? defaultGitHub, queue: { observe: projects.getQueue },
+    publication: { github: defaultGitHub, workspaces: verificationWorkspaces, verification },
+    observeTools: async () => {
+      const now = Date.now();
+      const tools: ToolObservation[] = [{ tool: 'node', state: 'observed', version: process.versions.node, cause: null, affectedRequirements: [], observedAtMs: now },
+        ...(['git', 'gh'] as const).map(tool => ({ tool, state: 'unavailable' as const, version: null, cause: 'CONTEXT_UNAVAILABLE', affectedRequirements: ['RF-22'], observedAtMs: now }))];
+      return [...tools, ...await execution!.observeVersions()];
+    }, logFailure: code => app.log.error({ code }, 'Pipeline dispatch failed') });
+  app.addHook('preClose', async () => { await pipeline.close(); });
+  installAttemptRoutes(app, pipeline, storage);
+  installDeliveryRoutes(app, pipeline, storage);
+
+  app.get('/api/v1/operations/:operationId', {
+    schema: { params: OperationParams, querystring: EmptyQuery, response: { 200: OperationView, 400: ErrorResponse, 401: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse } },
+  }, async (request) => {
+    const operation = storage.getOperation(request.params.operationId);
+    if (!operation) throw new HttpError(404, 'OPERATION_NOT_FOUND', 'Operation not found in the current scope.');
+    const { error, ...view } = operation;
+    return { ...view, ...(error ? { error: { ...error,requestId: request.id } } : {}), requestId: request.id };
+  });
+
+  // Technical liveness only; no settings, operational data or authority exposed.
+  app.get('/api/v1/health', {
+    schema: { querystring: EmptyQuery, response: { 200: HealthResponse, 403: ErrorResponse, 400: ErrorResponse, 503: ErrorResponse } },
+  }, async (request, reply) => {
+    try {
+      storage.checkHealth();
+      return { status: 'ok' as const };
+    } catch {
+      request.log.error({ code: 'STORAGE_UNAVAILABLE' }, 'Health check failed');
+      return reply.code(503).send({ code: 'STORAGE_UNAVAILABLE', message: 'Storage is unavailable.', requestId: request.id });
+    }
+  });
+  return app;
+}

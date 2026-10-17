@@ -1,0 +1,17 @@
+:root {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --fg: #202122;
+  --muted: #687078;
+  --border: #e9eaec;
+  --accent: #fb6b00;
+  --font: 'Segoe UI', system-ui, sans-serif;
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 38px;
+  --radius-sm: 5px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+}

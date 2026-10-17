@@ -1,0 +1,234 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { DeliveryDetail, DeliveryMode, EffectView, OperationAccepted, OperationView } from '#contracts';
+import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
+import { recordUncertainOperation, resolveUncertainOperation } from '../../api/uncertain-operations.js';
+
+type Props = {
+  attemptId: string;
+  attemptEtag: string | null;
+  delivery: DeliveryDetail;
+  effects: readonly EffectView[];
+  onRefresh: () => void;
+};
+type Action = 'complete' | 'reconcile' | 'upgrade';
+type PublicationAction = { kind: Action; id: string; accepted: OperationAccepted | null; view: OperationView | null; uncertain: boolean; targetMode?: DeliveryMode };
+
+const modeOrder: readonly DeliveryMode[] = ['icr', 'commit', 'pr'];
+const modeLabel: Record<DeliveryMode, string> = { icr: 'ICR', commit: 'ICR + Commit local', pr: 'ICR + Commit + PR' };
+const effectLabel: Record<EffectView['kind'], string> = {
+  issue_comment: 'Comentário de entrega', project_status: 'Projeção de Status', local_commit: 'Commit local', push: 'Push', pull_request: 'Pull request',
+};
+
+function messageFor(error: unknown): string {
+  return error instanceof HttpError ? error.message : 'Não foi possível confirmar a resposta. Consulte a operação original antes de qualquer nova ação.';
+}
+
+export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, onRefresh }: Props) {
+  const deliveryId = delivery.delivery.id;
+  const summary = delivery.publication;
+  const authorizedMode = delivery.authorizations.authorizedMode;
+  const [action, setAction] = useState<PublicationAction | null>(null);
+  const [armedCompletion, setArmedCompletion] = useState<string | null>(null);
+  const [armedUpgrade, setArmedUpgrade] = useState<{ mode: DeliveryMode; hash: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const effectFingerprint = useMemo(() => JSON.stringify({
+    deliveryId,
+    mode: authorizedMode,
+    reviewState: summary.reviewState,
+    confirmedEffects: summary.confirmedEffects,
+    pendingEffects: summary.pendingEffects,
+    unknownEffects: summary.unknownEffects,
+    commit: summary.commit,
+    push: summary.push,
+    pullRequest: summary.pullRequest,
+  }), [authorizedMode, deliveryId, summary]);
+  const previousFingerprint = useRef(effectFingerprint);
+  useEffect(() => {
+    if (previousFingerprint.current === effectFingerprint) return;
+    previousFingerprint.current = effectFingerprint;
+    setArmedCompletion(null);
+  }, [effectFingerprint]);
+
+  const upgrades = (summary.upgrades ?? []).filter((upgrade) => modeOrder.indexOf(upgrade.targetMode) > modeOrder.indexOf(authorizedMode));
+  const controls = delivery.capabilities;
+  const summaryMatchesAuthorization = summary.mode === authorizedMode;
+  const canComplete = summaryMatchesAuthorization && controls.completePublication.available && armedCompletion === effectFingerprint;
+  const canReconcile = controls.reconcilePublication.available;
+
+  useEffect(() => {
+    let mounted = true;
+    const pending = readPendingOperation();
+    if (!pending) return () => { mounted = false; };
+    void requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(pending)}`).then((view) => {
+      if (!mounted || view.resource.type !== 'attempt' || view.resource.id !== attemptId) return;
+      setAction({ kind: 'complete', id: pending, accepted: null, view, uncertain: view.state === 'unknown' });
+    }).catch(() => { if (mounted) setAction({ kind: 'complete', id: pending, accepted: null, view: null, uncertain: true }); });
+    return () => { mounted = false; };
+  }, [attemptId]);
+
+  const operationId = action?.id ?? null;
+  useEffect(() => {
+    if (!operationId) return;
+    let mounted = true;
+    let timer = 0;
+    let count = 0;
+    const poll = async (): Promise<void> => {
+      try {
+        const view = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(operationId)}`);
+        if (!mounted) return;
+        setAction((current) => current?.id === operationId ? { ...current, view, uncertain: view.state === 'unknown' } : current);
+        if (view.state === 'succeeded' || view.state === 'failed') {
+          resolveSafely(operationId);
+          onRefresh();
+          return;
+        }
+      } catch {
+        if (mounted) setAction((current) => current?.id === operationId ? { ...current, uncertain: true } : current);
+      }
+      if (++count < 31 && mounted) timer = window.setTimeout(() => { void poll(); }, 2_000);
+    };
+    void poll();
+    return () => { mounted = false; window.clearTimeout(timer); };
+  }, [operationId, onRefresh]);
+
+  async function send(kind: Action, targetMode?: DeliveryMode): Promise<void> {
+    if (action?.uncertain || action?.view?.state === 'accepted' || action?.view?.state === 'running' || action?.view?.state === 'unknown') return;
+    const id = crypto.randomUUID();
+    setError(null);
+    setAction({ kind, id, accepted: null, view: null, uncertain: true, ...(targetMode ? { targetMode } : {}) });
+    try { recordUncertainOperation({ operationId: id, kind: 'delivery-publish', recordedAt: Date.now() }); } catch { /* Operation remains in this dialog state. */ }
+    const path: `/api/v1/${string}` = kind === 'upgrade'
+      ? `/api/v1/attempts/${encodeURIComponent(attemptId)}/publication/authorize-upgrade`
+      : `/api/v1/attempts/${encodeURIComponent(attemptId)}/publication/${kind}`;
+    const body = kind === 'reconcile' ? { deliveryId }
+      : kind === 'upgrade' ? {
+        deliveryId, currentMode: authorizedMode, targetMode: targetMode!,
+        authorizedAdditionalEffectsHash: upgrades.find((item) => item.targetMode === targetMode)?.summaryHash,
+        authorized: true,
+      }
+        : { deliveryId, authorizedMode, authorized: true };
+    try {
+      const headers: Record<string, string> = { 'Idempotency-Key': id };
+      if (attemptEtag) headers['If-Match'] = attemptEtag;
+      const { data } = await requestJsonWithMetadata<OperationAccepted>(path, { method: 'POST', headers, body: JSON.stringify(body) });
+      if (data.operationId !== id) throw new Error('O recibo não corresponde à operação solicitada.');
+      setAction({ kind, id, accepted: data, view: null, uncertain: false, ...(targetMode ? { targetMode } : {}) });
+    } catch (reason: unknown) {
+      if (reason instanceof HttpError && reason.status < 500) {
+        resolveSafely(id);
+        setAction(null);
+        setError(messageFor(reason));
+      } else setAction({ kind, id, accepted: null, view: null, uncertain: true, ...(targetMode ? { targetMode } : {}) });
+    }
+  }
+
+  const actionState = action?.view?.state ?? (action?.accepted ? 'accepted' : action?.uncertain ? 'unknown' : undefined);
+  const actionLabel = action?.kind === 'complete' ? 'Conclusão do modo' : action?.kind === 'reconcile' ? 'Reconciliação' : `Autorização de ${action?.targetMode ? modeLabel[action.targetMode] : 'modo superior'}`;
+
+  return <section className="card publication-panel" aria-labelledby="publication-panel-title">
+    <div className="line"><div><span className="eyebrow">Entrega e publicação</span><h3 id="publication-panel-title">Versão e efeitos autorizados</h3></div><button type="button" onClick={onRefresh}>Atualizar estado</button></div>
+    <dl className="preparation-facts">
+      <div><dt>Versão selecionada</dt><dd className="mono">{deliveryId}</dd></div>
+      <div><dt>Conteúdo aprovado</dt><dd className="mono">{delivery.delivery.contentIdentity ?? 'Indisponível'}</dd></div>
+      <div><dt>Modo capturado</dt><dd>{modeLabel[delivery.authorizations.capturedMode]}</dd></div>
+      <div><dt>Modo autorizado</dt><dd>{modeLabel[delivery.authorizations.authorizedMode]}</dd></div>
+      <div><dt>Parecer</dt><dd>{summary.reviewState === 'approved' ? 'Aprovado para esta versão' : summary.reviewState === 'rejected' ? 'Reprovado nesta versão' : 'Pendente'}</dd></div>
+      <div><dt>Conclusão do modo</dt><dd>{summary.localState === 'completed' ? 'Concluída' : 'Pendente'}</dd></div>
+      <div><dt>Efeitos confirmados</dt><dd>{summary.confirmedEffects}</dd></div>
+      <div><dt>Efeitos pendentes</dt><dd>{summary.pendingEffects}</dd></div>
+      <div><dt>Efeitos incertos</dt><dd>{summary.unknownEffects}</dd></div>
+    </dl>
+
+    <div className="publication-effects" aria-label="Resultados dos efeitos desta versão">
+      {([['Commit local', summary.commit], ['Push', summary.push], ['Pull request', summary.pullRequest]] as const).map(([label, value]) => value && <article className="attempt-record" key={label}>
+        <h4>{label}</h4><p>Estado: <b>{effectStateLabel(value.state)}</b></p>
+        {'sha' in value && value.sha && <p>Commit <code>{value.sha}</code></p>}
+        {'receipt' in value && value.receipt && <><p>Recibo <span className="mono">{value.receipt.id}</span></p>{value.receipt.url && <a href={value.receipt.url} target="_blank" rel="noreferrer">Abrir recurso confirmado</a>}{value.receipt.commitSha && <p>SHA confirmado <code>{value.receipt.commitSha}</code></p>}{value.receipt.branchRef && <p>Ref confirmada <code>{value.receipt.branchRef}</code></p>}</>}
+        {value.reason && <p className="muted">Motivo: {value.reason}</p>}
+        {'operationId' in value && value.operationId && <p className="muted">Operação {value.operationId}</p>}
+      </article>)}
+      {effects.map((effect) => <article className="attempt-record" key={effect.operationId}>
+        <h4>{effectLabel[effect.kind]}</h4><p>Estado: <b>{effectStateLabel(effect.state)}</b> · Operação <span className="mono">{effect.operationId}</span></p>
+        <p>Versão <span className="mono">{effect.deliveryId ?? 'não vinculada'}</span> · Tentativa <span className="mono">{effect.attemptId ?? 'não vinculada'}</span></p>
+        {effect.expectedIdentity.branchRef && <p>Ref esperada <code>{effect.expectedIdentity.branchRef}</code></p>}
+        {effect.expectedIdentity.contentIdentity && <p>Conteúdo esperado <code>{effect.expectedIdentity.contentIdentity}</code></p>}
+        {effect.confirmedIdentity && <p>Identidade confirmada <code>{effect.confirmedIdentity.id}</code></p>}
+        {effect.receipt?.url && <p><a href={effect.receipt.url} target="_blank" rel="noreferrer">Abrir recibo confirmado</a></p>}
+        {effect.reason && <p>Motivo: {effect.reason}</p>}
+      </article>)}
+      {effects.length === 0 && <p className="muted">Nenhum efeito foi consultado para esta versão.</p>}
+    </div>
+
+    {!summaryMatchesAuthorization && <div className="queue-error" role="alert"><p>O resumo da publicação e o modo autorizado diferem. Atualize a tentativa e a versão antes de iniciar qualquer efeito.</p><button type="button" onClick={onRefresh}>Atualizar dados selecionados</button></div>}
+    {error && <div className="queue-error" role="alert"><p>{error}</p><button type="button" onClick={() => { setError(null); onRefresh(); }}>Atualizar antes de revisar</button></div>}
+    {upgrades.map((upgrade) => {
+      const isArmed = armedUpgrade?.mode === upgrade.targetMode && armedUpgrade.hash === upgrade.summaryHash;
+      const stale = armedUpgrade?.mode === upgrade.targetMode && armedUpgrade.hash !== upgrade.summaryHash;
+      return <div className="notice publication-upgrade" key={upgrade.targetMode}>
+        <h4>Aumentar para {modeLabel[upgrade.targetMode]}</h4><p>Os efeitos abaixo ainda não estão autorizados:</p>
+        <ul>{upgrade.additionalEffects.map((kind) => <li key={kind}>{effectLabel[kind]}</li>)}</ul>
+        {!upgrade.capability.available && <p>Indisponível: {upgrade.capability.reason ?? 'pré-requisito não confirmado'}.</p>}
+        {stale && <p role="alert">O resumo mudou desde sua revisão. Atualize a versão selecionada e revise novamente.</p>}
+        {upgrade.capability.available && <><label className="check"><input type="checkbox" checked={isArmed} onChange={(event) => setArmedUpgrade(event.currentTarget.checked ? { mode: upgrade.targetMode, hash: upgrade.summaryHash } : null)} />Autorizo os efeitos adicionais deste resumo ({upgrade.summaryHash.slice(0, 12)}…)</label>
+          <button type="button" className="primary" disabled={!summaryMatchesAuthorization || !isArmed || !attemptEtag || actionState === 'accepted' || actionState === 'running' || actionState === 'unknown' || actionState === 'succeeded'} onClick={() => void send('upgrade', upgrade.targetMode)}>Autorizar aumento uma vez</button></>}
+      </div>;
+    })}
+
+    {controls.completePublication.available && <div className="notice publication-completion">
+      <h4>Concluir {modeLabel[authorizedMode]}</h4>
+      <ul>{completionEffects(authorizedMode).map((item) => <li key={item}>{item}</li>)}</ul>
+      <label className="check"><input type="checkbox" checked={armedCompletion === effectFingerprint} onChange={(event) => setArmedCompletion(event.currentTarget.checked ? effectFingerprint : null)} />Confirmo o início somente dos efeitos pendentes deste modo e versão.</label>
+      <button type="button" className="primary" disabled={!canComplete || !attemptEtag || actionState === 'accepted' || actionState === 'running' || actionState === 'unknown'} onClick={() => void send('complete')}>Concluir modo autorizado</button>
+    </div>}
+    {!controls.completePublication.available && <p className="muted">Conclusão indisponível: {controls.completePublication.reason ?? 'o gate atual não foi satisfeito'}.</p>}
+    {canReconcile && <button type="button" onClick={() => void send('reconcile')} disabled={actionState === 'accepted' || actionState === 'running' || actionState === 'unknown'}>Reconciliar efeitos desta versão</button>}
+    {!canReconcile && <p className="muted">Reconciliação indisponível: {controls.reconcilePublication.reason ?? 'não há capacidade atual confirmada'}.</p>}
+    {action && <div className={actionState === 'unknown' || actionState === 'failed' ? 'queue-error' : 'notice'} role="status">
+      <b>{actionLabel} · {effectStateLabel(actionState ?? 'unknown')}</b>
+      <p>Operação <span className="mono">{action.id}</span>{action.accepted ? ' · aceitação recebida.' : ' · resposta não confirmada; consulte a operação original.'}</p>
+      {action.view?.resource && <p>Recurso {action.view.resource.type}/{action.view.resource.id}</p>}
+      {action.view?.error && <p>{action.view.error.message}</p>}
+      {actionState === 'succeeded' && <p>O estado do modo é consultável. A aprovação da revisão, sozinha, não significa PR criada ou publicação concluída.</p>}
+      {actionState === 'unknown' && <button type="button" onClick={() => void inspectOperation(action.id)}>Consultar operação original</button>}
+    </div>}
+  </section>;
+
+  async function inspectOperation(id: string): Promise<void> {
+    try {
+      const view = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(id)}`);
+      if (view.resource.type !== 'attempt' || view.resource.id !== attemptId) return;
+      if (view.state === 'succeeded' || view.state === 'failed') resolveSafely(id);
+      setAction((current) => current?.id === id ? { ...current, view, uncertain: view.state === 'unknown' } : current);
+      onRefresh();
+    } catch (reason: unknown) { setError(messageFor(reason)); }
+  }
+}
+
+function readPendingOperation(): string | null {
+  try {
+    const pending = window.sessionStorage.getItem('factory.uncertain-operations.v1');
+    if (!pending) return null;
+    const parsed: unknown = JSON.parse(pending);
+    if (!Array.isArray(parsed)) return null;
+    const record = parsed.find((item) => typeof item === 'object' && item !== null && 'kind' in item && item.kind === 'delivery-publish' && 'operationId' in item && typeof item.operationId === 'string');
+    return record && typeof record === 'object' && 'operationId' in record && typeof record.operationId === 'string' ? record.operationId : null;
+  } catch { return null; }
+}
+
+function resolveSafely(id: string): void { try { resolveUncertainOperation(id); } catch { /* Keep the operation visible in memory. */ } }
+function effectStateLabel(state: string): string {
+  if (state === 'confirmed' || state === 'succeeded') return 'Confirmado';
+  if (state === 'failed' || state === 'failed_known') return 'Falhou';
+  if (state === 'running') return 'Em andamento';
+  if (state === 'not_applicable') return 'Não se aplica';
+  if (state === 'not_requested') return 'Não solicitado';
+  if (state === 'not_started') return 'Não iniciado';
+  if (state === 'unknown') return 'Incerto';
+  return 'Pendente';
+}
+function completionEffects(mode: DeliveryMode): string[] {
+  if (mode === 'icr') return ['Registrar comentário identificado com a versão e as evidências', 'Projetar o Status autorizado quando aplicável'];
+  if (mode === 'commit') return ['Criar ou reconciliar o commit local aprovado', 'Registrar o comentário da entrega', 'Projetar o Status autorizado quando aplicável'];
+  return ['Confirmar commit e push da tree aprovada', 'Criar ou reconciliar a pull request', 'Projetar o Status autorizado quando aplicável'];
+}

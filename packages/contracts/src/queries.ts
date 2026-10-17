@@ -1,0 +1,68 @@
+import { Type, type Static } from '@sinclair/typebox';
+import { Capability, DeliveryMode, OperationId, Page } from './base.js';
+import { AttemptStatus } from './attempts.js';
+import { AttemptMeasurements, Question } from './questions.js';
+import { DeliveryView } from './deliveries.js';
+import { PublicationSummary, EffectView } from './publication.js';
+import { AttemptResource } from './recovery.js';
+import { Criterion } from './preparations.js';
+import { CheckRun } from './verification.js';
+import { Finding, Review, RoundHistory } from './reviews.js';
+import { CriterionOutcome } from './execution.js';
+
+const closed = { additionalProperties: false } as const;
+const nullable = <T extends import('@sinclair/typebox').TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
+const text = Type.String({ maxLength: 4096 });
+const paging = { cursor: Type.Optional(Type.String({ minLength: 1, maxLength: 2048 })), limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|100)$' })) };
+export const IssueHeader = Type.Object({ id: Type.String({ maxLength: 256 }),number: Type.Integer({ minimum: 1 }),title: Type.String({ maxLength: 65536 }),url: Type.String({ maxLength: 4096 }) },closed);
+export const AttemptListQuery = Type.Object({ ...paging, projectId: Type.Optional(OperationId), result: Type.Optional(Type.Union([Type.Literal('active'), ...['delivered','rejected','failed','cancelled','interrupted'].map(v => Type.Literal(v))])) }, closed);
+export type AttemptListQuery = Static<typeof AttemptListQuery>;
+export const AttemptSummary = Type.Object({
+  id: OperationId, projectId: OperationId, issueId: Type.String(), issueNumber: Type.Integer(),
+  phase: AttemptStatus.properties.phase, result: AttemptStatus.properties.result, suspension: AttemptStatus.properties.suspension,
+  revision: Type.Integer(), createdAtMs: Type.Integer(), updatedAtMs: Type.Integer(),
+}, closed);
+export type AttemptSummary = Static<typeof AttemptSummary>;
+export const AttemptPage = Page(AttemptSummary);
+export type AttemptPage = Static<typeof AttemptPage>;
+export const DetailSection = Type.Union(['rounds','passages','criteria','checks','reviews','findings','questions','effects','resources'].map(v => Type.Literal(v)));
+export type DetailSection = Static<typeof DetailSection>;
+export const AttemptDetailQuery = Type.Object({ ...paging, roundId: Type.Optional(Type.String({ pattern: '^[1-6]$' })), deliveryId: Type.Optional(OperationId), section: Type.Optional(DetailSection) }, closed);
+export type AttemptDetailQuery = Static<typeof AttemptDetailQuery>;
+export const DeliveryDetailQuery = Type.Object({ ...paging, section: Type.Optional(DetailSection) }, closed);
+export type DeliveryDetailQuery = Static<typeof DeliveryDetailQuery>;
+export const PassageSummary = Type.Object({ id: OperationId, attemptId: OperationId, deliveryId: OperationId, round: Type.Integer(),
+  role: Type.Union([Type.Literal('implementer'), Type.Literal('reviewer')]), state: text, tracking: text,
+  diagnostic: nullable(text), resultReceiptId: nullable(OperationId), createdAtMs: Type.Integer(),
+}, closed);
+export const CriterionDetail = Type.Object({ ...Criterion.properties, producer: nullable(Type.Object({ verdict: CriterionOutcome.properties.verdict, evidence: CriterionOutcome.properties.evidence }, closed)),
+  reviewer: nullable(Type.Object({ verdict: CriterionOutcome.properties.verdict, evidence: CriterionOutcome.properties.evidence }, closed)) }, closed);
+export const ReviewSummary = Type.Omit(Review, ['criteria','findings','resolutions']);
+export const QuestionSummary = Type.Object({ id: OperationId, attemptId: OperationId, passageId: OperationId, deliveryId: OperationId,
+  state: Question.properties.state, revision: Type.Integer(), createdAtMs: Type.Integer(), expiresAtMs: nullable(Type.Integer()), deliveryReceipt: Question.properties.deliveryReceipt }, closed);
+export const FindingDetail = Type.Object({ ...Finding.properties, resolutions: Type.Array(Type.Object({ reviewId: OperationId, deliveryId: OperationId,
+  verdict: Type.Union([Type.Literal('resolved'),Type.Literal('unresolved')]), evidence: CriterionOutcome.properties.evidence },closed),{ maxItems: 6 }) },closed);
+export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, CheckRun, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource]);
+export type DetailItem = Static<typeof DetailItem>;
+export const DetailPage = Type.Object({ section: DetailSection, ...Page(DetailItem).properties }, closed);
+export type DetailPage = Static<typeof DetailPage>;
+export const AttemptDetail = Type.Object({ ...AttemptStatus.properties,
+  expectedAccountId: Type.String({ maxLength: 256 }),
+  issue: IssueHeader,
+  selectedDeliveryId: nullable(OperationId), selectedRound: Type.Integer({ minimum: 1, maximum: 6 }),
+  publication: PublicationSummary, measurements: AttemptMeasurements,
+  cleanup: Type.Union(['pending','complete','uncertain'].map(v => Type.Literal(v))),
+  authority: nullable(Type.Object({ reason: nullable(text), expectedStatusId: nullable(text), observedStatusId: nullable(text), observedAtMs: Type.Integer(),recovery: text }, closed)),
+  capabilities: Type.Object({ cancel: Capability, completePublication: Capability, reconcilePublication: Capability, revalidate: Capability }, closed),
+  details: nullable(DetailPage),
+}, closed);
+export type AttemptDetail = Static<typeof AttemptDetail>;
+export const DeliveryDetail = Type.Object({ ...DeliveryView.properties,
+  issue: IssueHeader,
+  attempt: AttemptStatus, measurements: AttemptMeasurements, cleanup: Type.Union(['pending','complete','uncertain'].map(v => Type.Literal(v))),
+  authorizations: Type.Object({ capturedMode: DeliveryMode, authorizedMode: DeliveryMode, requiresCurrentGate: Type.Literal(true) },closed),
+  review: nullable(ReviewSummary), publication: PublicationSummary,
+  capabilities: Type.Object({ diff: Capability, completePublication: Capability, reconcilePublication: Capability }, closed),
+  details: nullable(DetailPage),
+}, closed);
+export type DeliveryDetail = Static<typeof DeliveryDetail>;

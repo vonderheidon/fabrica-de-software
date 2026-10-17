@@ -1,0 +1,47 @@
+{
+  "name": "nova-fabrica-software",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
+  "imports": {
+    "#contracts": {
+      "types": "./packages/contracts/src/index.ts",
+      "default": "./dist/packages/contracts/src/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-resources.mjs && vite build",
+    "typecheck": "tsc -p tsconfig.check.json --noEmit",
+    "lint": "node scripts/check-boundaries.mjs",
+    "test": "vitest run",
+    "test:compiled": "node scripts/smoke-compiled.mjs",
+    "test:execution-compiled": "node scripts/smoke-execution.mjs",
+    "test:verification-compiled": "node scripts/smoke-verification.mjs",
+    "test:acceptance": "vitest run tests/acceptance",
+    "acceptance:check": "node scripts/first-slice-evidence.mjs",
+    "start": "node dist/apps/controller/src/main.js"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.3",
+    "@fastify/static": "8.3.0",
+    "@fastify/type-provider-typebox": "5.2.0",
+    "@sinclair/typebox": "0.34.52",
+    "better-sqlite3": "13.0.3",
+    "fastify": "5.12.7",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "9.6.0",
+    "@types/node": "24.19.2",
+    "@types/react": "18.3.24",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.7.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.5"
+  }
+}

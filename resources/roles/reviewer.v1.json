@@ -1,0 +1,241 @@
+{
+  "id": "factory.reviewer",
+  "role": "reviewer",
+  "version": 1,
+  "instructions": "Review independently the fixed delivery version in the assigned review clone. Read the captured criteria, implementation evidence, checks and prior findings. Do not correct or edit the reviewed content. Report every criterion exactly once and each prior finding resolution exactly once, using findingKey equal to the supplied immutable finding id. Findings need a unique key, linked criterion IDs or an explicit technical category, concrete problem, evidence, expected result and blocking flag. Approve only when all criteria pass and no blocking finding or unresolved prior blocking finding remains. Send the Reviewer v1 result through execution_complete. Approval is limited to the supplied immutable delivery version.\n\nUse the existing OMP TUI, native tools, rules, skills, LSP and configured MCP lifecycle. Respect disabled servers. Correct invalid tool arguments and retry the useful call without treating a recoverable tool error as terminal failure. Perform routine operational maintenance autonomously. If GitNexus is required, analyze and query the exact clone root provided in the task, verify the returned root and use that exact repository identifier; never substitute the operator checkout. Ask execution_question only for a real human decision, with decision, context and alternatives. Technical failures need concrete diagnostics and preserved work. Do not publish, push, create PRs or change GitHub state. Identity, role, round and delivery version are injected privately by the controller; never add them to tool arguments. A tool success receipt confirms durable acceptance only. Conversation and native tools remain available after the result; conversation does not authorize new implementation.",
+  "resultSchema": {
+    "additionalProperties": false,
+    "type": "object",
+    "required": [
+      "formatVersion",
+      "summary",
+      "verdict",
+      "criteria",
+      "findings",
+      "resolutions"
+    ],
+    "properties": {
+      "formatVersion": {
+        "const": 1,
+        "type": "number"
+      },
+      "summary": {
+        "minLength": 1,
+        "maxLength": 8192,
+        "pattern": ".*\\S.*",
+        "type": "string"
+      },
+      "verdict": {
+        "anyOf": [
+          {
+            "const": "approved",
+            "type": "string"
+          },
+          {
+            "const": "rejected",
+            "type": "string"
+          }
+        ]
+      },
+      "criteria": {
+        "minItems": 1,
+        "maxItems": 1000,
+        "type": "array",
+        "items": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "criterionId",
+            "verdict",
+            "evidence"
+          ],
+          "properties": {
+            "criterionId": {
+              "pattern": "^ac-[1-9][0-9]*$",
+              "maxLength": 128,
+              "type": "string"
+            },
+            "verdict": {
+              "anyOf": [
+                {
+                  "const": "passed",
+                  "type": "string"
+                },
+                {
+                  "const": "failed",
+                  "type": "string"
+                },
+                {
+                  "const": "not_verified",
+                  "type": "string"
+                }
+              ]
+            },
+            "evidence": {
+              "minItems": 1,
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": ".*\\S.*",
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "findings": {
+        "maxItems": 1000,
+        "type": "array",
+        "items": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "key",
+            "criterionIds",
+            "category",
+            "problem",
+            "evidence",
+            "expectedResult",
+            "blocking"
+          ],
+          "properties": {
+            "key": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            "criterionIds": {
+              "maxItems": 1000,
+              "uniqueItems": true,
+              "type": "array",
+              "items": {
+                "pattern": "^ac-[1-9][0-9]*$",
+                "maxLength": 128,
+                "type": "string"
+              }
+            },
+            "category": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            "problem": {
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            "evidence": {
+              "minItems": 1,
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": ".*\\S.*",
+                "type": "string"
+              }
+            },
+            "expectedResult": {
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            "blocking": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "resolutions": {
+        "maxItems": 1000,
+        "type": "array",
+        "items": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "findingKey",
+            "verdict",
+            "evidence"
+          ],
+          "properties": {
+            "findingKey": {
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            "verdict": {
+              "anyOf": [
+                {
+                  "const": "resolved",
+                  "type": "string"
+                },
+                {
+                  "const": "unresolved",
+                  "type": "string"
+                }
+              ]
+            },
+            "evidence": {
+              "minItems": 1,
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": ".*\\S.*",
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "questionSchema": {
+    "additionalProperties": false,
+    "type": "object",
+    "properties": {
+      "formatVersion": {
+        "const": 1,
+        "type": "number"
+      },
+      "decision": {
+        "minLength": 1,
+        "maxLength": 2048,
+        "pattern": ".*\\S.*",
+        "type": "string"
+      },
+      "context": {
+        "minLength": 1,
+        "maxLength": 8192,
+        "pattern": ".*\\S.*",
+        "type": "string"
+      },
+      "alternatives": {
+        "minItems": 2,
+        "maxItems": 10,
+        "uniqueItems": true,
+        "type": "array",
+        "items": {
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": ".*\\S.*",
+          "type": "string"
+        }
+      }
+    },
+    "required": [
+      "formatVersion",
+      "decision",
+      "context",
+      "alternatives"
+    ]
+  }
+}

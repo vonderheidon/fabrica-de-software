@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "rootDir": ".", "outDir": "dist", "declaration": true, "types": ["node", "vite/client"] },
+  "include": ["apps/controller/src/**/*.ts", "apps/web/src/**/*.ts", "apps/web/src/**/*.tsx", "packages/contracts/src/**/*.ts"],
+  "exclude": ["**/*.test.ts"]
+}
