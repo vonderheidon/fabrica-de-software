@@ -36,3 +36,6 @@ obj/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Tools
+.playwright-mcp/
