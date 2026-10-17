@@ -147,17 +147,17 @@ export function createPipeline(deps: PipelineDependencies) {
     }
     if (scopePolling) return;
     if (deps.github && Date.now() - lastScopePoll >= storage.getSettings().timeDefaults.pollingIntervalMs) {
-    scopePolling = true; lastScopePoll = Date.now();
-    try {
-      if (publication) for (const id of storage.getAuthorityCandidates()) await publication.observeAuthority(id);
-      for (const [id, next] of waitingForAuthority) {
-        const a = storage.getAttempt(id);
-        if (a.result) waitingForAuthority.delete(id);
-        else if (!a.suspension || a.suspension === 'VERIFICATION_FAILED') { waitingForAuthority.delete(id); enqueue(next); }
+      scopePolling = true; lastScopePoll = Date.now();
+      try {
+        if (publication) for (const id of storage.getAuthorityCandidates()) await publication.observeAuthority(id);
+        for (const [id, next] of waitingForAuthority) {
+          const a = storage.getAttempt(id);
+          if (a.result) waitingForAuthority.delete(id);
+          else if (!a.suspension || a.suspension === 'VERIFICATION_FAILED') { waitingForAuthority.delete(id); enqueue(next); }
+        }
+        for (const binding of storage.getScopeCandidates()) await revalidateScope(binding);
       }
-      for (const binding of storage.getScopeCandidates()) await revalidateScope(binding);
-    }
-    finally { scopePolling = false; }
+      finally { scopePolling = false; }
     }
     await dispatchQueueCandidate();
   }

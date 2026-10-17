@@ -1568,3 +1568,51 @@ Uma rodada encontrou falta de `projectsRoot` na nova fixture de automação; a f
 - Elegibilidade por conta e vínculos: Implementar GET /queue e regras determinísticas dos candidatos.
 - Leitura completa e ordem explícita: Consultar todos os itens necessários antes de produzir observação autorizável.
 - Observação e resumo de habilitação: Disponibilizar escopo, modos e hash do resumo da fila.
+
+## Sprint — Scheduler e consumo durável da fila [IMPLEMENTADA NO BACKEND; ACEITE REAL PENDENTE]
+
+Data: 2026-10-17. Implementação no repositório canônico, preservando o histórico anterior. Nenhuma dependência instalada, comando Git/GH, provider, recrutamento Maestri/OMP ou mutação GitHub real. Nenhum commit/push, aprovação, Design Lock ou mudança de fase.
+
+### Fontes, critérios e prova definida
+
+- `AGENTS.md`; `SPEC.md` §§4–5.1/8/10.2, `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md` e SPEC derivada §§2.1/3.4. Cobertura backend RF-27/34/36–42 e AC-19–22: autorização da fila, ciclo observado, unicidade e governança atual.
+- Antes da edição: comprovar CAS/resumo/escopo e idempotência, consumo e tentativa na mesma transação antes de efeitos, rollback, Ready residual/rearmamento observado, pausa em corrida e governança do worker. SQLite e HTTP inject reais; GitHub/executor controlados. O lock recebeu prova adicional entre processos Node reais, sem rede.
+- Context7 consultado com resolução e consulta de better-sqlite3 para transações síncronas IMMEDIATE, rollback e savepoints. Mantidas as dependências fixadas. GitNexus não possui índice deste repositório; nenhum grafo do legado foi usado. A leitura opcional da memória externa foi rejeitada pela revisão automática como fora do escopo; o trabalho usou as fontes locais.
+
+### Entregáveis e comportamento
+
+| Superfície | Implementação |
+| --- | --- |
+| Habilitação/pausa | `projects/queue.ts`, `storage/queue.ts`, `http/routes/queue.ts` e `contracts/queue.ts`: PUT com operação própria `queue.update`, ETag composto de settings/perfis e projetos do escopo, hash do comando completo e recibo/evento atômicos. Habilitação reconsulta quantidade, conta/host, escopo, modos e candidatos; conflito retorna `QUEUE_SUMMARY_CHANGED`, resumo atual em `queue` e ETag. Pausa conserva tentativa ativa, ciclos e histórico. |
+| Vários projetos | GET aceita `projectIds` com IDs separados por vírgulas, sem combinar com `projectId`. Scope project altera de 1 a 100 projetos distintos em uma transação e exige chave global ligada para habilitar; scope account controla a chave global. Preview de projetos selecionados conta candidatos mesmo com a automação desses projetos desligada. A UI existente continua usando scope account; nenhum layout foi alterado. |
+| Persistência | Migration `016_queue_scheduler.sql`, preservando 001–015: `queue_consumptions` STRICT/imutável com conta/projeto/repositório/issue/ciclo/timestamps/attempt, FKs/guards/índices, timestamps observados em `queue_cycles` e origem de novas tentativas `manual/automatic/retry`. Origem histórica ausente permanece NULL; transições e ciclos antigos não são inventados. Vínculos consumidos efetivamente presentes na v15 são conservados na migração. |
+| Concorrência | Índice parcial único por conta para tentativa automática ativa; índice único de issue ativa preservado. O início automático também recusa ocupação por qualquer tentativa ativa da conta, repetindo esse gate na transação. Cadastros duplicados da mesma issue/repositório compartilham o consumo dos ciclos Ready já observados, evitando execução pelo cadastro vizinho. |
+| Scheduler | `pipeline/start.ts`, `main.ts`, `http/app.ts`: composição no controlador, sem worker criado por interface. Polling/backoff respeitados; observações completas/válidas registram ciclos, nova observação precede seleção e o início usa `startAttempt` existente. Configuração e pausa são repetidas no commit. Consumo, tentativa, captura, operação/recibo e intenções são confirmados juntos antes de clone/processo. |
+| Governança | Reutiliza observação de conta e autoridade da publicação: conta divergente pausa despacho, assignee alterado solicita cancelamento e Status divergente suspende avanço, preservando efeitos e versão. Falha de projeção não repete consumo. Sem takeover, escrita forçada, retry automático por falha/cancelamento ou reconstrução de transições offline. |
+| Provas/documentação | `tests/integration/queue-scheduler.test.ts` acrescenta 20 cenários; testes de ciclos e reconstrução de bancos temporários históricos atualizados para schema 16. README registra API, CAS, consumo e handoff entre contas/instalações. |
+
+### Validação técnica observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `node node_modules/typescript/bin/tsc -p tsconfig.check.json --noEmit` | Exit 0; produção/cliente/testes strict, sem any/supressões. |
+| `node scripts/check-boundaries.mjs` | Exit 0; limites de módulos, SQL privado e convenções. |
+| `node node_modules/vitest/vitest.mjs run --reporter=dot --no-color` | Exit 0; **750 testes em 48 arquivos**, incluindo 20 cenários novos do scheduler. Rede/subprocessos/providers de produto bloqueados na suíte padrão. |
+| `node node_modules/typescript/bin/tsc -p tsconfig.json` | Exit 0; controlador/declarations compilados. |
+| `node scripts/copy-resources.mjs` | Exit 0; recursos e migration 016 distribuídos. |
+| `node node_modules/vite/bin/vite.js build --clearScreen false` | Exit 0; bundle web gerado. Avisos existentes de React/esbuild e optimizeDeps permanecem. |
+| `node scripts/smoke-compiled.mjs` | Exit 1; `connect EACCES 127.0.0.1` no ambiente. HTTP loopback/SSE do smoke não foram comprovados nesta rodada. Nenhum fallback de produção ou alteração de ACL/credenciais. |
+| Lock compilado em processos próprios | Exit 0; primeiro processo Node mantém o lock SQLite, segundo é recusado e outro adquire após morte do proprietário. Sem rede ou dependência de porta/projeto, usando diretório exclusivo em `.cache`. |
+
+As três etapas de compilação/distribuição/Vite equivalem ao build configurado; execução direta Node, sem shell. As provas novas incluem autorização sem precondição/hash, resumo alterado por quantidade/modo/conta/responsável, resposta HTTP com resumo atual/CSRF, escrita atômica em vários projetos, rollback no evento/consumo/rodada, pausa concorrente, consumo anterior ao clone, ticks concorrentes, restrição SQLite entre issues diferentes, cadastros duplicados, backoff com segunda leitura degradada, cancelamento/reopen/Ready residual, retorno inelegível sem rearmamento, governança de conta/responsável/Status, projeção falha sem repetição e migração SQLite real 15→16 preservando identidade/recibos/histórico. As regressões anteriores de rearmamento e consumo único permanecem verdes. Cache ignorado de 16 MiB continua sem alterar banco/WAL/payloads na fixture histórica AC-29; Git é controlado nessa medição.
+
+### Limites de prova
+
+- GitHub, Git, executor e projeções remotas são controlados nos testes. Não houve consumo integrado real no GitHub/Maestri/OMP, consulta ao keyring, publicação ou inspeção visual. AC-19–22 integrais continuam dependentes da prova real autorizada; os resultados locais não a substituem.
+- O smoke HTTP compilado permanece bloqueado por EACCES no loopback. A prova separada de lock comprova exclusão local e liberação entre processos, sem comprovar transporte HTTP. Instalações independentes não compartilham o lock: handoff exige cancelar/encerrar a tentativa anterior antes de atribuir a outra conta e rearmar Ready.
+- Os bloqueios preexistentes de composição confiável do host e vínculo inicial da conta não foram substituídos por seed ou credencial de demonstração. Sem contexto autorizado, a composição continua recusando despacho. Nenhuma nova infraestrutura distribuída foi acrescentada.
+
+## Sprint 025 - Scheduler e consumo durável da fila [CONCLUIDA]
+- Habilitação e pausa autorizadas: Implementar PUT /queue para escopo de conta ou projetos.
+- Consumo atômico por ciclo observado: Persistir queue_consumptions e integrar o scheduler a startAttempt.
+- Concorrência e autoridade do worker: Aplicar os limites de execução e mudanças externas no caminho automático.

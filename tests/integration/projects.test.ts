@@ -51,7 +51,7 @@ async function queueFixture() {
 }
 
 describe('complete Ready observations without dispatch', () => {
-  it('keeps the default HTTP scheduler disconnected from queue consumption even when automation is configured', async () => {
+  it('refuses automatic work when the default controller account context is unavailable, even with configured automation', async () => {
     const f = await queueFixture();
     const settings = f.storage.getGlobalConfiguration();
     const changes = { automationEnabled: true, projectsRoot: f.directory };
