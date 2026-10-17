@@ -1,0 +1,165 @@
+{
+  "formatVersion": 1,
+  "proofId": "first-slice-20261017-02",
+  "preparedAtMs": 1792213669156,
+  "startedAtMs": null,
+  "endedAtMs": null,
+  "product": {
+    "version": "0.1.0",
+    "sourceRevision": null,
+    "sourceEvidenceId": "product-inventory"
+  },
+  "authorization": null,
+  "tools": [
+    {
+      "name": "node",
+      "version": "24.22.0",
+      "reason": null
+    },
+    {
+      "name": "git",
+      "version": null,
+      "reason": "Contexto elevado/keyring indisponível neste runtime."
+    },
+    {
+      "name": "gh",
+      "version": null,
+      "reason": "Contexto elevado/keyring indisponível neste runtime."
+    },
+    {
+      "name": "maestri",
+      "version": null,
+      "reason": "Versão não observada nesta prova; contexto nativo não fornecido."
+    },
+    {
+      "name": "omp",
+      "version": null,
+      "reason": "Versão não observada nesta prova."
+    },
+    {
+      "name": "gitnexus",
+      "version": null,
+      "reason": "Runtime MCP do clone ainda não iniciado."
+    },
+    {
+      "name": "playwright-mcp",
+      "version": null,
+      "reason": "Browser de teste do produto não iniciado."
+    },
+    {
+      "name": "chrome",
+      "version": null,
+      "reason": "Browser de teste do produto não iniciado."
+    }
+  ],
+  "prerequisites": [
+    {
+      "id": "sprint-017",
+      "state": "pending",
+      "evidenceIds": []
+    },
+    {
+      "id": "sprint-033",
+      "state": "pending",
+      "evidenceIds": []
+    },
+    {
+      "id": "sprint-034",
+      "state": "pending",
+      "evidenceIds": []
+    }
+  ],
+  "attempts": [],
+  "evidence": [
+    {
+      "id": "product-inventory",
+      "path": "product-inventory.json",
+      "kind": "real",
+      "bytes": 78334,
+      "sha256": "98d130e519c5d94cc7e5d9a9baf206abde24f9705778c78dd7fe509741116154",
+      "capturedAtMs": 1792213669156
+    },
+    {
+      "id": "local-validation",
+      "path": "local-validation.json",
+      "kind": "local",
+      "bytes": 2057,
+      "sha256": "6f0468765ffe33818eef4681b0cdb5c1b577311ebb6cfeedf89030444e6ecea3",
+      "capturedAtMs": 1792213669156
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "registration-icr",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Aguardando alvo, composição confiável do host e autorização delimitada."
+    },
+    {
+      "id": "correction",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Provider e alvo reais não autorizados."
+    },
+    {
+      "id": "tui-mcp",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Sessão Maestri/OMP do produto não iniciada."
+    },
+    {
+      "id": "transport",
+      "state": "pending",
+      "evidenceIds": [
+        "local-validation"
+      ],
+      "attemptIds": [],
+      "reason": "Diagnósticos locais atuais conferidos; falta correlação com tentativa Maestri/OMP real."
+    },
+    {
+      "id": "question",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Passagem real e resposta humana não iniciadas."
+    },
+    {
+      "id": "answer-unknown",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Aguardando falha de entrega observável na passagem real."
+    },
+    {
+      "id": "cancel-startup",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Lançamento real e parada de recursos próprios não iniciados."
+    },
+    {
+      "id": "cancel-child",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Trabalho real com filho e recurso manual ainda não iniciados."
+    },
+    {
+      "id": "restart-retry",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Restart real e nova tentativa não executados."
+    },
+    {
+      "id": "ui-prerequisites",
+      "state": "pending",
+      "evidenceIds": [],
+      "attemptIds": [],
+      "reason": "Aceite Playwright MCP/Chrome das sprints 017/033/034 pendente."
+    }
+  ]
+}

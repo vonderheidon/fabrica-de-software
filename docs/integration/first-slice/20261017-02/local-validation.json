@@ -1,0 +1,78 @@
+{
+  "formatVersion": 1,
+  "proofId": "first-slice-20261017-02",
+  "recordedAtMs": 1792213669156,
+  "node": "24.22.0",
+  "platform": "win32",
+  "maestriContextPresent": false,
+  "classification": "local_validation_only",
+  "commands": [
+    {
+      "command": "npm.cmd run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "npm.cmd run lint",
+      "exitCode": 0
+    },
+    {
+      "command": "npm.cmd run test:acceptance",
+      "exitCode": 0,
+      "files": 2,
+      "tests": 40
+    },
+    {
+      "command": "npm.cmd test -- --reporter=dot",
+      "exitCode": 0,
+      "files": 42,
+      "tests": 642
+    },
+    {
+      "command": "npm.cmd run build",
+      "exitCode": 0,
+      "warnings": [
+        "React plugin esbuild option deprecated",
+        "optimizeDeps.rollupOptions deprecated"
+      ],
+      "webJavaScriptBytesRounded": 610260
+    },
+    {
+      "command": "npm.cmd run test:compiled",
+      "exitCode": 0,
+      "scope": "real HTTP/SSE/SQLite, settings/CAS/idempotency, scaffold catalog, shutdown and own process lock"
+    },
+    {
+      "command": "npm.cmd run test:execution-compiled",
+      "exitCode": 0,
+      "scope": "real loopback transport and PowerShell launch using Node fixture",
+      "transportDiagnostics": {
+        "malformed": "FRAME_INVALID",
+        "invalidUtf8": "FRAME_INVALID",
+        "oversize": "FRAME_OVERSIZE",
+        "incompleteEof": "CHANNEL_EOF"
+      },
+      "maestriOmpIntegration": "not_executed"
+    },
+    {
+      "command": "npm.cmd run test:verification-compiled",
+      "exitCode": 0,
+      "nativeChecks": [
+        "passed",
+        "failed"
+      ],
+      "unicodeCwd": true,
+      "artifactRenameSyncChecksum": "real",
+      "canonicalization": "real",
+      "gitMaterialization": "not_executed",
+      "maestriOmpIntegration": "not_executed"
+    }
+  ],
+  "notExecuted": [
+    "Git/GH",
+    "Maestri/OMP/provider",
+    "GitNexus in a managed clone",
+    "Playwright MCP/Chrome product inspection",
+    "remote mutations",
+    "real controller restart/retry and cancellation"
+  ]
+}
