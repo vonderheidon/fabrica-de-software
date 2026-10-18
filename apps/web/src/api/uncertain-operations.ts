@@ -22,7 +22,7 @@ export function readUncertainOperations(): UncertainOperation[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isUncertainOperation);
+    return parsed.filter(isUncertainOperation).map(({ operationId, kind, recordedAt }) => ({ operationId, kind, recordedAt }));
   } catch {
     return [];
   }
@@ -31,7 +31,7 @@ export function readUncertainOperations(): UncertainOperation[] {
 export function recordUncertainOperation(operation: UncertainOperation): void {
   if (!isUncertainOperation(operation)) throw new TypeError('Registro de operação incerta inválido.');
   const operations = readUncertainOperations().filter((item) => item.operationId !== operation.operationId);
-  operations.push(operation);
+  operations.push({ operationId: operation.operationId, kind: operation.kind, recordedAt: operation.recordedAt });
   window.sessionStorage.setItem(storageKey, JSON.stringify(operations));
 }
 

@@ -13,7 +13,7 @@ const tabLabels: Record<PrincipalTab, string> = {
 export const dialogIds = [
   'register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation',
   'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication',
-  'diagnostic', 'interaction',
+  'diagnostic', 'interaction', 'profile',
 ] as const;
 export type DialogId = (typeof dialogIds)[number];
 
@@ -43,7 +43,7 @@ export function parseHash(hash: string): HashRoute {
   }
 
   const params = new URLSearchParams(match[2] ?? '');
-  const allowed = new Set<string>([...contextIds, 'dialog', 'search', 'filter']);
+  const allowed = new Set<string>([...contextIds, 'dialog', 'search', 'filter', 'profileId']);
   for (const key of params.keys()) {
     if (!allowed.has(key)) return { tab: tabValue as PrincipalTab, params, error: 'O contexto da rota contém parâmetros inválidos.' };
   }
@@ -52,6 +52,10 @@ export function parseHash(hash: string): HashRoute {
     if (value !== null && (value.length === 0 || value.length > 256 || /[\u0000-\u001f]/.test(value))) {
       return { tab: tabValue as PrincipalTab, params, error: `O identificador ${key} é inválido.` };
     }
+  }
+  const profileId = params.get('profileId');
+  if (profileId !== null && (profileId.length === 0 || profileId.length > 256 || /[\u0000-\u001f]/.test(profileId))) {
+    return { tab: tabValue as PrincipalTab, params, error: 'O identificador do perfil é inválido.' };
   }
   const roundId = params.get('roundId');
   if (roundId !== null && !/^[1-6]$/.test(roundId)) return { tab: tabValue as PrincipalTab, params, error: 'A rodada selecionada é inválida.' };
@@ -68,7 +72,7 @@ export function labelForTab(tab: PrincipalTab): string {
 
 export function buildHash(tab: PrincipalTab, params = new URLSearchParams()): string {
   const safe = new URLSearchParams();
-  for (const key of [...contextIds, 'search', 'filter', 'dialog']) {
+  for (const key of [...contextIds, 'search', 'filter', 'profileId', 'dialog']) {
     const value = params.get(key);
     if (value !== null) safe.set(key, value);
   }

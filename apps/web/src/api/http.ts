@@ -1,4 +1,5 @@
 import type { ErrorResponse, SessionResponse } from '#contracts';
+import { assertConfigurationBody, configurationBodyLimitMessage } from './configuration-body.js';
 
 export class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly requestId: string | null, readonly fieldErrors: readonly { field: string; message: string }[], readonly resource: { type: string; id: string } | null, readonly operationId: string | null, readonly facts: Readonly<Record<string, string | number | boolean | null>> | null, readonly affectedRequirements: readonly string[] = [], readonly recovery: string | null = null) {
@@ -9,6 +10,15 @@ export class HttpError extends Error {
 
 let csrfToken: string | null = null;
 let bootstrapPromise: Promise<void> | null = null;
+let instanceId: string | null = null;
+
+export function getControllerInstanceId(): string | null { return instanceId; }
+
+function notifySessionChange(): void {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new Event('factory-controller-resync'));
+  }
+}
 
 async function createSession(): Promise<void> {
   if (bootstrapPromise) return bootstrapPromise;
@@ -23,6 +33,9 @@ async function createSession(): Promise<void> {
     if (!response.ok) throw await toHttpError(response);
     const session = (await response.json()) as SessionResponse;
     csrfToken = session.csrf_token;
+    const changed = instanceId !== null && instanceId !== session.instance_id;
+    instanceId = session.instance_id;
+    if (changed) notifySessionChange();
   })().finally(() => { bootstrapPromise = null; });
   return bootstrapPromise;
 }
@@ -36,7 +49,7 @@ async function toHttpError(response: Response): Promise<HttpError> {
 async function rejectExpiredMutation(response: Response): Promise<never> {
   const failure = await toHttpError(response);
   csrfToken = null;
-  try { await createSession(); }
+  try { await createSession(); notifySessionChange(); }
   catch (error: unknown) { failure.cause = error; }
   // Renewal must not replace the command's correlation or replay its effects.
   throw failure;
@@ -47,6 +60,8 @@ export interface JsonResponse<T> { data: T; etag: string | null }
 export async function requestJsonWithMetadata<T>(path: `/api/v1/${string}`, init: RequestInit = {}): Promise<JsonResponse<T>> {
   const method = (init.method ?? 'GET').toUpperCase();
   const isRead = method === 'GET' || method === 'HEAD';
+  const configurationSave = method === 'PUT' && (path === '/api/v1/settings' || /^\/api\/v1\/projects\/[^/]+\/configuration$/.test(path));
+  if (configurationSave && typeof init.body === 'string') assertConfigurationBody(init.body);
   if (csrfToken === null) await createSession();
 
   const send = (): Promise<Response> => {
@@ -60,12 +75,17 @@ export async function requestJsonWithMetadata<T>(path: `/api/v1/${string}`, init
   if (response.status === 401 && isRead) {
     csrfToken = null;
     await createSession();
+    notifySessionChange();
     response = await send();
   } else if (response.status === 401) {
     return rejectExpiredMutation(response);
   }
   if (response.status === 403) throw await toHttpError(response);
-  if (!response.ok) throw await toHttpError(response);
+  if (!response.ok) {
+    const error = await toHttpError(response);
+    if (configurationSave && response.status === 413) error.message = configurationBodyLimitMessage;
+    throw error;
+  }
   if (response.status === 204) return { data: undefined as T, etag: response.headers.get('ETag') };
   return { data: (await response.json()) as T, etag: response.headers.get('ETag') };
 }
@@ -87,6 +107,7 @@ export async function requestText(path: `/api/v1/${string}`, init: RequestInit =
   if (response.status === 401 && isRead) {
     csrfToken = null;
     await createSession();
+    notifySessionChange();
     response = await send();
   } else if (response.status === 401) {
     return rejectExpiredMutation(response);

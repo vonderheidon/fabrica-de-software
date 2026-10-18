@@ -9,11 +9,13 @@ export function useDialogs(route: HashRoute) {
     setDialog(requested && dialogIds.some((id) => id === requested) ? requested as DialogId : null);
   }, [route.params]);
 
-  const open = useCallback((id: string, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string }) => {
+  const open = useCallback((id: string, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string; profileId?: string }) => {
     if (!dialogIds.some((allowed) => allowed === id)) return;
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     params.set('dialog', id);
+    if (id !== 'profile' || !context?.profileId) params.delete('profileId');
     if (context?.projectId) params.set('projectId', context.projectId);
+    if (context?.profileId) params.set('profileId', context.profileId);
     if (context?.previousAttemptId) params.set('attemptId', context.previousAttemptId);
     if (context?.attemptId) params.set('attemptId', context.attemptId);
     window.location.hash = buildHash(route.tab, params);
@@ -23,6 +25,7 @@ export function useDialogs(route: HashRoute) {
     setDialog(null);
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     params.delete('dialog');
+    params.delete('profileId');
     window.history.pushState(null, '', buildHash(route.tab, params));
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   }, [route.tab]);

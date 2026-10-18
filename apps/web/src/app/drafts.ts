@@ -5,6 +5,10 @@ export type DraftValue = string | number | boolean | null | readonly DraftValue[
 
 const drafts = new Map<string, Map<string, DraftValue>>();
 
+export function configurationDraftIdentity(accountId: string | null, resource: string, step = 'configuration', profileId: string | null = null): string {
+  return JSON.stringify([accountId, resource, step, profileId]);
+}
+
 export function getDraft<T extends DraftValue>(identity: string, field: string): T | undefined {
   return drafts.get(identity)?.get(field) as T | undefined;
 }

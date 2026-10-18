@@ -4,6 +4,7 @@ import { useHashRoute } from './useHashRoute.js';
 import { PrincipalScreen } from './PrincipalScreen.js';
 import { HttpError } from '../api/http.js';
 import { ProjectRegistrationForm } from '../features/projects/ProjectForm.js';
+import { ProfileForm } from '../features/projects/ProfileForm.js';
 import { ProjectCreationDialog } from '../features/projects/ProjectCreationDialog.js';
 import { QueueEnableDialog } from '../features/queue/QueueEnableDialog.js';
 import { QueueAuthorityDialog } from '../features/queue/QueueAuthorityDialog.js';
@@ -26,6 +27,8 @@ export function AppShell() {
   const { dialog, setDialog } = dialogs;
   const eventState = useControllerEvents();
   const [dialogState, setDialogState] = useState<DialogState>({ status: 'ready', message: '' });
+  const [profileSavePending, setProfileSavePending] = useState(false);
+  const profileSavePendingRef = useRef(false);
   const dialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const appRef = useRef<HTMLDivElement>(null);
@@ -77,8 +80,8 @@ export function AppShell() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [dialog]);
 
-  function openDialog(id: string, trigger: HTMLElement, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string }): void {
-    if (!['register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation', 'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication', 'diagnostic', 'interaction'].includes(id)) return;
+  function openDialog(id: string, trigger: HTMLElement, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string; profileId?: string }): void {
+    if (!['register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation', 'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication', 'diagnostic', 'interaction', 'profile'].includes(id)) return;
     returnFocusRef.current = trigger;
     setDialogState({ status: 'ready', message: id === 'diagnostic' ? 'Revise a origem local autorizada e a proteção da solicitação. O navegador não libera CORS nem repete o bootstrap automaticamente.' : 'O conteúdo desta ação será conectado à funcionalidade correspondente.' });
     dialogs.open(id, context);
@@ -97,7 +100,15 @@ export function AppShell() {
   }
 
   function closeDialog(): void {
+    if (dialog === 'profile' && profileSavePendingRef.current) return;
+    profileSavePendingRef.current = false;
+    setProfileSavePending(false);
     dialogs.close();
+  }
+
+  function setProfileSaving(pending: boolean): void {
+    profileSavePendingRef.current = pending;
+    setProfileSavePending(pending);
   }
 
   return <>
@@ -111,14 +122,17 @@ export function AppShell() {
       </aside>
       <main className="main">
         <header className="topbar"><span>Workspace <span className="crumb-separator">/</span><b>{title}</b></span><div className="row"><span className={`pill ${eventState === 'connected' ? '' : 'warn'}`} role="status" aria-label={`Eventos do controlador: ${eventState}`}>Eventos {eventState === 'connected' ? 'conectados' : eventState === 'reconnecting' ? 'reconectando' : eventState === 'unavailable' ? 'indisponíveis' : 'conectando'}</span><span className="pill neutral">Acesso local</span><span className="mono muted">Controlador técnico</span></div></header>
-        <div className="content"><PrincipalScreen route={route} onOpenDialog={openDialog} onActionError={reportActionError} /></div>
+        <div className="content"><PrincipalScreen route={route} onOpenDialog={openDialog} onOpenProfileDialog={(profileId, projectId, trigger) => openDialog('profile', trigger, { ...(projectId ? { projectId } : {}), ...(profileId ? { profileId } : {}) })} onActionError={reportActionError} /></div>
       </main>
     </div>
     {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
-      <div className="dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1}>
-        <div className="line"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label="Fechar diálogo" onClick={closeDialog}>×</button></div>
-        <h2 id="dialog-title">{dialog === 'diagnostic' ? 'Diagnóstico de acesso' : labelForDialog(dialog)}</h2>
-        {dialog === 'register' ? <ProjectRegistrationForm identity={routeIdentity(route)} onRegistered={(projectId) => {
+      <div className={`dialog${dialog === 'profile' ? ' profile-dialog' : ''}`} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1}>
+        <div className="line"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label="Fechar diálogo" onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending}>×</button></div>
+        <h2 id="dialog-title">{dialog === 'profile' ? (route.params.has('profileId') ? 'Editar perfil' : 'Criar perfil') : dialog === 'diagnostic' ? 'Diagnóstico de acesso' : labelForDialog(dialog)}</h2>
+        {dialog === 'profile' ? <ProfileForm key={`${route.params.get('projectId') ?? 'global'}:${route.params.get('profileId') ?? 'new'}`} projectId={route.params.get('projectId')} profileId={route.params.get('profileId')} onClose={closeDialog} onSavingChange={setProfileSaving} onSaved={() => {
+          window.dispatchEvent(new Event('factory-controller-resync'));
+          closeDialog();
+        }} /> : dialog === 'register' ? <ProjectRegistrationForm identity={routeIdentity(route)} onRegistered={(projectId) => {
           setDialog(null);
           const params = new URLSearchParams({ projectId });
           window.location.hash = buildHash('configuracao', params);
@@ -169,7 +183,7 @@ function labelForDialog(dialog: DialogId): string {
     register: 'Cadastrar origem Git', create: 'Criar projeto', 'creation-plan': 'Plano de criação', partial: 'Criação parcial',
     preparation: 'Preparar issue', 'start-confirmation': 'Confirmar início', 'enable-queue': 'Habilitar fila Ready',
     authority: 'Autoridade do projeto', detail: 'Detalhe da tentativa', decision: 'Responder decisão', stop: 'Parada da tentativa',
-    delivery: 'Entrega', publication: 'Reconciliação da publicação', diagnostic: 'Diagnóstico', interaction: 'Sessão operacional',
+    delivery: 'Entrega', publication: 'Reconciliação da publicação', diagnostic: 'Diagnóstico', interaction: 'Sessão operacional', profile: 'Perfil',
   };
   return labels[dialog];
 }

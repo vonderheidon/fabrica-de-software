@@ -81,7 +81,7 @@ function hasReadData(state: LoadState<ReadData>): state is { status: 'empty' | '
   return state.status === 'empty' || state.status === 'ready';
 }
 
-export function PrincipalScreen({ route, onOpenDialog, onActionError }: { route: HashRoute; onOpenDialog: (id: string, trigger: HTMLElement, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string }) => void; onActionError: (error: unknown) => void }) {
+export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onActionError }: { route: HashRoute; onOpenDialog: (id: string, trigger: HTMLElement, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string }) => void; onOpenProfileDialog: (profileId: string | null, projectId: string | null, trigger: HTMLElement) => void; onActionError: (error: unknown) => void }) {
   const [saveIssues, setSaveIssues] = useState<SaveIssue[]>([]);
   const identity = draftIdentity(route);
   const searchContext = route.params.get('search') ?? '';
@@ -188,7 +188,7 @@ export function PrincipalScreen({ route, onOpenDialog, onActionError }: { route:
         if (projectId) params.set('projectId', projectId); else params.delete('projectId');
         window.location.hash = `#principal/configuracao${params.size ? `?${params.toString()}` : ''}`;
       }}><option value="">Configuração global</option>{selectedProjectId && !selectedProjectIsOnPage && <option value={selectedProjectId}>Projeto selecionado · {selectedProjectId}</option>}{projectsCatalog.page?.items.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><a href="#principal/projetos">Abrir catálogo de projetos</a>{projectsCatalog.page?.has_more && <small>Há mais projetos no catálogo.</small>}</div>
-      <ProjectConfigurationForm projectId={route.params.get('projectId')} onSaveIssue={(issue, identity) => setSaveIssues((current) => issue ? [...current.filter((item) => item.identity !== issue.identity), issue] : current.filter((item) => item.identity !== identity))} />
+      <ProjectConfigurationForm projectId={route.params.get('projectId')} onOpenProfileDialog={(profileId, trigger) => onOpenProfileDialog(profileId, route.params.get('projectId'), trigger)} onSaveIssue={(issue, identity) => setSaveIssues((current) => issue ? [...current.filter((item) => item.identity !== issue.identity), issue] : current.filter((item) => item.identity !== identity))} />
     </>}
     {route.tab === 'fila' && <QueuePanel load={queue.load} pageNotice={queue.pageNotice} pauseNotice={pauseNotice} pauseOperationId={pauseOperationId} pauseUncertain={pauseUncertain} onConsultPause={() => void consultPause()} onRefresh={queue.resetPages} onNextPage={queue.nextPage} onPreviousPage={queue.previousPage} canGoBack={queue.canGoBack} pausing={pausing}
       onEnable={(trigger) => onOpenDialog('enable-queue', trigger)} onPause={() => {

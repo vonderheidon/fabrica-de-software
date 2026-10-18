@@ -14,7 +14,7 @@ export function createSaveLifecycle(initialIdentity: string): SaveLifecycle {
   let generation = 0;
   return {
     activate() { active = true; },
-    dispose() { active = false; },
+    dispose() { active = false; generation += 1; },
     updateIdentity(nextIdentity) {
       if (identity === nextIdentity) return;
       identity = nextIdentity;

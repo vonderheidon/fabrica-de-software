@@ -12,6 +12,8 @@ it('serializes global and project editor submissions using the actual shared req
   const project = configurationCommand({ github_project: null, reviewer_profile_id: null, queue_order: { use_board_position: false } }, {}, profiles);
   expect(Value.Check(ConfigurationUpdate, project)).toBe(true);
   expect(project).not.toHaveProperty('global_changes');
+  expect(configurationCommand(null, {}, profiles)).toEqual({ changes: {}, profile_changes: profiles });
+  expect(configurationCommand({}, {}, profiles)).toEqual({ project_changes: {}, profile_changes: profiles });
   expect(configurationCommand({}, {})).not.toHaveProperty('profile_changes');
 });
 

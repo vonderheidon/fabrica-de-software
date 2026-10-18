@@ -26,7 +26,12 @@ export function useConfiguration(projectId: string | null) {
     requestJsonWithMetadata<EditableConfigurationView>(path, { signal: controller.signal }).then(({ data, etag }) => {
       if (!active) return;
       setRefreshError(null);
-      if (!etag) { setLoad({ status: 'error', identity, message: 'O controlador não retornou a revisão necessária para salvar.', requestId: null }); return; }
+      if (!etag) {
+        const failure = { message: 'O controlador não retornou a revisão necessária para salvar.', requestId: null };
+        if (priorReady) setRefreshError(failure);
+        else setLoad({ status: 'error', identity, ...failure });
+        return;
+      }
       setLoad({ status: 'ready', identity, view: data, etag });
     }).catch((error: unknown) => {
       if (!active || (error instanceof DOMException && error.name === 'AbortError')) return;

@@ -1,13 +1,16 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type {
   ConfigurationOptions, ConfigurationView, ExecutionProfile, GlobalConfiguration, ProjectConfiguration,
-  ConfigurationSaved, SettingsSaved, ProjectRegistered, ProjectRegistration, ProfileChanges, ProfilePatch, ProfileType, StoredExecutionProfile,
+  ConfigurationSaved, SettingsSaved, ProjectRegistered, ProjectRegistration, StoredExecutionProfile,
 } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
-import { clearDraft, getDraft, setDraft as persistDraft, type DraftValue } from '../../app/drafts.js';
+import { clearDraft, configurationDraftIdentity, getDraft, setDraft as persistDraft, type DraftValue } from '../../app/drafts.js';
 import { useConfiguration, type EditableConfigurationView } from './useConfiguration.js';
 import { configurationCommand, configurationOptionsParams } from './configuration-requests.js';
 import { createSaveLifecycle, type SaveOperation } from './save-lifecycle.js';
+import { consultConfigurationSave, finishConfigurationSave, hasOriginalConfigurationSave, operationNotLocatedMessage, resendConfigurationSave, retainConfigurationSave, revalidateConfigurationSave } from '../../api/configuration-save.js';
+import { readUncertainOperations } from '../../api/uncertain-operations.js';
+import { getControllerInstanceId } from '../../api/http.js';
 
 type EditableView = EditableConfigurationView;
 type EditableProfile = ExecutionProfile & { id?: string };
@@ -19,11 +22,6 @@ type EditorDraft = {
 type PersistedEditorDraft = {
   dirty: string[];
   values: Record<string, DraftValue>;
-  profileEdits?: {
-    added: EditableProfile[];
-    removedIds: string[];
-    changed: { id: string; fields: Partial<EditableProfile> }[];
-  };
   pendingCommand?: { signature: string; id: string };
 };
 type SavedSettingsView = SettingsSaved;
@@ -36,29 +34,6 @@ const isConfigurationView = (view: EditableView): view is ConfigurationView => '
 const editableProfile = (profile: StoredExecutionProfile): EditableProfile => ({
   id: profile.id, name: profile.name, profile_type: profile.profile_type, executor: profile.executor, provider: profile.provider, model: profile.model, effort: profile.effort, guidance: profile.guidance,
 });
-function profileChangesBetween(before: readonly EditableProfile[], after: readonly EditableProfile[]): ProfileChanges {
-  const commands: ProfileChanges = [];
-  for (const profile of after) {
-    const previous = profile.id ? before.find((candidate) => candidate.id === profile.id) : undefined;
-    if (!previous) {
-      commands.push({ action: 'create', profile: {
-        name: profile.name, profile_type: profile.profile_type, executor: profile.executor,
-        provider: profile.provider, model: profile.model, effort: profile.effort, guidance: profile.guidance,
-      } });
-      continue;
-    }
-    const changes: ProfilePatch = {};
-    for (const key of ['name', 'provider', 'model', 'effort', 'guidance'] as const) {
-      if (!same(previous[key], profile[key])) Object.assign(changes, { [key]: profile[key] });
-    }
-    const id = previous.id;
-    if (id && Object.keys(changes).length > 0) commands.push({ action: 'update', id, changes });
-  }
-  for (const previous of before) {
-    if (previous.id && !after.some((profile) => profile.id === previous.id)) commands.push({ action: 'delete', id: previous.id });
-  }
-  return commands;
-}
 function changedPaths(prefix: string, before: unknown, after: unknown, paths: string[] = []): string[] {
   if (same(before, after)) return paths;
   if (before && after && typeof before === 'object' && typeof after === 'object' && !Array.isArray(before) && !Array.isArray(after)) {
@@ -86,11 +61,7 @@ function readPath(source: Record<string, unknown>, path: readonly string[]): unk
   }
   return value;
 }
-const profileKey = (profile: EditableProfile): string => JSON.stringify([
-  profile.name, profile.profile_type, profile.executor, profile.provider, profile.model, profile.effort, profile.guidance,
-]);
-
-function rebaseDraft(latest: EditorDraft, saved: EditorDraft, submitted?: EditorDraft): EditorDraft {
+function rebaseDraft(latest: EditorDraft, saved: EditorDraft): EditorDraft {
   const merged = structuredClone(latest) as EditorDraft;
   for (const path of saved.dirty) {
     if (path === 'profiles') continue;
@@ -102,50 +73,11 @@ function rebaseDraft(latest: EditorDraft, saved: EditorDraft, submitted?: Editor
     const value = readPath(source as unknown as Record<string, unknown>, parts);
     setPath(target as unknown as Record<string, unknown>, parts, value);
   }
-  if (saved.dirty.includes('profiles')) {
-    const profileMap = new Map(merged.profiles.flatMap((profile) => profile.id ? [[profile.id, profile] as const] : []));
-    for (const previous of saved.baselineProfiles) {
-      const edited = saved.profiles.find((profile) => profile.id === previous.id);
-      if (!edited) { profileMap.delete(previous.id ?? ''); continue; }
-      const current = profileMap.get(previous.id ?? '');
-      if (!current) continue;
-      const next = { ...current };
-      for (const key of ['name', 'executor', 'provider', 'model', 'effort', 'guidance'] as const) {
-        if (!same(previous[key], edited[key])) Object.assign(next, { [key]: edited[key] });
-      }
-      profileMap.set(previous.id ?? '', next);
-    }
-    const confirmedAdds = latest.profiles.filter((profile) => profile.id && !saved.baselineProfiles.some((previous) => previous.id === profile.id));
-    const submittedAdds = submitted?.profiles.filter((profile) => !profile.id || !submitted.baselineProfiles.some((previous) => previous.id === profile.id)) ?? [];
-    const confirmedBySubmittedIndex = new Map<number, EditableProfile>();
-    const unusedConfirmed = new Set(confirmedAdds);
-    for (let index = 0; index < submittedAdds.length; index += 1) {
-      const submittedProfile = submittedAdds[index];
-      if (!submittedProfile) continue;
-      const confirmed = [...unusedConfirmed].find((profile) => profileKey(profile) === profileKey(submittedProfile));
-      if (confirmed) {
-        confirmedBySubmittedIndex.set(index, confirmed);
-        unusedConfirmed.delete(confirmed);
-      }
-    }
-    const usedSubmitted = new Set<number>();
-    const added = saved.profiles.flatMap((profile) => {
-      if (profile.id) return [profile];
-      let submittedIndex = submittedAdds.findIndex((candidate, index) => !usedSubmitted.has(index) && profileKey(candidate) === profileKey(profile));
-      if (submittedIndex < 0) submittedIndex = submittedAdds.findIndex((_, index) => !usedSubmitted.has(index));
-      if (submittedIndex < 0) return [profile];
-      usedSubmitted.add(submittedIndex);
-      const confirmed = confirmedBySubmittedIndex.get(submittedIndex);
-      if (!confirmed?.id) return [profile];
-      profileMap.set(confirmed.id, { ...confirmed, ...profile, id: confirmed.id });
-      return [];
-    });
-    merged.profiles = [...profileMap.values(), ...added];
-  }
+  merged.profiles = structuredClone(latest.profiles);
   merged.baselineGlobal = structuredClone(latest.baselineGlobal);
   merged.baselineProfiles = structuredClone(latest.profiles);
   merged.baselineProject = latest.project ? structuredClone(latest.project) : null;
-  merged.dirty = [...saved.dirty];
+  merged.dirty = saved.dirty.filter((path) => path !== 'profiles');
   return merged;
 }
 
@@ -153,38 +85,19 @@ function persistEditedFields(identity: string, draft: EditorDraft): void {
   const dirty = [
     ...changedPaths('global', draft.baselineGlobal, draft.global).filter((path) => path !== 'global.profiles' && !path.startsWith('global.profiles.')),
     ...(draft.project && draft.baselineProject ? changedPaths('project', draft.baselineProject, draft.project) : []),
-    ...(!same(draft.baselineProfiles, draft.profiles) ? ['profiles'] : []),
   ];
   const values: Record<string, DraftValue> = {};
   for (const path of dirty) {
-    if (path === 'profiles') continue;
     const [root, ...parts] = path.split('.');
     const source = root === 'global' ? draft.global : root === 'project' ? draft.project : null;
     if (source) values[path] = readPath(source as unknown as Record<string, unknown>, parts) as DraftValue;
   }
-  const before = new Map(draft.baselineProfiles.flatMap((profile) => profile.id ? [[profile.id, profile] as const] : []));
-  const after = new Map(draft.profiles.flatMap((profile) => profile.id ? [[profile.id, profile] as const] : []));
-  const profileEdits = dirty.includes('profiles') ? {
-    added: draft.profiles.filter((profile) => !profile.id || !before.has(profile.id)),
-    removedIds: [...before.keys()].filter((id) => !after.has(id)),
-    changed: draft.profiles.flatMap((profile) => {
-      if (!profile.id) return [];
-      const previous = before.get(profile.id);
-      if (!previous) return [];
-      const fields: Partial<EditableProfile> = {};
-      for (const key of ['name', 'executor', 'provider', 'model', 'effort', 'guidance'] as const) {
-        if (!same(previous[key], profile[key])) Object.assign(fields, { [key]: profile[key] });
-      }
-      return Object.keys(fields).length ? [{ id: profile.id, fields }] : [];
-    }),
-  } : undefined;
   if (dirty.length === 0 && !draft.pendingCommand) {
     clearDraft(identity, editorKey);
     return;
   }
   const saved: PersistedEditorDraft = {
     dirty, values,
-    ...(profileEdits ? { profileEdits } : {}),
     ...(draft.pendingCommand ? { pendingCommand: draft.pendingCommand } : {}),
   };
   persistDraft(identity, editorKey, saved as unknown as DraftValue);
@@ -197,17 +110,7 @@ function restoreEditedFields(latest: EditorDraft, saved: PersistedEditorDraft): 
     const target = root === 'global' ? restored.global : root === 'project' ? restored.project : null;
     if (target) setPath(target as unknown as Record<string, unknown>, parts, value);
   }
-  const edits = saved.profileEdits;
-  if (edits) {
-    const profiles = new Map(restored.profiles.flatMap((profile) => profile.id ? [[profile.id, profile] as const] : []));
-    for (const id of edits.removedIds) profiles.delete(id);
-    for (const edit of edits.changed) {
-      const current = profiles.get(edit.id);
-      if (current) profiles.set(edit.id, { ...current, ...edit.fields });
-    }
-    restored.profiles = [...profiles.values(), ...edits.added];
-  }
-  restored.dirty = [...saved.dirty];
+  restored.dirty = saved.dirty.filter((path) => path !== 'profiles');
   if (saved.pendingCommand) restored.pendingCommand = saved.pendingCommand;
   return restored;
 }
@@ -234,30 +137,6 @@ function conflictCurrentValues(draft: EditorDraft, view: EditableView): { label:
     if (!source) continue;
     const label = parts.map((part) => part.replace(/([A-Z])/g, ' $1').replace(/^./, (letter) => letter.toLocaleUpperCase('pt-BR'))).join(' · ');
     values.push({ label: `${root === 'global' ? 'Configuração global' : 'Projeto'} · ${label}`, value: format(readPath(source as unknown as Record<string, unknown>, parts)) });
-  }
-  if (draft.dirty.includes('profiles')) {
-    const saved = new Map(draft.baselineProfiles.flatMap((profile) => profile.id ? [[profile.id, profile] as const] : []));
-    const currentById = new Map(current.profiles.flatMap((profile) => profile.id ? [[profile.id, profile] as const] : []));
-    for (const profile of draft.profiles) {
-      if (!profile.id) {
-        values.push({ label: `Perfil novo · ${profile.name || 'sem nome'}`, value: 'Ainda não existe na configuração atual' });
-        continue;
-      }
-      const previous = saved.get(profile.id);
-      const latest = currentById.get(profile.id);
-      if (!latest) {
-        values.push({ label: `Perfil ${previous?.name ?? profile.name}`, value: 'Removido na configuração atual' });
-        continue;
-      }
-      for (const key of ['name', 'executor', 'provider', 'model', 'effort', 'guidance'] as const) {
-        if (previous && !same(previous[key], profile[key])) values.push({ label: `Perfil ${latest.name} · ${key}`, value: format(latest[key]) });
-      }
-    }
-    for (const previous of draft.baselineProfiles) {
-      if (previous.id && !draft.profiles.some((profile) => profile.id === previous.id)) {
-        values.push({ label: `Perfil ${previous.name}`, value: currentById.has(previous.id) ? 'Ainda existe na configuração atual' : 'Removido na configuração atual' });
-      }
-    }
   }
   return values;
 }
@@ -334,12 +213,14 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
   </form>;
 }
 
-export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId: string | null; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
+export function ProjectConfigurationForm({ projectId, onOpenProfileDialog, onSaveIssue }: { projectId: string | null; onOpenProfileDialog: (profileId: string | null, trigger: HTMLElement) => void; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
   const identity = projectId ?? 'global-settings';
   const identityRef = useRef(identity);
   const saveLifecycleRef = useRef(createSaveLifecycle(identity));
   identityRef.current = identity;
   const { load, setLoad, retry: retryConfiguration, refreshError, clearRefreshError } = useConfiguration(projectId);
+  const accountId = load.status === 'ready' && load.identity === identity ? load.view.settings.account_id : null;
+  const draftScope = configurationDraftIdentity(accountId, identity);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const draftRef = useRef<EditorDraft | null>(null);
   const [options, setOptions] = useState<{ key: string; data: ConfigurationOptions } | null>(null);
@@ -347,6 +228,12 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   const optionsKeyRef = useRef('');
   const [saveState, setSaveState] = useState<SaveState>({ status: 'idle' });
   const [conflictView, setConflictView] = useState<EditableView | null>(null);
+  const conflictETagRef = useRef<string | null>(null);
+  const saveInFlightRef = useRef(false);
+  const [uncertainId, setUncertainId] = useState<string | null>(() => readUncertainOperations().find((item) => item.kind === 'settings-save')?.operationId ?? null);
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [canResend, setCanResend] = useState(false);
+  const initializedDraftRef = useRef<string | null>(null);
 
   useEffect(() => {
     const lifecycle = saveLifecycleRef.current;
@@ -355,8 +242,10 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   }, []);
 
   useLayoutEffect(() => {
+    saveLifecycleRef.current.dispose();
     saveLifecycleRef.current.updateIdentity(identity);
-  }, [identity]);
+    saveLifecycleRef.current.activate();
+  }, [identity, accountId]);
 
   useEffect(() => {
     setOptions(null); setOptionsError(null); setSaveState({ status: 'idle' }); setConflictView(null);
@@ -364,13 +253,29 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
 
   useEffect(() => {
     if (load.status !== 'ready' || load.identity !== identity) return;
+    const accountIdentity = JSON.stringify([identity, load.view.settings.account_id]);
+    if (initializedDraftRef.current === accountIdentity) {
+      const current = draftRef.current;
+      if (!current) return;
+      const nextProfiles = load.view.profiles.map(editableProfile);
+      if (same(current.profiles, nextProfiles)) return;
+      const next = {
+        ...current, profiles: nextProfiles, baselineProfiles: nextProfiles,
+        global: { ...current.global, profiles: load.view.profiles },
+        baselineGlobal: { ...current.baselineGlobal, profiles: load.view.profiles },
+      };
+      draftRef.current = next;
+      setDraft(next);
+      return;
+    }
+    initializedDraftRef.current = accountIdentity;
     const data = load.view;
     const defaults = draftFromView(data);
-    const savedDraft = getDraft<PersistedEditorDraft>(identity, editorKey);
+    const savedDraft = getDraft<PersistedEditorDraft>(draftScope, editorKey);
     const nextDraft = savedDraft ? restoreEditedFields(defaults, savedDraft) : defaults;
     draftRef.current = nextDraft;
     setDraft(nextDraft);
-    if (savedDraft) persistEditedFields(identity, nextDraft);
+    if (savedDraft) persistEditedFields(draftScope, nextDraft);
   }, [identity, load]);
 
   const selectedProjectId = draft?.project?.github_project?.id ?? '';
@@ -403,11 +308,10 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
       const changed = update(current);
       const dirty = [...current.dirty];
       for (const path of changedPaths('global', current.global, changed.global)) if (!dirty.includes(path)) dirty.push(path);
-      if (!same(current.profiles, changed.profiles) && !dirty.includes('profiles')) dirty.push('profiles');
       if (current.project && changed.project) for (const path of changedPaths('project', current.project, changed.project)) if (!dirty.includes(path)) dirty.push(path);
       const next = { ...changed, dirty };
       draftRef.current = next;
-      persistEditedFields(identity, next);
+      persistEditedFields(draftScope, next);
       setSaveState((state) => state.status === 'saved' ? { status: 'idle' } : state);
       return next;
     });
@@ -428,15 +332,8 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     const latest = await requestJsonWithMetadata<EditableView>(path);
     if (!latest.etag) throw new Error('A revisão atual não veio na resposta.');
     if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return { view: latest.data, etag: latest.etag };
-    setLoad({ status: 'ready', identity: expectedIdentity, view: latest.data, etag: latest.etag });
     setConflictView(latest.data);
-    const currentDraft = draftRef.current;
-    if (currentDraft) {
-      const defaults = draftFromView(latest.data);
-      const nextDraft = rebaseDraft(defaults, currentDraft);
-      draftRef.current = nextDraft;
-      setDraft(nextDraft); persistEditedFields(expectedIdentity, nextDraft);
-    }
+    conflictETagRef.current = latest.etag;
     return { view: latest.data, etag: latest.etag };
   }
 
@@ -455,21 +352,23 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
 
   async function loadMoreOptions(): Promise<void> {
     if (!projectId || !currentOptions?.projects.next_cursor) return;
+    const operation = saveLifecycleRef.current.begin(identity);
     const expectedIdentity = identity;
     const expectedOptionsKey = optionsKey;
     const params = configurationOptionsParams({ github_project_id: selectedProjectId, owner_id: selectedOwnerId, status_field_id: selectedStatusField }, currentOptions.projects.next_cursor);
     try {
       const { data } = await requestJsonWithMetadata<ConfigurationOptions>(`/api/v1/projects/${encodeURIComponent(projectId)}/configuration-options?${params.toString()}`);
-      if (identityRef.current !== expectedIdentity || optionsKeyRef.current !== expectedOptionsKey) return;
+      if (!saveLifecycleRef.current.isCurrent(expectedIdentity, operation) || identityRef.current !== expectedIdentity || optionsKeyRef.current !== expectedOptionsKey) return;
       setOptions((current) => current?.key === expectedOptionsKey ? { key: expectedOptionsKey, data: { ...data, projects: { ...data.projects, items: [...current.data.projects.items, ...data.projects.items] } } } : current);
       setOptionsError(null);
     } catch (error: unknown) {
-      if (identityRef.current !== expectedIdentity || optionsKeyRef.current !== expectedOptionsKey) return;
+      if (!saveLifecycleRef.current.isCurrent(expectedIdentity, operation) || identityRef.current !== expectedIdentity || optionsKeyRef.current !== expectedOptionsKey) return;
       setOptionsError({ key: expectedOptionsKey, message: error instanceof HttpError ? error.message : 'Não foi possível carregar a próxima página de Projects.' });
     }
   }
 
   async function save(): Promise<void> {
+    if (uncertainId || saveInFlightRef.current || saveState.status === 'saving') return;
     if (load.status !== 'ready' || load.identity !== identity || !draft) return;
     const baseline = load.view;
     const baseGlobal: GlobalConfiguration = { ...baseline.settings, profiles: baseline.profiles };
@@ -477,7 +376,6 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     for (const key of ['projects_root', 'automation_enabled', 'time_defaults', 'artifact_policy'] as const) {
       if (!same(baseGlobal[key], draft.global[key])) Object.assign(globalChanges, { [key]: draft.global[key] });
     }
-    const profilesChanged = !same(baseline.profiles.map(editableProfile), draft.profiles);
     const projectChanges: Partial<ProjectConfiguration> = {};
     if (projectId && isConfigurationView(baseline) && draft.project) {
       for (const key of ['source', 'base_branch', 'github_project', 'implementer_profile_id', 'reviewer_profile_id', 'checks', 'correction_limit', 'default_delivery_mode', 'automation_enabled', 'queue_order', 'guidance'] as const) {
@@ -486,23 +384,25 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     }
     const hasGlobalChanges = Object.keys(globalChanges).length > 0;
     const hasProjectChanges = Object.keys(projectChanges).length > 0;
-    if (!hasGlobalChanges && !profilesChanged && !hasProjectChanges) { setSaveState({ status: 'idle' }); return; }
+    if (!hasGlobalChanges && !hasProjectChanges) { setSaveState({ status: 'idle' }); return; }
 
     setSaveState({ status: 'saving' });
-    const profileCommands = profilesChanged ? profileChangesBetween(baseline.profiles.map(editableProfile), draft.profiles) : undefined;
-    const payload = configurationCommand(projectId ? projectChanges : null, globalChanges, profileCommands);
-    const submittedDraft = structuredClone(draft) as EditorDraft;
+    const payload = configurationCommand(projectId ? projectChanges : null, globalChanges);
     const signature = JSON.stringify([load.etag, payload]);
     const pendingCommand = draft.pendingCommand?.signature === signature ? draft.pendingCommand : { signature, id: crypto.randomUUID() };
     const operationIdForRequest = pendingCommand.id;
     if (draft.pendingCommand !== pendingCommand) {
       const withPendingCommand = { ...draft, pendingCommand };
-      setDraft(withPendingCommand); persistEditedFields(identity, withPendingCommand);
+      setDraft(withPendingCommand); persistEditedFields(draftScope, withPendingCommand);
     }
     const operation = saveLifecycleRef.current.begin(identity);
     const expectedIdentity = operation.identity;
     const headers = { 'If-Match': load.etag, 'Idempotency-Key': operationIdForRequest };
+    saveInFlightRef.current = true;
     try {
+      const instanceId = getControllerInstanceId();
+      if (!instanceId) throw new Error('Consulte a configuração antes de salvar.');
+      retainConfigurationSave({ operationId: operationIdForRequest, path: projectId ? `/api/v1/projects/${encodeURIComponent(projectId)}/configuration` : '/api/v1/settings', method: 'PUT', body: JSON.stringify(payload), etag: load.etag, accountId: baseline.settings.account_id, installationId: baseline.settings.installation_id, instanceId });
     let saved: EditableView;
     let operationId = '';
     let receiptConfirmed = false;
@@ -519,20 +419,24 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
         saved = response.data; etag = response.etag; operationId = response.data.operation_id; receiptConfirmed = Boolean(response.data.receipt);
       }
       if (!etag || !receiptConfirmed) throw new Error('O commit não retornou ETag e recibo durável.');
+      finishConfigurationSave(operationIdForRequest);
       if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
       const defaults = draftFromView(saved);
       if (!defaults.project && draft.project) defaults.project = draft.project;
       const currentDraft = draftRef.current ?? draft;
-      const nextDraft = rebaseDraft(defaults, currentDraft, submittedDraft);
+      const nextDraft = rebaseDraft(defaults, currentDraft);
       delete nextDraft.pendingCommand;
       draftRef.current = nextDraft;
-      setDraft(nextDraft); persistEditedFields(expectedIdentity, nextDraft);
+      setDraft(nextDraft); persistEditedFields(draftScope, nextDraft);
       setLoad({ status: 'ready', identity, view: saved, etag }); setConflictView(null);
       setSaveState({ status: 'saved', operationId, message: 'Salvo após confirmação do recibo de commit.' });
       onSaveIssue(null, expectedIdentity);
     } catch (error: unknown) {
       const http = error instanceof HttpError ? error : null;
+      const uncertain = !(error instanceof RangeError) && (!http || http.status === 401 || http.status >= 500);
+      if (!uncertain) finishConfigurationSave(operationIdForRequest);
       if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
+      if (uncertain) { setUncertainId(operationIdForRequest); setCanResend(false); setRecoveryMessage('Gravação ainda não confirmada. Consulte o resultado antes de qualquer novo comando.'); }
       if (http?.status === 412) {
         let currentLoaded = false;
         try { await refreshCurrent(operation); currentLoaded = saveLifecycleRef.current.isCurrent(identityRef.current, operation); } catch { /* Keep the existing draft and report the original conflict. */ }
@@ -545,6 +449,43 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
         setSaveState({ status: 'error', message, requestId: http?.requestId ?? null });
         onSaveIssue({ identity: expectedIdentity, message, requestId: http?.requestId ?? null, kind: 'error' }, expectedIdentity);
       }
+    } finally { saveInFlightRef.current = false; }
+  }
+
+  async function recoverSave(resend = false): Promise<void> {
+    if (!uncertainId) return;
+    const operation = saveLifecycleRef.current.begin(identity);
+    try {
+      if (resend) {
+        const original = await revalidateConfigurationSave(uncertainId);
+        const expectedPath = projectId ? `/api/v1/projects/${encodeURIComponent(projectId)}/configuration` : '/api/v1/settings';
+        if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation) || original.path !== expectedPath || original.accountId !== accountId) throw new Error('Restabeleça o contexto original da edição para reapresentar a operação.');
+        const response = await resendConfigurationSave<SavedSettingsView | SavedConfigurationView>(uncertainId);
+        if (!response.etag || !response.data.receipt || response.data.operation_id !== uncertainId) throw new Error('A gravação permanece sem recibo confirmado.');
+        finishConfigurationSave(uncertainId);
+      } else {
+        const result = await consultConfigurationSave(uncertainId);
+        if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
+        if (!result) {
+          setRecoveryMessage(operationNotLocatedMessage);
+          setCanResend(false);
+          if (hasOriginalConfigurationSave(uncertainId)) {
+            const original = await revalidateConfigurationSave(uncertainId);
+            const expectedPath = projectId ? `/api/v1/projects/${encodeURIComponent(projectId)}/configuration` : '/api/v1/settings';
+            if (saveLifecycleRef.current.isCurrent(identityRef.current, operation)) setCanResend(original.path === expectedPath && original.accountId === accountId);
+          }
+          return;
+        }
+        if (result.state !== 'succeeded' || !result.receipt) { setRecoveryMessage('A operação continua sem confirmação de sucesso. Mantenha a consulta ou procure suporte.'); return; }
+        finishConfigurationSave(uncertainId);
+      }
+      if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
+      setUncertainId(null); setCanResend(false);
+      setRecoveryMessage('O recibo original foi recuperado. Consulte os valores atuais para comparar com seu rascunho.');
+      await refreshCurrent(operation);
+    } catch (error: unknown) {
+      if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
+      setRecoveryMessage(error instanceof Error ? error.message : 'Não foi possível consultar a operação.');
     }
   }
 
@@ -565,17 +506,22 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
       <p className="muted field-full">Política de artefatos: exclusão automática desativada pelo contrato. Os dados atuais permanecem nesta revisão até serem salvos.</p>
     </div></section>
 
-    <section className="card form-section"><div className="panel-title line"><div><span className="eyebrow">Execução configurável</span><h2>Perfis</h2></div><button type="button" onClick={() => updateDraft((current) => ({ ...current, profiles: [...current.profiles, { name: '', profile_type: 'implementer', executor: 'maestri-omp', provider: '', model: '', effort: null, guidance: '' }] }))} disabled={profiles.length >= 100}>Adicionar perfil</button></div>
+    {conflictView && conflictETagRef.current && <button type="button" onClick={() => {
+      const etag = conflictETagRef.current;
+      if (!etag || !draftRef.current) return;
+      const next = rebaseDraft(draftFromView(conflictView), draftRef.current);
+      draftRef.current = next; setDraft(next); persistEditedFields(draftScope, next);
+      setLoad({ status: 'ready', identity, view: conflictView, etag });
+      setConflictView(null); setSaveState({ status: 'idle' });
+    }}>Aplicar minha edição sobre a revisão consultada</button>}
+    {recoveryMessage && <p role="status">{recoveryMessage}</p>}
+    {uncertainId && <section className="notice"><b>Gravação ainda não confirmada</b><p>O rascunho permanece somente nesta sessão. A consulta usa o ID original; não repete o comando.</p><button type="button" onClick={() => void recoverSave()}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void recoverSave(true)}>Reapresentar a mesma operação</button>}</section>}
+    <section className="card form-section"><div className="panel-title line"><div><span className="eyebrow">Execução configurável</span><h2>Perfis</h2></div><button type="button" onClick={(event) => onOpenProfileDialog(null, event.currentTarget)} disabled={profiles.length >= 100}>Criar perfil</button></div>
       {profiles.length === 0 && <p className="empty">Nenhum perfil configurado.</p>}
-      {profiles.map((profile, index) => <fieldset className="profile-card" key={profile.id ?? `new-${index}`}><legend>{profile.name || `Novo perfil ${index + 1}`}</legend>{profile.id && <small className="mono muted">ID {profile.id}</small>}<div className="form-grid">
-        <TextField label={`Nome do perfil ${index + 1}`} value={profile.name} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, name: value } : item) }))} />
-        <SelectField label={`Tipo do perfil ${index + 1}`} value={profile.profile_type} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, profile_type: value as ProfileType } : item) }))} disabled={Boolean(profile.id)} options={[{ value: 'implementer', label: 'Implementador' }, { value: 'reviewer', label: 'Revisor' }]} />
-        <SelectField label={`Executor do perfil ${index + 1}`} value={profile.executor} onChange={() => undefined} disabled help="Maestri / OMP é o executor da primeira entrega." options={[{ value: 'maestri-omp', label: 'Maestri / OMP' }]} />
-        <TextField label={`Provider do perfil ${index + 1}`} value={profile.provider} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, provider: value } : item) }))} />
-        <TextField label={`Modelo do perfil ${index + 1}`} value={profile.model} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, model: value } : item) }))} />
-        <TextField label={`Esforço do perfil ${index + 1}`} value={profile.effort ?? ''} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, effort: value || null } : item) }))} />
-        <label className="form-field field-full" htmlFor={`profile-guidance-${index}`}>Orientações do perfil<textarea id={`profile-guidance-${index}`} value={profile.guidance} onChange={(event) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, guidance: event.currentTarget.value } : item) }))} /></label>
-      </div></fieldset>)}
+      <div className="profile-list">{profiles.map((profile, index) => <article className="profile-card" key={profile.id ?? `profile-${index}`}>
+        <div><h3>{profile.name || 'Perfil sem nome'}</h3><p className="muted">{profile.profile_type === 'implementer' ? 'Implementador' : 'Revisor'} · Maestri / OMP · {profile.provider}/{profile.model} · {profile.effort ?? 'Não se aplica'}</p>{profile.guidance && <p>{profile.guidance}</p>}</div>
+        <button type="button" onClick={(event) => profile.id && onOpenProfileDialog(profile.id, event.currentTarget)} disabled={!profile.id}>Editar perfil</button>
+      </article>)}</div>
     </section>
 
     {projectId && draft.project && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Projeto selecionado</span><h2>Configuração do projeto</h2></div>
@@ -583,8 +529,8 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
         <SelectField label="Tipo da origem" value={draft.project.source.kind} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: value as 'local' | 'github', location: current.source.location } }))} options={[{ value: 'local', label: 'Local' }, { value: 'github', label: 'GitHub' }]} />
         <TextField label="Localização da origem" value={draft.project.source.location} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: current.source.kind, location: value } }))} />
         <TextField label="Branch-base" value={draft.project.base_branch} onChange={(value) => updateProject((current) => ({ ...current, base_branch: value }))} />
-        <SelectField label="Perfil implementador" value={draft.project.implementer_profile_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, implementer_profile_id: value || null }))} options={profiles.filter((profile) => profile.profile_type === 'implementer').map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
-        <SelectField label="Perfil revisor" value={draft.project.reviewer_profile_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, reviewer_profile_id: value || null }))} options={profiles.filter((profile) => profile.profile_type === 'reviewer').map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
+        <SelectField label="Perfil implementador" value={draft.project.implementer_profile_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, implementer_profile_id: value || null }))} options={profiles.filter((profile) => profile.profile_type === 'implementer' || profile.id === draft.project?.reviewer_profile_id).map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
+        <SelectField label="Perfil revisor" value={draft.project.reviewer_profile_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, reviewer_profile_id: value || null }))} options={profiles.filter((profile) => profile.profile_type === 'reviewer' || profile.id === draft.project?.implementer_profile_id).map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
         <NumberField label="Limite de correções" value={draft.project.correction_limit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correction_limit: Math.max(0, Math.min(5, value)) }))} />
         <SelectField label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit' }, { value: 'pr', label: 'Pull request' }]} />
         <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
