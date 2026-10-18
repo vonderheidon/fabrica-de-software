@@ -1,5 +1,32 @@
 # Progresso da implementação
 
+## Sprint — Ciclo de save, rascunhos e operações incertas na web [IMPLEMENTADA NO WORKSPACE; VALIDAÇÃO PENDENTE]
+
+Data: 2026-10-18. Fontes: AGENTS.md, SPEC.md §§8.5/10.2, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md e SPEC do pacote `docs/Docs20261017_233303/SPEC20261017_233303.md`, E02/§4.3, US-18, RF-94–97 e RNF-11/12. Nenhuma dependência instalada ou operação Git de escrita executada.
+
+- Novo `apps/web/src/api/configuration-body.ts`: mede bytes UTF-8 do JSON serializado; limite inclusivo de 16.384 bytes e mensagem literal da SPEC. `http.ts` aplica a verificação antes de bootstrap/envio dos PUTs de settings/configuração e normaliza a apresentação de 413 sem alterar o body. Rebootstrap conserva a falha original e notifica releituras sem replay de mutação.
+- Novo `apps/web/src/api/configuration-save.ts`: conserva request integral exclusivamente em memória, com rota/método/ID/If-Match e contexto originais. Metadados mínimos são registrados antes do envio. Consulta usa o ID original; 404 conserva incerteza e habilita apenas revalidação/reapresentação explícita da mesma operação. Reexecução exige instalação/conta/contexto originais, sem reconstruir payload, trocar ETag ou gerar ID. Reload perde o request e mantém somente consulta/suporte.
+- `uncertain-operations.ts` projeta ID/tipo/instante explicitamente na leitura e escrita, impedindo persistência acidental de propriedades adicionais de objetos estruturalmente compatíveis.
+- `ProjectForm.tsx`, `useConfiguration.ts`, `save-lifecycle.ts` e `drafts.ts`: comparação de conflito separada, aplicação de edição somente por ação explícita, rascunho em memória com conta/recurso e helper para etapa/perfil, polling sem substituir campos, erro de atualização independente, geração invalidada no cleanup e paginação protegida contra retorno tardio. Editor oferece consulta/reapresentação e bloqueia novo save durante incerteza.
+- Novos testes: `tests/configuration-save-web.test.ts` e `apps/web/src/api/configuration-save.test.ts`, para fronteira UTF-8/Unicode/escapes, metadados mínimos, contexto, cleanup, consulta anterior ao replay, corpo/ETag/chave originais e ausência de replay após reload ou troca de conta. Documentação React consultada via Context7 para cleanup de efeitos e respostas obsoletas. Skills de design nomeadas no pedido não estavam disponíveis; preservada a composição existente, sem redesenho.
+
+Validação desta rodada: `git diff --check` passou. Typecheck, lint, testes e build **não executados**: foi solicitada exceção explícita à regra da sessão que proíbe comandos não iniciados por git; resposta ainda pendente. Nenhum executor alternativo foi usado para contornar essa regra. Testes escritos não constituem prova de funcionamento; compilação e critérios integrais permanecem sem confirmação. Não houve browser, GitHub/Maestri/OMP real, provider, publicação, instalação operacional como alvo ou mudança de fase. A revisão automática rejeitou a consulta opcional à memória externa como conteúdo privado fora do escopo; esse conteúdo não foi usado.
+
+## Registro atual — Progresso e conclusão do onboarding no servidor [IMPLEMENTAÇÃO NO WORKSPACE; VALIDAÇÃO PENDENTE]
+
+- Views de settings e configuração agora incluem onboarding derivado, contagens de perfis vivos por tipo, capacidades de seleção do host e cursor de eventos. A primeira etapa incompleta usa o vínculo local persistido, a confirmação da pasta e os perfis Implementador/Revisor; a conclusão persistida faz a etapa permanecer nula mesmo após pendência posterior.
+- `PUT /api/v1/settings` aceita `onboarding_changes` fechado para supressão independente ou conclusão explícita. A primeira conclusão revalida a conta ativa/observada, confirma acesso e gravação da pasta e repete conta/raiz/perfis dentro da transação antes de registrar timestamp, revisão, operação, recibo e evento. Replay recupera o recibo original antes de nova consulta.
+- GETs de settings/configuração não consultam GitHub nem OMP. A conclusão não exige catálogo e não cria projeto/tentativa, altera automação, despacha trabalho ou recruta executor. Diagnósticos de configuração indicam conta, pasta e papéis ausentes após conclusão; o POST explícito de configuração também revalida o acesso/gravação atual da pasta.
+- Não foi necessária migration nova; os fatos persistidos existentes de onboarding são reutilizados. Foram acrescentadas regressões HTTP/SQLite em `tests/integration/projects.test.ts` para derivação, capabilities, schemas fechados, supressão, revalidação/falhas, recuperação, ausência de efeitos e pendências posteriores.
+- Typecheck, lint, testes e build não foram executados nesta rodada: a restrição de terminal desta tarefa permite somente comandos iniciados por `git`, em conflito com os comandos de validação requeridos. Nenhum executor alternativo foi usado.
+
+## Registro anterior — Integridade dos perfis e validação de início [IMPLEMENTAÇÃO NO WORKSPACE; VALIDAÇÃO PENDENTE]
+
+- Migration 023 acrescenta tipo, chave de nome e exclusão lógica em `execution_profiles` por alterações in-place. Triggers exigem tipo/chave em escritas novas; bancos com perfis legados sem tipo são recusados sem classificação automática ou substituição de tabela.
+- Settings e saves agregados serializam padrões correntes e exclusões. Exclusão também consulta IDs exatos de ambos os papéis nas tentativas com `result IS NULL`; tentativas encerradas com limpeza incerta não bloqueiam. Revisões históricas não bloqueiam e perfis excluídos liberam o nome.
+- Projeto, preparação e início revalidam tipo/identidade dentro da gravação serializada. Inícios exigem perfil vivo de cada tipo; catálogo OMP carregado rejeita combinações inválidas e catálogo indisponível permite tentar a configuração salva, preservando a causa de falha do executor.
+- Foram acrescentados testes para impedimentos, conta cruzada, fases/questões, reuso de nome, corrida de referência, snapshots, catálogo e migration preservadora. Typecheck, lint, testes e build seguem pendentes porque esta sessão permite somente comandos Git de leitura. A migration para bancos antigos aguarda a decisão solicitada ao usuário.
+
 ## Sprint 1 — Fundação executável e persistência inicial
 
 Data: 2026-10-16. Este registro deve ser atualizado em **todas as próximas sprints**. Implementação nova no repositório canônico; sem análise ou incorporação do legado Aula-IA, setup de scaffold ou ações Git/GH.
@@ -2488,3 +2515,23 @@ Typecheck, lint, testes e build não foram executados. A regra de terminal desta
 - Schema de perfis tipados e exclusão lógica: Introduzir os campos finais de perfil sem provisionamento automático ou classificação inventada de dados antigos.
 - Criação e edição por comandos de perfil: Aplicar ProfileChanges em settings e nos saves agregados explícitos de configuração.
 - Edição preservada sem substituições de catálogo: Permitir manutenção de nome/orientação quando as opções de execução não podem ser substituídas.
+
+## Sprint 014 - Integridade dos perfis e validação de início [CONCLUIDA]
+- Exclusão e mudança de tipo com impedimentos atuais: Manter referências de projetos e tentativas consistentes no momento da gravação.
+- Serialização de referências e captura imutável: Revalidar padrões, preparação e início contra exclusão ou mudança de tipo concorrente.
+- Pré-requisitos de perfis no início: Distinguir ausência de perfis, modelo comprovadamente ausente e indisponibilidade da consulta.
+
+## Sprint — Progresso e conclusão do onboarding no servidor [IMPLEMENTADA NO WORKSPACE; VALIDAÇÃO PENDENTE]
+- Visão compartilhada de configuração: Incluir onboarding derivado, `profile_counts`, `selection_capabilities` e `event_cursor` em SettingsView/ConfigurationView, sem chamadas externas nos GETs.
+- Supressão e conclusão independentes: Persistir `suppressed` e `complete: true` pelo save existente, com validação reexecutada e conclusão imutável.
+- Conclusão sem efeitos e pendências posteriores: Preservar o marco, recuperar recibos sem novo IO e expor falhas atuais nos diagnósticos de configuração.
+
+## Sprint 015 - Progresso e conclusão do onboarding no servidor [CONCLUIDA]
+- Visão compartilhada de configuração: Retornar os fatos necessários ao wizard e às telas posteriores sem consultas externas implícitas.
+- Supressão e conclusão independentes: Persistir preferência de abertura e marco histórico por comandos explícitos.
+- Conclusão sem efeitos e pendências posteriores: Preservar o marco histórico e orientar problemas futuros sem reiniciar configuração inicial.
+
+## Sprint 016 - Ciclo de save, rascunhos e operações incertas na web [CONCLUIDA]
+- Rascunhos e contexto de edição preservados: Separar leitura, erro de leitura, save, conflito e incerteza por contexto.
+- Consulta e reapresentação da mesma operação: Recuperar resultados perdidos preservando a identidade original e as restrições de contexto.
+- Limite conjunto de save e rebootstrap seguro: Preservar atomicidade dos saves e recuperar a sessão técnica sem repetir efeitos.
