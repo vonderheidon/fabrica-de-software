@@ -31,6 +31,20 @@ As falhas de loopback foram observadas novamente; esta rodada não determinou su
 
 ## Critérios reais
 
+### Atualização de diagnóstico - 2026-10-17, após 23:14
+
+Este adendo preserva a avaliação histórica abaixo. A composição atual `scripts/start-host.mjs` iniciou o controlador no terminal próprio Maestri. A consulta HTTP atual retornou `host.matches=true` e `MAESTRI_CONTEXT_CONFIRMED`. A falta de contexto do shell externo não significa falta de acesso Wire. PF-05 deixa de ser o impedimento observado para iniciar o servidor neste host; isso não comprova execução de provider ou todos os adapters Git/GitHub.
+
+As consultas reais retornaram conta observada presente, conta vinculada ausente, zero projetos, zero tentativas, automação desabilitada e despacho pausado. PF-06 continua sendo uma lacuna de implementação: `GlobalChanges` não oferece vínculo da conta e `writeGlobals` não atualiza `account_id`. Não foi alterado SQL para contornar a lacuna.
+
+Reexecuções locais sobre o build atual:
+
+- `npm.cmd run test:execution-compiled`: exit 0; loopback UTF-8, diagnósticos de frames/EOF e lançamento Windows com fixture Node passaram. Não executou Maestri/OMP/provider.
+- `npm.cmd run test:verification-compiled`: exit 0; checks nativos, cwd Unicode, checksum e canonicalização reais passaram. Sem materialização Git ou Maestri/OMP.
+- `npm.cmd run test:compiled`: exit 1; conexão local alcançada, mas a execução terminou com `TypeError: terminated`, causa `UND_ERR_SOCKET`, outro lado fechou a conexão. Causa não isolada. Não declarar o smoke HTTP/SSE aprovado nem manter EACCES como único diagnóstico atual.
+
+O acesso ao Playwright foi restabelecido; a prova visual parcial atual está em `../../acceptance-transversal/visual-evidence.md`. Permanecem sem prova os percursos de agentes/publicação/fila, concorrência entre abas e recuperação com tentativas reais. Alvo, autorização dos efeitos e limites de custo precisam estar definidos antes dessas ações. Revisão independente da versão imutável também permanece pendente. Este adendo não altera os cenários do manifesto nem concede aceite.
+
 Continuam sem evidência desta rodada: cadastro preservando origem dirty até ICR; capturas por tentativa e consumo visual das sprints 017/033/034; perfil efetivo/TUI/MCP útil e recuperação de argumento; cwd/argv/resultados Unicode no percurso real; pergunta/resposta e recibo na mesma passagem; resposta incerta suspensa; cancelamentos com recursos próprios/filho/recurso manual; restart e retry com outro clone/processo.
 
 O manifesto 02 mantém os dez cenários e os três pré-requisitos pendentes. Não recebeu horários de início, autorização, tentativas ou anexos de execução inventados. PF-05/PF-06 continuam abertos; este relatório não é correção desses fluxos nem aceite da fatia. Nenhum código de produção, teste ou UI foi alterado, e nenhuma dependência foi instalada. Somente esta revalidação e sua referência no roteiro foram acrescentadas; `dist` foi reconstruído pelo build existente.

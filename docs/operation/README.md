@@ -14,7 +14,7 @@ npm.cmd run package:local
 npm.cmd run test:distribution
 ```
 
-`package:local` executa o build configurado e gera uma pasta nova `build/Fábrica distribuição-<id>`. Ela contém `dist/` (controlador, contratos compilados, cliente, migrations, papéis e templates), `scripts/start-host.mjs`, manifesto/lockfile, dependências **de produção** instaladas, exemplo de ambiente e este manual. Não inclui `.env`, banco, WAL/SHM, `work`, armazenamento Git operacional, caches, skills ou fontes do workspace. Uma falha conserva o pacote parcial; não o distribua. O smoke cria outra pasta de teste e dados próprios em `.cache`, sem alterar a instalação operacional.
+`package:local` executa o build configurado e gera uma pasta nova `build/Fábrica distribuição-<id>`. Ela contém `dist/` (controlador, contratos compilados, cliente, migrations, papéis e templates), `scripts/start-host.mjs`, manifesto/lockfile, dependências **de produção** instaladas, exemplo de ambiente e este manual. Não inclui `.env`, banco, WAL/SHM, `work`, armazenamento Git operacional, caches, skills ou fontes do workspace. Uma falha conserva o pacote parcial; não o distribua. O smoke cria outra instalação de teste em `build` com dados próprios em `var/factory` e cwd em `.cache`, sem alterar a instalação operacional.
 
 Transfira a pasta completa para a instalação de destino. Node, Git, GH, Maestri e OMP são pré-requisitos externos normais. As dependências nativas empacotadas correspondem ao SO, arquitetura e ABI indicados em `distribution.json`; use Windows/arquitetura compatíveis e Node 24. Não anunciar um binário universal ou executar instalação global de ferramentas. Um pacote para outra plataforma precisa ser preparado e validado nessa plataforma. Não é necessário compilar TypeScript ou instalar skills no destino.
 
@@ -22,28 +22,29 @@ O smoke portátil usa HTTP e SQLite nativos em uma raiz com espaços/Unicode e c
 
 ## Terminal-âncora e bootstrap
 
-Abra um terminal normal **dentro do Maestri** no contexto autorizado do Windows com acesso ao keyring existente. Não importe variáveis de outro terminal nem invente `MAESTRI_PIPE`, terminal ou workspace. Informe cinco caminhos absolutos de executáveis EXE instalados, nesta ordem: Git, GH, Maestri, OMP e PowerShell. CMD/BAT/PS1 não substituem os executáveis nativos esperados pelo adapter. OMP suportado pelo adapter atual: **18.11.1**; outra versão exige conferência e adaptação explícita, sem fallback de modelo/perfil.
+Abra um terminal normal **dentro do Maestri** no contexto autorizado do Windows com acesso ao keyring existente. Não importe variáveis de outro terminal nem invente `MAESTRI_PIPE`, terminal ou workspace. Informe quatro caminhos absolutos de executáveis EXE instalados, nesta ordem: Git, Maestri, OMP e PowerShell. O GitHub CLI não é necessário para iniciar a fábrica; a descoberta começa quando as opções do GitHub são consultadas. CMD/BAT/PS1 não substituem os executáveis nativos esperados pelo adapter. OMP suportado pelo adapter atual: **18.11.1**; outra versão exige conferência e adaptação explícita, sem fallback de modelo/perfil.
 
 Exemplo a adaptar aos executáveis do host, sem caminhos pessoais fixados pelo produto:
 
 ```powershell
 $installationDirectory = 'D:\Aplicações\Fábrica local'
-$env:FACTORY_DATA_DIR = 'D:\Dados\Fábrica'
 Set-Location -LiteralPath $installationDirectory
-npm.cmd start -- 'D:\Ferramentas\Git\cmd\git.exe' 'D:\Ferramentas\GitHub CLI\gh.exe' 'D:\Ferramentas\Maestri\maestri.exe' 'D:\Ferramentas\OMP\omp.exe' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+npm.cmd start -- 'D:\Ferramentas\Git\cmd\git.exe' 'D:\Ferramentas\Maestri\maestri.exe' 'D:\Ferramentas\OMP\omp.exe' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 ```
 
-Alternativamente, após criar um `.env` **local** contendo somente as seis opções de `.env.example`, use o carregamento nativo do Node:
+Alternativamente, após criar um `.env` **local** contendo somente as cinco opções de `.env.example`, use o carregamento nativo do Node:
 
 ```powershell
-node --env-file=.env scripts/start-host.mjs 'D:\Ferramentas\Git\cmd\git.exe' 'D:\Ferramentas\GitHub CLI\gh.exe' 'D:\Ferramentas\Maestri\maestri.exe' 'D:\Ferramentas\OMP\omp.exe' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+node --env-file=.env scripts/start-host.mjs 'D:\Ferramentas\Git\cmd\git.exe' 'D:\Ferramentas\Maestri\maestri.exe' 'D:\Ferramentas\OMP\omp.exe' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
 ```
 
-O loader não procura executáveis no PATH e não lê credenciais de argumentos ou arquivos de bootstrap. A composição declara contexto `windows_keyring`; **não eleva** o processo nem comprova autenticação por si. GH consulta a identidade efetiva pelos mecanismos normais. Não refazer login ou alterar ACLs para contornar erro de contexto. O entrypoint `dist/apps/controller/src/main.js` sem composição também falha com `CONTEXT_MISSING`, sem iniciar scheduler/HTTP.
+O launcher não procura executáveis Git, Maestri, OMP ou PowerShell no PATH e não lê credenciais de argumentos ou arquivos de bootstrap. A descoberta GitHub consulta candidatos em `PATH`, `GH_PATH` e no caminho salvo, nessa ordem, e exige que cada candidato exista e passe `gh --version`; `GH_TOKEN`/`GITHUB_TOKEN` não contam como instalação. Se nenhum funcionar, Configuração orienta instalar ou reiniciar após atualizar o PATH e permite localizar `gh.exe`. Salvar o caminho é uma operação separada e o valida novamente. A composição fornece o contexto de acesso do host independentemente do executável; achar ou selecionar `gh.exe` não concede acesso ao keyring. A observação de contas usa somente `github.com`, não inclui tokens e não vincula nem troca a conta ativa. Não refazer login ou alterar ACLs para contornar erro de contexto. O entrypoint `dist/apps/controller/src/main.js` sem composição também falha no preflight Maestri/OMP, sem iniciar scheduler/HTTP.
+
+`GET /api/v1/settings/github-options` retorna o executável observado, conta vinculada, identidade ativa observada e contas do CLI com `active`, `valid` e `eligible`. Só conta ativa com autenticação validada e identidade GraphQL correspondente fica elegível. Inativas e inválidas recebem orientação para regularização externa. A consulta é somente leitura. Para salvar um caminho localizado, use `PUT /api/v1/settings` como comando isolado (`changes: {}` e `gh_executable_path`), com a revisão e a chave de idempotência atuais; o servidor revalida o EXE e o recibo pode ser consultado por `/api/v1/operations/:operationId`.
 
 Ordem: validar bootstrap → adquirir lock → abrir/conferir migrations e configuração persistida → carregar papéis → consultar contexto real Maestri e versão OMP → validar templates distribuídos → compor scheduler/HTTP → listen loopback. O pré-voo não recruta agente nem chama provider. Lock ocupado, banco desconhecido/mais novo/corrompido, checksum incompatível, recurso inválido ou contexto ausente/stale impedem avanço. Diagnósticos são códigos sanitizados; não registrar ambiente, argv, pipe, tokens ou stderr nativo.
 
-As únicas variáveis de bootstrap são `NODE_ENV`, `FACTORY_BIND_HOST`, `FACTORY_PORT`, `FACTORY_BROWSER_ORIGIN`, `FACTORY_DATA_DIR` e `FACTORY_LOG_LEVEL`. Defaults/validação estão no README raiz. Diretório relativo de dados resolve pela instalação, não pelo cwd. Use diretório absoluto estável para atualização entre versões. Não inserir senha humana, token, Wire, segredos de provider ou variáveis `VITE_*` no exemplo/bundle.
+As únicas variáveis de bootstrap são `NODE_ENV`, `FACTORY_BIND_HOST`, `FACTORY_PORT`, `FACTORY_BROWSER_ORIGIN` e `FACTORY_LOG_LEVEL`. Defaults/validação estão no README raiz. O banco é fixo em `<raiz da instalação>/var/factory/factory.sqlite`, independentemente do cwd. `FACTORY_DATA_DIR` é ignorada; HTTP e configuração persistida não substituem esse caminho. Git retido, ambientes, evidências e lock usam a mesma raiz operacional `var/factory`. Não inserir senha humana, token, Wire, segredos de provider ou variáveis `VITE_*` no exemplo/bundle.
 
 ## Configurar e iniciar trabalho
 
@@ -51,7 +52,7 @@ Navegue à origem configurada, por padrão `http://127.0.0.1:4310`. Produção s
 
 HTML, JS e CSS são entregues por GET/HEAD antes da sessão, permitindo a navegação inicial. Somente arquivos presentes no cliente compilado recebem essa permissão; leituras operacionais e SSE exigem sessão, e mutações preservam Origin/JSON/CSRF. A navegação direta (`Sec-Fetch-Site: none`) é permitida somente para esses arquivos; Host/Origin continuam validados. HTML usa `no-store`; assets do build usam cache imutável.
 
-Em Configuração, confira host executor designado (comparado ao hostname observado), raiz local de projetos e perfis `maestri-omp` com provider/modelo/esforço exatos. Selecione Implementador e Revisor, checks relativos, branch-base, Project/owner/campo/quatro opções de Status por ID. Limites/TTL/custos/polling são configuração persistida, não ambiente do bundle. Revise o resumo de início; automação exige habilitação explícita e resumo atual. Várias UIs compartilham o worker do controlador.
+O hostname real é capturado automaticamente antes da preparação, do início e do controle da fila; não há seleção de outra máquina. Maestri usa o contexto herdado do terminal-âncora, sem Workspace ID editável. Em Configuração, confira a raiz local de projetos e perfis `maestri-omp` com provider/modelo/esforço exatos. Selecione Implementador e Revisor, checks relativos, branch-base, Project/owner/campo/quatro opções de Status por ID. Tempo ativo, TTL e polling são configuração persistida, não ambiente do bundle. Intervalo de consulta e tempo ativo usam inteiros de 1 a 2.147.483.647 ms, com defaults de 15.000 e 1.800.000 ms. A espera humana não acumula atividade e o TTL permanece independente. Não há configuração de teto financeiro ou de tokens de inferência. Revise o resumo de início; automação exige habilitação explícita e resumo atual. Várias UIs compartilham o worker do controlador.
 
 **Limite de instalação nova:** a superfície atual ainda não oferece vínculo inicial da conta observada ao singleton; observação de conta não faz esse vínculo. Se a conta persistida estiver ausente, mantenha execução bloqueada e registre `PF-06` conforme o roteiro first-slice. Não usar seed SQL, conta demonstrativa ou edição manual do banco como procedimento de operação. Este pacote não resolve esse gate preexistente.
 
@@ -62,10 +63,10 @@ O launcher básico fornece os contextos de consulta/execução, sem autorizaçã
 1. Pause novos inícios da fila e confira o recibo. Fechar aba/modal não cancela trabalho.
 2. Quando quiser parar a tentativa, use Cancelar e acompanhe separadamente revogação, pedido de parada, confirmação física e limpeza. Preserve ambientes quando a parada for incerta.
 3. Ctrl+C no terminal-âncora solicita shutdown. O controlador revoga sessões/SSE, coordenadores e canais, encerra esperas com diagnóstico, aguarda IO próprio e fecha banco/lock. Encerrar o controlador não é prova de parada de todos os processos de agentes/filhos; confira recursos no Maestri.
-4. Reinicie pelo novo terminal-âncora válido e pelo **mesmo** diretório de dados. Sessões/CSRF anteriores são recusados; registros/resultados/efeitos ficam preservados. Trabalho incompleto fica interrupted/unknown, sem restaurar conversa, adotar terminal ou reenviar publicação/pergunta.
-5. Para atualizar, encerre o proprietário anterior, prepare/verifique outro pacote e aponte-o para o mesmo diretório estável. Migrations são transacionais, ordenadas e verificadas por checksum. Um pacote antigo pode recusar banco atualizado; não há downgrade automático. Mantenha o pacote anterior para diagnóstico, sem presumir reversibilidade do schema.
+4. Reinicie pelo novo terminal-âncora válido e pela **mesma raiz de instalação**. Sessões/CSRF anteriores são recusados; registros/resultados/efeitos ficam preservados. Trabalho incompleto fica interrupted/unknown, sem restaurar conversa, adotar terminal ou reenviar publicação/pergunta.
+5. Para atualizar, encerre o proprietário anterior, prepare/verifique o pacote e atualize os arquivos da mesma instalação preservando `var/factory` integralmente. Uma pasta de instalação diferente representa outra instalação; apontar uma variável para os dados antigos não faz migração. Migrations são transacionais, ordenadas e verificadas por checksum. Um pacote antigo pode recusar banco atualizado; não há downgrade automático. Mantenha o pacote anterior para diagnóstico, sem presumir reversibilidade do schema.
 
-Não apagar WAL/SHM, substituir banco incompatível por vazio, editar ledger/checksum, copiar somente `factory.sqlite` em uso ou compartilhar o SQLite por rede. Alterar `settings.dataRoot` não move o banco aberto nem o armazenamento Git/evidências; o bootstrap define o diretório efetivo. Export/restore e migração física são procedimentos futuros separados. O produto não é backup de projeto.
+Não apagar WAL/SHM, substituir banco incompatível por vazio, editar ledger/checksum, copiar somente `factory.sqlite` em uso ou compartilhar o SQLite por rede. Diretório de dados e Workspace Maestri ID não pertencem à configuração editável. Banco incompatível produz diagnóstico e é preservado; esta atualização não executa limpeza ou reset da instalação atual. Export/restore e migração física são procedimentos futuros separados. O produto não é backup de projeto.
 
 ## Recuperação por situação
 

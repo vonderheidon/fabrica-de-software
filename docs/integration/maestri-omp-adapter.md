@@ -12,15 +12,25 @@ Escolhido o executável nativo OMP com uma extensão suportada. A TUI que recebe
 
 A separação entre o stdout da TUI e o resultado oficial cria a necessidade concreta do pequeno canal local: callbacks da extensão precisam entregar payloads ao controlador e aguardar o commit do consumidor, enquanto stdin/stdout permanecem no terminal. O canal não transporta transcript nem implementa ferramentas de filesystem/shell. Somente bootstrap, handshake, recibos, resultados e perguntas usam JSON Lines em loopback com capacidade efêmera. Wire dos ensaios não é usado pelo produto.
 
-Context7 consultado para OMP e Node 24. A resolução de Maestri encontrou outro produto; para Maestri foram consultadas as instruções locais de CLI distribuídas, opções embutidas na CLI e metadados da instalação. Referências primárias da versão OMP:
+Context7 consultado para OMP e Node 24. A resolução de Maestri encontrou outro produto; para Maestri foram consultadas as instruções locais de CLI distribuídas, opções embutidas na CLI e metadados da instalação. Para a consulta de catálogo, a documentação atual do OMP foi confirmada pelas fontes primárias:
 
-- [ExtensionAPI e eventos em v18.11.1](https://github.com/can1357/oh-my-pi/blob/v18.11.1/packages/coding-agent/src/extensibility/extensions/types.ts): sessão, modelo, esforço, schemas, registro de tools e envio de mensagens.
-- [Parsing da CLI em v18.11.1](https://github.com/can1357/oh-my-pi/blob/v18.11.1/packages/coding-agent/src/cli/args.ts): provider/modelo/esforço e extensão.
+- [Documentação de modelos e CLI v18.11.1](https://github.com/can1357/oh-my-pi/blob/v18.11.1/docs/models.md): `omp models --json`, catálogo `chat` disponível e refresh online como ação separada.
+- [Serialização JSON do catálogo](https://github.com/can1357/oh-my-pi/blob/main/packages/coding-agent/src/cli/models-cli.ts): `provider`, `kind`, `id`, `selector`, `name` e `thinking` (lista de esforços ou null).
+- [ExtensionAPI e eventos em v18.11.1](https://github.com/can1357/oh-my-pi/blob/v18.11.1/packages/coding-agent/src/extensibility/extensions/types.ts): sessão, modelo, esforço, schemas, registro de tools e envio de mensagens; referência histórica do adapter inicial.
+- [Parsing da CLI em v18.11.1](https://github.com/can1357/oh-my-pi/blob/v18.11.1/packages/coding-agent/src/cli/args.ts): provider/modelo/esforço e extensão do adapter inicial.
 - [Documentação de extensões](https://github.com/can1357/oh-my-pi/blob/main/docs/extensions.md) e [Node 24 net](https://nodejs.org/docs/latest-v24.x/api/net.html).
 
 Conferência local, sem provider: `omp --version` retornou **omp/18.11.1**. `omp --help` falhou ao carregar addon nativo por EPERM neste sandbox. Maestri instalado: **0.24.1**, build **94**, SHA de build `655f48da28c44196f90bb63ae220fc96b83b1bc5`. `maestri --help` retornou ausência de `MAESTRI_PIPE`. Isso não foi corrigido com ACL global ou contexto inventado. A integração real não foi executada.
 
-O preflight do adapter exige contexto herdado, faz `maestri list` no servidor e confere a resposta do próprio chamador, consulta `recruit --help` e obtém a versão local de OMP. Hoje aceita exatamente OMP 18.11.1; outra versão recebe `CLI_UNSUPPORTED` e exige conferir a API antes de ampliar suporte. Não faz chamada paga para verificar ambiente. Em runtime com contexto ausente/stale ou CLI incompatível, não recruta terminal.
+O preflight exige contexto herdado, faz `maestri list` no servidor e confere a resposta do próprio chamador, consulta `recruit --help` e registra a versão OMP como metadado. A comparação exata anterior com 18.11.1 foi retirada; versões diferentes passam quando as capacidades concretas de Maestri/OMP e os contratos de protocolo funcionam. A versão não decide compatibilidade. Contexto ausente/stale ou ajuda Maestri sem as opções usadas continuam bloqueando o lançamento.
+
+## Catálogo OMP e esforço ausente
+
+`Execution.getCatalog()` usa o executável OMP já fornecido pelo host e consulta `omp models --json`; não inicializa uma sessão de agente, recruta terminal ou chama inferência. Cada chamada produz uma observação nova, sem cache da fábrica e sem executar `omp models refresh`. O alcance é a lista completa de modelos `chat` que a CLI declara selecionáveis na configuração efetiva do runtime: providers habilitados com autenticação local resolvida ou keyless, incluindo modelos registrados por extensões carregadas normalmente. A CLI não retorna um rótulo de exibição separado para provider, portanto `provider_name` espelha o ID oficial do provider.
+
+`loaded` só é retornado quando a CLI termina com sucesso, o JSON está íntegro, a lista não está vazia e todos os registros têm identidade/provider/nome/tipo/selector/esforços compatíveis e sem duplicatas. Falha de execução, vazio, saída parcial/malformada ou registro incompatível retorna `unavailable` com diagnóstico; linhas válidas não são extraídas de uma resposta parcial. A CLI serializa esforços suportados em `thinking`; `null` vira `efforts: []`, que corresponde exclusivamente a `effort: null`. Nenhum fallback usa `auto`, `default` ou string vazia.
+
+No lançamento, `--thinking <effort>` só aparece quando o perfil capturado tem esforço não nulo. A extensão normaliza apenas ausência observada (`undefined`) para `null`; provider, modelo e esforço efetivos são comparados exatamente com o perfil capturado. Clamping/fallback recebido do OMP faz o handshake falhar e não confirma `ready`. A versão observada acompanha catálogo e passagem como diagnóstico/evidência, sem faixa ou igualdade fixa.
 
 ## Composição e persistência
 

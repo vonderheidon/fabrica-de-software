@@ -1928,3 +1928,563 @@ Data: 2026-10-17. Fontes: `AGENTS.md`, `SPEC.md` §§4.1, 4.7, 9, 10.2–10.3; `
 - A revisão final vinculada a uma referência Git imutável permanece pendente. `AGENTS.md` exige contexto elevado com keyring para Git; o runtime não o disponibiliza. Nenhum Git/GH foi executado, não foi identificado SHA imutável desta versão e não foi alterado o estado Git.
 
 Não há aceite integral, aprovação de pipeline, Design Lock ou mudança de fase declarados. Nenhuma regressão de produto foi reproduzida; por isso esta rodada não alterou código de UI nem contratos. Os próximos aceites exigem ferramenta Playwright MCP/Chrome liberada e contexto Git autorizado para identificar/revisar a versão entregue, além das provas reais explicitadas na matriz.
+
+## Pacote Configuração inicial — Posição 1, sprint-001 — Fundação de persistência e compatibilidade [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Identidade conferida em `docs/Docs20261017_233303/sprints20261017_233303.json`: posição exibida 1, índice 0, ID `sprint-001`, título **Fundação de persistência e compatibilidade**. Trabalho no repositório canônico, preservando o histórico e as alterações existentes.
+
+### Fontes, escopo e acesso efetivo
+
+- Contrato dos deltas: `docs/Docs20261017_233303/SPEC20261017_233303.md` §2.1/2.3/2.4; features feat-001/002/003, US-04/06/10/18 e RNF-02/12/17/18. Consultados AGENTS.md, SPEC.md §8.4/8.5, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md e FEEDBACK-PROXIMO-PACOTE.md. A sprint prepara fatos privados e identidade de operação; wizard, comandos bind/switch, remoção de campos legados e evolução de perfis pertencem às próximas fatias.
+- Antes da edição, este Implementador leu efetivamente AGENTS.md, a SPEC da feature, package.json, runner, seed e operações pelo filesystem do Node REPL em UTF-8. Executou no mesmo contexto um check de contagem/sequência das 18 migrations e capturou seus SHA-256: passou em 2026-10-18T05:08:25.651Z. Esse check de fontes não foi apresentado como compilação ou execução SQLite. Após a implementação, os checks configurados abaixo foram realmente executados e aguardados.
+- Runtime dos checks: Node v24.22.0, better-sqlite3 **13.0.3**, SQLite **3.53.4**, cwd `C:\Users\jeffe\Documents\Apps\nova-fabrica-software`; observação nativa às 2026-10-18T05:11:29.606Z. Context7 consultado com resolução e consulta de better-sqlite3 para DDL/transações síncronas IMMEDIATE/rollback; versões efetivas conferidas na dependência instalada, sem atualização ou instalação.
+- A avaliação independente futura deve registrar sua própria leitura/check e versão avaliada; este registro não atesta o contexto de outro responsável. Repo-graph não está exposto entre as ferramentas desta sessão; arquivos atuais foram a fonte de navegação. Nenhuma chamada Git/GH foi executada: contexto elevado/keyring indisponível. Não há SHA/ref imutável desta entrega atestado.
+
+### Alterações e interfaces
+
+| Superfície | Resultado |
+| --- | --- |
+| Migration nova | `storage/migrations/019_initial_configuration_facts.sql`, schema final desta sprint **19**. Os bytes e checksums das migrations 001–018 permanecem iguais ao check anterior à edição e estão cobertos por regressão com os 18 digests explícitos. |
+| Singleton | Acrescentados onboarding_suppressed NOT NULL DEFAULT 0, onboarding_completed_at_ms nullable >=0, projects_root_confirmed_at_ms nullable condicionado à raiz não nula e timestamp >=0, gh_executable_path nullable com trim não vazio. Sem tabela de onboarding ou fatos de etapa/contagem/prontidão. |
+| Conclusão | `onboarding_completion_immutable` recusa substituir ou anular conclusão não nula, inclusive timestamp zero; permite repetir o mesmo valor. `onboarding_completion_delete_immutable` também recusa apagar o singleton concluído. Supressão continua independente. |
+| Operações | result_account_id nullable com FK RESTRICT para accounts e CHECK de bind/switch/settings/local; demais tipos exigem destino nulo. O trigger operation_identity_immutable conserva os oito campos anteriores e acrescenta o destino. Origem nula permanece nula. Nenhuma exceção de consulta entre contas ou endpoint de vínculo foi antecipado. |
+| Runner | `loadMigrations` conhece a sequência até 019, registrando nome/SHA-256/timestamp reais. `inspectHistory` valida configuração existente e foreign_key_check ainda na sondagem readonly e repete sob a transação IMMEDIATE, antes dos deltas. Erro não abre a instalação como vazia. `applyMigrations` mantém rollback integral. |
+| Seed e APIs | `seedSettings` conserva o seed existente; defaults SQL aplicam supressão falsa e os três fatos nulos. Conta/raiz ausentes, automação desligada e nenhum perfil/projeto/tentativa semeado. Interfaces públicas `Storage`, `StoredOperation`, `getSettings` e contratos HTTP permanecem iguais: os novos fatos são privados nesta fatia. |
+| Testes históricos | Expectativas de versão passaram a 19. `tests/fixtures/initial-configuration-schema.ts`, chamado na cadeia histórica de fixtures, retira somente o delta 019 dos bancos temporários para reconstruir versões anteriores; não é código de produção/downgrade da instalação. |
+
+A migration usa apenas ALTER TABLE ADD COLUMN e criação/substituição delimitada de triggers suportados pela dependência fixada. Não edita sqlite_schema, não recria tabelas nem inventa classificação/backfill para perfis antigos. O SHA-256 da migration 019 é `d31378c42e9234389d5ec50accc073f42ed0e211003174869fdd84293d93a1bd`; os bytes fonte e distribuição foram comparados e são idênticos.
+
+### Validação executada
+
+| Comando/check | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict, produção/cliente/testes. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| `npm.cmd test -- apps/controller/src/modules/storage/initial-configuration.test.ts apps/controller/src/modules/storage/storage.test.ts --reporter=dot --no-color` | Exit 0; **48 testes em 2 arquivos**, duração 13,28 s. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **899 testes em 61 arquivos**, duração 50,59 s. |
+| `npm.cmd run build` | Exit 0; controlador/declarations, migrations/recursos e bundle web. Aviso existente de chunk acima de 500 kB; JS 722,30 kB minificado. |
+| Observação da dependência em processo Node | Exit 0; better-sqlite3 13.0.3 carregado e SQLite 3.53.4 consultado em memória. |
+| Integridade das migrations | Check posterior confirmou os 18 SHA-256 históricos inalterados; migration 019 fonte/distribuição idêntica, exit 0. |
+
+Os 25 testes novos em `storage/initial-configuration.test.ts` cobrem seed limpo, defaults/nulabilidade/CHECKs, conclusão/supressão/root/path, persistência após reopen, bind/switch/origem/destino/recurso inválidos, FK/imutabilidade de todos os campos de identidade e migração SQLite real 18→19 com identidade, perfil sem classificação inventada, recibo, operação e ledger anterior preservados. Configuração semanticamente inválida é recusada antes de escrita, preservando o arquivo byte a byte; operação antiga incompatível causa rollback de todas as colunas/triggers/ledger da nova migration. A suíte histórica mantém os casos de ledger divergente, banco desconhecido/corrompido, versão superior e recusa sem substituição silenciosa, além das demais regressões do produto.
+
+### Limites locais e continuidade
+
+SQLite, filesystem, migrations e reopen dos testes são reais e temporários; adapters externos da suíte continuam controlados. Não foi aberta, migrada, apagada ou resetada a instalação operacional existente. A fixture 18→19 demonstra somente os dados nela exercitados; não declara suporte geral de upgrade dos dados atuais para o schema final de todo o pacote. Não houve Git/GH, provider, recrutamento, tracker, publicação, criação de referência Git ou nova dependência.
+
+Não foram executados smokes externos ou inspeção de UI nesta sprint de persistência, que não altera UI. Wizard, validação nativa de EXE/pasta, bind/switch transacionais e consulta excepcional do recibo pelo destino continuam nas sprints consumidoras. Aceite integrado real e revisão independente da versão imutável permanecem separados; não há aprovação, Design Lock ou mudança de fase presumidos.
+
+A revisão automática rejeitou a leitura opcional de memória externa por considerá-la conteúdo privado fora do escopo autorizado. Esse conteúdo não foi usado; o trabalho e os checks prosseguiram pelas fontes do repositório. A restrição de comandos foi levantada como dúvida, mas as chamadas diretas aos checks locais solicitados foram aceitas e concluídas neste contexto; não houve rejeição desses checks nem execução por ferramenta alternativa para contorná-la.
+
+## Sprint 001 - Fundação de persistência e compatibilidade [CONCLUIDA]
+- Compatibilidade não destrutiva do schema: Estender o runner para os deltas do pacote sem modificar as 18 migrations históricas ou tratar banco incompatível como instalação vazia.
+- Fatos persistidos da configuração inicial: Acrescentar os fatos privados necessários à supressão, conclusão, confirmação da pasta e localização do GitHub CLI.
+- Identidade de destino das operações de vínculo: Preparar a persistência para identificar a conta de destino de bind e switch sem alterar a conta de origem da operação.
+
+## Pacote Configuração inicial — Posição 2, sprint-002 — Instalação fixa e executor local automático [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Identidade conferida em `docs/Docs20261017_233303/sprints20261017_233303.json`: posição exibida 2, índice 1, ID `sprint-002`. Trabalho no repositório canônico, preservando o histórico. Escopo US-09/10, RF-48–54 e RNF-15/17; aceite externo permanece uma etapa separada.
+
+### Fontes e comprovação
+
+- Consultados AGENTS.md, SPEC.md §§8/10, INTEGRACAO-MAESTRI-OMP.md, GLOSSARY.md, FEEDBACK-PROXIMO-PACOTE.md e os deltas da SPEC da feature, especialmente US-09/10 e §2.1. As decisões novas substituem somente os campos e gates antigos pertinentes a esta sprint.
+- Leituras efetivas em UTF-8 e checks executados neste contexto. Context7 consultado com resolução seguida de consultas sobre transações síncronas/DDL/rollback em better-sqlite3 e resolução de caminhos/hostname em Node 24. Nenhuma dependência instalada ou versão alterada.
+- Prova definida por superfície: SQLite temporário para schema, rollback e recibos; HTTP inject para rejeição dos campos; startup controlado para hostname, lock e várias sessões; processos Node nativos e pacote relocado para caminho independente do cwd e exclusão local. A suíte padrão continua sem providers ou efeitos externos.
+
+### Implementação e interfaces
+
+| Superfície | Resultado |
+| --- | --- |
+| Bootstrap | `loadConfiguration` resolve exclusivamente `<raiz da instalação>/var/factory`; `FACTORY_DATA_DIR` é ignorada, inclusive valores vazios/inválidos. Banco, lock, workspaces, Git retido e artifacts recebem a mesma raiz operacional da composição. `ControllerDependencies.dataDirectory` é seam interna de testes, sem flag CLI, opção HTTP ou variável distribuída para selecioná-la. |
+| Persistência | Migration nova `020_local_installation.sql` remove `data_root` e `maestri_settings_json` com ALTER TABLE DROP COLUMN, sem tabelas/colunas substitutas. Schema corrente **20**. Migrations 001–019 não foram editadas; testes preservam os 18 checksums explícitos e o SHA-256 da 019. |
+| Leitura e seed | `FactorySettings` e leitores deixam de retornar os dois campos removidos. Seed recebe somente a conexão e usa hostname real. Compatibilidade valida os campos legados apenas em bancos históricos antes de aplicar o delta; valores incompatíveis são recusados, sem usar seu path nem recriar banco vazio. Fixtures históricas usam `seedLegacySettings` e reconstrução exclusiva dos bancos temporários. |
+| Identidade local | `Storage.captureLocalHost()` captura o hostname real sob transação curta, com incremento de revisão somente se mudar. `startController` chama essa operação sob o lock e antes do executor, preparação, pipeline, fila e HTTP. Host legado/manual não é exigido nem aceito em saves. |
+| Gates e autoridade | Preparação, início, habilitação de automação/fila e diagnóstico não exigem designação manual. A observação da fila usa identidade local automática; revalidação de conta, resumo/CAS, consumo durável, unicidade de tentativa e worker permanecem. A API de suporte conserva identidade técnica; telas comuns deixam de apresentar cadastro, seleção e rótulo de host executor. |
+| Contratos e UI | `GlobalChanges`, `GlobalConfiguration`, settings/configuration saves e `ProjectForm` removem host editável, diretório de dados e Workspace Maestri ID. Rotas e storage recusam essas propriedades. Dashboard e resumos da fila deixam de exibir host designado. Contexto Maestri herdado, preflight, workspace/terminal/pipe nativos não foram substituídos por nova identidade ou credencial. |
+| Distribuição e manual | `.env.example` contém cinco opções não sensíveis; launcher, README e manual descrevem armazenamento fixo, atualização preservando `var/factory`, contexto herdado e ausência de seleção de máquina. `distribution.json` registra `databasePath: var/factory/factory.sqlite`. Smokes usam a seam interna ou uma instalação empacotada própria. |
+
+SHA-256 da migration 020: `80660c78a09810e5873e7301fc6c695cbab6454865e1f60ccbd0df8323eb4651`; bytes fonte/distribuição comparados e idênticos. Os testes novos cobrem ausência das colunas, hostname real/idempotência, preservação de identidade/fatos de onboarding/ledger/recibos em banco temporário 19→20, rollback integral quando a segunda remoção de coluna falha e recusa de configuração histórica incompatível preservando os bytes do arquivo.
+
+### Validação executada
+
+| Comando/prova | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 na rodada final; produção, cliente, testes e scripts strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **912 testes em 62 arquivos**, duração 46,30 s na rodada final. |
+| `npm.cmd run build` | Exit 0; controlador, migration 020, recursos e cliente. Aviso existente de chunk acima de 500 kB; JS 719,67 kB minificado. |
+| Testes focados finais de instalação/startup | Exit 0; 11 testes em 2 arquivos. |
+| `npm.cmd run test:distribution` | Exit 0; pacote próprio `build/Fábrica distribuição-9lY6nt`, SQLite nativo, dois processos com cwd distintos resolvem o mesmo `var/factory/factory.sqlite`, override ignorado, hostname real, segundo controlador recusado, assets/API e restart com identidade preservada/sessão revogada. Pré-voo Maestri controlado. |
+| `npm.cmd run test:compiled` | Exit 0 na rodada corrigida, cerca de 5 s; HTTP/SSE/SQLite nativos, CAS/idempotência, diagnóstico, shutdown, recusa de segundo processo em outra porta e liberação do lock após morte do processo de teste. Pré-voo controlado. |
+
+O teste de startup verifica captura do hostname antes do preflight, duas sessões técnicas distintas usando exatamente uma composição de pipeline e recusa do controlador concorrente antes de outro executor/worker. Os testes da fila e publicação continuam verificando divergência de conta e pausa de novos despachos. Campos retirados são recusados nas duas rotas agregadas, inclusive grafias snake_case, e no storage, sem evento ou edição parcial.
+
+### Falhas corrigidas e limites
+
+- A primeira rodada focada encontrou uma sobra de `mockResolvedValueOnce` na fixture de diretórios: com um campo a menos, a resposta extra contaminava o caso seguinte. A fixture passou a simular uma única validação; regressões e suíte completa passaram.
+- O smoke HTTP/SSE reproduziu `TypeError: terminated / UND_ERR_SOCKET`. Aplicada a skill local `diagnosing-bugs`: foi identificado que o smoke aguardava o evento antigo `diagnostic.completed`, enquanto servidor, cliente e contrato SSE da feature usam `controller-event` com `eventType` no JSON. A espera terminava somente com o fechamento por prazo. O smoke passou a conferir o frame e o tipo efetivos, com deadline de leitura de 5 s; a execução integral passou. Nenhum erro genérico de socket foi suprimido e o servidor SSE não foi alterado. Isso não diagnostica nem comprova o comportamento do navegador da futura etapa externa.
+- Uma execução do smoke foi interrompida durante a conferência de suas seams; a chamada de restart foi também ajustada para o diretório temporário. A execução posterior completa passou. Metadados consultados da instalação operacional antecedem esta rodada; ela não foi usada como alvo dos testes, migrada, limpa ou resetada.
+- SQLite, filesystem, HTTP loopback e processos dos smokes são reais e locais. O preflight de teste é controlado; não houve Git/GH, keyring, provider, recrutamento Maestri/OMP, publicação ou tracker. Não há ref Git imutável desta entrega atestada: o runtime não fornece o contexto elevado exigido e nenhum comando Git foi executado.
+- Não houve inspeção visual Playwright/Chrome ou aceite nativo Maestri/OMP/GitHub. Esses aceites e a revisão independente da versão entregue permanecem para a etapa externa coordenada pelo chat principal. Não se declara aprovação, Design Lock ou mudança de fase. Vínculo inicial da conta e demais deltas do pacote permanecem nas sprints consumidoras.
+- A revisão automática bloqueou a consulta opcional à memória privada externa como fora do escopo. Esse conteúdo não foi usado; fontes e skill locais sustentaram o trabalho. Os checks locais solicitados foram aceitos e concluídos sem contorno por outro executor.
+
+## Sprint 002 - Instalação fixa e executor local automático [CONCLUIDA]
+- Armazenamento derivado da instalação: Fixar o banco e os caminhos operacionais na raiz resolvida da instalação.
+- Retirada dos campos internos editáveis: Remover diretório de dados e Workspace Maestri ID das superfícies editáveis e do schema final.
+- Identidade automática e exclusividade local: Usar o hostname real internamente, eliminando a designação manual de executor.
+
+## Pacote Configuração inicial — Posição 3, sprint-003 — Retirada dos tetos e precisão interna dos tempos [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Identidade conferida em `docs/Docs20261017_233303/sprints20261017_233303.json`: posição exibida 3, índice 2, ID `sprint-003`, título **Retirada dos tetos e precisão interna dos tempos**. Trabalho no repositório canônico, preservando o histórico anterior. Sem dependências novas ou comandos Git/GH.
+
+### Fontes e prova definida
+
+- AGENTS.md, SPEC.md §§5.3/8.4/8.5, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md §§5–6, FEEDBACK-PROXIMO-PACOTE.md itens 8–10 e SPEC da feature `docs/Docs20261017_233303/SPEC20261017_233303.md`, US-11/12. Cobertura feat-007/008/009, RF-56–62 e RNF-06/14 desta sprint. A conversão visual para minutos pertence à próxima fatia e não foi antecipada.
+- Leituras efetivas em UTF-8 pelo filesystem do Node REPL. Antes das edições foram definidos os checks configurados, provas HTTP/SQLite dos limites, início controlado sem tetos, migração temporária 20→21 e comparação dos documentos históricos. A avaliação independente deve executar suas próprias leituras/checks sobre a versão entregue.
+- Context7 consultado com resolução de better-sqlite3 seguida de consulta às transações síncronas/IMMEDIATE e rollback. Dependência fixada preservada; SQL permanece privado em storage, sem IO externo dentro das transações.
+
+### Alterações e interfaces
+
+| Superfície | Resultado |
+| --- | --- |
+| Contratos | Removidos `CostDefaults`, `FactorySettings.costDefaults`, mudanças globais, overrides, configuração efetiva e origem correspondente. `AttemptCapture` usa a configuração sem tetos. `AttemptMeasurements` deixa de ter `costLimit` e `costLimitState`; mantém observação de custo, atividade, espera e TTL. |
+| Configuração e captura | Seed, leitores, merge e UPDATE de settings não carregam nem gravam tetos. Preparações e novos JSONs de captura não incluem tetos financeiros ou de tokens de inferência. Início com os demais pré-requisitos válidos chega a passagem acompanhada sem exigir essas propriedades. |
+| Persistência | Migration nova `021_inference_limits.sql` remove exclusivamente `factory_settings.cost_defaults_json` com ALTER TABLE DROP COLUMN. Schema final **21**, sem coluna ou tabela equivalente. Migrations 001–020 preservadas. Runner continua validando dados históricos antes de migrar e recusa incompatibilidade sem recriação vazia. |
+| Histórico | `storage/historical-configuration.ts` valida explicitamente os formatos históricos e fornece projeções operacionais sem os campos retirados. Não executa UPDATE de capturas/revisões. Documentos originais, pareceres, resultados, recibos, guards e ledger histórico mantêm seus bytes. A migration não reescreve histórico para eliminar tetos. |
+| Medições | A leitura depende somente dos tempos capturados, sem validação ou estado de aplicação de teto financeiro. Custo não observado continua indisponível com causa; não há gasto inventado nem enforcement financeiro. Espera humana até o recibo continua separada da atividade; TTL continua independente. |
+| Tempos | Um schema comum interno define o domínio inteiro 1..2.147.483.647 ms para consulta, backoff opcional e tempo ativo. Defaults permanecem 15.000 e 1.800.000 ms. Servidor recusa zero, negativos, frações, excesso, strings e null nos caminhos pertinentes. |
+| Consumidores e documentação | Retirados campo de custo de ProjectForm, preview de PreparationDialog e limite/estado financeiro de AttemptDetailDialog. Custo observado permanece separado. Unidade visual e composição existentes preservadas. README, manual operacional e roteiro first-slice passam a distinguir autorização externa de qualquer teto de produto. |
+
+SHA-256 da migration 021: `3b16ed8b6b5b0d03f53c3ac50f3c1368b9d796a1e78c22c044d96dafdef12cc2`. Fonte e distribuição comparadas byte a byte: iguais.
+
+### Validação executada
+
+| Comando/prova | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; produção, cliente, testes e scripts strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras de módulos e convenções TypeScript. |
+| `npm.cmd test -- tests/integration/inference-limits.test.ts --reporter=dot --no-color` | Exit 0; 10 testes novos, antes da rodada completa final. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **922 testes em 63 arquivos**, duração 46,62 s na rodada final. |
+| `npm.cmd run build` | Exit 0; controlador/declarations, migration 021, recursos e cliente distribuídos. Aviso existente de chunk acima de 500 kB; JS 718,08 kB minificado. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite reais, sessão/CAS/idempotência, catálogo distribuído, diagnóstico, shutdown e lock entre processos. Pré-voo Maestri controlado; Maestri/OMP não executados. |
+
+`tests/integration/inference-limits.test.ts` cobre os dois tempos nas rotas de settings, configuração agregada e criação/edição de preparação; rejeição sem escrita e limites 1/3/2.147.483.647 exatos; edição de outro campo preservando valores; gravação interna de tempos; propriedades financeiras/tokenizadas recusadas; CSRF preservado; defaults e início controlado; migração SQLite real 20→21 com captura/preparação/parecer/resultados/recibos/ledger preservados; guardas históricos; rollback de DDL por dependência incompatível e recusa de dados inválidos preservando o arquivo. Fixtures históricas foram ajustadas somente para reconstruir bancos temporários anteriores.
+
+Os testes de perguntas mantêm a prova de espera de 60 s sem acúmulo ativo, inclusive durante entrega incerta, e agora também comparam atividade antes/depois da expiração de TTL 0/1.000 ms. A suíte completa inclui as regressões históricas de sessão, autenticação técnica, payloads, CSRF e demais proteções, que não foram removidas.
+
+A primeira compilação identificou blocos novos posicionados fora do escopo; foram corrigidos. A primeira rodada dos testes novos encontrou dependências GitHub ausentes na fixture HTTP e consulta por uma conexão já fechada; as fixtures foram corrigidas sem relaxar gates de produção. A primeira suíte completa detectou uma expectativa histórica ainda em schema 20; foi atualizada para 21, e a suíte completa final passou.
+
+### Limites e continuidade
+
+SQLite, arquivos temporários, migrations e HTTP inject são reais; Git/GitHub/executor são controlados nas provas de preparação/início/revisão. O smoke usa HTTP loopback e processos locais reais com pré-voo controlado. Esses resultados não comprovam TUI/provider, keyring, Maestri/OMP/GitHub reais ou aceite visual. Browser e revisão independente da referência imutável permanecem na etapa externa coordenada pelo chat principal.
+
+Nenhuma instalação operacional foi aberta, migrada, limpa ou resetada. Sem Git/GH, login alternativo, alteração de credencial/ACL, provider, recrutamento, publicação ou tracker. O runtime não disponibiliza o contexto elevado exigido para Git/GH; nenhuma ref imutável desta entrega é atestada. Sem aprovação, Design Lock ou mudança de fase presumidos.
+
+A revisão automática rejeitou a leitura opcional da memória privada externa como fora do escopo. Esse conteúdo não foi usado; o trabalho prosseguiu pelas fontes locais. Os comandos locais de validação solicitados foram aceitos e concluídos.
+
+## Sprint 003 - Retirada dos tetos e precisão interna dos tempos [CONCLUIDA LOCALMENTE]
+
+- Configuração sem tetos de inferência: contratos, defaults, saves e formulários sem teto; coluna removida pelo delta 021.
+- Execução sem bloqueadores financeiros residuais: preparação e início controlados sem tetos, medições atualizadas e histórico imutável preservado.
+- Tempos internos exatos e controles separados: faixa inteira, defaults conservados e provas de atividade/espera/TTL independentes; minutos ficam para a próxima fatia.
+
+## Sprint 003 - Retirada dos tetos e precisão interna dos tempos [CONCLUIDA]
+- Configuração sem tetos de inferência: Retirar configurações, defaults e campos públicos de teto financeiro ou de tokens.
+- Execução sem bloqueadores financeiros residuais: Retirar a exigência de tetos da captura, início, runtime e detalhe das tentativas.
+- Tempos internos exatos e controles separados: Garantir o domínio inteiro dos tempos e preservar a distinção entre atividade, espera e TTL.
+
+## Pacote Configuração inicial — Posição 4, sprint-025 — Contratos públicos compartilhados antes das famílias consumidoras [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Identidade conferida em `docs/Docs20261017_233303/sprints20261017_233303.json`: índice 3, posição exibida 4, ID `sprint-025`, feat-015. Esta identidade pertence ao pacote Configuração inicial e não substitui a sprint histórica de fila com o mesmo número. Repositório canônico; histórico e alterações anteriores preservados.
+
+### Fontes, escopo e prova definida
+
+- AGENTS.md; SPEC.md §§8.2/8.4/8.5/10.2; GLOSSARY.md; INTEGRACAO-MAESTRI-OMP.md §§1–6; SPEC da feature `docs/Docs20261017_233303/SPEC20261017_233303.md`, convenções e §3.2. Cobertura: contratos comuns, US-18, RNF-04/18. As famílias específicas de configuração, execução e observação continuam nas sprints-004/005/006; nenhuma funcionalidade, fase ou autorização externa foi acrescentada.
+- Antes das edições: definidas validação estática, regressões TypeBox de objetos fechados/constraints, HTTP inject de sessão/Origin/Host/JSON/CSRF e recibos, teste do cliente com fetch controlado e comparação dos documentos privados antes/depois de leituras/reopen. Leituras efetivas em UTF-8; nenhuma dependência instalada. Context7 consultado por resolução seguida de consulta sobre schemas TypeBox fechados, Partial/Optional e validação; versão fixada 0.34.52 preservada.
+- Repo-graph não está exposto nesta sessão; navegação pelos arquivos atuais. Nenhum Git/GH foi executado: o runtime não fornece o contexto elevado com keyring exigido. Nenhuma referência Git imutável desta entrega é atestada.
+
+### Contratos e consumidores concluídos
+
+| Fronteira | Resultado |
+| --- | --- |
+| Sessão e erros | `base.ts`: SessionResponse usa csrf_token/instance_id; ErrorResponse usa request_id/field_errors/operation_id/affected_requirements. operation_id de erro é UUID. Bootstrap, erros de parsing nativo, handlers e erro aninhado de GET operations produzem o mesmo formato. Cookie, geração/comparação dos segredos, rate limits e controles de segurança permanecem os existentes. |
+| Operações e recibos | OperationAccepted/OperationView usam operation_id/request_id e status_url quando aplicável; OperationReceipt usa event_cursor. Storage, rotas de comando, consultas, relatórios com recibos e ações React consomem esses objetos conjuntamente. OperationParams continua com operationId no path. Recibos não recebem payload arbitrário. |
+| Auxiliares | Page usa next_cursor/has_more/event_cursor; Capability usa reason_code; MeasuredValue indisponível usa affected_requirements. ConfiguredLimit conserva suas variantes e constraints. FactorySettings, TimeDefaults e ArtifactPolicy usam snake_case, inclusive os campos herdados pelos patches globais e seus consumidores diretos. HealthResponse, OperationId/Resource, DeliveryMode, EmptyBody/Query preservam seus contratos. CostDefaults/MaestriSettings não foram reintroduzidos. |
+| Composição | Atualizados produtores e consumidores de configurações, preparações, capturas operacionais, medições, páginas de projetos/issues/tentativas/eventos, fila, scaffold, diagnóstico e publicação que usam os tipos comuns. Campos próprios dessas famílias continuam na representação anterior até suas fatias; por exemplo, PreparationOverrides.timeDefaults contém polling_interval_ms. Eventos/SSE mantêm os campos próprios existentes; somente a página comum mudou. |
+| Cliente | `api/http.ts` lê csrf_token somente para a variável em memória. A classe interna HttpError conserva requestId/fieldErrors/resource/operationId/facts e agora também affectedRequirements/recovery recebidos no envelope público. Mantidos bootstrap serializado, same-origin e ausência de replay de mutação após 401. Hooks, formulários, polling e renderização usam as propriedades comuns atualizadas. |
+| Histórico privado | Novo `storage/common-json.ts` contém schemas/codecs explícitos de TimeDefaults, ArtifactPolicy e recibos privados. `historical-configuration.ts` compõe as projeções de captura/preparação, inclusive o histórico com custo retirado. Escritas preservam os formatos privados versionados e leituras não executam UPDATE. Chaves de fatos, conteúdo do operador, resultados/pareceres e paths JSON históricos não passam por conversor genérico. Schema continua 21, sem migration nova. |
+| Provas e documentação | `common-public.test.ts`, `api/http.test.ts`, `common-history.test.ts` e casos em http-security; expectativas e smokes existentes atualizados. Vitest passa a coletar também testes TS do cliente. README registra a fronteira comum e a distinção das famílias ainda não normalizadas. |
+
+### Validação executada
+
+| Comando/prova | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 na rodada final; produção, cliente, contratos, scripts e testes strict. |
+| `npm.cmd run lint` | Exit 0 na rodada final; fronteiras de módulos e convenções TypeScript. |
+| Testes focados de contratos/segurança/storage/scaffold/publicação/diagnóstico | Exit 0; 158 testes em 8 arquivos após as correções. |
+| Testes focados adicionais do cliente e histórico comum | Exit 0; 3 testes em 2 arquivos. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0 na rodada final; **940 testes em 66 arquivos**, duração 51,92 s. Inclui 18 regressões novas e a suíte anterior. |
+| `npm.cmd run build` | Exit 0; controlador/declarations, migrations/recursos e cliente distribuídos; bundle JS observado 718,32 kB minificado. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite reais, sessão, settings/CAS/idempotência, operação, diagnóstico, catálogo distribuído, shutdown e lock entre processos. Pré-voo Maestri controlado. |
+
+As regressões novas recusam aliases mesmo junto às chaves canônicas, exercitam schemas parciais compostos, limites internos dos tempos, UUID/path/objetos vazios, medidas e TTL zero. HTTP confirma recibo/Location/consulta/replay e objetos normalizados na mesma entrega, recusa aliases sem escrita e preserva as proteções existentes. O teste do cliente conserva metadados/orientação/fatos e confere CSRF em memória, same-origin e um único POST de negócio após 401. O histórico compara bytes de captura, escolhas e recibos antes/depois de projeções e reopen, com texto do operador contendo nomes camelCase preservado literalmente. A regressão de migração 20→21 também compara novamente o histórico após consultar suas projeções.
+
+A primeira rodada encontrou 15 falhas: expectativas antigas de campos, um nome de variável de teste alterado e dois problemas de fronteira corrigidos — recibo de reconciliação de criação fora do codec privado e propagação de OPERATION_DATA_INVALID no lugar de SETTINGS_INVALID. Não foram relaxados os schemas, gates ou critérios para passar a suíte. Typecheck, testes focados e suíte completa foram repetidos depois das correções; o teste novo do cliente foi incluído explicitamente na coleta padrão.
+
+### Limites e continuidade
+
+SQLite, arquivos temporários, HTTP inject e o transporte/processos próprios do smoke são reais. Fetch e adapters externos da suíte são controlados; não houve Git/GH, provider, recrutamento, publicação, tracker ou inspeção visual. O smoke não comprova TUI, keyring, Maestri/OMP/GitHub reais, nem aceite de navegador. Nenhuma instalação operacional foi migrada, limpa ou resetada; nenhum commit/push, aprovação, Design Lock ou mudança de fase foi executado. A revisão independente da referência imutável e os aceites externos continuam separados desta validação local.
+
+A revisão automática rejeitou a leitura opcional da memória externa como conteúdo privado fora do escopo. Esse conteúdo não foi usado. Os comandos locais expressamente solicitados de validação foram aceitos e concluídos neste runtime; nenhuma rejeição de execução foi contornada.
+
+## Pacote Configuração inicial — sprint-025 — Contratos públicos compartilhados [CONCLUIDA LOCALMENTE]
+
+- Representação pública comum em snake_case, schemas fechados e consumidores diretos coerentes.
+- Sessão, metadados de erro, recibos e constraints preservados com provas HTTP/cliente.
+- JSONs privados históricos consultáveis e imutáveis por mapeamentos explícitos; famílias específicas seguem para as sprints consumidoras.
+
+### Complemento — consumidores diretos e preservação dos erros [VALIDADO LOCALMENTE]
+
+Data: 2026-10-18. Conferida novamente a identidade do pacote Configuração inicial: posição 4, índice 3, `sprint-025`, **Contratos públicos compartilhados antes das famílias consumidoras**, feat-015. Fontes efetivamente lidas nesta rodada: AGENTS.md, SPEC.md §§8/10.2, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md, SPEC da feature §3.2, contratos comuns, produtores HTTP, codecs privados e consumidores web. Cobertura permanece US-18/RNF-04/RNF-18, sem antecipar a normalização das famílias seguintes.
+
+- `PrincipalScreen.tsx`: o reconhecimento de páginas ainda exigia `nextCursor/eventCursor`, descartando páginas atuais do Dashboard. Agora valida diretamente o schema compartilhado `ProjectPage`, com `next_cursor/has_more/event_cursor`, incluindo catálogo vazio e recusa de aliases ou itens inválidos. Os dois comportamentos incorretos foram reproduzidos por testes antes da correção.
+- `ProjectForm.tsx`: removida a cópia local do recibo com `eventCursor`; as respostas de gravação usam `OperationReceipt` de `#contracts`.
+- `api/http.ts`: um erro durante a renovação técnica após 401 de mutação substituía o erro original. Os clientes JSON e texto agora preservam status, request_id, field_errors, resource, operation_id, facts, affected_requirements e recovery na mesma `HttpError`; a falha de renovação permanece em `cause`. A sessão continua em memória e a mutação não é reenviada. Ambos os caminhos foram reproduzidos antes da correção.
+- Acrescentadas cinco regressões: três em `PrincipalScreen.test.ts` e duas em `api/http.test.ts`. O schema permanece 21; não houve migration, conversor genérico, reescrita de JSON histórico ou nova dependência. Context7 consultado por resolução seguida de consulta sobre validação TypeBox e objetos fechados; mantida a API e a versão instaladas.
+
+| Comando/prova desta rodada | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 após as correções; TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| Testes focados de Principal, cliente, contratos comuns, histórico e segurança HTTP | Exit 0; 45 testes em 5 arquivos. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **945 testes em 67 arquivos**, duração 48,24 s. |
+| `npm.cmd run build` | Exit 0; controlador, recursos e cliente distribuídos; JS 727,85 kB minificado. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite reais, sessão/CAS/idempotência, catálogo, diagnóstico, shutdown e lock entre processos; pré-voo Maestri controlado. |
+
+As regressões existentes de sessão, Host, Origin, JSON, CSRF, recibos, schemas compostos e histórico privado/reopen passaram novamente. A classificação da página foi validada em teste de consumidor, sem inspeção visual de navegador. Fetch e integrações externas da suíte são controlados; não houve Git/GH, keyring, provider, recrutamento Maestri/OMP, publicação, tracker, commit/push ou aprovação/mudança de fase. O runtime não oferece o contexto elevado exigido para Git/GH; nenhuma referência Git imutável desta rodada é atestada. Nenhuma instalação operacional foi usada como alvo de migração ou limpeza.
+
+A revisão automática rejeitou leituras opcionais da memória e da skill Context7 externas ao repositório, por considerá-las conteúdo privado fora do escopo. Esses arquivos não foram usados; o trabalho prosseguiu pelas fontes locais e pelas ferramentas Context7, conforme AGENTS.md. Os comandos locais expressamente solicitados de validação foram aceitos e concluídos.
+
+## Sprint 004 - Contratos públicos compartilhados antes das famílias consumidoras [CONCLUIDA]
+- Sessão, erros, recibos e tipos auxiliares compartilhados: Concluir a representação pública dos contratos comuns, incluindo os auxiliares de páginas, capacidades, medidas e configuração, com produtores e consumidores diretos atualizados na mesma entrega.
+
+## Pacote Configuração inicial — Posição 5, sprint-004 — Contratos públicos de configuração em snake_case [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Identidade conferida em `docs/Docs20261017_233303/sprints20261017_233303.json`: índice 4, posição exibida 5, ID `sprint-004`, título **Contratos públicos de configuração em snake_case**. Esta identidade é distinta das sprints históricas com o mesmo número. Trabalho no repositório canônico, preservando o histórico anterior.
+
+### Fontes e comprovação definida
+
+- AGENTS.md; SPEC.md §§8/10.2, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md e convenções da SPEC da feature `docs/Docs20261017_233303/SPEC20261017_233303.md`. Cobertura: US-18/RNF-18 e normalização da família de configuração. Comandos funcionais novos de vínculo, onboarding e evolução dos perfis continuam em suas sprints consumidoras.
+- Leituras efetivas em UTF-8. Antes das alterações foram definidos testes de schemas fechados, HTTP/SQLite, montagem dos requests web, CAS/idempotência, formatos privados e consultas/reopen sem UPDATE histórico. Context7 consultado por resolução seguida de consulta sobre TypeBox, objetos fechados e Partial; mantidas a API instalada e a versão fixada 0.34.52, sem instalação de dependências.
+- Repo-graph não está exposto nesta sessão; navegação pelos arquivos atuais. Nenhum Git/GH executado: o runtime não oferece o contexto elevado/keyring exigido pelo projeto. Nenhuma referência Git imutável desta entrega é atestada.
+
+### Fronteiras convertidas e leitores preservados
+
+| Superfície | Resultado |
+| --- | --- |
+| Settings e perfis existentes | `SettingsUpdate/SettingsSaved/SettingsView` compartilham `profile_changes`, `operation_id`, `event_cursor` e timestamps `created_at_ms/updated_at_ms` dos perfis. Os campos comuns completos da sprint-025 são consumidos nesta entrega. Não foram acrescentados campos funcionais de perfil ou onboarding. |
+| Projetos | Cadastro, resumo, revisão, configuração e opções usam `base_branch`, `repository_id/repository_url`, `account_id`, `current_revision_id`, `project_id`, `github_project`, papéis de perfil, checks, correções, automação e ordenação em snake_case. Requests agregados usam `project_changes/global_changes/profile_changes`; Status usa `in_progress/in_review`; checks usam `cwd_relative/timeout_ms`. |
+| Queries e paths | `configuration-options` recebe `owner_id/owner_kind/github_project_id/status_field_id`. `ProjectParams`, `PreparationParams`, os paths `:projectId/:preparationId` e os parâmetros de navegação continuam preservados. Busca, limite e cursor mantêm seus nomes já normalizados. |
+| Preparações | GET/POST/PUT, escolhas, overrides, configuração efetiva, origens, critérios, efeitos, base e resumo usam os schemas normalizados. Tempos permanecem inteiros em ms; TTL e limites existentes conservam suas variantes/constraints. A identidade de tentativa anterior não é editável pelo PUT. |
+| Dados GitHub aninhados | `ConfigurationIssueContext/ConfigurationIssueOption` projetam explicitamente repositório, comentários, memberships, valores de campo e `content_id`. `http/configuration-views.ts` forma a resposta da preparação sem alterar os modelos do adapter, respostas GraphQL, textos ou mapas externos. |
+| Consumidores | `ProjectForm`, `PreparationDialog`, consultas de opções, Dashboard/Principal e os consumidores backend de configuração foram atualizados conjuntamente. Recibos de gravação/cadastro usam tipos compartilhados, sem cópias locais com `operationId`. `configuration-requests.ts` e `preparation-requests.ts` concentram a montagem tipada dos comandos e queries web. Layout e navegação existentes foram mantidos. |
+| JSON privado | `storage/configuration-json.ts` define schemas e mapeamentos explícitos para configuração, perfis capturados, checks, opções, ordem, escolhas, origens e critérios. `historical-configuration.ts` conserva os leitores dos formatos anteriores, inclusive documentos com tetos retirados. Revisões SQL continuam gravando seus JSONs privados originais. Capturas, preparações e perguntas de escopo mantêm `occurrenceIndex` em disco e recebem `occurrence_index` na projeção operacional. |
+| Identidade dos comandos | `configuration-command-json.ts` preserva a representação semântica anterior usada no hash das operações de cadastro/settings/configuração/preparação. Campos comuns que já eram snake_case continuam assim nesse hash. Isso mantém compatibilidade com operações anteriores sem aceitar aliases públicos, alterar recibos ou reescrever o ledger. |
+
+Schema permanece **21**, sem migration ou alteração de arquivos SQL históricos. Contratos continuam sem IO, com limites e `additionalProperties:false`. Não há conversor genérico de chaves: os mapeamentos visitam somente campos conhecidos. Omissão conserva valores; null continua restrito aos campos previstos; listas e overrides explícitos mantêm a semântica existente.
+
+### Validação executada nesta rodada
+
+| Comando/prova | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 na rodada final; produção, contratos, web, testes e scripts em TypeScript strict. |
+| `npm.cmd run lint` | Exit 0 na rodada final; fronteiras de módulos e convenções TypeScript. |
+| Testes focados finais de HTTP e histórico | Exit 0; 5 testes em 2 arquivos, incluindo hashes semânticos anteriores e pergunta histórica/reopen. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0 na rodada final; **956 testes em 70 arquivos**, duração 49,59 s. |
+| `npm.cmd run build` | Exit 0 na rodada final; controlador/declarations, recursos e web distribuídos. Bundle JS observado: 729,16 kB minificado; permanece o aviso de chunk acima de 500 kB. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite reais, sessão, settings/CAS/idempotência, catálogo, diagnóstico, shutdown e lock entre processos. Pré-voo Maestri controlado. |
+
+As 11 regressões novas cobrem os schemas recursivos da família, aliases isolados e junto às chaves canônicas, parciais aninhados, null/omissão/limites, queries e paths, requests efetivamente montados pelo cliente, GET/POST/PUT de preparação, dados GitHub aninhados e recusa HTTP sem operação/evento/escrita parcial. A prova histórica existente foi ampliada com duas revisões de preparação, JSONs esperados literalmente nas chaves antigas, checks, mapeamento, perfis, origens e critérios; compara registros completos e `total_changes()` durante leitura, além dos bytes após reopen. A nova regressão de pergunta conserva o JSON privado dos critérios após reopen. Texto do operador contendo nomes camelCase permanece literal.
+
+Durante a validação foram corrigidas projeções inferidas com cursores/chaves antigos, seletores calculados dos formulários, tipos locais de recibos e consumidores indiretos de critérios. Fixtures HTTP e expectativas foram atualizadas para a fronteira nova; chamadas internas e famílias ainda não normalizadas conservam seus contratos próprios. Nenhum schema foi relaxado para aceitar os dois formatos e nenhum gate de segurança ou execução foi removido. A suíte completa e os checks finais passaram após essas correções.
+
+### Limites de prova
+
+SQLite, filesystem temporário, HTTP inject e os processos/transportes locais do smoke são reais. Fetch e adapters externos da suíte são controlados; o smoke não executa Maestri/OMP. Não houve Git/GH, keyring, provider, recrutamento, publicação, tracker, commit/push ou inspeção visual Playwright/Chrome. Testes do cliente comprovam montagem/consumo dos contratos, sem declarar aceite visual ou integração externa. Nenhuma instalação operacional foi aberta, migrada, limpa ou resetada. Revisão independente da referência imutável e aceites externos permanecem separados; nenhuma aprovação, Design Lock ou mudança de fase foi simulada.
+
+A revisão automática rejeitou a consulta opcional à memória externa como conteúdo privado fora do escopo. Esse conteúdo não foi usado; o trabalho prosseguiu pelas fontes locais. Os comandos locais de validação solicitados foram aceitos e concluídos.
+
+## Sprint 005 - Contratos públicos de configuração em snake_case [CONCLUIDA]
+- Configuração e projetos com representação única: Aplicar snake_case aos campos públicos existentes de settings, configuração, cadastro e opções de projetos.
+- Preparação normalizada sem reescrever histórico: Normalizar os DTOs de preparação, configuração efetiva e suas escolhas públicas.
+
+## Pacote Configuração inicial — Posição 6, sprint-005 — Contratos públicos de execução e entrega em snake_case [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Identidade conferida em `docs/Docs20261017_233303/sprints20261017_233303.json`: índice 5, posição exibida 6, ID `sprint-005`, features feat-012/013/014. Esta identidade não substitui as sprints históricas com o mesmo número. Trabalho no repositório canônico, preservando o histórico anterior.
+
+### Fontes, escopo e prova definida
+
+- Fontes efetivamente consultadas: AGENTS.md, SPEC.md §§5–8/10.2, INTEGRACAO-MAESTRI-OMP.md §§2–3 e critérios INT, GLOSSARY.md, convenções e dicionário HTTP da SPEC da feature em `docs/Docs20261017_233303/SPEC20261017_233303.md` §3.2. Cobertura desta fatia: US-18/23/24 e RNF-14/18 nas fronteiras de representação; integração e revisão real continuam com suas próprias evidências.
+- Antes das edições foram definidos: schemas fechados/constraints, recusa de aliases isolados e junto às chaves canônicas, HTTP/SQLite para CAS/idempotência/correlação, cliente para montagem dos requests/queries, duas versões históricas e comparação dos registros privados durante leitura/reopen. Smokes de execução/verificação somente após build, sem provider/recrutamento real.
+- Context7 consultado com resolução de TypeBox seguida de consulta sobre objetos fechados, Optional e validação; versões fixadas e dependências preservadas. Repo-graph não está exposto nesta sessão; arquivos atuais foram usados para navegação. Não foi usado GitNexus.
+
+### Implementação e fronteiras
+
+| Superfície | Resultado |
+| --- | --- |
+| Schemas HTTP | `packages/contracts/src/http-execution/` contém DTOs explícitos por família, reexportados como `Http*` em `#contracts`. As rotas e o cliente usam esses tipos/schemas. Os contratos sem prefixo continuam modelos internos e protocolos privados existentes; não são aliases aceitos no HTTP. Testes de equivalência conferem todas as constraints, variantes, campos opcionais, limites e objetos fechados. |
+| Tentativas e consultas | Início usa preparation_id/preparation_revision/authorized_summary_hash; listagem filtra project_id; detalhe seleciona round_id/delivery_id. Resumos, passagens, critérios, seções e medições têm propriedades públicas normalizadas. Os seis grupos de params de path e os parâmetros de navegação por hash conservam os nomes existentes. |
+| Perguntas e recuperação | Question normaliza o envelope, scope_change, question.format_version, answer_operation_id e delivery_receipt correlacionado. Resposta usa scope_choice; recursos/planos/superfícies usam passage_id, launch_state, stop_state, plan_hash, location_display, session_reference e open_capability. Cancelamento continua aceitação durável separada de parada/limpeza. |
+| Entrega, checks e revisão | Metadados, diff e paginação usam git_ref/content_identity/base_sha/producer_passage_id, old_path/old_mode/new_mode e next_cursor/has_more. Checks/artefatos/revisões/achados/resultados públicos seguem o dicionário, inclusive criterion_id/criterion_ids, declared_verdict, independence_state, receipt_id e binding.delivery_version. Download de artefato permanece texto inerte com os headers existentes. |
+| Publicação | Requests complete/reconcile/authorize-upgrade e projeções de efeitos/recibos/modos/capacidades usam snake_case. Captured_mode e authorized_mode continuam separados. Reconcile consulta fatos; complete preserva versão/gates existentes. Nenhum endpoint de início, CRUD, executor ou reexecução da implementação foi acrescentado. |
+| Projeções | `apps/controller/src/http/execution-views.ts` mapeia somente campos conhecidos, com tipos derivados dos schemas e preservação de omissão/null. Requests normalizados são decodificados para os modelos internos antes dos serviços, conservando os hashes semânticos anteriores, CAS, Idempotency-Key, recibos/Location e 202 como aceitação. Não há conversor genérico de chaves em produção. |
+| Consumidores web | AttemptDetailDialog, PublicationDialog, QuestionDecisionCard, hooks de tentativa/versão/decisão/recuperação, listagem, preparação, Dashboard, AppShell e diálogo de autoridade consomem os DTOs correspondentes. `execution-requests.ts` monta comandos e queries tipados usados pelos componentes. Layout e navegação existentes foram preservados. |
+| Histórico e executor | Nenhuma migration: schema permanece 21. Capturas, JSONs de resultados/perguntas, avaliações, recibos privados e índices históricos conservam seus formatos; nenhum UPDATE para renomear chaves. PassageRequest/PassageBinding e canais/extensão/recursos OMP continuam no protocolo privado suportado. Suas projeções HTTP são independentes. |
+
+### Validação executada
+
+[Registro das saídas e códigos de término](docs/integration/execution-public/20261018/technical-validation.json).
+
+| Comando/prova | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; produção, contratos, cliente, testes e scripts em TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript, sem any explícito ou supressões. |
+| Testes focados de HTTP/execução/publicação | Exit 0; 185 testes em 9 arquivos após atualizar as fixtures HTTP. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0 na rodada final; **1.033 testes em 73 arquivos**, duração 52,86 s. São 77 regressões adicionais sobre a base anterior de 956. |
+| `npm.cmd run build` | Exit 0; controlador/declarations, recursos e cliente distribuídos. JS web observado: 746,10 kB minificado. |
+| `npm.cmd run test:execution-compiled` | Exit 0; papéis distribuídos com cwd alheio, loopback UTF-8, malformed/invalid UTF-8 FRAME_INVALID, oversize FRAME_OVERSIZE, EOF incompleto CHANNEL_EOF e lançamento Windows com Node como fixture. Saída: maestriOmpIntegration=not_executed. |
+| `npm.cmd run test:verification-compiled` | Exit 0; nativeChecks=[passed,failed], unicodeCwd=true, artifactRenameSyncChecksum=real, canonicalization=real. Saída: gitMaterialization=not_executed e maestriOmpIntegration=not_executed. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite reais, sessão/settings/CAS/idempotência, catálogo distribuído, diagnóstico, shutdown e lock entre processos. Pré-voo de terminal-âncora controlado. |
+
+As novas provas HTTP conferem rejeição de aliases sem operação/escrita aceita; request_hash anterior no início; mesmos recibos após replay; vínculo exato de tentativa/pergunta/passagem/versão; delivery_unknown mantendo suspensão até ACK tardio; consulta de pergunta estrangeira recusada; duas rodadas e versões com pareceres distintos; todas as seções normalizadas; producer-result, checks e recursos. Comparam registros completos de captura, preparações, resultados, critérios, reviews e operações, além de total_changes durante leituras, e repetem as consultas após reopen. Conteúdo do operador com nomes camelCase e emoji permanece literal. As regressões históricas de CSRF/sessão/Origin/CAS/rollback/unknown/reconciliação continuam passando.
+
+A primeira suíte encontrou nove expectativas HTTP no formato anterior; foram atualizadas sem alterar contratos privados ou relaxar schemas. Uma asserção nova de critérios esperava somente um item, embora a fixture tenha dois; foi corrigida para conferir ambos. A auditoria dos consumidores também identificou e corrigiu o filtro de projeto da listagem para project_id. A suíte completa e os checks finais passaram depois dessas correções.
+
+### Limites de prova
+
+SQLite, filesystem temporário, HTTP inject e os processos/transportes locais dos smokes são reais. Git/GitHub/executor são controlados na suíte; os smokes não chamam provider nem recrutam Maestri/OMP. Não houve Git/GH, keyring, publicação, tracker, commit/push ou inspeção visual Playwright/Chrome. O runtime não disponibiliza o contexto elevado exigido para Git/GH; nenhuma referência Git imutável desta entrega é atestada. Nenhuma instalação operacional foi aberta, migrada, limpa ou resetada. Aceite visual, integração externa real e revisão independente da versão imutável permanecem separados desta validação; nenhuma aprovação, Design Lock ou mudança de fase foi simulada.
+
+A revisão automática rejeitou a leitura opcional da memória externa como conteúdo privado fora do escopo autorizado. Esse conteúdo não foi usado; fontes locais e documentação Context7 sustentaram o trabalho. Os comandos locais expressamente solicitados de validação foram aceitos e concluídos.
+
+## Pacote Configuração inicial — sprint-005 — Contratos públicos de execução e entrega [CONCLUIDA LOCALMENTE]
+
+- Tentativas, perguntas e recuperação: requests, responses e queries normalizados, correlação/recibos preservados e params de path mantidos.
+- Entregas, checks, revisão e publicação: representação única por versão, consumidores atualizados e histórico privado preservado.
+- Fronteira do executor: projeções explícitas e protocolos privados intactos; smokes compilados passaram sem provider ou recrutamento real.
+
+## Sprint 006 - Contratos públicos de execução e entrega em snake_case [CONCLUIDA]
+- Tentativas, perguntas e recuperação normalizadas: Atualizar contratos e consumidores do início, detalhe, perguntas, recursos e ações de recuperação.
+- Entregas, checks, revisão e publicação normalizados: Atualizar as fronteiras públicas de consulta e ação da versão entregue.
+- Fronteiras explícitas com o executor: Manter distintas a representação HTTP normalizada e os protocolos privados ou externos efetivamente suportados.
+
+## Pacote Configuração inicial — Posição 7, sprint-006 — Contratos de observação, fila e transporte em snake_case [IMPLEMENTADA; VALIDAÇÃO PENDENTE]
+
+Data: 2026-10-18. Identidade conferida em `docs/Docs20261017_233303/sprints20261017_233303.json`: índice 6, posição 7, `sprint-006`, feat-016/017. Repositório canônico; histórico e alterações existentes preservados.
+
+### Fontes e prova definida
+
+- Consultados AGENTS.md, SPEC.md, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md e convenções/dicionário HTTP da SPEC da feature, especialmente §3.2 e o frame SSE de §4. Cobertura de representação US-01/18/19/23, RNF-04/18. A investigação da falha de socket permanece separada; nenhuma causa foi atribuída à normalização.
+- Provas preparadas antes de validar: equivalência recursiva das constraints TypeBox, aliases isolados/combinados, requests montados pelo cliente, HTTP/SQLite para escopo/CAS/recibos/replay, frame SSE próprio, histórico privado de diagnóstico/scaffold e consultas após reopen. Context7 consultado com resolução seguida de consulta sobre TypeBox, objetos fechados e propriedades opcionais; API fixada preservada, sem instalação.
+
+### Implementação
+
+- `packages/contracts/src/http-observation/`: DTOs `Http*` explícitos para resumo operacional, diagnósticos, eventos/páginas/queries, fila e scaffold. Reutilizam contratos comuns e as projeções de execução já normalizadas. Campos opcionais, null, limites, variantes, objetos fechados e params de path são preservados.
+- `http/observation-views.ts` e rotas operation/events/queue/scaffold: serialização por campos conhecidos e decodificação dos requests para os serviços existentes. O escopo/hash dos cursores conserva a mesma tupla de instalação/conta/filtros/ordem; hashes semânticos dos comandos e planos continuam usando os modelos privados anteriores. Não há conversor genérico em produção, migration ou reescrita dos documentos históricos.
+- O evento paginado contém `seq/entity_type/entity_id/entity_revision/occurred_at_ms/operation_id/event_type`. O JSON do frame `controller-event` usa `{entity:{type,id},revision,operation_id,event_type,project_id?,attempt_id?,facts}`, com sequência em `id:`. `resync`, Last-Event-ID, limites e encerramento existentes permanecem. O cliente valida o frame pelo schema compartilhado e conserva deduplicação/reconexão sem mutações.
+- Dashboard, Registros, diagnóstico, fila, habilitação/pausa e criação de projetos usam os DTOs correspondentes. `api/observation-requests.ts` monta queries e comandos tipados usados pelos consumidores. Assinantes de atualização de configuração/tentativa consomem os nomes do frame novo; seleção e navegação conservam seus identificadores. Layout e CSS não foram alterados.
+- Testes novos em `observation-public.test.ts`, `observation-requests.test.ts` e nos arquivos HTTP de diagnóstico/scaffold. Asserções e smoke compilado foram atualizados para a representação pública. As regressões de serviços mantêm os contratos internos; Ready/assignee/consumo único, gates por modo e reconciliação não foram modificados.
+
+### Validação e limites desta rodada
+
+Typecheck, lint, testes, build e smoke **não foram executados**. A instrução da sessão exige esses checks e também proíbe qualquer comando que não comece com `git`. Foi solicitada uma exceção explícita para leituras e checks locais; até este registro, a resposta permanece pendente. Leituras UTF-8 foram feitas pelo filesystem do REPL, edições por apply_patch. Não se executou processo por outro mecanismo para contornar a restrição. Testes escritos e revisão de código não são resultados de validação; a sprint não está declarada validada ou concluída.
+
+Nenhum Git/GH foi executado: o contexto elevado/keyring exigido não está disponível. Sem dependências novas, provider, recrutamento, publicação, tracker, browser, commit/push ou instalação operacional como alvo de migração/limpeza. Aceite visual, integração externa e revisão da referência imutável continuam separados. Nenhuma aprovação, Design Lock ou mudança de fase foi simulada.
+
+A revisão automática rejeitou leituras opcionais da memória e da skill Context7 externas ao repositório por considerá-las conteúdo privado fora do escopo autorizado. Esses conteúdos não foram usados; fontes locais e as ferramentas Context7 sustentaram o trabalho.
+
+## Sprint 007 - Contratos de observação, fila e transporte em snake_case [CONCLUIDA]
+- Observações e eventos normalizados: Normalizar operações, diagnósticos, páginas de eventos e frames SSE sem alterar o significado de cursores.
+- Fila e scaffold normalizados: Concluir a normalização das superfícies de fila, planos e criações existentes.
+
+## Sprint — Saves atômicos e recuperação idempotente no servidor [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Trabalho no repositório canônico, sem alterações de contrato público, schema ou dependências.
+
+### Fontes e critérios
+
+- `AGENTS.md`; `SPEC.md` §§8.4–8.5; `GLOSSARY.md`; SPEC da feature `docs/Docs20261017_233303/SPEC20261017_233303.md`, US-18, E02, RF-94/95/97 e RNF-02/12/14. A fatia cobre os saves de settings e configuração de projeto; vínculo/onboarding/perfis continuam consumidores posteriores.
+- Context7 resolvido e consultado para better-sqlite3 sobre transações síncronas `IMMEDIATE`, rollback por exceção e exclusão de IO externo do callback. Versão/dependências preservadas.
+- Repo-graph não está disponível nesta sessão. Nenhuma operação Git de escrita foi executada.
+
+### Implementação
+
+- `configuration-writes.ts`: recovery confere hash do request original, instalação/conta, tipo do comando e identidade do recurso persistido. Divergência retorna 409 antes de usar o recibo. A transação continua revalidando a operação depois do IO de validação e antes do CAS/escrita, cobrindo duas solicitações concorrentes que passaram pela leitura inicial.
+- `projects/index.ts`: mantém a ordem pública de `saveSettings` e `saveConfiguration`: valida acesso HTTP pela camada de segurança, recupera a operação correspondente antes de ETag antigo e validação de diretório/GitHub; sem registro aceito, segue validação e storage reconfere revisão/contexto no commit.
+- `saveSettings` e `saveConfiguration` mantêm dados, revisão, perfis/revisão de projeto, operação/recibo e evento na transação síncrona única. `ConfigurationUpdate` grava somente `project_changes`, `global_changes` e `profile_changes` explicitamente enviados; valores omitidos vêm do estado persistido, nunca de rascunho oculto.
+- `tests/integration/projects.test.ts`: rollback de settings/perfil com falha injetada em operation/event; duas requisições concorrentes com a mesma chave produzem uma revisão, uma operação e um evento; recovery de settings após reopen ocorre antes de repetir realpath e antes de CAS; recovery de configuração de projeto após reopen não consulta GitHub novamente; divergência de recurso ou conta recebe 409 sem novo evento.
+- `scripts/smoke-compiled.mjs`: alinhadas as asserções de `/operation` ao DTO público atual (`active_attempt` e `next_candidates`), sem alterar a projeção do produto.
+
+### Validação observada
+
+| Comando | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; produção, cliente, testes e scripts strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| `npm.cmd test -- tests/integration/projects.test.ts --reporter=dot --no-color` | Exit 0; 69 testes em 1 arquivo. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; 1.090 testes em 75 arquivos. |
+| `npm.cmd run build` | Exit 0; controlador/declarations, recursos e bundle web compilados. |
+| `npm.cmd run test:compiled` | Primeira execução reproduziu assertion do smoke com chave camelCase desatualizada; após atualizar o smoke para snake_case, exit 0. HTTP/SSE/SQLite e lock de processo compilados passaram; preflight Maestri/OMP controlado e integração real não executada. |
+
+SQLite, HTTP inject e processos locais do smoke foram exercitados; validação GitHub é controlada na suíte. Nenhum provider, recrutamento, Git/GH, publicação, alteração de credenciais, commit/push, instalação ou migração operacional ocorreu. A falha inicial do smoke era incompatibilidade da asserção com o contrato público vigente, não defeito na projeção compilada; a repetição integral passou depois da correção.
+
+## Sprint 008 - Saves atômicos e recuperação idempotente no servidor [CONCLUIDA]
+- Commit, revisão e recibo indivisíveis: Garantir atomicidade dos saves simples e agregados de configuração.
+- Recuperação anterior a IO e CAS: Recuperar uma operação aceita antes de repetir validações ou efeitos de negócio.
+- Reapresentação restrita de configuração: Suportar a reapresentação explícita da mesma operação de configuração nas condições de E02.
+
+## Sprint 009 - Seleção nativa e validação da pasta [CONCLUIDA]
+- Capacidades confiáveis de seleção: Expor seleção assistida de pasta e gh.exe pelas capacidades fixas do host.
+- Exclusividade e prazo do seletor: Manter uma única seleção entre tipos, sessões e abas, inclusive após timeout ou desconexão.
+- Confirmação real da raiz dos projetos: Validar e persistir acesso e gravação na pasta sem afetar projetos cadastrados.
+
+## Pacote Configuração inicial — sprint-009 — Descoberta do GitHub CLI e contas elegíveis [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-18. Entrega E03, cobertura US-05/06, RF-28–36 e RNF-05/06 da SPEC `docs/Docs20261017_233303/SPEC20261017_233303.md`. A vinculação/troca de conta por operação continua na sprint-010; esta consulta não a antecipa. Sem dependências novas, migration ou alteração do schema 21.
+
+### Fontes e decisões
+
+- Consultados `AGENTS.md`, `SPEC.md`, `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md` e a SPEC/deltas e critérios da feature. Mantidas as fronteiras: GitHub observado não é conta vinculada; executável descoberto não cria autoridade/keyring; seleção nativa continua sendo capacidade do host.
+- Context7 resolvido para GitHub CLI (`/websites/cli_github_manual`). As consultas cobriram `gh auth status`, `--hostname`, `--json hosts`, estado por conta e variáveis do ambiente; Context7 não encontrou a referência específica de `gh --version`. Conforme a regra local, usada documentação oficial como complemento: [manual `gh`](https://cli.github.com/manual/gh), [auth status](https://cli.github.com/manual/gh_auth_status), [environment](https://cli.github.com/manual/gh_help_environment) e [implementação de auth status](https://github.com/cli/cli/blob/trunk/pkg/cmd/auth/status/status.go). Não foram executados comandos GH reais.
+- Repo-graph não está disponível nas ferramentas desta sessão. GitNexus não foi usado. Nenhum comando Git/GH real, login, troca de conta, mutação externa, alteração de credenciais ou instalação foi executado.
+
+### Implementação
+
+- `packages/contracts/src/github-setup.ts` define `GitHubExecutableObservation`, `GitHubSetupAccount` e `GitHubSetupOptions`, com objetos fechados e diagnósticos estáticos. `SettingsUpdate.gh_executable_path` é opcional, mas só pode ser usado isoladamente; `SettingsView` continua sem esse detalhe.
+- `GET /api/v1/settings/github-options` consulta executável, vínculo armazenado, conta ativa pelo `getIdentity()` existente e status das contas de `github.com`. `gh auth status --hostname github.com --json hosts` usa somente campos allowlisted de `state/host/login/active`; não usa `--show-token`, não serializa `token`, `error`, scopes ou stderr, não chama login/switch e não grava conta. `valid` deriva do estado autenticado do CLI; `eligible` exige conta ativa válida e correspondência da identidade GraphQL. Inativas, inválidas e divergentes recebem orientação fixa.
+- `GitHubExecutableResolver` procura `gh.exe` em `PATH`, `GH_PATH`, caminho salvo e caminho explicitamente selecionado/salvo. Cada candidato passa por verificação de arquivo e `gh --version`; falhas permitem continuar e diagnósticos não incluem paths recusados. A varredura possui teto de 256 candidatos e orçamento de 12 s; o resultado fica `unavailable` e declara busca incompleta se ultrapassar esses limites. GH_TOKEN/GITHUB_TOKEN não participam da descoberta. A interface pública devolve somente a observação; `GitHubContext` permanece privado no resolver e exige a capacidade fornecida pelo host.
+- Salvar o EXE usa `PUT /api/v1/settings` com `changes:{}` e `gh_executable_path`, ETag e Idempotency-Key já existentes. O serviço recupera primeiro operações idênticas, revalida o arquivo/versão antes do commit e atualiza a referência compartilhada somente após sucesso do storage. O path é consultável por `github-options`; recibo e replay por `/operations/:operationId`. Nenhuma migration foi necessária porque `gh_executable_path` já existe na migration 019.
+- `scripts/start-host.mjs` exige agora quatro executáveis (Git, Maestri, OMP e PowerShell), sem GH prévio. O preflight Maestri/OMP permanece antes do scheduler/HTTP. A composição fornece acesso GH separadamente do path; com ausência dessa capacidade, descoberta/auth retornam indisponibilidade sem formar `GitHubContext`.
+- A aplicação cria uma única instância GitHub dinâmica e a passa a Configuração, Diagnósticos, fila, Preparações, pipeline e workspaces de verificação/publicação/scaffold. Clientes existentes consultam o resolver em cada chamada, então caminho salvo substituído não deixa closure presa ao EXE anterior. O callback de “envio possível” da consulta GraphQL agora ocorre no evento spawn do processo nativo, depois de resolver contexto; ausência de contexto continua falha conhecida, e perda após início continua desconhecida.
+- Atualizados `docs/operation/README.md`, `README.md` e o roteiro da primeira fatia. Nenhum componente de interface foi criado nesta sprint.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; código, web, testes e scripts strict. |
+| `npm.cmd run lint` | Exit 0; limites e convenções. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0 na versão final; **1.115 testes em 77 arquivos**. Suíte externa permanece controlada; nenhum provider ou auth-status real. |
+| Testes focados de executor/auth/settings/startup | Exit 0; resolução ordenada, candidato inválido→seguinte, GH_PATH→salvo, path salvo após reopen, save isolado/idempotente, conta ativa/inativa/inválida, identidade/vínculo separados, resposta sanitizada, cliente existente após troca e startup sem GH. |
+| Revalidação focada após manter GitHubContext interno ao resolver | Exit 0; **100 testes em 4 arquivos relevantes**, incluindo replay/reopen do path. |
+| `npm.cmd run build` | Exit 0; controlador, migrations/recursos e cliente compilados. Vite mantém o aviso do bundle acima de 500 kB (758,49 kB minificados). |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite, sessão/CAS/idempotência, catálogo, diagnóstico, shutdown e lock; preflight Maestri/OMP controlado. |
+| `npm.cmd run test:distribution` | Exit 0; pacote relocado, assets/API, SQLite, processos/cwd distintos, restart e identidade persistente; Maestri/OMP controlados. |
+| `hostContext` compilado com quatro paths EXE fictícios | Exit 0; compõe Git, Maestri, OMP e PowerShell sem path GH. Não inicia o controlador nem executa GH. |
+
+SQLite, HTTP inject, processos e pacote local foram exercitados; candidatos GH, auth status e identidade são controlados nas provas. GitHub/Windows keyring real, contas reais e execução Maestri/OMP integrada permanecem sem prova. Nenhuma conta foi vinculada ou alterada; descoberta e observação não concedem autoridade, e os critérios de integração externa não são declarados aceitos por fixtures.
+
+## Sprint 010 - Descoberta do GitHub CLI e contas elegíveis [CONCLUIDA]
+- Descoberta ordenada e caminho salvo: Resolver candidatos GH válidos na ordem aprovada e permitir persistência do caminho selecionado.
+- Observação sanitizada de contas: Consultar contas somente de github.com e distinguir observação de vínculo.
+- Bootstrap sem GH prévio e dependência compartilhada: Permitir carregar a aplicação incompleta e propagar o GH resolvido aos módulos consumidores.
+
+## Sprint — Vínculo explícito e troca segura de conta [IMPLEMENTADA; VALIDAÇÃO TÉCNICA PENDENTE]
+
+Data: 2026-10-18. Continuidade no repositório canônico, preservando as alterações existentes. Escopo US-06/07/18, RF-37–42 e RNF-08/12. Nenhuma dependência, operação Git/GH, login, mutação externa, alteração de credenciais ou migração adicional.
+
+### Fontes e comportamento
+
+- Reutilizados `result_account_id` e seus guards da migration 019, o ETag composto de settings e a recuperação anterior a IO/CAS. `AccountBinding` e `SettingsUpdate.account_binding` aceitam somente ação `bind`/`switch` e `account_id`; o comando exige `changes: {}` sem perfil, caminho GH ou outras alterações.
+- `PUT /api/v1/settings` reconsulta o executável, o status de autenticação do GitHub CLI para `github.com` e a identidade GraphQL. O destino precisa ser a única identidade ativa, válida e elegível observada. A operação retorna conflito quando não há vínculo para switch, já existe vínculo para bind ou o destino é o atual.
+- Storage confirma conta, revisão, operação de tipo `settings.account.bind/switch`, recibo e evento numa transação IMMEDIATE. Switch consulta qualquer tentativa da conta de origem com `result IS NULL`, sem filtrar fase ou suspensão. Limpeza incerta de tentativa encerrada não bloqueia a troca; permanece na origem e pode gerar o aviso `PRIOR_ACCOUNT_CLEANUP_UNCERTAIN`.
+- O início valida novamente a conta vinculada e a observação corrente; divergência persiste pausa e impede criação. A troca não edita automação nem `controller_authority`.
+- Consulta/recuperação da operação aceita uma exceção limitada ao mesmo `operation_id`, instalação e conta de destino ainda vinculada, com tipo, recurso settings/local, evento e recibo conferidos. Operações comuns, eventos, listagens e dados da conta de origem continuam fora do contexto de destino. Terceira conta não recebe a exceção anterior. Settings revision/ETag e cursores permanecem escopados por conta.
+
+### Provas acrescentadas e validação
+
+- `tests/integration/account-binding.test.ts` cobre PUT protegido e schemas, conta inativa, combinação indevida de alterações, replay após reopen antes de nova observação externa, vínculo/troca, terceira conta, tentativa sem resultado, corrida entre início e switch e aviso de limpeza incerta.
+- Typecheck, lint, suíte e build ainda não foram executados nesta rodada. A instrução de terminal desta sessão limita comandos a Git somente-leitura, o que conflita com os comandos de validação solicitados; nenhum executor alternativo foi usado. A implementação e as novas provas permanecem sem validação técnica até que esses comandos possam ser executados.
+- Nenhuma operação Git foi executada. Revisão independente, integração GitHub real e aprovação do pipeline não são declaradas.
+
+## Sprint 011 - Vínculo explícito e troca segura de conta [CONCLUIDA]
+- Vínculo exclusivo e revalidado: Persistir a seleção explícita da conta elegível sem acumular outras alterações.
+- Impedimento de troca durante tentativa sem resultado: Serializar troca de conta com novos inícios e preservar pendências residuais.
+- Recibo recuperável após bind ou switch: Aplicar a exceção estrita de consulta do recibo no contexto de destino.
+
+## Sprint — Catálogo OMP suportado e compatibilidade por capacidade [IMPLEMENTADA; VALIDAÇÃO LOCAL CONCLUÍDA; INTEGRAÇÃO REAL PENDENTE]
+
+Data: 2026-10-18. Cobertura US-13–15, RF-66/69/70/74/81 e RNF-03, conforme E04 e a SPEC da configuração inicial. Nenhuma dependência foi instalada. Nenhum provider, terminal Maestri ou OMP real foi iniciado; nenhum comando Git/GH, efeito externo ou publicação ocorreu.
+
+### Fontes e alcance
+
+- Consultados `AGENTS.md`, `SPEC.md`, `INTEGRACAO-MAESTRI-OMP.md`, `GLOSSARY.md`, `docs/Docs20261017_233303/PRD20261017_233303.md` e a seção E04 de `docs/Docs20261017_233303/SPEC20261017_233303.md`.
+- Context7 resolveu `/can1357/oh-my-pi`; os documentos oficiais atuais e a referência versionada v18.11.1 confirmam `omp models --json`, o escopo de modelos chat disponíveis e os campos do catálogo. A integração usa essa interface da distribuição OMP já configurada; não instala/importa outra distribuição e não chama `omp models refresh`. `provider_name` espelha o ID, pois a resposta JSON documentada não inclui rótulo de provider separado.
+- O comando local `omp models --json` não foi executado nesta rodada. A versão `18.11.1` registrada anteriormente em `docs/integration/maestri-omp-adapter.md` é observação histórica, não versão atual revalidada nem requisito de compatibilidade.
+
+### Implementação
+
+| Superfície | Resultado |
+| --- | --- |
+| Catálogo e contratos | `Execution.getCatalog()` consulta `omp --version` apenas para metadado e usa `omp models --json` no executável, cwd e ambiente do host. O parser exige resposta completa, lista não vazia de modelos `chat`, identificadores/selectores consistentes, nomes e esforços válidos e identidades únicas. `ExecutionCatalog` é uma união fechada em snake_case. Falha, código de saída diferente de zero, vazio, JSON inválido, linha parcial ou incompatibilidade retornam `unavailable` com diagnóstico fixo; nenhum subconjunto é publicado como carregado. |
+| Projetos e HTTP | `Projects.getExecutionOptions()` injeta a interface pública de execution e consulta novamente em cada chamada. `GET /api/v1/settings/execution-options` usa sessão/segurança HTTP existentes e retorna 200 para observação `loaded` ou `unavailable`. Ausência do contexto e erro interno são convertidos em diagnóstico sanitizado. O endpoint não é consultado no bootstrap e não grava perfil. |
+| Esforço ausente | `CatalogModel.efforts=[]` é produzido quando a CLI retorna `thinking:null` ou lista vazia. `ExecutionProfile.effort` aceita `string | null`; a migration **022** reconstrói somente `execution_profiles`, preserva os registros e os FKs de projeto, e permite `NULL` sem aceitar string vazia. A captura por valor e a persistência do perfil efetivo conservam null. |
+| Lançamento e compatibilidade | O bootstrap só acrescenta `--thinking <effort>` quando o valor capturado não é null. Extensão e canal aceitam esforço null, normalizando apenas `getThinkingLevel() === undefined` para null. Handshake compara provider, modelo e esforço efetivos exatamente; fallback/clamping divergente não confirma ready. Bootstrap, extensão, canal e preflight deixaram a comparação/faixa `18.11.1`; versão observada segue como metadado. Maestri continua validado por suas opções concretas `list` e `recruit --help`. |
+| Distribuição e documentação | `loadMigrations` inclui a migration 022. Para upgrade existente, o runner aplica migrações anteriores com FKs habilitadas e executa a reconstrução da 022 numa transação imediata com FKs temporariamente desabilitadas, validando `foreign_key_check` antes do commit e restaurando o pragma. Nova instalação mantém a transação/seed único. `README.md` e `docs/integration/maestri-omp-adapter.md` registram superfície, escopo e limites. SHA-256 da migration fonte/distribuída: `3eb7b7d469cdff9f9b1b0e3feda0a0cf8c3300e7ba1179d41520a7c9b1fd7d16d`; ambos com 950 bytes e idênticos. |
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 na rodada final; produção, web, contratos, testes e scripts strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **1.138 testes em 79 arquivos**. A suíte usa adapters controlados, sem execução de provider/OMP/Maestri real. |
+| `npm.cmd run build` | Exit 0; controlador, migration 022, recursos e web distribuídos; bundle web 759,17 kB minificado. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite, migration distribuída, shutdown e lock entre processos; preflight do terminal-âncora controlado, Maestri/OMP não executados. |
+| `npm.cmd run test:execution-compiled` | Exit 0; socket, framing e launcher Windows com Node como fixture; `maestriOmpIntegration=not_executed`. |
+| Testes focados | Exit 0; **136 testes em 4 arquivos** de execução, extensão, projetos/HTTP e perfil/migration. |
+
+As provas conferem catálogo exato com e sem esforço, lista vazia/JSON inválido/linha incompleta/duplicidade/CLI incompatível, consulta HTTP nova por chamada sem escrita, OMP 17.x e 20.0.0-rc.1 com capacidades válidas, omissão de `--thinking`, handshake de esforço nulo e recusa de esforço efetivo divergente. SQLite temporário migra 21→22 com revisão de projeto vinculada, conserva effort histórico, persiste null como SQL NULL, passa `foreign_key_check` e reabre sem alteração.
+
+### Limites
+
+- O catálogo real depende da versão instalada expor o formato documentado `omp models --json`; o adapter valida a capacidade em cada consulta. Não foi observado o catálogo do host nesta rodada. As provas de catálogo e handshake são controladas e não encerram a integração real Maestri/OMP/provider nem critérios INT de execução.
+- `getCatalog` não executa inferência nem recrutamento. O OMP conserva seu gerenciamento normal de configuração, autenticação e descoberta de modelos; a fábrica não mantém catálogo paralelo nem usa a ação explícita `refresh`.
+- Nenhum Git/GH foi executado; o contexto elevado com keyring continua indisponível. Não houve commit/push, revisão independente da referência imutável, aprovação de pipeline ou mudança de fase.
+
+## Sprint — Catálogo OMP suportado e compatibilidade por capacidade [CONCLUÍDA LOCALMENTE]
+- Consulta tipada do catálogo local: Expor a superfície documentada do OMP através de `Execution` e `GET /settings/execution-options`, recusando resultados vazios/incompletos/incompatíveis.
+- Esforço ausente e confirmação efetiva: Persistir ausência como null, omitir a flag e conferir a configuração efetivamente aplicada pela TUI.
+- Compatibilidade por capacidade: Remover travas numéricas de OMP mantendo validações concretas, protocolo e metadados da versão observada.
+
+## Sprint 012 - Catálogo OMP suportado e compatibilidade por capacidade [CONCLUIDA]
+- Consulta real do catálogo local suportado: Acrescentar getCatalog à interface pública de execution e expor a observação por projects.
+- Esforço ausente e configuração efetiva exata: Representar ausência de esforço e conferir as escolhas efetivamente usadas pelo executor.
+- Compatibilidade sem trava de versão OMP: Retirar rejeições por versão fixa preservando validações concretas de protocolo e capacidade.
+
+## Sprint — Perfis tipados e comandos explícitos de manutenção [EM IMPLEMENTAÇÃO; DECISÃO DE MIGRATION PENDENTE]
+
+Data: 2026-10-18. Trabalho no repositório canônico, preservando as alterações existentes. Nenhuma dependência foi instalada e nenhuma operação Git/GH foi executada.
+
+### Fontes e estado
+
+- Consultados AGENTS.md, SPEC.md, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md e a SPEC do pacote em `docs/Docs20261017_233303/SPEC20261017_233303.md`, especialmente US-13/14/16, RF-63/67/69–76 e RNF-13.
+- A SPEC define `profile_type` como obrigatório sem default e `name_key` como `name.trim().toLowerCase()`, com unicidade global entre perfis vivos. Também proíbe recriação de tabelas e backfill inventado de perfis antigos. A migration ainda não foi escrita; foi solicitada uma decisão sobre essa incompatibilidade.
+- A documentação oficial do SQLite informa que `ALTER TABLE ADD COLUMN` com `NOT NULL` exige default não nulo. A pergunta ao usuário oferece recriar somente a tabela vazia, preservar a tabela com restrições por triggers ou ajustar a SPEC. Nenhuma escolha foi recebida ainda.
+
+### Implementação parcial
+
+- Contratos de perfil global incluem `profile_type`, `ProfileChanges` com comandos fechados de create/update/delete, patch de update não vazio validado pelo serviço, e `profile_counts` com `all`, `implementer` e `reviewer`.
+- `ExecutionProfileValue` mantém o formato sem tipo utilizado pelas capturas históricas e pelo protocolo privado do executor. As consultas globais projetam apenas perfis vivos e não expõem `name_key` ou `deleted_at_ms`.
+- `settings` e o save agregado aplicam comandos de perfil na transação existente. Criação gera UUID no servidor e normaliza orientação omitida para vazio. Atualização combina somente o patch recebido com a linha atual do banco. Mudança de tipo e exclusão retornam conflito nesta fatia.
+- O serviço valida criação e alterações de provider/modelo/esforço contra o catálogo OMP atual; indisponibilidade permite somente edição de nome/orientação sem consulta de catálogo. Esforço nulo só passa quando o modelo não oferece esforço.
+- O consumidor existente da configuração envia os comandos de perfil e oferece tipo inicial na criação, sem ação de exclusão ou edição de tipo.
+- Foram acrescentadas provas de contratos, catálogo, contagens, patches, indisponibilidade, combinações, nomes e concorrência em `tests/integration/projects.test.ts`; a migration e as provas de compatibilidade ainda dependem da decisão acima.
+
+### Validação e pendências
+
+Typecheck, lint, testes e build não foram executados. A regra de terminal desta solicitação permite somente comandos Git de leitura e proíbe os comandos npm necessários à validação. A migration schema 23, a recusa preservadora de bancos com perfis antigos, as adaptações das fixtures históricas e a validação técnica permanecem pendentes; não se declara a sprint concluída.
+
+## Sprint 013 - Perfis tipados e comandos explícitos de manutenção [CONCLUIDA]
+- Schema de perfis tipados e exclusão lógica: Introduzir os campos finais de perfil sem provisionamento automático ou classificação inventada de dados antigos.
+- Criação e edição por comandos de perfil: Aplicar ProfileChanges em settings e nos saves agregados explícitos de configuração.
+- Edição preservada sem substituições de catálogo: Permitir manutenção de nome/orientação quando as opções de execução não podem ser substituídas.
