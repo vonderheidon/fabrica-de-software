@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { DeliveryDetail } from '#contracts';
+import type { HttpDeliveryDetail as DeliveryDetail } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 
 type DeliveryState = { id: string | null; value: DeliveryDetail | null; status: 'loading' | 'ready' | 'not-captured' | 'error'; error: string | null };
 
-export function useDelivery(deliveryId: string | null, reload: number): { delivery: DeliveryDetail | null; status: DeliveryState['status']; error: string | null } {
+export function useDelivery(deliveryId: string | null, reload: number): { delivery: DeliveryDetail | null; status: DeliveryState["status"]; error: string | null } {
   const [state, setState] = useState<DeliveryState>({ id: null, value: null, status: 'loading', error: null });
   useEffect(() => {
     let active = true;
@@ -13,7 +13,7 @@ export function useDelivery(deliveryId: string | null, reload: number): { delive
     setState((current) => ({ id: deliveryId, value: current.id === deliveryId ? current.value : null, status: 'loading', error: null }));
     void requestJsonWithMetadata<DeliveryDetail>(`/api/v1/deliveries/${encodeURIComponent(deliveryId)}`, { signal: controller.signal }).then(({ data }) => {
       if (!active) return;
-      setState({ id: deliveryId, value: data, status: data.delivery.captureState === 'captured' ? 'ready' : 'not-captured', error: data.delivery.diagnostic });
+      setState({ id: deliveryId, value: data, status: data.delivery.capture_state === 'captured' ? 'ready' : 'not-captured', error: data.delivery.diagnostic });
     }).catch((reason: unknown) => {
       if (!active || (reason instanceof DOMException && reason.name === 'AbortError')) return;
       if (reason instanceof HttpError && reason.status === 404) setState({ id: deliveryId, value: null, status: 'not-captured', error: null });

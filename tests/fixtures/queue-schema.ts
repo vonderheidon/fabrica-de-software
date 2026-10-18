@@ -9,5 +9,5 @@ export function removeQueueSchedulerSchema(db: Database.Database): void {
     ALTER TABLE attempts DROP COLUMN source;
     ALTER TABLE queue_cycles DROP COLUMN ready_exit_observed_at_ms;
     ALTER TABLE queue_cycles DROP COLUMN ready_return_observed_at_ms;
-    DELETE FROM schema_migrations WHERE version=16; PRAGMA user_version=15;`);
+    DELETE FROM schema_migrations WHERE version>=16; PRAGMA user_version=15;`);
 }

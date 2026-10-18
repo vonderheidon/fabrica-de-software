@@ -27,11 +27,11 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     if (selectedIds && (selectedIds.length > 100 || new Set(selectedIds).size !== selectedIds.length)) problem(400, 'QUEUE_SCOPE_INVALID', 'Select up to 100 distinct projects.');
     const catalog = selectedIds ? null : storage.listProjects({ limit: '100' });
     const allProjects = selectedIds ? selectedIds.map(id => storage.getProject(id).view.project) : [...(catalog?.items ?? [])];
-    let catalogCursor = catalog?.nextCursor ?? null;
+    let catalogCursor = catalog?.next_cursor ?? null;
     while (catalogCursor) {
       const next = storage.listProjects({ limit: '100', cursor: catalogCursor });
       allProjects.push(...next.items);
-      catalogCursor = next.nextCursor;
+      catalogCursor = next.next_cursor;
     }
     if (allProjects.length > 100) problem(503, 'QUEUE_SCOPE_LIMIT', 'Queue observation supports at most 100 configured projects. Select one project.');
     const settings = storage.getGlobalConfiguration();
@@ -43,7 +43,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     const identity: GitHubQueryResult<GitHubAccount> = deferred
       ? { state: 'unavailable', data: null, retryAtMs, diagnostics: [] }
       : await github.getIdentity();
-    const queueEnabled = settings.view.settings.automationEnabled && (!selectedIds || selectedIds.every(id => configurations.get(id)!.view.configuration.automationEnabled));
+    const queueEnabled = settings.view.settings.automation_enabled && (!selectedIds || selectedIds.every(id => configurations.get(id)!.view.configuration.automation_enabled));
     const activeAttempt = storage.listAttempts({ result: 'active', limit: '1' }).items[0] ?? null;
     const currentHost = hostName;
     const diagnostics: QueueObservation['diagnostics'] = identity.diagnostics.map(({ code, message, recovery }) => ({ code, message, recovery }));
@@ -59,42 +59,42 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     for (const projectSummary of allProjects) {
       const configured = configurations.get(projectSummary.id)!;
       const configuration = configured.view.configuration;
-      modesByProject.push({ projectId: projectSummary.id, mode: configuration.defaultDeliveryMode });
-      if (!configuration.githubProject || !configuration.source.repositoryId) {
+      modesByProject.push({ projectId: projectSummary.id, mode: configuration.default_delivery_mode });
+      if (!configuration.github_project || !configuration.source.repository_id) {
         complete = false;
         diagnostics.push({ code: 'PROJECT_NOT_READY', message: `${projectSummary.name}: GitHub Project ou repositório não está configurado.`, recovery: 'Configure os IDs do Project e do repositório antes de habilitar a fila.' });
         continue;
       }
       if (deferred || identity.state !== 'complete' || !identity.data) continue;
       const [items, projectDetails] = await Promise.all([
-        github.listProjectItems(configuration.githubProject.id), github.getProject(configuration.githubProject.id),
+        github.listProjectItems(configuration.github_project.id), github.getProject(configuration.github_project.id),
       ]);
       remoteRetryAtMs = Math.max(remoteRetryAtMs, items.retryAtMs ?? 0, projectDetails.retryAtMs ?? 0);
       diagnostics.push(...items.diagnostics.map(({ code, message, recovery }) => ({ code, message, recovery })),
         ...projectDetails.diagnostics.map(({ code, message, recovery }) => ({ code, message, recovery })));
       if (items.state !== 'complete' || projectDetails.state !== 'complete' || !projectDetails.data) complete = false;
       const details = projectDetails.data;
-      const mappingValid = details?.project.id === configuration.githubProject.id &&
-        details.project.owner.id === configuration.githubProject.ownerId && !details.project.closed &&
-        Object.values(configuration.githubProject.statusOptionIds).every((id) => details.singleSelectFields
-          .find((field) => field.id === configuration.githubProject?.statusFieldId)?.options.some((option) => option.id === id));
+      const mappingValid = details?.project.id === configuration.github_project.id &&
+        details.project.owner.id === configuration.github_project.owner_id && !details.project.closed &&
+        Object.values(configuration.github_project.status_option_ids).every((id) => details.singleSelectFields
+          .find((field) => field.id === configuration.github_project?.status_field_id)?.options.some((option) => option.id === id));
       if (!mappingValid) {
         complete = false;
         diagnostics.push({ code: 'PROJECT_MAPPING_INVALID', message: 'O Project, proprietário ou mapeamento de Status diverge da configuração.', recovery: 'Confira os IDs configurados no projeto.' });
       }
-      const priorityField = configuration.queueOrder.priorityFieldId;
+      const priorityField = configuration.queue_order.priority_field_id;
       const numericPriority = Boolean(priorityField && details?.numberFields?.some((field) => field.id === priorityField));
-      const useBoard = configuration.queueOrder.useBoardPosition && (items.data ?? []).every((item) => item.position !== undefined);
+      const useBoard = configuration.queue_order.use_board_position && (items.data ?? []).every((item) => item.position !== undefined);
       priorityAvailable ||= numericPriority;
       boardAvailable ||= useBoard;
       if (priorityField && !numericPriority) diagnostics.push({ code: 'PRIORITY_VALUE_UNAVAILABLE', message: 'O campo de prioridade numérica não está disponível neste Project.', recovery: 'Confira o ID do campo; será usada posição documentada ou número/ID.' });
-      if (configuration.queueOrder.useBoardPosition && !useBoard) diagnostics.push({ code: 'BOARD_POSITION_UNAVAILABLE', message: 'A leitura não fornece posição documentada dos itens.', recovery: 'A ordem usa número crescente e ID.' });
+      if (configuration.queue_order.use_board_position && !useBoard) diagnostics.push({ code: 'BOARD_POSITION_UNAVAILABLE', message: 'A leitura não fornece posição documentada dos itens.', recovery: 'A ordem usa número crescente e ID.' });
       if (activeAttempt) diagnostics.push({ code: 'QUEUE_OCCUPIED', message: 'Já existe uma tentativa ativa. Os demais candidatos permanecem visíveis e não serão descartados.', recovery: 'A fila pode consumir o próximo candidato quando a tentativa terminar.' });
       for (const item of items.data ?? []) {
         const projectLabel = projectSummary.name;
-        const cycle = item.contentId && settings.view.settings.accountId ? storage.getQueueCycle(settings.view.settings.accountId, projectSummary.id, item.contentId) : null;
+        const cycle = item.contentId && settings.view.settings.account_id ? storage.getQueueCycle(settings.view.settings.account_id, projectSummary.id, item.contentId) : null;
         const prior = cycle?.consumedAttemptId ? { id: cycle.consumedAttemptId, active: storage.getAttempt(cycle.consumedAttemptId).result === null }
-          : (!cycle || cycle.cycleNumber === 1) && item.contentId ? storage.getLatestIssueAttempt(configuration.source.repositoryId, item.contentId) : null;
+          : (!cycle || cycle.cycleNumber === 1) && item.contentId ? storage.getLatestIssueAttempt(configuration.source.repository_id, item.contentId) : null;
         const kind = item.kind;
         let eligible = false;
         let reasons: QueueItem['reasons'][number][] = [];
@@ -119,9 +119,9 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
             reasons = ['READ_INCOMPLETE'];
           } else {
             const context = issue.data;
-            const readiness = assessIssueReadiness({ identity, issue, project: projectDetails, expectedAccountId: settings.view.settings.accountId ?? '',
-              repositoryId: configuration.source.repositoryId, projectId: configuration.githubProject.id,
-              statusFieldId: configuration.githubProject.statusFieldId, readyOptionId: configuration.githubProject.statusOptionIds.ready });
+            const readiness = assessIssueReadiness({ identity, issue, project: projectDetails, expectedAccountId: settings.view.settings.account_id ?? '',
+              repositoryId: configuration.source.repository_id, projectId: configuration.github_project.id,
+              statusFieldId: configuration.github_project.status_field_id, readyOptionId: configuration.github_project.status_option_ids.ready });
             reasons = readiness.reasons;
             eligible = readiness.eligible;
             issueId = context.id;
@@ -132,14 +132,14 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
             if (assignees.length === 0) reasons.push('ASSIGNEE_MISSING');
             else if (assignees.length > 1) reasons.push('MULTIPLE_ASSIGNEES');
             else if (assignees[0]?.id !== identity.data?.id) reasons.push('ASSIGNEE_OTHER');
-            const membership = context.memberships.find((entry) => entry.itemId === item.id && entry.projectId === configuration.githubProject?.id && !entry.archived);
+            const membership = context.memberships.find((entry) => entry.itemId === item.id && entry.projectId === configuration.github_project?.id && !entry.archived);
             if (!membership || context.id !== item.contentId || !mappingValid) {
               eligible = false;
               reasons.push('PROJECT_MEMBERSHIP_MISSING');
             }
-            const statusValue = membership?.statusValues.find((entry) => entry.fieldId === configuration.githubProject?.statusFieldId);
+            const statusValue = membership?.statusValues.find((entry) => entry.fieldId === configuration.github_project?.status_field_id);
             status = statusValue?.name ?? null;
-            ready = statusValue?.optionId === configuration.githubProject?.statusOptionIds.ready;
+            ready = statusValue?.optionId === configuration.github_project?.status_option_ids.ready;
             priority = numericPriority ? membership?.numberValues?.find((entry) => entry.fieldId === priorityField)?.value ?? null : null;
           }
         } else {
@@ -152,7 +152,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
           eligible = false;
           reasons = [...new Set([...reasons, 'ALREADY_CONSUMED' as const])];
         }
-        if (!configuration.automationEnabled && !selectedIds) {
+        if (!configuration.automation_enabled && !selectedIds) {
           eligible = false;
           reasons = [...new Set([...reasons, 'AUTOMATION_DISABLED' as const])];
         }
@@ -163,11 +163,11 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
         const row: QueueItem = { projectId: projectSummary.id, projectName: projectLabel, itemId: item.id, kind, issueId, number, title, url, assignees,
           status, ready, readyEligible, eligible, reasons: [...new Set(reasons)], consumption: prior ? prior.active ? 'active' : 'consumed' : complete ? 'available' : 'unknown',
           attemptId: prior?.id ?? null, order: { position: 1,
-            criterion: numericPriority ? `Prioridade numérica ${configuration.queueOrder.priorityDirection}; ${useBoard ? 'posição do Project' : 'número/ID'}`
+            criterion: numericPriority ? `Prioridade numérica ${configuration.queue_order.priority_direction}; ${useBoard ? 'posição do Project' : 'número/ID'}`
               : useBoard ? 'Posição documentada do Project; número/ID' : 'Fallback: número crescente; ID',
             value: priority === null ? null : String(priority) } };
         rows.push(row);
-        sortValues.set(row, { priority, board: useBoard ? item.position ?? null : null, direction: configuration.queueOrder.priorityDirection });
+        sortValues.set(row, { priority, board: useBoard ? item.position ?? null : null, direction: configuration.queue_order.priority_direction });
       }
     }
     const configStamp = [settings.etag, ...allProjects.map((project) => configurations.get(project.id)!.etag)];
@@ -183,7 +183,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       do {
         const page = storage.listProjects({ limit: '100', ...(cursor ? { cursor } : {}) });
         currentIds.push(...page.items.map((project) => project.id));
-        cursor = page.nextCursor;
+        cursor = page.next_cursor;
       } while (cursor);
       configurationChanged ||= hash(currentIds.sort()) !== hash(scope.projectIds);
     }
@@ -207,8 +207,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
         (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || compareId(a.issueId ?? a.itemId, b.issueId ?? b.itemId);
     });
     rows.forEach((row, index) => { row.order.position = index + 1; });
-    const valid = complete && settings.view.settings.accountId !== null && settings.view.settings.accountId === identity.data?.id &&
-      settings.view.settings.designatedHost?.toLowerCase() === currentHost.toLowerCase() && modesByProject.length > 0;
+    const valid = complete && settings.view.settings.account_id !== null && settings.view.settings.account_id === identity.data?.id && modesByProject.length > 0;
     if (!complete) for (const row of rows) {
       row.eligible = false;
       row.readyEligible = false;
@@ -217,11 +216,11 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     }
     const eligibleTotal = complete ? rows.filter((row) => row.eligible).length : null;
     const summaryHash = hash({ scope, configStamp, modesByProject, accountId: identity.data?.id ?? null,
-      expectedAccountId: settings.view.settings.accountId, host: [settings.view.settings.designatedHost, currentHost], complete, valid, eligibleTotal,
+      expectedAccountId: settings.view.settings.account_id, host: currentHost, complete, valid, eligibleTotal,
       candidates: rows.map(({ projectId, itemId, kind, issueId, ready, readyEligible, eligible, reasons, status, assignees, order: itemOrder }) =>
         [projectId, itemId, kind, issueId, ready, readyEligible, eligible, reasons, status, assignees.map((assignee) => assignee.id).sort(), itemOrder]), order });
-    const intervalMs = settings.view.settings.timeDefaults.pollingIntervalMs;
-    const backoffMaxMs = settings.view.settings.timeDefaults.pollingBackoffMaxMs ?? Math.max(intervalMs, 60_000);
+    const intervalMs = settings.view.settings.time_defaults.polling_interval_ms;
+    const backoffMaxMs = settings.view.settings.time_defaults.polling_backoff_max_ms ?? Math.max(intervalMs, 60_000);
     if (!deferred) {
       failureDelayMs = complete ? 0 : Math.min(backoffMaxMs, Math.max(intervalMs, failureDelayMs * 2));
       retryAtMs = complete ? 0 : Math.max(Date.now() + failureDelayMs, remoteRetryAtMs);
@@ -249,9 +248,9 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       scope, enabled: queueEnabled, valid, complete, observationId, summaryHash, observedAtMs: now,
       eligibleTotal,
       modesByProject, account: { id: identity.data?.id ?? null, login: identity.data?.login ?? null },
-      host: { expected: settings.view.settings.designatedHost, observed: currentHost, matches: settings.view.settings.designatedHost?.toLowerCase() === currentHost.toLowerCase() },
-      order, page: { items: pageItems, hasMore, nextCursor: hasMore ? Buffer.from(JSON.stringify({ scope: pageScope, offset: offset + limit })).toString('base64url') : null, eventCursor: settings.view.eventCursor },
-      diagnostics: [...new Map(diagnostics.map((entry) => [JSON.stringify(entry), entry])).values()].slice(0, 100), eventCursor: settings.view.eventCursor,
+      host: { expected: currentHost, observed: currentHost, matches: true },
+      order, page: { items: pageItems, has_more: hasMore, next_cursor: hasMore ? Buffer.from(JSON.stringify({ scope: pageScope, offset: offset + limit })).toString('base64url') : null, event_cursor: settings.view.event_cursor },
+      diagnostics: [...new Map(diagnostics.map((entry) => [JSON.stringify(entry), entry])).values()].slice(0, 100), eventCursor: settings.view.event_cursor,
       polling: { intervalMs, backoffMaxMs, retryAtMs: retryAtMs || null, nextPollAtMs: Math.max(Date.now() + intervalMs, retryAtMs) },
     };
     return { observation, etag, items: rows };
@@ -269,7 +268,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
         const fresh = await observe(query);
         if (!fresh.observation.complete || !fresh.observation.valid || fresh.observation.summaryHash !== command.authorizedSummaryHash ||
           fresh.etag !== context.expectedRevision || hash(fresh.observation.scope.projectIds) !== hash([...command.scope.projectIds].sort()) ||
-          (command.scope.kind === 'project' && !storage.getSettings().automationEnabled)) throw new QueueSummaryChanged(fresh);
+          (command.scope.kind === 'project' && !storage.getSettings().automation_enabled)) throw new QueueSummaryChanged(fresh);
       }
       try { operation = storage.saveQueueChange(change); }
       catch (error) {
@@ -280,7 +279,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     const receipt = operation.receipt;
     if (!receipt) return problem(503, 'QUEUE_RECEIPT_UNAVAILABLE', 'The queue change was not confirmed.');
     const latest = await observe({ ...query, limit: '25' });
-    return { queue: latest.observation, operationId: operation.operationId, receipt, etag: latest.etag };
+    return { queue: latest.observation, operationId: operation.operation_id, receipt, etag: latest.etag };
   }
 
   return { observe, save };

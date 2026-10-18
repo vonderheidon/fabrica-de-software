@@ -1,5 +1,6 @@
+import { answerQuestionBody } from './execution-requests.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { OperationAccepted, OperationView, Question } from '#contracts';
+import type { OperationAccepted, OperationView, HttpQuestion as Question } from '#contracts';
 import { HttpError, requestJsonWithMetadata, requestJson } from '../../api/http.js';
 
 type DecisionState = {
@@ -34,13 +35,13 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
     try {
       const result = await requestJsonWithMetadata<Question>(`/api/v1/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}`);
       setState((current) => ({ ...current, question: result.data, etag: result.etag, loading: false, error: null,
-        submissionLocked: current.submissionLocked || result.data.answerOperationId !== null }));
-      const currentOperationId = result.data.answerOperationId ?? operationId.current;
+        submissionLocked: current.submissionLocked || result.data.answer_operation_id !== null }));
+      const currentOperationId = result.data.answer_operation_id ?? operationId.current;
       if (currentOperationId) {
         operationId.current = currentOperationId;
         try {
           const operation = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(currentOperationId)}`);
-          if (operation.operationId === currentOperationId) setState((current) => ({ ...current, operation, notice: null }));
+          if (operation.operation_id === currentOperationId) setState((current) => ({ ...current, operation, notice: null }));
         } catch (reason: unknown) {
           setState((current) => ({ ...current, operation: null, notice: reason instanceof HttpError && reason.status === 404 ? 'A resposta ainda não tem recibo de operação consultável.' : 'Não foi possível consultar o recibo da operação. A resposta não será reenviada.' }));
         }
@@ -62,7 +63,7 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
   const submit = useCallback(async (): Promise<void> => {
     const current = stateRef.current;
     if (!current.question || current.question.state !== 'pending' || !current.etag || current.submitting || current.submissionLocked || !draft.trim()) return;
-    if (current.question.scopeChange && scopeChoice !== 'keep_captured') return;
+    if (current.question.scope_change && scopeChoice !== 'keep_captured') return;
     const id = operationId.current ?? crypto.randomUUID();
     operationId.current = id;
     setState((value) => ({ ...value, submitting: true, submissionLocked: true, error: null, notice: null }));
@@ -70,9 +71,9 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
       const headers = new Headers({ 'Idempotency-Key': id, 'If-Match': current.etag });
       const result = await requestJsonWithMetadata<OperationAccepted>(
         `/api/v1/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/answer`,
-        { method: 'POST', headers, body: JSON.stringify({ answer: draft, ...(current.question.scopeChange ? { scopeChoice } : {}) }) },
+        { method: 'POST', headers, body: JSON.stringify(answerQuestionBody(draft, current.question.scope_change ? scopeChoice ?? undefined : undefined)) },
       );
-      if (result.data.operationId !== id) throw new Error('O recibo retornou uma operação diferente.');
+      if (result.data.operation_id !== id) throw new Error('O recibo retornou uma operação diferente.');
       setState((value) => ({ ...value, operation: null, notice: 'Resposta gravada. Aguardando confirmação de entrega na mesma passagem.' }));
       await refresh();
     } catch (reason: unknown) {

@@ -1,40 +1,64 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type {
   ConfigurationOptions, ConfigurationView, ExecutionProfile, GlobalConfiguration, ProjectConfiguration,
-  ProjectDetail, ProjectRegistration, SettingsView, StoredExecutionProfile,
+  ConfigurationSaved, SettingsSaved, ProjectRegistered, ProjectRegistration, ProfileChanges, ProfilePatch, ProfileType, StoredExecutionProfile,
 } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 import { clearDraft, getDraft, setDraft as persistDraft, type DraftValue } from '../../app/drafts.js';
 import { useConfiguration, type EditableConfigurationView } from './useConfiguration.js';
+import { configurationCommand, configurationOptionsParams } from './configuration-requests.js';
 import { createSaveLifecycle, type SaveOperation } from './save-lifecycle.js';
 
 type EditableView = EditableConfigurationView;
+type EditableProfile = ExecutionProfile & { id?: string };
 type EditorDraft = {
-  global: GlobalConfiguration; profiles: ExecutionProfile[]; project: ProjectConfiguration | null; dirty: string[];
-  baselineGlobal: GlobalConfiguration; baselineProfiles: ExecutionProfile[]; baselineProject: ProjectConfiguration | null;
+  global: GlobalConfiguration; profiles: EditableProfile[]; project: ProjectConfiguration | null; dirty: string[];
+  baselineGlobal: GlobalConfiguration; baselineProfiles: EditableProfile[]; baselineProject: ProjectConfiguration | null;
   pendingCommand?: { signature: string; id: string };
 };
 type PersistedEditorDraft = {
   dirty: string[];
   values: Record<string, DraftValue>;
   profileEdits?: {
-    added: ExecutionProfile[];
+    added: EditableProfile[];
     removedIds: string[];
-    changed: { id: string; fields: Partial<ExecutionProfile> }[];
+    changed: { id: string; fields: Partial<EditableProfile> }[];
   };
   pendingCommand?: { signature: string; id: string };
 };
-type Receipt = { revision?: number; eventCursor?: string };
-type SavedSettingsView = SettingsView & { operationId: string; receipt: Receipt };
-type SavedConfigurationView = ConfigurationView & { operationId: string; receipt: Receipt };
+type SavedSettingsView = SettingsSaved;
+type SavedConfigurationView = ConfigurationSaved;
 type SaveState = { status: 'idle' } | { status: 'saving' } | { status: 'saved'; operationId: string; message: string } | { status: 'error'; message: string; requestId: string | null } | { status: 'conflict'; message: string; requestId: string | null };
 
 const editorKey = 'project-configuration';
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const isConfigurationView = (view: EditableView): view is ConfigurationView => 'configuration' in view;
-const editableProfile = (profile: StoredExecutionProfile): ExecutionProfile => ({
-  id: profile.id, name: profile.name, executor: profile.executor, provider: profile.provider, model: profile.model, effort: profile.effort, guidance: profile.guidance,
+const editableProfile = (profile: StoredExecutionProfile): EditableProfile => ({
+  id: profile.id, name: profile.name, profile_type: profile.profile_type, executor: profile.executor, provider: profile.provider, model: profile.model, effort: profile.effort, guidance: profile.guidance,
 });
+function profileChangesBetween(before: readonly EditableProfile[], after: readonly EditableProfile[]): ProfileChanges {
+  const commands: ProfileChanges = [];
+  for (const profile of after) {
+    const previous = profile.id ? before.find((candidate) => candidate.id === profile.id) : undefined;
+    if (!previous) {
+      commands.push({ action: 'create', profile: {
+        name: profile.name, profile_type: profile.profile_type, executor: profile.executor,
+        provider: profile.provider, model: profile.model, effort: profile.effort, guidance: profile.guidance,
+      } });
+      continue;
+    }
+    const changes: ProfilePatch = {};
+    for (const key of ['name', 'provider', 'model', 'effort', 'guidance'] as const) {
+      if (!same(previous[key], profile[key])) Object.assign(changes, { [key]: profile[key] });
+    }
+    const id = previous.id;
+    if (id && Object.keys(changes).length > 0) commands.push({ action: 'update', id, changes });
+  }
+  for (const previous of before) {
+    if (previous.id && !after.some((profile) => profile.id === previous.id)) commands.push({ action: 'delete', id: previous.id });
+  }
+  return commands;
+}
 function changedPaths(prefix: string, before: unknown, after: unknown, paths: string[] = []): string[] {
   if (same(before, after)) return paths;
   if (before && after && typeof before === 'object' && typeof after === 'object' && !Array.isArray(before) && !Array.isArray(after)) {
@@ -62,8 +86,8 @@ function readPath(source: Record<string, unknown>, path: readonly string[]): unk
   }
   return value;
 }
-const profileKey = (profile: ExecutionProfile): string => JSON.stringify([
-  profile.name, profile.executor, profile.provider, profile.model, profile.effort, profile.guidance,
+const profileKey = (profile: EditableProfile): string => JSON.stringify([
+  profile.name, profile.profile_type, profile.executor, profile.provider, profile.model, profile.effort, profile.guidance,
 ]);
 
 function rebaseDraft(latest: EditorDraft, saved: EditorDraft, submitted?: EditorDraft): EditorDraft {
@@ -93,7 +117,7 @@ function rebaseDraft(latest: EditorDraft, saved: EditorDraft, submitted?: Editor
     }
     const confirmedAdds = latest.profiles.filter((profile) => profile.id && !saved.baselineProfiles.some((previous) => previous.id === profile.id));
     const submittedAdds = submitted?.profiles.filter((profile) => !profile.id || !submitted.baselineProfiles.some((previous) => previous.id === profile.id)) ?? [];
-    const confirmedBySubmittedIndex = new Map<number, ExecutionProfile>();
+    const confirmedBySubmittedIndex = new Map<number, EditableProfile>();
     const unusedConfirmed = new Set(confirmedAdds);
     for (let index = 0; index < submittedAdds.length; index += 1) {
       const submittedProfile = submittedAdds[index];
@@ -147,7 +171,7 @@ function persistEditedFields(identity: string, draft: EditorDraft): void {
       if (!profile.id) return [];
       const previous = before.get(profile.id);
       if (!previous) return [];
-      const fields: Partial<ExecutionProfile> = {};
+      const fields: Partial<EditableProfile> = {};
       for (const key of ['name', 'executor', 'provider', 'model', 'effort', 'guidance'] as const) {
         if (!same(previous[key], profile[key])) Object.assign(fields, { [key]: profile[key] });
       }
@@ -264,7 +288,7 @@ const registrationDraftKey = 'project-registration';
 export function ProjectRegistrationForm({ identity, onRegistered }: { identity: string; onRegistered: (projectId: string) => void }) {
   const [form, setForm] = useState<RegistrationDraft>(() => getDraft<RegistrationDraft>(identity, registrationDraftKey) ?? { name: '', kind: 'local', location: '', baseBranch: 'main', commandId: null });
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<(ProjectDetail & { operationId: string }) | null>(null);
+  const [result, setResult] = useState<(ProjectRegistered) | null>(null);
   const [failure, setFailure] = useState<{ message: string; requestId: string | null; fields: ReadonlyMap<string, string> } | null>(null);
   const locationLabel = form.kind === 'local' ? 'Pasta local existente' : 'URL do repositório GitHub';
   const fieldMessage = (field: string) => failure?.fields.get(field) ?? null;
@@ -279,11 +303,11 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setBusy(true); setFailure(null); setResult(null);
-    const body: ProjectRegistration = { name: form.name.trim(), source: { kind: form.kind, location: form.location.trim() }, baseBranch: form.baseBranch.trim() };
+    const body: ProjectRegistration = { name: form.name.trim(), source: { kind: form.kind, location: form.location.trim() }, base_branch: form.baseBranch.trim() };
     try {
       const stableId = form.commandId ?? crypto.randomUUID();
       updateForm({ commandId: stableId });
-      const saved = await requestJsonWithMetadata<ProjectDetail & { operationId: string }>('/api/v1/projects', {
+      const saved = await requestJsonWithMetadata<ProjectRegistered>('/api/v1/projects', {
         method: 'POST', headers: { 'Idempotency-Key': stableId }, body: JSON.stringify(body),
       });
       setResult(saved.data);
@@ -294,7 +318,7 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
     } finally { setBusy(false); }
   }
 
-  if (result) return <section className="project-form-success" aria-live="polite"><span className="pill">Cadastro confirmado</span><h3>{result.project.name}</h3><p>{result.project.source.kind === 'local' ? 'Origem local registrada. Somente o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.' : 'Origem GitHub registrada.'}</p>{result.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos de execução</b><ul>{result.prerequisites.map((item) => <li key={item.code}>{item.message}</li>)}</ul></div>}<p className="mono muted">Operação {result.operationId}</p><button type="button" className="primary" onClick={() => onRegistered(result.project.id)}>Abrir configuração do projeto</button></section>;
+  if (result) return <section className="project-form-success" aria-live="polite"><span className="pill">Cadastro confirmado</span><h3>{result.project.name}</h3><p>{result.project.source.kind === 'local' ? 'Origem local registrada. Somente o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.' : 'Origem GitHub registrada.'}</p>{result.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos de execução</b><ul>{result.prerequisites.map((item) => <li key={item.code}>{item.message}</li>)}</ul></div>}<p className="mono muted">Operação {result.operation_id}</p><button type="button" className="primary" onClick={() => onRegistered(result.project.id)}>Abrir configuração do projeto</button></section>;
 
   return <form className="feature-form" onSubmit={(event) => void submit(event)} noValidate>
     <p className="muted">Cadastre uma origem existente para consultar e configurar. O cadastro não clona nem inicia trabalho.</p>
@@ -303,7 +327,7 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
       <TextField label="Nome do projeto" value={form.name} onChange={(value) => updateForm({ name: value, commandId: null })} required error={fieldMessage('name')} />
       <SelectField label="Tipo de origem" value={form.kind} onChange={(value) => updateForm({ kind: value as 'local' | 'github', commandId: null })} options={[{ value: 'local', label: 'Pasta local existente' }, { value: 'github', label: 'Repositório GitHub' }]} error={fieldMessage('source.kind')} />
       <TextField label={locationLabel} value={form.location} onChange={(value) => updateForm({ location: value, commandId: null })} required error={fieldMessage('source.location')} help={form.kind === 'local' ? 'A pasta permanece intacta; não é necessário ter remoto configurado.' : 'Use uma URL HTTPS ou SSH sem credenciais embutidas.'} />
-      <TextField label="Branch-base" value={form.baseBranch} onChange={(value) => updateForm({ baseBranch: value, commandId: null })} required error={fieldMessage('baseBranch')} />
+      <TextField label="Branch-base" value={form.baseBranch} onChange={(value) => updateForm({ baseBranch: value, commandId: null })} required error={fieldMessage('base_branch')} />
     </div>
     {form.kind === 'local' && <div className="notice"><b>Origem local</b><p>O projeto continua consultável mesmo sem remoto. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão identificados antes de qualquer execução.</p></div>}
     <div className="form-actions"><button type="submit" className="primary" disabled={busy || !form.name.trim() || !form.location.trim() || !form.baseBranch.trim()}>{busy ? 'Cadastrando…' : 'Cadastrar origem'}</button></div>
@@ -349,9 +373,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     if (savedDraft) persistEditedFields(identity, nextDraft);
   }, [identity, load]);
 
-  const selectedProjectId = draft?.project?.githubProject?.id ?? '';
-  const selectedStatusField = draft?.project?.githubProject?.statusFieldId ?? '';
-  const selectedOwnerId = draft?.project?.githubProject?.ownerId ?? '';
+  const selectedProjectId = draft?.project?.github_project?.id ?? '';
+  const selectedStatusField = draft?.project?.github_project?.status_field_id ?? '';
+  const selectedOwnerId = draft?.project?.github_project?.owner_id ?? '';
   const optionsKey = JSON.stringify([projectId, selectedProjectId, selectedOwnerId, selectedStatusField]);
   optionsKeyRef.current = optionsKey;
   const currentOptions = options?.key === optionsKey ? options.data : null;
@@ -360,10 +384,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     if (!projectId || !draft?.project) return;
     let active = true;
     const controller = new AbortController();
-    const params = new URLSearchParams();
-    if (selectedProjectId) params.set('githubProjectId', selectedProjectId);
-    if (selectedOwnerId) params.set('ownerId', selectedOwnerId);
-    if (selectedStatusField) params.set('statusFieldId', selectedStatusField);
+    const params = configurationOptionsParams({ github_project_id: selectedProjectId, owner_id: selectedOwnerId, status_field_id: selectedStatusField });
     requestJsonWithMetadata<ConfigurationOptions>(`/api/v1/projects/${encodeURIComponent(projectId)}/configuration-options${params.size ? `?${params.toString()}` : ''}`, { signal: controller.signal }).then(({ data }) => {
       if (active) { setOptions({ key: optionsKey, data }); setOptionsError(null); }
     }).catch((error: unknown) => {
@@ -374,8 +395,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
 
   const profiles = draft?.profiles ?? [];
   const settings = load.status === 'ready' && load.identity === identity ? load.view.settings : null;
-  const accountLabel = settings?.accountId ?? 'Conta indisponível';
-  const hostLabel = settings?.designatedHost ?? 'Host não designado';
+  const accountLabel = settings?.account_id ?? 'Conta indisponível';
 
   function updateDraft(update: (current: EditorDraft) => EditorDraft): void {
     setDraft((current) => {
@@ -434,13 +454,10 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   }
 
   async function loadMoreOptions(): Promise<void> {
-    if (!projectId || !currentOptions?.projects.nextCursor) return;
+    if (!projectId || !currentOptions?.projects.next_cursor) return;
     const expectedIdentity = identity;
     const expectedOptionsKey = optionsKey;
-    const params = new URLSearchParams({ cursor: currentOptions.projects.nextCursor });
-    if (selectedProjectId) params.set('githubProjectId', selectedProjectId);
-    if (selectedOwnerId) params.set('ownerId', selectedOwnerId);
-    if (selectedStatusField) params.set('statusFieldId', selectedStatusField);
+    const params = configurationOptionsParams({ github_project_id: selectedProjectId, owner_id: selectedOwnerId, status_field_id: selectedStatusField }, currentOptions.projects.next_cursor);
     try {
       const { data } = await requestJsonWithMetadata<ConfigurationOptions>(`/api/v1/projects/${encodeURIComponent(projectId)}/configuration-options?${params.toString()}`);
       if (identityRef.current !== expectedIdentity || optionsKeyRef.current !== expectedOptionsKey) return;
@@ -457,13 +474,13 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     const baseline = load.view;
     const baseGlobal: GlobalConfiguration = { ...baseline.settings, profiles: baseline.profiles };
     const globalChanges: Partial<GlobalConfiguration> = {};
-    for (const key of ['designatedHost', 'projectsRoot', 'dataRoot', 'maestriSettings', 'automationEnabled', 'timeDefaults', 'costDefaults', 'artifactPolicy'] as const) {
+    for (const key of ['projects_root', 'automation_enabled', 'time_defaults', 'artifact_policy'] as const) {
       if (!same(baseGlobal[key], draft.global[key])) Object.assign(globalChanges, { [key]: draft.global[key] });
     }
     const profilesChanged = !same(baseline.profiles.map(editableProfile), draft.profiles);
     const projectChanges: Partial<ProjectConfiguration> = {};
     if (projectId && isConfigurationView(baseline) && draft.project) {
-      for (const key of ['source', 'baseBranch', 'githubProject', 'implementerProfileId', 'reviewerProfileId', 'checks', 'correctionLimit', 'defaultDeliveryMode', 'automationEnabled', 'queueOrder', 'guidance'] as const) {
+      for (const key of ['source', 'base_branch', 'github_project', 'implementer_profile_id', 'reviewer_profile_id', 'checks', 'correction_limit', 'default_delivery_mode', 'automation_enabled', 'queue_order', 'guidance'] as const) {
         if (!same(baseline.configuration[key], draft.project[key])) Object.assign(projectChanges, { [key]: draft.project[key] });
       }
     }
@@ -472,9 +489,8 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     if (!hasGlobalChanges && !profilesChanged && !hasProjectChanges) { setSaveState({ status: 'idle' }); return; }
 
     setSaveState({ status: 'saving' });
-    const payload = projectId
-      ? { projectChanges, ...(hasGlobalChanges ? { globalChanges } : {}), ...(profilesChanged ? { profileChanges: draft.profiles } : {}) }
-      : { changes: globalChanges, ...(profilesChanged ? { profileChanges: draft.profiles } : {}) };
+    const profileCommands = profilesChanged ? profileChangesBetween(baseline.profiles.map(editableProfile), draft.profiles) : undefined;
+    const payload = configurationCommand(projectId ? projectChanges : null, globalChanges, profileCommands);
     const submittedDraft = structuredClone(draft) as EditorDraft;
     const signature = JSON.stringify([load.etag, payload]);
     const pendingCommand = draft.pendingCommand?.signature === signature ? draft.pendingCommand : { signature, id: crypto.randomUUID() };
@@ -495,12 +511,12 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
         const response = await requestJsonWithMetadata<SavedConfigurationView>(`/api/v1/projects/${encodeURIComponent(projectId)}/configuration`, {
           method: 'PUT', headers, body: JSON.stringify(payload),
         });
-        saved = response.data; etag = response.etag; operationId = response.data.operationId; receiptConfirmed = Boolean(response.data.receipt);
+        saved = response.data; etag = response.etag; operationId = response.data.operation_id; receiptConfirmed = Boolean(response.data.receipt);
       } else {
         const response = await requestJsonWithMetadata<SavedSettingsView>('/api/v1/settings', {
           method: 'PUT', headers, body: JSON.stringify(payload),
         });
-        saved = response.data; etag = response.etag; operationId = response.data.operationId; receiptConfirmed = Boolean(response.data.receipt);
+        saved = response.data; etag = response.etag; operationId = response.data.operation_id; receiptConfirmed = Boolean(response.data.receipt);
       }
       if (!etag || !receiptConfirmed) throw new Error('O commit não retornou ETag e recibo durável.');
       if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
@@ -538,57 +554,54 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
 
   return <div className="configuration-editor">
     {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p>{refreshError.requestId && <small className="mono">Solicitação {refreshError.requestId}</small>}<div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
-    <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><p><b>Host observado</b> · Indisponível nesta superfície</p><p><b>Host executor designado</b> · {hostLabel}</p><a href={projectId ? `#principal/registros?projectId=${encodeURIComponent(projectId)}` : '#principal/registros'}>Abrir registros e diagnóstico deste contexto</a></div><p className="muted">A conta vinculada é um ID persistido do controlador; conectividade do host não é fornecida por esta API. Nenhum campo de credencial ou Wire é solicitado.</p></div>
+    <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><a href={projectId ? `#principal/registros?projectId=${encodeURIComponent(projectId)}` : '#principal/registros'}>Abrir registros e diagnóstico deste contexto</a></div><p className="muted">Os dados operacionais ficam em var/factory na raiz da instalação. A execução usa o contexto Maestri herdado neste computador. Nenhum campo de credencial ou Wire é solicitado.</p></div>
     {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Revisão global {conflictView.settings.revision}{'configuration' in conflictView ? ` · revisão do projeto ${conflictView.configuration.revision}` : ''}. Seu rascunho continua aberto. Os valores abaixo vêm da revisão atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
-    <section className="card form-section"><div className="panel-title"><span className="eyebrow">Host e operação</span><h2>Configuração global</h2></div><div className="form-grid">
-      <TextField label="Host executor designado" value={draft.global.designatedHost ?? ''} onChange={(value) => updateGlobal('designatedHost', value || null)} help="Identificador persistido; a presença do valor não prova conectividade." />
-      <TextField label="Raiz dos projetos" value={draft.global.projectsRoot ?? ''} onChange={(value) => updateGlobal('projectsRoot', value || null)} help="Diretório local validado pelo controlador ao salvar." />
-      <TextField label="Diretório de dados da instalação" value={draft.global.dataRoot} onChange={(value) => updateGlobal('dataRoot', value)} help="Alterar este valor não move o banco que já está aberto." />
-      <TextField label="Workspace Maestri ID" value={draft.global.maestriSettings.workspaceId ?? ''} onChange={(value) => updateGlobal('maestriSettings', { ...draft.global.maestriSettings, workspaceId: value || null })} help="Referência não sensível. Pareamento e credenciais ficam fora desta configuração." />
-      <NumberField label="Intervalo de consulta" value={draft.global.timeDefaults.pollingIntervalMs} min={1} onChange={(value) => updateGlobal('timeDefaults', { ...draft.global.timeDefaults, pollingIntervalMs: value })} unit="ms" />
-      <NumberField label="Tempo ativo por passagem" value={draft.global.timeDefaults.passageActiveTimeMs} min={1} onChange={(value) => updateGlobal('timeDefaults', { ...draft.global.timeDefaults, passageActiveTimeMs: value })} unit="ms" />
-      <ConfiguredLimitField label="TTL de pergunta" value={draft.global.timeDefaults.questionTtl} defaultUnit="ms" onChange={(value) => updateGlobal('timeDefaults', { ...draft.global.timeDefaults, questionTtl: value })} />
-      <ConfiguredLimitField label="Limite de custo" value={draft.global.costDefaults.limit} defaultUnit="USD" onChange={(value) => updateGlobal('costDefaults', { ...draft.global.costDefaults, limit: value })} />
-      <Checkbox label="Automação global habilitada" checked={draft.global.automationEnabled} onChange={(value) => updateGlobal('automationEnabled', value)} />
+    <section className="card form-section"><div className="panel-title"><span className="eyebrow">Operação local</span><h2>Configuração global</h2></div><div className="form-grid">
+      <TextField label="Raiz dos projetos" value={draft.global.projects_root ?? ''} onChange={(value) => updateGlobal('projects_root', value || null)} help="Diretório local validado pelo controlador ao salvar." />
+      <NumberField label="Intervalo de consulta" value={draft.global.time_defaults.polling_interval_ms} min={1} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, polling_interval_ms: value })} unit="ms" />
+      <NumberField label="Tempo ativo por passagem" value={draft.global.time_defaults.passage_active_time_ms} min={1} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, passage_active_time_ms: value })} unit="ms" />
+      <ConfiguredLimitField label="TTL de pergunta" value={draft.global.time_defaults.question_ttl} defaultUnit="ms" onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, question_ttl: value })} />
+      <Checkbox label="Automação global habilitada" checked={draft.global.automation_enabled} onChange={(value) => updateGlobal('automation_enabled', value)} />
       <p className="muted field-full">Política de artefatos: exclusão automática desativada pelo contrato. Os dados atuais permanecem nesta revisão até serem salvos.</p>
     </div></section>
 
-    <section className="card form-section"><div className="panel-title line"><div><span className="eyebrow">Execução configurável</span><h2>Perfis</h2></div><button type="button" onClick={() => updateDraft((current) => ({ ...current, profiles: [...current.profiles, { name: '', executor: 'maestri-omp', provider: '', model: '', effort: '', guidance: '' }] }))} disabled={profiles.length >= 100}>Adicionar perfil</button></div>
+    <section className="card form-section"><div className="panel-title line"><div><span className="eyebrow">Execução configurável</span><h2>Perfis</h2></div><button type="button" onClick={() => updateDraft((current) => ({ ...current, profiles: [...current.profiles, { name: '', profile_type: 'implementer', executor: 'maestri-omp', provider: '', model: '', effort: null, guidance: '' }] }))} disabled={profiles.length >= 100}>Adicionar perfil</button></div>
       {profiles.length === 0 && <p className="empty">Nenhum perfil configurado.</p>}
       {profiles.map((profile, index) => <fieldset className="profile-card" key={profile.id ?? `new-${index}`}><legend>{profile.name || `Novo perfil ${index + 1}`}</legend>{profile.id && <small className="mono muted">ID {profile.id}</small>}<div className="form-grid">
         <TextField label={`Nome do perfil ${index + 1}`} value={profile.name} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, name: value } : item) }))} />
+        <SelectField label={`Tipo do perfil ${index + 1}`} value={profile.profile_type} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, profile_type: value as ProfileType } : item) }))} disabled={Boolean(profile.id)} options={[{ value: 'implementer', label: 'Implementador' }, { value: 'reviewer', label: 'Revisor' }]} />
         <SelectField label={`Executor do perfil ${index + 1}`} value={profile.executor} onChange={() => undefined} disabled help="Maestri / OMP é o executor da primeira entrega." options={[{ value: 'maestri-omp', label: 'Maestri / OMP' }]} />
         <TextField label={`Provider do perfil ${index + 1}`} value={profile.provider} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, provider: value } : item) }))} />
         <TextField label={`Modelo do perfil ${index + 1}`} value={profile.model} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, model: value } : item) }))} />
-        <TextField label={`Esforço do perfil ${index + 1}`} value={profile.effort} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, effort: value } : item) }))} />
+        <TextField label={`Esforço do perfil ${index + 1}`} value={profile.effort ?? ''} onChange={(value) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, effort: value || null } : item) }))} />
         <label className="form-field field-full" htmlFor={`profile-guidance-${index}`}>Orientações do perfil<textarea id={`profile-guidance-${index}`} value={profile.guidance} onChange={(event) => updateDraft((current) => ({ ...current, profiles: current.profiles.map((item, itemIndex) => itemIndex === index ? { ...item, guidance: event.currentTarget.value } : item) }))} /></label>
-      </div><button type="button" className="danger-button" onClick={() => updateDraft((current) => ({ ...current, profiles: current.profiles.filter((_, itemIndex) => itemIndex !== index) }))}>Remover perfil do conjunto</button></fieldset>)}
+      </div></fieldset>)}
     </section>
 
     {projectId && draft.project && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Projeto selecionado</span><h2>Configuração do projeto</h2></div>
       <div className="form-grid">
         <SelectField label="Tipo da origem" value={draft.project.source.kind} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: value as 'local' | 'github', location: current.source.location } }))} options={[{ value: 'local', label: 'Local' }, { value: 'github', label: 'GitHub' }]} />
         <TextField label="Localização da origem" value={draft.project.source.location} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: current.source.kind, location: value } }))} />
-        <TextField label="Branch-base" value={draft.project.baseBranch} onChange={(value) => updateProject((current) => ({ ...current, baseBranch: value }))} />
-        <SelectField label="Perfil implementador" value={draft.project.implementerProfileId ?? ''} onChange={(value) => updateProject((current) => ({ ...current, implementerProfileId: value || null }))} options={profiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
-        <SelectField label="Perfil revisor" value={draft.project.reviewerProfileId ?? ''} onChange={(value) => updateProject((current) => ({ ...current, reviewerProfileId: value || null }))} options={profiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
-        <NumberField label="Limite de correções" value={draft.project.correctionLimit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correctionLimit: Math.max(0, Math.min(5, value)) }))} />
-        <SelectField label="Modo de entrega padrão" value={draft.project.defaultDeliveryMode} onChange={(value) => updateProject((current) => ({ ...current, defaultDeliveryMode: value as ProjectConfiguration['defaultDeliveryMode'] }))} options={[{ value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit' }, { value: 'pr', label: 'Pull request' }]} />
-        <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automationEnabled} onChange={(value) => updateProject((current) => ({ ...current, automationEnabled: value }))} />
-        <SelectField label="Ordem de prioridade" value={draft.project.queueOrder.priorityDirection} onChange={(value) => updateProject((current) => ({ ...current, queueOrder: { ...current.queueOrder, priorityDirection: value as 'asc' | 'desc' } }))} options={[{ value: 'asc', label: 'Crescente' }, { value: 'desc', label: 'Decrescente' }]} />
-        <TextField label="Campo de prioridade (ID)" value={draft.project.queueOrder.priorityFieldId ?? ''} onChange={(value) => updateProject((current) => ({ ...current, queueOrder: { ...current.queueOrder, priorityFieldId: value || null } }))} />
-        <Checkbox label="Usar posição do quadro" checked={draft.project.queueOrder.useBoardPosition} onChange={(value) => updateProject((current) => ({ ...current, queueOrder: { ...current.queueOrder, useBoardPosition: value } }))} />
+        <TextField label="Branch-base" value={draft.project.base_branch} onChange={(value) => updateProject((current) => ({ ...current, base_branch: value }))} />
+        <SelectField label="Perfil implementador" value={draft.project.implementer_profile_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, implementer_profile_id: value || null }))} options={profiles.filter((profile) => profile.profile_type === 'implementer').map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
+        <SelectField label="Perfil revisor" value={draft.project.reviewer_profile_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, reviewer_profile_id: value || null }))} options={profiles.filter((profile) => profile.profile_type === 'reviewer').map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
+        <NumberField label="Limite de correções" value={draft.project.correction_limit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correction_limit: Math.max(0, Math.min(5, value)) }))} />
+        <SelectField label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit' }, { value: 'pr', label: 'Pull request' }]} />
+        <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
+        <SelectField label="Ordem de prioridade" value={draft.project.queue_order.priority_direction} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, priority_direction: value as 'asc' | 'desc' } }))} options={[{ value: 'asc', label: 'Crescente' }, { value: 'desc', label: 'Decrescente' }]} />
+        <TextField label="Campo de prioridade (ID)" value={draft.project.queue_order.priority_field_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, priority_field_id: value || null } }))} />
+        <Checkbox label="Usar posição do quadro" checked={draft.project.queue_order.use_board_position} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, use_board_position: value } }))} />
         <label className="form-field field-full" htmlFor="project-guidance">Orientações do projeto<textarea id="project-guidance" value={draft.project.guidance} onChange={(event) => updateProject((current) => ({ ...current, guidance: event.currentTarget.value }))} /></label>
       </div>
       <ProjectMappingEditor configuration={draft.project} options={currentOptions} optionsError={currentOptionsError} onChange={updateProject} onLoadMore={() => void loadMoreOptions()} />
-      <div className="checks-editor"><div className="line panel-title"><div><span className="eyebrow">Validação</span><h3>Checks</h3></div><button type="button" onClick={() => updateProject((current) => ({ ...current, checks: [...current.checks, { id: crypto.randomUUID(), command: '', cwdRelative: '.' }] }))} disabled={draft.project.checks.length >= 50}>Adicionar check</button></div>
-        {draft.project.checks.map((check, index) => <fieldset className="check-card" key={check.id}><legend>Check {index + 1}</legend><div className="form-grid"><TextField label={`Comando do check ${index + 1}`} value={check.command} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, command: value } : item) }))} /><TextField label={`cwd relativo do check ${index + 1}`} value={check.cwdRelative} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, cwdRelative: value } : item) }))} help="Deve permanecer relativo ao ambiente da tentativa." /><NumberField label={`Timeout do check ${index + 1}`} value={check.timeoutMs ?? 60000} min={1} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, timeoutMs: value } : item) }))} unit="ms" /></div><button type="button" className="danger-button" onClick={() => updateProject((current) => ({ ...current, checks: current.checks.filter((item) => item.id !== check.id) }))}>Remover check</button></fieldset>)}
+      <div className="checks-editor"><div className="line panel-title"><div><span className="eyebrow">Validação</span><h3>Checks</h3></div><button type="button" onClick={() => updateProject((current) => ({ ...current, checks: [...current.checks, { id: crypto.randomUUID(), command: '', cwd_relative: '.' }] }))} disabled={draft.project.checks.length >= 50}>Adicionar check</button></div>
+        {draft.project.checks.map((check, index) => <fieldset className="check-card" key={check.id}><legend>Check {index + 1}</legend><div className="form-grid"><TextField label={`Comando do check ${index + 1}`} value={check.command} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, command: value } : item) }))} /><TextField label={`cwd relativo do check ${index + 1}`} value={check.cwd_relative} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, cwd_relative: value } : item) }))} help="Deve permanecer relativo ao ambiente da tentativa." /><NumberField label={`Timeout do check ${index + 1}`} value={check.timeout_ms ?? 60000} min={1} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, timeout_ms: value } : item) }))} unit="ms" /></div><button type="button" className="danger-button" onClick={() => updateProject((current) => ({ ...current, checks: current.checks.filter((item) => item.id !== check.id) }))}>Remover check</button></fieldset>)}
       </div>
       {draft.project.source.kind === 'local' && <div className="notice"><b>Origem local</b><p>Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.</p></div>}
     </section>}
 
     <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">{saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <span className="pill">{saveState.message}{saveState.operationId && ` · Operação ${saveState.operationId}`}</span>}{saveState.status === 'error' && <span className="error" role="alert">Erro: {saveState.message}{saveState.requestId && ` · Solicitação ${saveState.requestId}`}</span>}{saveState.status === 'conflict' && <span className="conflict-message" role="alert">Conflito 412: {saveState.message}{saveState.requestId && ` · Solicitação ${saveState.requestId}`}</span>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}</div><button type="button" className="primary" disabled={saveState.status === 'saving'} onClick={() => void save()}>Salvar configuração</button></section>
-    <div className="current-data-note"><small>ETag atual: <span className="mono">{load.etag}</span>. A conta vinculada é {accountLabel}; o host designado é {hostLabel}.</small></div>
+    <div className="current-data-note"><small>ETag atual: <span className="mono">{load.etag}</span>. A conta vinculada é {accountLabel}.</small></div>
   </div>;
 }
 
@@ -605,38 +618,38 @@ function Checkbox({ label, checked, onChange }: { label: string; checked: boolea
 function ProjectMappingEditor({ configuration, options, optionsError, onChange, onLoadMore }: {
   configuration: ProjectConfiguration; options: ConfigurationOptions | null; optionsError: string | null; onChange: (update: (current: ProjectConfiguration) => ProjectConfiguration) => void; onLoadMore: () => void;
 }) {
-  const mapping = configuration.githubProject;
+  const mapping = configuration.github_project;
   const chosenProject = mapping?.id ?? '';
-  const chosenField = mapping?.statusFieldId ?? '';
+  const chosenField = mapping?.status_field_id ?? '';
   const selectedProject = options?.projects.items.find((project) => project.id === chosenProject);
   const staleProject = Boolean(chosenProject && !selectedProject);
-  const selectedField = options?.statusFields.find((field) => field.id === chosenField);
+  const selectedField = options?.status_fields.find((field) => field.id === chosenField);
   const staleField = Boolean(chosenField && !selectedField);
   const optionNames = useMemo(() => new Map((selectedField?.options ?? []).map((option) => [option.id, option.name])), [selectedField]);
-  const statusRoles = ['ready', 'inProgress', 'inReview', 'delivered'] as const;
+  const statusRoles = ['ready', 'in_progress', 'in_review', 'delivered'] as const;
 
-  function updateMapping(next: NonNullable<ProjectConfiguration['githubProject']> | null): void { onChange((current) => ({ ...current, githubProject: next })); }
+  function updateMapping(next: NonNullable<ProjectConfiguration['github_project']> | null): void { onChange((current) => ({ ...current, github_project: next })); }
   return <fieldset className="mapping-editor"><legend>Mapeamento GitHub Project e Status</legend>
     <p className="muted">Seleções persistidas usam IDs. Ao trocar Project, os campos e opções dependentes são invalidados; ao trocar Status, as quatro opções são limpas.</p>
     <div className="form-grid">
       <SelectField label="GitHub Project" value={chosenProject} onChange={(id) => {
         if (!id) { updateMapping(null); return; }
         const project = options?.projects.items.find((item) => item.id === id);
-        updateMapping({ id, ownerId: project?.owner.id ?? '', statusFieldId: '', statusOptionIds: { ready: '', inProgress: '', inReview: '', delivered: '' } });
+        updateMapping({ id, owner_id: project?.owner.id ?? '', status_field_id: '', status_option_ids: { ready: '', in_progress: '', in_review: '', delivered: '' } });
       }} options={(options?.projects.items ?? []).map((project) => ({ value: project.id, label: `${project.title} · ${project.owner.login}${project.closed ? ' · encerrado' : ''}` }))} disabled={options?.completeness === 'unavailable'} />
       {staleProject && <div className="notice field-full"><b>Project salvo inacessível</b><p>ID {chosenProject} não aparece nas opções atuais. {options?.diagnostics.map((item) => `${item.code}: ${item.message} ${item.recovery}`).join(' · ') || 'O catálogo pode estar parcial ou indisponível.'}</p></div>}
-      {mapping && <><div className="field-full"><small className="muted">Owner ID observado: <span className="mono">{mapping.ownerId || 'não confirmado'}</span></small></div>
-        <SelectField label="Campo Status" value={chosenField} onChange={(id) => updateMapping({ ...mapping, statusFieldId: id, statusOptionIds: { ready: '', inProgress: '', inReview: '', delivered: '' } })} options={(options?.statusFields ?? []).map((field) => ({ value: field.id, label: field.name }))} disabled={!chosenProject || !options?.statusFields.length} />
+      {mapping && <><div className="field-full"><small className="muted">Owner ID observado: <span className="mono">{mapping.owner_id || 'não confirmado'}</span></small></div>
+        <SelectField label="Campo Status" value={chosenField} onChange={(id) => updateMapping({ ...mapping, status_field_id: id, status_option_ids: { ready: '', in_progress: '', in_review: '', delivered: '' } })} options={(options?.status_fields ?? []).map((field) => ({ value: field.id, label: field.name }))} disabled={!chosenProject || !options?.status_fields.length} />
         {staleField && <div className="notice field-full"><b>Campo Status salvo inacessível</b><p>ID {chosenField} não aparece entre os campos consultáveis. {options?.diagnostics.map((item) => `${item.code}: ${item.message} ${item.recovery}`).join(' · ') || 'O mapeamento permanece visível para correção.'}</p></div>}
         {statusRoles.map((role) => {
-          const id = mapping.statusOptionIds[role];
-          const roleLabel = ({ ready: 'Ready', inProgress: 'Em andamento', inReview: 'Em revisão', delivered: 'Entregue' } as const)[role];
-          return <SelectField key={role} label={`Status ${roleLabel}`} value={id} onChange={(optionId) => updateMapping({ ...mapping, statusOptionIds: { ...mapping.statusOptionIds, [role]: optionId } })} options={(selectedField?.options ?? []).map((option) => ({ value: option.id, label: option.name }))} disabled={!selectedField} {...(id && !optionNames.has(id) ? { help: `ID salvo ${id} inacessível; consulte o diagnóstico e selecione outro valor se necessário.` } : {})} />;
+          const id = mapping.status_option_ids[role];
+          const roleLabel = ({ ready: 'Ready', in_progress: 'Em andamento', in_review: 'Em revisão', delivered: 'Entregue' } as const)[role];
+          return <SelectField key={role} label={`Status ${roleLabel}`} value={id} onChange={(optionId) => updateMapping({ ...mapping, status_option_ids: { ...mapping.status_option_ids, [role]: optionId } })} options={(selectedField?.options ?? []).map((option) => ({ value: option.id, label: option.name }))} disabled={!selectedField} {...(id && !optionNames.has(id) ? { help: `ID salvo ${id} inacessível; consulte o diagnóstico e selecione outro valor se necessário.` } : {})} />;
         })}
       </>}
     </div>
     {optionsError && <div className="read-state" role="alert"><p>{optionsError}</p></div>}
-    {options && options.completeness !== 'complete' && <div className="notice"><b>{options.completeness === 'partial' ? 'Opções incompletas' : 'Conta/host indisponível'}</b>{options.diagnostics.length ? <ul>{options.diagnostics.map((item, index) => <li key={`${item.code}-${index}`}><b>{item.code}</b> · {item.message} {item.recovery}</li>)}</ul> : <p>As opções atuais não foram confirmadas.</p>}{options.retryAtMs !== null && <small>Nova consulta permitida após {new Date(options.retryAtMs).toLocaleString('pt-BR')}</small>}</div>}
-    {options?.projects.hasMore && <button type="button" onClick={onLoadMore}>Carregar mais Projects</button>}
+    {options && options.completeness !== 'complete' && <div className="notice"><b>{options.completeness === 'partial' ? 'Opções incompletas' : 'Conta/host indisponível'}</b>{options.diagnostics.length ? <ul>{options.diagnostics.map((item, index) => <li key={`${item.code}-${index}`}><b>{item.code}</b> · {item.message} {item.recovery}</li>)}</ul> : <p>As opções atuais não foram confirmadas.</p>}{options.retry_at_ms !== null && <small>Nova consulta permitida após {new Date(options.retry_at_ms).toLocaleString('pt-BR')}</small>}</div>}
+    {options?.projects.has_more && <button type="button" onClick={onLoadMore}>Carregar mais Projects</button>}
   </fieldset>;
 }

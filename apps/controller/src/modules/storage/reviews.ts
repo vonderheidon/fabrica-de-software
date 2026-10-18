@@ -114,7 +114,7 @@ export function beginCorrection(db: Database.Database, deliveryId: string): Corr
     const review = readReview(db, deliveryId); const d = readDelivery(db, deliveryId); const a = readAttempt(db, d.attemptId);
     if (!review || review.state !== 'rejected' || a.result || a.suspension || a.deliveryId !== d.id || a.phase !== 'reviewing') return null;
     const capture = readCapture(db, a.id);
-    if (d.round >= 1 + capture.configuration.configuration.correctionLimit) {
+    if (d.round >= 1 + capture.configuration.configuration.correction_limit) {
       db.prepare("UPDATE attempts SET phase='finished',result='rejected',suspension=NULL,revision=revision+1,updated_at_ms=? WHERE id=?").run(Date.now(), a.id);
       attemptEvent(db, a.id, 'attempt.rejected'); return null;
     }

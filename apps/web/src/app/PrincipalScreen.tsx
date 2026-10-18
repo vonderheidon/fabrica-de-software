@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ProjectPage, SettingsView } from '#contracts';
+import { ProjectPage, type SettingsView } from '#contracts';
+import { Value } from '@sinclair/typebox/value';
 import { requestJson, requestJsonWithMetadata, HttpError } from '../api/http.js';
 import { buildHash, routeIdentity, type PrincipalTab, type HashRoute } from './hash-route.js';
 import { draftIdentity, getDraft, setDraft } from './drafts.js';
@@ -7,7 +8,7 @@ import { useProjects } from '../features/projects/useProjects.js';
 import { ProjectConfigurationForm } from '../features/projects/ProjectForm.js';
 import { QueuePanel } from '../features/queue/QueuePanel.js';
 import { useQueue } from '../features/queue/useQueue.js';
-import type { OperationView, QueueSaved } from '#contracts';
+import type { OperationView, HttpQueueSaved as QueueSaved } from '#contracts';
 import { readUncertainOperations, recordUncertainOperation, resolveUncertainOperation } from '../api/uncertain-operations.js';
 import { AttemptListPanel } from '../features/attempts/AttemptListPanel.js';
 import { DashboardPanel } from '../features/operations/DashboardPanel.js';
@@ -167,7 +168,7 @@ export function PrincipalScreen({ route, onOpenDialog, onActionError }: { route:
       {projectsCatalog.error && <section className="card read-state" role="alert"><h2>Falha ao consultar projetos</h2><p>{projectsCatalog.error.message}</p>{projectsCatalog.error.requestId && <p className="mono muted">Solicitação {projectsCatalog.error.requestId}</p>}<button type="button" onClick={projectsCatalog.retry}>Tentar novamente</button></section>}
       {!projectsCatalog.error && projectsCatalog.loading && !projectsCatalog.page && <section className="card read-state" role="status"><p>Consultando catálogo de projetos…</p></section>}
       {!projectsCatalog.error && projectsCatalog.page && projectsCatalog.page.items.length === 0 && <section className="card empty" role="status"><h2>{search.trim() ? 'Nenhuma correspondência' : 'Nenhum projeto cadastrado'}</h2><p>{search.trim() ? 'Altere o filtro ou cadastre uma origem.' : 'Cadastre uma origem para configurar o projeto.'}</p></section>}
-      {projectsCatalog.page && projectsCatalog.page.items.length > 0 && <section className="card"><div className="table-wrap"><table><thead><tr><th>Projeto / origem</th><th>Branch-base</th><th>Revisão</th><th>Pré-requisitos</th><th>Ação</th></tr></thead><tbody>{projectsCatalog.page.items.map((project) => <tr key={project.id}><td><b>{project.name}</b><br /><small className="mono">{project.source.location}</small><br /><small>{project.source.kind === 'local' ? 'Origem local' : 'GitHub'}</small></td><td className="mono">{project.baseBranch}</td><td>{project.revision}</td><td>{project.prerequisites.length ? <ul className="compact-list">{project.prerequisites.map((item) => <li key={item.code}>{item.message}</li>)}</ul> : 'Sem impedimentos registrados'}</td><td><div className="row"><a className="button-link" href={`#principal/configuracao?projectId=${encodeURIComponent(project.id)}`}>Selecionar projeto</a><button type="button" onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: project.id })}>Preparar</button></div></td></tr>)}</tbody></table></div>{projectsCatalog.page.hasMore && <div className="pagination-actions"><button type="button" onClick={() => void projectsCatalog.loadMore()} disabled={projectsCatalog.loading}>{projectsCatalog.loading ? 'Carregando…' : 'Carregar próxima página'}</button></div>}</section>}
+      {projectsCatalog.page && projectsCatalog.page.items.length > 0 && <section className="card"><div className="table-wrap"><table><thead><tr><th>Projeto / origem</th><th>Branch-base</th><th>Revisão</th><th>Pré-requisitos</th><th>Ação</th></tr></thead><tbody>{projectsCatalog.page.items.map((project) => <tr key={project.id}><td><b>{project.name}</b><br /><small className="mono">{project.source.location}</small><br /><small>{project.source.kind === 'local' ? 'Origem local' : 'GitHub'}</small></td><td className="mono">{project.base_branch}</td><td>{project.revision}</td><td>{project.prerequisites.length ? <ul className="compact-list">{project.prerequisites.map((item) => <li key={item.code}>{item.message}</li>)}</ul> : 'Sem impedimentos registrados'}</td><td><div className="row"><a className="button-link" href={`#principal/configuracao?projectId=${encodeURIComponent(project.id)}`}>Selecionar projeto</a><button type="button" onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: project.id })}>Preparar</button></div></td></tr>)}</tbody></table></div>{projectsCatalog.page.has_more && <div className="pagination-actions"><button type="button" onClick={() => void projectsCatalog.loadMore()} disabled={projectsCatalog.loading}>{projectsCatalog.loading ? 'Carregando…' : 'Carregar próxima página'}</button></div>}</section>}
     </>}
     {route.tab === 'dashboard' && <DashboardPanel projects={dashboardProjects} projectsLoad={{ loading: state.status === 'loading', refreshing: state.status === 'loading' && Boolean(dashboardProjects), error: state.status === 'read-error' ? { message: state.message, requestId: state.requestId } : null, stale: Boolean(dashboardProjects) && (state.status === 'loading' || state.status === 'read-error'), empty: state.status !== 'loading' && state.status !== 'read-error' && isProjectPage(state.value) && state.value.items.length === 0 }} onRefreshProjects={() => setReloadKey((value) => value + 1)} onPrepare={(projectId, trigger) => onOpenDialog('preparation', trigger, { projectId })} onAttempt={(attemptId, projectId) => {
       const params = new URLSearchParams(route.params);
@@ -186,7 +187,7 @@ export function PrincipalScreen({ route, onOpenDialog, onActionError }: { route:
         const projectId = event.currentTarget.value;
         if (projectId) params.set('projectId', projectId); else params.delete('projectId');
         window.location.hash = `#principal/configuracao${params.size ? `?${params.toString()}` : ''}`;
-      }}><option value="">Configuração global</option>{selectedProjectId && !selectedProjectIsOnPage && <option value={selectedProjectId}>Projeto selecionado · {selectedProjectId}</option>}{projectsCatalog.page?.items.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><a href="#principal/projetos">Abrir catálogo de projetos</a>{projectsCatalog.page?.hasMore && <small>Há mais projetos no catálogo.</small>}</div>
+      }}><option value="">Configuração global</option>{selectedProjectId && !selectedProjectIsOnPage && <option value={selectedProjectId}>Projeto selecionado · {selectedProjectId}</option>}{projectsCatalog.page?.items.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><a href="#principal/projetos">Abrir catálogo de projetos</a>{projectsCatalog.page?.has_more && <small>Há mais projetos no catálogo.</small>}</div>
       <ProjectConfigurationForm projectId={route.params.get('projectId')} onSaveIssue={(issue, identity) => setSaveIssues((current) => issue ? [...current.filter((item) => item.identity !== issue.identity), issue] : current.filter((item) => item.identity !== identity))} />
     </>}
     {route.tab === 'fila' && <QueuePanel load={queue.load} pageNotice={queue.pageNotice} pauseNotice={pauseNotice} pauseOperationId={pauseOperationId} pauseUncertain={pauseUncertain} onConsultPause={() => void consultPause()} onRefresh={queue.resetPages} onNextPage={queue.nextPage} onPreviousPage={queue.previousPage} canGoBack={queue.canGoBack} pausing={pausing}
@@ -200,7 +201,7 @@ export function PrincipalScreen({ route, onOpenDialog, onActionError }: { route:
         setPauseNotice('');
         void requestJsonWithMetadata<QueueSaved>('/api/v1/queue', { method: 'PUT', headers: { 'If-Match': command.etag, 'Idempotency-Key': command.operationId }, body: JSON.stringify({ enabled: false, scope: command.scope }) })
           .then(({ data }) => {
-            if (data.operationId !== command.operationId || !data.receipt) throw new Error('O recibo de pausa não corresponde à operação solicitada.');
+            if (data.operation_id !== command.operationId || !data.receipt) throw new Error('O recibo de pausa não corresponde à operação solicitada.');
             resolveUncertainOperation(command.operationId);
             pauseCommand.current = null;
             setPauseOperationId(null);
@@ -234,4 +235,4 @@ export function PrincipalScreen({ route, onOpenDialog, onActionError }: { route:
   </>;
 }
 
-function isProjectPage(value: ReadData): value is ProjectPage { return value !== null && typeof value === 'object' && 'items' in value && 'nextCursor' in value && 'eventCursor' in value; }
+export function isProjectPage(value: unknown): value is ProjectPage { return Value.Check(ProjectPage, value); }

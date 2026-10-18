@@ -36,9 +36,8 @@ export const PassageMeasurements = Type.Object({
 export type PassageMeasurements = Static<typeof PassageMeasurements>;
 export const AttemptMeasurements = Type.Object({
   activeTime: MeasuredValue, humanWait: MeasuredValue, cost: MeasuredValue,
-  activeLimit: ConfiguredLimit, questionTtl: ConfiguredLimit, costLimit: ConfiguredLimit,
+  activeLimit: ConfiguredLimit, questionTtl: ConfiguredLimit,
   activeLimitState: Type.Union(['within_limit', 'expired', 'unavailable', 'not_applicable'].map(s => Type.Literal(s))),
-  costLimitState: Type.Union(['not_configured', 'unavailable', 'not_applicable'].map(s => Type.Literal(s))),
   activeExpiredAtMs: nullableTime,
   passages: Type.Array(PassageMeasurements, { maxItems: 12 }),
   pendingRequirements: Type.Array(Type.Object({ cause: Type.String(), affectedRequirements: Type.Array(Type.String()), pending: Type.String() }, closed), { maxItems: 10 }),

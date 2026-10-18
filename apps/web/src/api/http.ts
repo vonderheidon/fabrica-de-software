@@ -1,7 +1,7 @@
 import type { ErrorResponse, SessionResponse } from '#contracts';
 
 export class HttpError extends Error {
-  constructor(readonly status: number, readonly code: string, message: string, readonly requestId: string | null, readonly fieldErrors: readonly { field: string; message: string }[], readonly resource: { type: string; id: string } | null, readonly operationId: string | null, readonly facts: Readonly<Record<string, string | number | boolean | null>> | null) {
+  constructor(readonly status: number, readonly code: string, message: string, readonly requestId: string | null, readonly fieldErrors: readonly { field: string; message: string }[], readonly resource: { type: string; id: string } | null, readonly operationId: string | null, readonly facts: Readonly<Record<string, string | number | boolean | null>> | null, readonly affectedRequirements: readonly string[] = [], readonly recovery: string | null = null) {
     super(message);
     this.name = 'HttpError';
   }
@@ -22,7 +22,7 @@ async function createSession(): Promise<void> {
     });
     if (!response.ok) throw await toHttpError(response);
     const session = (await response.json()) as SessionResponse;
-    csrfToken = session.csrfToken;
+    csrfToken = session.csrf_token;
   })().finally(() => { bootstrapPromise = null; });
   return bootstrapPromise;
 }
@@ -30,7 +30,16 @@ async function createSession(): Promise<void> {
 async function toHttpError(response: Response): Promise<HttpError> {
   let body: ErrorResponse | null = null;
   try { body = (await response.json()) as ErrorResponse; } catch { /* Keep the transport error generic. */ }
-  return new HttpError(response.status, body?.code ?? 'HTTP_ERROR', body?.message ?? 'A solicitação não foi concluída.', body?.requestId ?? null, body?.fieldErrors ?? [], body?.resource ?? null, body?.operationId ?? null, body?.facts ?? null);
+  return new HttpError(response.status, body?.code ?? 'HTTP_ERROR', body?.message ?? 'A solicitação não foi concluída.', body?.request_id ?? null, body?.field_errors ?? [], body?.resource ?? null, body?.operation_id ?? null, body?.facts ?? null, body?.affected_requirements ?? [], body?.recovery ?? null);
+}
+
+async function rejectExpiredMutation(response: Response): Promise<never> {
+  const failure = await toHttpError(response);
+  csrfToken = null;
+  try { await createSession(); }
+  catch (error: unknown) { failure.cause = error; }
+  // Renewal must not replace the command's correlation or replay its effects.
+  throw failure;
 }
 
 export interface JsonResponse<T> { data: T; etag: string | null }
@@ -53,8 +62,7 @@ export async function requestJsonWithMetadata<T>(path: `/api/v1/${string}`, init
     await createSession();
     response = await send();
   } else if (response.status === 401) {
-    csrfToken = null;
-    await createSession();
+    return rejectExpiredMutation(response);
   }
   if (response.status === 403) throw await toHttpError(response);
   if (!response.ok) throw await toHttpError(response);
@@ -81,8 +89,7 @@ export async function requestText(path: `/api/v1/${string}`, init: RequestInit =
     await createSession();
     response = await send();
   } else if (response.status === 401) {
-    csrfToken = null;
-    await createSession();
+    return rejectExpiredMutation(response);
   }
   if (!response.ok) throw await toHttpError(response);
   return response.text();

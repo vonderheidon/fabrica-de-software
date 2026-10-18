@@ -14,9 +14,10 @@ const response = (data: unknown) => ({ exitCode: 0,stdout: 'HTTP/1.1 200 OK\r\nc
 function fixture(mode = '',grant: ScaffoldAuthorization | undefined = authorization) {
   let repository: Record<string,unknown> | null = mode === 'exists' ? { id: 'R_existing',name: 'new-repo' } : null;
   let mutations = 0; let viewer = 'ACCOUNT_test';
-  const runner = vi.fn<GhRunner>(async text => {
+  const runner = vi.fn<GhRunner>(async (text, onSend) => {
     const request = JSON.parse(text) as { query: string; variables: Record<string,unknown> };
     if (request.query.includes('mutation FactoryCreateRepository')) {
+      onSend?.();
       mutations++; const input = request.variables.input as Record<string,unknown>;
       expect(input).toMatchObject({ ownerId: 'OWNER_test',name: 'new-repo',visibility: 'PRIVATE',hasWikiEnabled: false });
       expect(input).not.toHaveProperty('autoInit');

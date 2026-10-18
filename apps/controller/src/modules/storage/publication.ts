@@ -1,3 +1,4 @@
+import { serializeOperationReceipt } from './common-json.js';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { CompletePublication, ReconcilePublication, AuthorizeUpgrade, OperationId, type EffectView, type PublicationSummary } from '#contracts';
@@ -80,7 +81,7 @@ export function recoverPublication(db: Database.Database, c: PublicationCommand)
   const hash = commandHash(c); const s = readSettings(db);
   const old = db.prepare<[string], { installation_id: string; account_id: string | null; request_hash: string }>('SELECT installation_id,account_id,request_hash FROM operation_requests WHERE operation_id=?').get(c.operationId);
   if (!old) return null;
-  if (old.installation_id !== s.installationId || old.account_id !== s.accountId || old.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The command conflicts with a previously accepted operation.');
+  if (old.installation_id !== s.installation_id || old.account_id !== s.account_id || old.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The command conflicts with a previously accepted operation.');
   const op = readOperation(db, c.operationId); if (!op?.receipt) throw new StorageError('OPERATION_DATA_INVALID'); return op;
 }
 export function acceptPublication(db: Database.Database, c: PublicationCommand): { created: boolean; operation: StoredOperation } {
@@ -100,7 +101,7 @@ export function acceptPublication(db: Database.Database, c: PublicationCommand):
       const body = c.body as AuthorizeUpgrade;
       const summary = publicationSummary(db,a.id,body.deliveryId).upgrades?.find(u => u.targetMode === body.targetMode);
       if (body.currentMode !== authorizedMode(db,a.id) || !summary || !summary.capability.available || summary.summaryHash !== body.authorizedAdditionalEffectsHash) {
-        throw new OperationError(409,'MODE_UPGRADE_NOT_ALLOWED',summary?.capability.reasonCode ?? 'The additional effects summary or mode changed.');
+        throw new OperationError(409,'MODE_UPGRADE_NOT_ALLOWED',summary?.capability.reason_code ?? 'The additional effects summary or mode changed.');
       }
       assertPublicationEligible(db,a.id,body.deliveryId,true);
       if (db.prepare('SELECT reason FROM attempt_authority WHERE attempt_id=? AND reason IS NOT NULL').get(a.id)) throw new OperationError(409,'PUBLICATION_BLOCKED','Current publication authority is blocked.');
@@ -108,10 +109,10 @@ export function acceptPublication(db: Database.Database, c: PublicationCommand):
     if (db.prepare("SELECT operation_id FROM publication_requests WHERE attempt_id=? AND state IN ('accepted','running')").get(a.id)) throw new OperationError(409, 'PUBLICATION_BUSY', 'Another publication command is still active.');
     const revision = a.revision + 1;
     const next = db.prepare<[],{ seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()!.seq;
-    const receipt = { revision, eventCursor: String(next) };
+    const receipt = { revision, event_cursor: String(next) };
     db.prepare('UPDATE attempts SET revision=?,updated_at_ms=? WHERE id=? AND revision=?').run(revision, Date.now(), a.id, a.revision);
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
-      VALUES (?,?,?,?,'attempt',?,?,?,?)`).run(c.operationId, s.installationId, s.accountId, c.kind, a.id, commandHash(c), JSON.stringify({ etag: c.expectedRevision }), JSON.stringify(receipt));
+      VALUES (?,?,?,?,'attempt',?,?,?,?)`).run(c.operationId, s.installation_id, s.account_id, c.kind, a.id, commandHash(c), JSON.stringify({ etag: c.expectedRevision }), serializeOperationReceipt(receipt));
     db.prepare(`INSERT INTO publication_requests(operation_id,attempt_id,delivery_id,kind,authorized_mode,state,created_at_ms) VALUES (?,?,?,?,?,'accepted',?)`)
       .run(c.operationId, a.id, deliveryId, c.kind, c.kind === 'publication.complete' && 'authorizedMode' in c.body ? c.body.authorizedMode : c.kind === 'publication.authorize-upgrade' && 'targetMode' in c.body ? c.body.targetMode : null, Date.now());
     if (c.kind === 'publication.authorize-upgrade' && 'targetMode' in c.body) {
@@ -140,7 +141,7 @@ export function recordAuthority(db: Database.Database, id: string, stamp: string
     const old = snapshot.authority?.reason ?? null;
     db.prepare(`INSERT INTO controller_authority(id,configured_account_id,observed_account_id,dispatch_paused,observed_at_ms) VALUES ('local',?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET configured_account_id=excluded.configured_account_id,observed_account_id=excluded.observed_account_id,dispatch_paused=excluded.dispatch_paused,observed_at_ms=excluded.observed_at_ms`)
-      .run(snapshot.settings.accountId, observation.observedAccountId, observation.observedAccountId === snapshot.settings.accountId ? 0 : 1, Date.now());
+      .run(snapshot.settings.account_id, observation.observedAccountId, observation.observedAccountId === snapshot.settings.account_id ? 0 : 1, Date.now());
     db.prepare(`INSERT INTO attempt_authority(attempt_id,reason,expected_status_id,observed_status_id,observed_at_ms) VALUES (?,?,?,?,?)
       ON CONFLICT(attempt_id) DO UPDATE SET reason=excluded.reason,expected_status_id=excluded.expected_status_id,observed_status_id=excluded.observed_status_id,observed_at_ms=excluded.observed_at_ms`)
       .run(id, observation.reason, observation.expectedStatusId, observation.observedStatusId, Date.now());
@@ -201,6 +202,6 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
     confirmedEffects: counts.confirmed,
     pendingEffects: counts.pending,
     unknownEffects: counts.unknown,
-    completeCapability: reason ? { available: false, reasonCode: reason } : { available: true },
-    reconcileCapability: counts.unknown > 0 ? { available: true } : { available: false, reasonCode: 'NO_UNRESOLVED_EFFECTS' } };
+    completeCapability: reason ? { available: false, reason_code: reason } : { available: true },
+    reconcileCapability: counts.unknown > 0 ? { available: true } : { available: false, reason_code: 'NO_UNRESOLVED_EFFECTS' } };
 }

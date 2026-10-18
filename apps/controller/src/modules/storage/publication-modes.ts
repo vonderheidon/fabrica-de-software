@@ -19,7 +19,7 @@ export function upgradeSummaries(db: Database.Database, attemptId: string, deliv
     const additionalEffects: ModeUpgradeSummary['additionalEffects'] = [...(mode === 'icr' ? ['local_commit' as const] : []), ...(targetMode === 'pr' ? ['push' as const, 'pull_request' as const] : [])];
     const blocked = a.phase !== 'finished' || !a.result ? 'ATTEMPT_NOT_FINISHED' : reason;
     return { targetMode, additionalEffects,
-      summaryHash: digest([s.installationId,s.accountId,a.id,a.revision,deliveryId,version,review,mode,targetMode,additionalEffects,effects,configurationETag(readConfiguration(db,a.projectId))]),
-      capability: blocked ? { available: false, reasonCode: blocked } : { available: true } };
+      summaryHash: digest([s.installation_id,s.account_id,a.id,a.revision,deliveryId,version,review,mode,targetMode,additionalEffects,effects,configurationETag(readConfiguration(db,a.projectId))]),
+      capability: blocked ? { available: false, reason_code: blocked } : { available: true } };
   });
 }

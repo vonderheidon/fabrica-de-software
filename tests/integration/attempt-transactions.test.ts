@@ -9,7 +9,8 @@ import { createQueue } from '../../apps/controller/src/modules/projects/queue.js
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { readSettings, seedSettings } from '../../apps/controller/src/modules/storage/settings.js';
+import { readSettings } from '../../apps/controller/src/modules/storage/settings.js';
+import { seedLegacySettings as seedSettings } from '../fixtures/legacy-settings.js';
 import { saveTimeDefaults, settingsETag } from '../../apps/controller/src/modules/storage/operations.js';
 import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
 
@@ -18,12 +19,12 @@ afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 async function fixture() { const f = await attemptFixture(); fixtures.push(f); return f; }
 describe('atomic attempt acceptance', () => {
   it.each(['operation_requests', 'attempts', 'attempt_criteria', 'rounds', 'passages', 'resources', 'events'] as const)('rolls back every record and dispatch intention on %s failure', async table => {
-    const f = await fixture(); const c = await f.prepare(); const cursor = f.storage.getEvents({}).eventCursor;
+    const f = await fixture(); const c = await f.prepare(); const cursor = f.storage.getEvents({}).event_cursor;
     f.db.exec(`CREATE TRIGGER fail_start BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ABORT,'fixture-failure'); END`);
     await expect(f.pipeline.startAttempt(c.body, c.context)).rejects.toThrow();
     expect(f.storage.getOperation(c.context.operationId)).toBeNull();
     for (const name of ['attempts', 'attempt_criteria', 'rounds', 'passages', 'resources']) expect(f.db.prepare(`SELECT count(*) AS n FROM ${name}`).get()).toEqual({ n: 0 });
-    expect(f.storage.getEvents({}).eventCursor).toBe(cursor);
+    expect(f.storage.getEvents({}).event_cursor).toBe(cursor);
     await f.pipeline.drain(); expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled(); expect(f.execution.startPassage).not.toHaveBeenCalled();
     f.db.exec('DROP TRIGGER fail_start');
     await f.pipeline.startAttempt(c.body, c.context); await f.pipeline.drain(); expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
@@ -46,11 +47,11 @@ describe('atomic attempt acceptance', () => {
     const f = await fixture();
     await f.pipeline.close();
     const settings = f.storage.getGlobalConfiguration();
-    f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, body: { changes: { automationEnabled: true } }, changes: { automationEnabled: true } });
+    f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, body: { changes: { automation_enabled: true } }, changes: { automation_enabled: true } });
     const project = f.storage.getConfiguration(f.projectId);
-    const { id: _id, projectId: _projectId, revision: _revision, createdAtMs: _created, ...configuration } = project.view.configuration;
+    const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = project.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: project.etag, projectId: f.projectId,
-      body: { projectChanges: { automationEnabled: true } }, configuration: { ...configuration, automationEnabled: true }, globalChanges: {} });
+      body: { project_changes: { automation_enabled: true } }, configuration: { ...configuration, automation_enabled: true }, globalChanges: {} });
     const item: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true };
     vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([item]));
     const queue = createQueue({ storage: f.storage, github: f.github, hostName: 'test-host' });
@@ -87,11 +88,11 @@ describe('atomic attempt acceptance', () => {
     const f = await fixture();
     const global = f.storage.getGlobalConfiguration();
     f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: global.etag,
-      body: { changes: { automationEnabled: true } }, changes: { automationEnabled: true } });
+      body: { changes: { automation_enabled: true } }, changes: { automation_enabled: true } });
     const project = f.storage.getConfiguration(f.projectId);
-    const { id: _id, projectId: _projectId, revision: _revision, createdAtMs: _created, ...configuration } = project.view.configuration;
+    const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = project.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: project.etag, projectId: f.projectId,
-      body: { projectChanges: { automationEnabled: true } }, configuration: { ...configuration, automationEnabled: true }, globalChanges: {} });
+      body: { project_changes: { automation_enabled: true } }, configuration: { ...configuration, automation_enabled: true }, globalChanges: {} });
 
     const first = await f.prepare();
     await f.pipeline.startAttempt(first.body, first.context);
@@ -128,11 +129,11 @@ describe('atomic attempt acceptance', () => {
     const f = await fixture();
     const global = f.storage.getGlobalConfiguration();
     f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: global.etag,
-      body: { changes: { automationEnabled: true } }, changes: { automationEnabled: true } });
+      body: { changes: { automation_enabled: true } }, changes: { automation_enabled: true } });
     const project = f.storage.getConfiguration(f.projectId);
-    const { id: _id, projectId: _projectId, revision: _revision, createdAtMs: _created, ...configuration } = project.view.configuration;
+    const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = project.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: project.etag, projectId: f.projectId,
-      body: { projectChanges: { automationEnabled: true } }, configuration: { ...configuration, automationEnabled: true }, globalChanges: {} });
+      body: { project_changes: { automation_enabled: true } }, configuration: { ...configuration, automation_enabled: true }, globalChanges: {} });
     vi.mocked(f.github.listProjectItems).mockResolvedValue({ state: 'rate_limited', data: null,
       diagnostics: [{ code: 'RATE_LIMITED', message: 'GitHub query rate limit reached.', recovery: 'Retry after the supplied reset time.' }],
       retryAtMs: Date.now() + 60_000 });
@@ -161,12 +162,12 @@ describe('atomic attempt acceptance', () => {
     let identity: string; const operationId = randomUUID();
     try {
       db.pragma('foreign_keys=ON'); applyMigrations(db, loadMigrations().slice(0, 4), () => seedSettings(db, directory));
-      const s = readSettings(db); identity = s.installationId;
-      saveTimeDefaults(db, { operationId, expectedRevision: settingsETag(s.installationId, s.revision), timeDefaults: s.timeDefaults });
+      const s = readSettings(db); identity = s.installation_id;
+      saveTimeDefaults(db, { operationId, expectedRevision: settingsETag(s.installation_id, s.revision), timeDefaults: s.time_defaults });
     } finally { db.close(); }
     const storage = openStorage({ dataDirectory: directory });
     try {
-      expect(storage.getDiagnostics().schemaVersion).toBe(18); expect(storage.getSettings()).toMatchObject({ installationId: identity, revision: 2 });
+    expect(storage.getDiagnostics().schemaVersion).toBe(23); expect(storage.getSettings()).toMatchObject({ installation_id: identity, revision: 2 });
       expect(storage.getOperation(operationId)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
       const probe = new Database(join(directory, 'factory.sqlite'));
       try {

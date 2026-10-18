@@ -9,7 +9,7 @@ export const controlledDependencies = {
   }),
 };
 if (process.argv[1] && import.meta.url === (await import('node:url')).pathToFileURL(process.argv[1]).href) {
-  try { await startController({}, controlledDependencies); }
+  try { await startController({}, { ...controlledDependencies, dataDirectory: process.argv[2] }); }
   catch (error) {
     console.error(JSON.stringify({ code: error instanceof StorageError ? error.code : 'FIXTURE_STARTUP_FAILED', fixture: true }));
     process.exitCode = 1;

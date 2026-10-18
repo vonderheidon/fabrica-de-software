@@ -9,7 +9,7 @@ describe('shared contracts', () => {
   });
   it('distinguishes measured zero, unavailable and not applicable', () => {
     expect(Value.Check(MeasuredValue, { state: 'measured', value: 0, unit: 'ms' })).toBe(true);
-    expect(Value.Check(MeasuredValue, { state: 'unavailable', reason: 'No sample', affectedRequirements: ['RNF-16'] })).toBe(true);
+    expect(Value.Check(MeasuredValue, { state: 'unavailable', reason: 'No sample', affected_requirements: ['RNF-16'] })).toBe(true);
     expect(Value.Check(MeasuredValue, { state: 'not_applicable', reason: 'No provider call' })).toBe(true);
     expect(Value.Check(MeasuredValue, { state: 'unavailable', value: 0, unit: 'ms' })).toBe(false);
     expect(Value.Check(MeasuredValue, { state: 'measured', value: -1, unit: 'ms' })).toBe(false);
@@ -17,11 +17,11 @@ describe('shared contracts', () => {
     expect(Value.Check(ConfiguredLimit, { state: 'configured', value: 0, unit: 'USD' })).toBe(true);
   });
   it('bounds error payloads and rejects unexpected fields', () => {
-    const error = { code: 'VALIDATION_FAILED', message: 'Invalid request.', requestId: 'request-id' } satisfies ErrorResponse;
+    const error = { code: 'VALIDATION_FAILED', message: 'Invalid request.', request_id: 'request-id' } satisfies ErrorResponse;
     expect(Value.Check(ErrorResponse, error)).toBe(true);
     expect(Value.Check(ErrorResponse, { ...error, stack: 'private' })).toBe(false);
     expect(Value.Check(ErrorResponse, { ...error, message: '' })).toBe(false);
-    expect(Value.Check(Capability, { available: false, reasonCode: 'NOT_CONFIGURED', reason: 'Configure the host.' })).toBe(true);
+    expect(Value.Check(Capability, { available: false, reason_code: 'NOT_CONFIGURED', reason: 'Configure the host.' })).toBe(true);
     expect(Value.Check(Capability, { available: true, token: 'private' })).toBe(false);
   });
 });

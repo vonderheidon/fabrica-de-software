@@ -1,3 +1,4 @@
+import { toHttpAuthorizeUpgrade } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
 import { readFileSync } from 'node:fs';
@@ -114,7 +115,7 @@ it('uses a single durable upgrade for ICR to PR, preserves confirmed comments an
   const body = upgrade(f,'pr'); const context = f.context();
   expect(f.storage.getPublicationSummary(f.attemptId).upgrades!.find(u => u.targetMode === 'pr')).toMatchObject({ capability: { available: true },additionalEffects: ['local_commit','push','pull_request'] });
   const op = await f.pipeline.authorizePublicationUpgrade(f.attemptId,body,context); await f.pipeline.drain();
-  expect(await f.pipeline.authorizePublicationUpgrade(f.attemptId,body,context)).toEqual(f.storage.getOperation(op.operationId));
+  expect(await f.pipeline.authorizePublicationUpgrade(f.attemptId,body,context)).toEqual(f.storage.getOperation(op.operation_id));
   expect(f.storage.getDeliveryDetail(deliveryId,{})).toMatchObject({ authorizations: { capturedMode: 'icr',authorizedMode: 'pr' },publication: { mode: 'pr',localState: 'completed',upgrades: [] } });
   expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(capture); expect(effect(f,'issue_comment')).toEqual(comment); expect(f.issue.comments).toHaveLength(1);
   expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce(); expect(f.workspaces.pushApproved).toHaveBeenCalledOnce();
@@ -127,7 +128,7 @@ it('continues an already authorized upgrade after known failure without requesti
   const commit = effect(f,'local_commit'); const push = f.workspaces.pushApproved.getMockImplementation()!;
   f.workspaces.pushApproved.mockResolvedValueOnce({ state: 'failed_known',receipt: null,reason: 'PUSH_NOT_AUTHORIZED' });
   const op = await f.pipeline.authorizePublicationUpgrade(f.attemptId,upgrade(f,'pr'),f.context()); await f.pipeline.drain();
-  expect(f.storage.getOperation(op.operationId)?.state).toBe('failed');
+  expect(f.storage.getOperation(op.operation_id)?.state).toBe('failed');
   expect(f.storage.getPublicationSummary(f.attemptId)).toMatchObject({ mode: 'pr',localState: 'pending' });
   f.workspaces.pushApproved.mockImplementation(push); complete(f); await f.pipeline.drain();
   expect(f.storage.getPublicationSummary(f.attemptId).localState).toBe('completed'); expect(effect(f,'local_commit')).toEqual(commit);
@@ -209,12 +210,12 @@ it('does not restore publication on restart and explicitly completes an authoriz
     expect(() => publication.complete(f.attemptId,request,context())).toThrow(expect.objectContaining({ code: 'RESOURCES_NOT_RECONCILED' }));
     f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
     const op = publication.complete(f.attemptId,request,context());
-    await Promise.all(tasks); expect(storage.getOperation(op.operationId)?.state).toBe('succeeded'); expect(storage.getPublicationSummary(f.attemptId).localState).toBe('completed');
+    await Promise.all(tasks); expect(storage.getOperation(op.operation_id)?.state).toBe('succeeded'); expect(storage.getPublicationSummary(f.attemptId).localState).toBe('completed');
   } finally { storage.close(); }
 });
 
 it('migrates actual v14 journals without fabricating upgrades, preserving receipts and immutable history', async () => {
-  const f = await fixture('commit'); await f.implement(); await f.approve(); const before = effects(f); const instance = f.storage.getSettings().installationId;
+  const f = await fixture('commit'); await f.implement(); await f.approve(); const before = effects(f); const instance = f.storage.getSettings().installation_id;
   await f.pipeline.close(); f.storage.close();
   const sql = readFileSync(new URL('../../apps/controller/src/modules/storage/migrations/014_local_publication.sql',import.meta.url),'utf8');
   f.db.transaction(() => {
@@ -225,7 +226,7 @@ it('migrates actual v14 journals without fabricating upgrades, preserving receip
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(18); expect(storage.getSettings().installationId).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
+    expect(storage.getDiagnostics().schemaVersion).toBe(23); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }
@@ -240,13 +241,13 @@ it('exposes protected upgrade summary/authorization with CAS and an operation re
     const boot = await app.inject({ method: 'POST',url: '/api/v1/session',headers: { host,origin,'x-factory-client': 'web' },payload: {} });
     const cookie = String(boot.headers['set-cookie']).split(';')[0]!;
     const body = upgrade(f,'pr'); const c = f.context(); const url = `/api/v1/attempts/${f.attemptId}/publication/authorize-upgrade`;
-    const headers = { host,origin,cookie,'x-csrf-token': boot.json<{ csrfToken: string }>().csrfToken,'if-match': c.expectedRevision,'idempotency-key': c.operationId };
-    expect((await app.inject({ method: 'POST',url,headers: { ...headers,'x-csrf-token': 'invalid' },payload: body })).statusCode).toBe(403);
-    expect((await app.inject({ method: 'POST',url,headers: { ...headers,'if-match': 'stale' },payload: body })).statusCode).toBe(412);
-    const response = await app.inject({ method: 'POST',url,headers,payload: body });
+    const headers = { host,origin,cookie,'x-csrf-token': boot.json<{ csrf_token: string }>().csrf_token,'if-match': c.expectedRevision,'idempotency-key': c.operationId };
+    expect((await app.inject({ method: 'POST',url,headers: { ...headers,'x-csrf-token': 'invalid' },payload: toHttpAuthorizeUpgrade(body) })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST',url,headers: { ...headers,'if-match': 'stale' },payload: toHttpAuthorizeUpgrade(body) })).statusCode).toBe(412);
+    const response = await app.inject({ method: 'POST',url,headers,payload: toHttpAuthorizeUpgrade(body) });
     expect({ status: response.statusCode,code: response.statusCode >= 400 ? response.json<{ code: string }>().code : null }).toEqual({ status: 202,code: null });
     expect(response.headers.location).toBe(`/api/v1/operations/${c.operationId}`); await f.pipeline.drain();
     const get = await app.inject({ method: 'GET',url: `/api/v1/deliveries/${body.deliveryId}`,headers: { host,cookie } });
-    expect(get.json<{ publication: unknown }>().publication).toMatchObject({ mode: 'pr',localState: 'completed',pullRequest: { state: 'confirmed' } });
+    expect(get.json<{ publication: unknown }>().publication).toMatchObject({ mode: 'pr',local_state: 'completed',pull_request: { state: 'confirmed' } });
   } finally { await app.close(); }
 });

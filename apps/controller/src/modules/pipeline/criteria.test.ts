@@ -12,7 +12,7 @@ describe('criteria captured from the issue body by occurrence', () => {
   });
   it('reserves all explicit IDs before generating IDs and preserves repeated texts', () => {
     const result = parse('- Same requirement\n- **AC-1**: Same requirement\n- Same requirement');
-    expect(result.criteria.map((c) => [c.id, c.text, c.occurrenceIndex, c.explicit])).toEqual([
+    expect(result.criteria.map((c) => [c.id, c.text, c.occurrence_index, c.explicit])).toEqual([
       ['ac-2', 'Same requirement', 1, false], ['ac-1', 'Same requirement', 2, true], ['ac-3', 'Same requirement', 3, false],
     ]);
   });
@@ -27,7 +27,7 @@ describe('criteria captured from the issue body by occurrence', () => {
   ])('requires title, objective and a valid list', (input) => expect(interpretIssue(input).executable).toBe(false));
   it('ignores commented and fenced lists, and free text after another section', () => {
     const result = parse('<!--\n- ac-1: comment\n-->\n```md\n- ac-1: example\n```\n- ac-1: Actual\n  continued text\n## Comments\n- ac-1: Comment');
-    expect(result.criteria).toEqual([{ id: 'ac-1', text: 'Actual\ncontinued text', occurrenceIndex: 1, explicit: true }]);
+    expect(result.criteria).toEqual([{ id: 'ac-1', text: 'Actual\ncontinued text', occurrence_index: 1, explicit: true }]);
   });
   it('supports Setext headings and rejects empty or invalid identifiers', () => {
     expect(interpretIssue({ title: 'Title', body: 'Objective\n===\nGoal\nAcceptance criteria\n---\n- Valid' }).executable).toBe(true);

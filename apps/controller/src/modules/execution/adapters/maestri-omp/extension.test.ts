@@ -39,17 +39,17 @@ afterEach(() => {
   if (ttyIn) Object.defineProperty(process.stdin, 'isTTY', ttyIn); else Reflect.deleteProperty(process.stdin, 'isTTY');
   if (ttyOut) Object.defineProperty(process.stdout, 'isTTY', ttyOut); else Reflect.deleteProperty(process.stdout, 'isTTY');
 });
-function fixture() {
+function fixture(initialEffort: string | null = 'high', ompVersion = '19.2.0-beta.1') {
   Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
   Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: true });
   vi.stubEnv('FACTORY_PASSAGE_BOOTSTRAP', 'private-launch-fixture');
   vi.stubEnv('MAESTRI_TERMINAL_ID', randomUUID()); vi.stubEnv('MAESTRI_WORKSPACE_ID', randomUUID());
   const role = loadRoleResources().get('implementer')!;
   seam.launch = JSON.stringify({ protocolVersion: 1, host: '127.0.0.1', port: 12345, token: 'x'.repeat(43),
-    cwd: 'C:\\Clone ç 😀', ompVersion: '18.11.1', role, task: 'Long task '.repeat(15000), guidance: 'Exact guidance', gitNexusRequired: true });
+    cwd: 'C:\\Clone ç 😀', ompVersion, role, task: 'Long task '.repeat(15000), guidance: 'Exact guidance', gitNexusRequired: true });
   const handlers = new Map<string, Parameters<Api['on']>[1]>();
   const tools = new Map<string, Parameters<Api['registerTool']>[0]>();
-  let effort = 'high';
+  let effort: string | undefined = initialEffort ?? undefined;
   const api: Api = {
     typebox: { Type: {
       String: opts => ({ ...opts, type: 'string' }), Integer: opts => ({ ...opts, type: 'integer' }), Boolean: opts => ({ ...opts, type: 'boolean' }),
@@ -63,7 +63,7 @@ function fixture() {
   executionExtension(api);
   const start = async () => { await handlers.get('session_start')!(undefined, context); seam.socket!.emit('connect'); await Promise.resolve(); };
   const call = async (name: string, input: unknown) => tools.get(name)!.execute(randomUUID(), input, new AbortController().signal, undefined, context);
-  return { api, context, handlers, tools, start, call, setEffort: (value: string) => { effort = value; } };
+  return { api, context, handlers, tools, start, call, setEffort: (value: string | undefined) => { effort = value; } };
 }
 
 describe('supported OMP extension on the same TUI', () => {
@@ -99,6 +99,14 @@ describe('supported OMP extension on the same TUI', () => {
     expect(task).toContain('C:\\Clone ç 😀'); expect(task).toContain('Long task '.repeat(15000));
     await expect(seam.frame!({ type: 'run' })).rejects.toThrow('TRACKING_LOST');
     expect(f.api.sendUserMessage).toHaveBeenCalledOnce();
+    await f.handlers.get('session_shutdown')!(undefined, f.context);
+  });
+  it('sends null for an absent effort and keeps an arbitrary OMP version as metadata', async () => {
+    const f = fixture(null, '20.0.0-rc.1'); await f.start();
+    expect(seam.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'hello', effort: null, ompVersion: '20.0.0-rc.1' }));
+    await seam.frame!({ type: 'run' });
+    await f.handlers.get('before_agent_start')!(undefined, f.context);
+    expect(seam.send).not.toHaveBeenCalledWith({ type: 'tracking-lost' });
     await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
   it('returns a correctable error, continues tool calls, and never lets the model set private correlation', async () => {

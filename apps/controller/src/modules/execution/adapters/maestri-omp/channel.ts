@@ -6,10 +6,11 @@ import { ExecutionError, type ExecutionCode } from '../../errors.js';
 import { connectWire, executionLimits, type Wire } from './wire.js';
 
 const text = Type.String({ minLength: 1, maxLength: 8192 });
+const effort = Type.Union([text, Type.Null()]);
 export const Hello = Type.Object({
   type: Type.Literal('hello'), protocolVersion: Type.Literal(1), token: Type.String({ pattern: '^[A-Za-z0-9_-]{43}$' }),
-  sessionId: text, terminalId: text, workspaceId: text, cwd: text, provider: text, model: text, effort: text,
-  tui: Type.Literal(true), roleDigest: Type.String({ pattern: '^[a-f0-9]{64}$' }), ompVersion: Type.Literal('18.11.1'),
+  sessionId: text, terminalId: text, workspaceId: text, cwd: text, provider: text, model: text, effort,
+  tui: Type.Literal(true), roleDigest: Type.String({ pattern: '^[a-f0-9]{64}$' }), ompVersion: Type.String({ minLength: 1, maxLength: 128 }),
 }, { additionalProperties: false });
 export type Hello = Static<typeof Hello>;
 export interface PassageChannel {

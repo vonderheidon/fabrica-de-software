@@ -1,29 +1,17 @@
 import { useEffect, useState } from 'react';
-import type { EventPage } from '#contracts';
+import { Value } from '@sinclair/typebox/value';
+import { HttpControllerEventFrame, type HttpEventPage as EventPage } from '#contracts';
 import { requestJson } from '../api/http.js';
 
-type EventPayload = {
-  entity: { type: string; id: string };
-  revision: number;
-  operationId: string;
-  eventType: string;
-  projectId?: string;
-  attemptId?: string;
-  facts: Record<string, never>;
-};
-
-export type ControllerEventNotice = EventPayload & { seq: string; eventType: string };
+export type ControllerEventNotice = HttpControllerEventFrame & { seq: string };
 export type EventConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
 
-function parsePayload(event: MessageEvent<string>): ControllerEventNotice | null {
+export function parsePayload(event: MessageEvent<string>): ControllerEventNotice | null {
   if (!/^[1-9][0-9]{0,19}$/.test(event.lastEventId)) return null;
   try {
     const payload: unknown = JSON.parse(event.data);
-    if (payload === null || typeof payload !== 'object') return null;
-    const value = payload as Partial<EventPayload>;
-    if (!value.entity || typeof value.entity.type !== 'string' || typeof value.entity.id !== 'string'
-      || typeof value.operationId !== 'string' || typeof value.eventType !== 'string' || typeof value.revision !== 'number' || value.facts === null || typeof value.facts !== 'object') return null;
-    return { ...value, seq: event.lastEventId } as ControllerEventNotice;
+    if (!Value.Check(HttpControllerEventFrame, payload)) return null;
+    return { ...payload, seq: event.lastEventId };
   } catch {
     return null;
   }
@@ -45,7 +33,7 @@ export function useControllerEvents(): EventConnectionState {
       try {
         const page = await requestJson<EventPage>('/api/v1/events?limit=1');
         if (!alive) return;
-        lastSeq = page.eventCursor;
+        lastSeq = page.event_cursor;
         const params = new URLSearchParams({ cursor: lastSeq });
         source?.close();
         source = new EventSource(`/api/v1/events/stream?${params.toString()}`, { withCredentials: true });

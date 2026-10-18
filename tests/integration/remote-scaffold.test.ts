@@ -1,16 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CreateScaffold, EffectReceipt, EffectView, GitHubMutationResult, ScaffoldInput, SessionResponse } from '#contracts';
 import { createScaffold, type ScaffoldDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { seedSettings } from '../../apps/controller/src/modules/storage/settings.js';
 import { acceptCreation, completeCreation, recordCreationStep } from '../../apps/controller/src/modules/storage/creations.js';
-import { configurationETag, digest, readSettingsView } from '../../apps/controller/src/modules/storage/configuration-reads.js';
 import { readOperation } from '../../apps/controller/src/modules/storage/operations.js';
+import { removeRemoteScaffoldSchema } from '../fixtures/scaffold-schema.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 
@@ -18,12 +17,12 @@ const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const complete = <T>(data: T) => ({ state: 'complete' as const,data,diagnostics: [],retryAtMs: null });
 async function fixture(failure = '') {
-  mkdirSync(resolve('.cache'),{ recursive: true }); const directory = mkdtempSync(resolve('.cache/remote-scaffold-'));
+  const directory = mkdtempSync(join(tmpdir(),'remote-scaffold-'));
   cleanup.push(() => rmSync(directory,{ recursive: true })); const storage = openStorage({ dataDirectory: directory,busyTimeoutMs: 10 }); cleanup.push(() => storage.close());
   const db = new Database(join(directory,'factory.sqlite')); cleanup.push(() => { db.close(); }); db.pragma('foreign_keys=ON');
   db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('ACCOUNT_test','test-user',1,1,1);
   db.prepare("UPDATE factory_settings SET account_id='ACCOUNT_test'").run();
-  storage.saveSettings({ operationId: randomUUID(),expectedRevision: storage.getGlobalConfiguration().etag,body: { changes: { projectsRoot: directory } },changes: { projectsRoot: directory } });
+  storage.saveSettings({ operationId: randomUUID(),expectedRevision: storage.getGlobalConfiguration().etag,body: { changes: { projects_root: directory } },changes: { projects_root: directory } });
   let accountId = 'ACCOUNT_test'; let remote: EffectReceipt | null = null; const sends: string[] = [];
   const receipt = (e: EffectView): EffectReceipt => ({ id: e.kind === 'baseline_push' ? 'a'.repeat(40) : 'R_created',repositoryId: 'R_created',
     ownerId: 'OWNER_test',repositoryName: 'different-name',visibility: 'private',url: 'https://github.com/test-org/different-name',operationId: e.operationId,
@@ -32,14 +31,14 @@ async function fixture(failure = '') {
   const unknown = (): GitHubMutationResult => ({ state: 'unknown',receipt: null,reason: 'RESPONSE_LOST',retryAtMs: null });
   const github = {
     getIdentity: vi.fn(async () => complete({ id: accountId,login: 'test-user' })),
-    scaffoldRemoteCapability: vi.fn(() => ({ available: true,reasonCode: 'CREATION_TARGET_NOT_AUTHORIZED' })),
+    scaffoldRemoteCapability: vi.fn(() => ({ available: true,reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' })),
     inspectScaffoldRemote: vi.fn(async () => complete({ ownerLogin: 'test-org',repositoryId: remote?.id ?? null })),
     createScaffoldRepository: vi.fn<NonNullable<ScaffoldDependencies['github']['createScaffoldRepository']>>(async (e,_account,authorize) => {
       expect(storage.getEffect(e.operationId).state).toBe('running'); expect(storage.getOperation(e.operationId)?.receipt).toBeDefined();
       expect(storage.getCreation(e.creationId!).creation.baselineSha).toBe('a'.repeat(40));
       await authorize(); sends.push('create_repository'); remote = receipt(e);
       if (failure === 'account') accountId = 'OTHER';
-      if (failure === 'settings') storage.saveTimeDefaults({ operationId: randomUUID(),expectedRevision: storage.getSettingsETag(),timeDefaults: { ...storage.getSettings().timeDefaults,pollingIntervalMs: 9000 } });
+      if (failure === 'settings') storage.saveTimeDefaults({ operationId: randomUUID(),expectedRevision: storage.getSettingsETag(),timeDefaults: { ...storage.getSettings().time_defaults,polling_interval_ms: 9000 } });
       if (failure === 'throw') throw new Error('Synthetic transport error');
       return failure === 'repository' ? unknown() : confirmed(e);
     }),
@@ -89,8 +88,8 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(f.sends).toEqual(mode === 'remote_push' ? ['create_repository','associate_origin','baseline_push'] : ['create_repository','associate_origin']);
     expect(view.remoteEffects.find(e => e.kind === 'baseline_push')?.state).toBe(mode === 'remote_push' ? 'confirmed' : 'not_requested');
     const config = f.storage.getConfiguration(view.creation.projectId!).view.configuration;
-    expect(config).toMatchObject({ baseBranch: 'release/base',automationEnabled: false,githubProject: null,source: { repositoryId: 'R_created',repositoryUrl: 'https://github.com/test-org/different-name' } });
-    const before = [...f.sends]; expect((await f.scaffold.create(body,operationId)).operationId).toBe(operationId); await f.scaffold.drain(); expect(f.sends).toEqual(before);
+    expect(config).toMatchObject({ base_branch: 'release/base',automation_enabled: false,github_project: null,source: { repository_id: 'R_created',repository_url: 'https://github.com/test-org/different-name' } });
+    const before = [...f.sends]; expect((await f.scaffold.create(body,operationId)).operation_id).toBe(operationId); await f.scaffold.drain(); expect(f.sends).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     for (const e of view.effects) expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(e.operationId)).toThrow();
   });
@@ -113,8 +112,8 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(f.storage.getOperation(reconciliationId)?.state).toBe(failure === 'baseline_push' ? 'succeeded' : 'unknown');
     expect(f.sends).toEqual(sent); const view = f.scaffold.getCreation(op.resource.id); expect(view.effects.at(-1)?.state).toBe('confirmed');
     expect(view.creation.state).toBe(failure === 'baseline_push' ? 'completed' : 'partial');
-    expect((await f.scaffold.create(body,originalId)).operationId).toBe(originalId);
-    expect((await f.scaffold.reconcile(op.resource.id,reconciliationId,precondition)).operationId).toBe(reconciliationId); await f.scaffold.drain(); expect(f.sends).toEqual(sent);
+    expect((await f.scaffold.create(body,originalId)).operation_id).toBe(originalId);
+    expect((await f.scaffold.reconcile(op.resource.id,reconciliationId,precondition)).operation_id).toBe(reconciliationId); await f.scaffold.drain(); expect(f.sends).toEqual(sent);
     await expect(f.scaffold.reconcile(op.resource.id,reconciliationId,'"other"')).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
   });
   it('keeps an unobserved remote unknown and requires CAS before reconciliation',async () => {
@@ -124,21 +123,21 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     f.github.reconcileScaffoldRepository.mockResolvedValue({ state: 'unknown',receipt: null,reason: 'NOT_OBSERVED',retryAtMs: null });
     const before = f.scaffold.getCreation(op.resource.id); const precondition = etag(f,op.resource.id);
     const reconcile = await f.scaffold.reconcile(op.resource.id,randomUUID(),precondition); await f.scaffold.drain();
-    expect(f.storage.getOperation(reconcile.operationId)?.state).toBe('unknown'); expect(f.scaffold.getCreation(op.resource.id).effects[0]?.state).toBe('unknown'); expect(f.sends).toEqual(['create_repository']);
-    expect(f.db.prepare('SELECT state,diagnostic FROM creation_reconciliations WHERE operation_id=?').get(reconcile.operationId)).toEqual({ state: 'unknown',diagnostic: 'NOT_OBSERVED' });
-    expect(f.db.prepare('SELECT event_type,entity_revision FROM events WHERE operation_id=? ORDER BY seq').all(reconcile.operationId)).toEqual([
+    expect(f.storage.getOperation(reconcile.operation_id)?.state).toBe('unknown'); expect(f.scaffold.getCreation(op.resource.id).effects[0]?.state).toBe('unknown'); expect(f.sends).toEqual(['create_repository']);
+    expect(f.db.prepare('SELECT state,diagnostic FROM creation_reconciliations WHERE operation_id=?').get(reconcile.operation_id)).toEqual({ state: 'unknown',diagnostic: 'NOT_OBSERVED' });
+    expect(f.db.prepare('SELECT event_type,entity_revision FROM events WHERE operation_id=? ORDER BY seq').all(reconcile.operation_id)).toEqual([
       { event_type: 'creation.reconcile.accepted',entity_revision: before.creation.revision },
       { event_type: 'creation.reconciled',entity_revision: before.creation.revision + 1 },
     ]);
     const after = f.scaffold.getCreation(op.resource.id);
     expect(after.creation).toEqual({ ...before.creation,revision: before.creation.revision + 1 });
     expect(after.effects).toEqual(before.effects);
-    expect(f.storage.getOperation(reconcile.operationId)?.receipt).toEqual(reconcile.receipt);
-    expect(await f.scaffold.reconcile(op.resource.id,reconcile.operationId,precondition)).toMatchObject({ state: 'unknown',receipt: reconcile.receipt });
+    expect(f.storage.getOperation(reconcile.operation_id)?.receipt).toEqual(reconcile.receipt);
+    expect(await f.scaffold.reconcile(op.resource.id,reconcile.operation_id,precondition)).toMatchObject({ state: 'unknown',receipt: reconcile.receipt });
     await f.scaffold.drain(); expect(f.github.reconcileScaffoldRepository).toHaveBeenCalledTimes(1); expect(f.sends).toEqual(['create_repository']);
     await expect(f.scaffold.reconcile(op.resource.id,randomUUID(),precondition)).rejects.toMatchObject({ statusCode: 412 });
     const next = await f.scaffold.reconcile(op.resource.id,randomUUID(),etag(f,op.resource.id)); await f.scaffold.drain();
-    expect(f.storage.getOperation(next.operationId)?.state).toBe('unknown'); expect(f.sends).toEqual(['create_repository']);
+    expect(f.storage.getOperation(next.operation_id)?.state).toBe('unknown'); expect(f.sends).toEqual(['create_repository']);
   });
   it.each(['effect.intended','effect.sent','effect.confirmed'])('a SQL failure in %s blocks the following effect',async event => {
     const f = await fixture(); const body = await f.authorize();
@@ -159,25 +158,23 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     const url = `/api/v1/scaffold/creations/${op.resource.id}/reconcile`; const base = { host: '127.0.0.1:4310',origin: 'http://127.0.0.1:4310','content-type': 'application/json','x-factory-client': 'web' };
     expect((await app.inject({ method: 'POST',url,headers: base,payload: {} })).statusCode).toBe(401);
     const session = await app.inject({ method: 'POST',url: '/api/v1/session',headers: base,payload: {} });
-    const headers = { ...base,cookie: String(session.headers['set-cookie']).split(';')[0]!,'x-csrf-token': session.json<SessionResponse>().csrfToken,'idempotency-key': randomUUID(),'if-match': etag(f,op.resource.id) };
+    const headers = { ...base,cookie: String(session.headers['set-cookie']).split(';')[0]!,'x-csrf-token': session.json<SessionResponse>().csrf_token,'idempotency-key': randomUUID(),'if-match': etag(f,op.resource.id) };
     const response = await app.inject({ method: 'POST',url,headers,payload: {} }); expect(response.statusCode).toBe(202); expect(response.json<{ resource: { type: string } }>().resource.type).toBe('creation');
     expect(response.headers.location).toMatch(/^\/api\/v1\/operations\//);
     expect((await app.inject({ method: 'POST',url,headers,payload: { deliveryId: randomUUID() } })).statusCode).toBe(400);
   });
   it('migrates actual v16 preserving completed local creation, baseline, identity and original receipt',async () => {
-    const f = await fixture(); const sample = await f.authorize();
-    mkdirSync(resolve('.cache'),{ recursive: true }); const directory = mkdtempSync(resolve('.cache/remote-migration-')); cleanup.push(() => rmSync(directory,{ recursive: true }));
-    const db = new Database(join(directory,'factory.sqlite')); applyMigrations(db,loadMigrations().slice(0,16),() => seedSettings(db,directory));
-    const settings = readSettingsView(db); const { remote: _remote,...input } = sample.plan.input; const { ownerLogin: _ownerLogin,...originalPlan } = sample.plan;
-    const plan = { ...originalPlan,input: { ...input,creationMode: 'local' as const },installationId: settings.settings.installationId,
-      settingsETag: configurationETag(settings),projectsRoot: directory,destination: join(directory,'historical-local'),ownerId: null,
-      effects: ['create_directory','write_template_and_engineering','initialize_git','create_conventional_baseline','register_local_project'] };
-    const originalId = randomUUID(); const accepted = acceptCreation(db,{ operationId: originalId,body: { planHash: digest(plan),plan,authorized: true } });
-    for (const step of ['directory','files','git','baseline'] as const) { recordCreationStep(db,accepted.operation.resource.id,step,'running'); recordCreationStep(db,accepted.operation.resource.id,step,'confirmed',step === 'baseline' ? 'a'.repeat(40) : undefined); }
-    completeCreation(db,accepted.operation.resource.id);
-    const before = readOperation(db,originalId); const instance = db.prepare('SELECT installation_id FROM factory_settings').get(); db.close();
-    const storage = openStorage({ dataDirectory: directory }); cleanup.push(() => storage.close());
-    expect(storage.getDiagnostics().schemaVersion).toBe(18); const probe = new Database(join(directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
+    const f = await fixture(); const { remote: _remote, ...localInput } = f.input;
+    const planned = await f.scaffold.plan({ ...localInput, creationMode: 'local' });
+    const body: CreateScaffold = { planHash: planned.planHash, plan: planned.plan, authorized: true };
+    const originalId = randomUUID();
+    const accepted = acceptCreation(f.db,{ operationId: originalId,body });
+    for (const step of ['directory','files','git','baseline'] as const) { recordCreationStep(f.db,accepted.operation.resource.id,step,'running'); recordCreationStep(f.db,accepted.operation.resource.id,step,'confirmed',step === 'baseline' ? 'a'.repeat(40) : undefined); }
+    completeCreation(f.db,accepted.operation.resource.id);
+    const before = readOperation(f.db,originalId); const instance = f.db.prepare('SELECT installation_id FROM factory_settings').get();
+    f.storage.close(); removeRemoteScaffoldSchema(f.db);
+    const storage = openStorage({ dataDirectory: f.directory }); cleanup.push(() => storage.close());
+    expect(storage.getDiagnostics().schemaVersion).toBe(23); const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
     expect(probe.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(instance); expect(probe.pragma('foreign_key_check')).toEqual([]);
     expect(storage.getOperation(originalId)).toEqual(before);
     expect(storage.getCreation(accepted.operation.resource.id).creation).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });

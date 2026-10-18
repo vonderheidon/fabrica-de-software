@@ -16,9 +16,25 @@ assert(!existsSync(join(directory, 'node_modules/typescript')));
 const main = pathToFileURL(join(directory, 'dist/apps/controller/src/main.js')).href;
 const execution = pathToFileURL(join(directory, 'dist/apps/controller/src/modules/execution/index.js')).href;
 const storage = pathToFileURL(join(directory, 'dist/apps/controller/src/modules/storage/index.js')).href;
+const configuration = pathToFileURL(join(directory, 'dist/apps/controller/src/config.js')).href;
+const fixedData = join(directory, 'var', 'factory');
+const lockProbe = `import {startController} from ${JSON.stringify(main)};
+try { await startController(); process.exitCode=1; }
+catch(error) { console.log(JSON.stringify({code:error.code})); }`;
+// Separate native processes and cwd values must resolve the same distributed database path.
+const pathProbe = `import {loadConfiguration} from ${JSON.stringify(configuration)};
+import {join} from 'node:path';
+console.log(join(loadConfiguration({FACTORY_DATA_DIR:'ignored-override'},${JSON.stringify(directory)}).dataDirectory,'factory.sqlite'));`;
+for (const cwd of [directory, data]) {
+  const probe = await promisify(execFile)(process.execPath, ['--input-type=module', '--eval', pathProbe], { cwd, timeout: 15_000, maxBuffer: 4096, windowsHide: true });
+  assert.equal(probe.stdout.trim(), join(fixedData, 'factory.sqlite'));
+}
 const code = `
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { hostname } from 'node:os';
 import { startController } from ${JSON.stringify(main)};
 import { createExecution } from ${JSON.stringify(execution)};
 import { openStorage } from ${JSON.stringify(storage)};
@@ -33,6 +49,10 @@ const dependencies = { executionFactory: options => ({ ...createExecution(option
 let app;
 try {
   app = await startController({},dependencies);
+  const contender = await promisify(execFile)(process.execPath, ['--input-type=module','--eval',${JSON.stringify(lockProbe)}], {
+    cwd:${JSON.stringify(directory)},timeout:15_000,maxBuffer:4096,windowsHide:true,
+  });
+  assert.equal(JSON.parse(contender.stdout.trim()).code,'CONTROLLER_LOCK_UNAVAILABLE');
   const origin = process.env.FACTORY_BROWSER_ORIGIN;
   const html = await fetch(origin,{headers:{'sec-fetch-site':'none','sec-fetch-mode':'navigate'}}); assert.equal(html.status,200);
   assert.match(html.headers.get('content-type'),/^text\\/html/);
@@ -58,14 +78,15 @@ try {
   const cookie=session.headers.get('set-cookie').split(';')[0];
   const options=await fetch(origin+'/api/v1/scaffold/options',{headers:{cookie}});
   assert.equal(options.status,200); assert.equal((await options.json()).catalog.id,'factory.engineering');
-  const store=openStorage({dataDirectory:process.env.FACTORY_DATA_DIR});
-  const identity=store.getSettings().installationId; store.close();
+  const store=openStorage({dataDirectory:${JSON.stringify(fixedData)}});
+  assert.equal(store.getSettings().designated_host,hostname());
+  const identity=store.getSettings().installation_id; store.close();
   await app.close(); app=undefined;
   app=await startController({},dependencies);
   assert.equal((await fetch(origin+'/api/v1/settings',{headers:{cookie}})).status,401);
-  const reopened=openStorage({dataDirectory:process.env.FACTORY_DATA_DIR});
-  assert.equal(reopened.getSettings().installationId,identity); reopened.close();
-  console.log(JSON.stringify({assetsAndApi:'same_loopback_origin',sqlite:'native',restart:'sessions_revoked_identity_preserved',anchor:'controlled',maestriOmp:'not_executed'}));
+  const reopened=openStorage({dataDirectory:${JSON.stringify(fixedData)}});
+  assert.equal(reopened.getSettings().installation_id,identity); reopened.close();
+  console.log(JSON.stringify({assetsAndApi:'same_loopback_origin',sqlite:'native',fixedDatabase:'var/factory/factory.sqlite',distinctCwdProcesses:2,secondController:'refused',localHost:'captured',restart:'sessions_revoked_identity_preserved',anchor:'controlled',maestriOmp:'not_executed'}));
 } finally { if(app) await app.close(); }
 `;
 try {
@@ -75,6 +96,8 @@ try {
   // Only our closed summary is forwarded; native stderr and exception/environment are discarded.
   const summary = JSON.parse(result.stdout.trim());
   assert.equal(summary.maestriOmp, 'not_executed');
+  assert(existsSync(join(fixedData, 'factory.sqlite')));
+  assert(!existsSync(join(data, 'factory.sqlite')));
   console.log(JSON.stringify({ distribution: directory, ...summary }));
 } catch {
   console.error(JSON.stringify({ code: 'DISTRIBUTION_SMOKE_FAILED', message: 'Relocated HTTP/SQLite smoke failed; package and test data preserved for diagnosis.' }));

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -32,17 +32,16 @@ describe('initial storage', () => {
   it('checks effective pragmas and persists only the installation and normative defaults', () => {
     const path = directory();
     const store = open(path, 250);
-    expect(store.getDiagnostics()).toEqual({ foreignKeys: 1, journalMode: 'wal', synchronous: 2, busyTimeoutMs: 250, schemaVersion: 18 });
+    expect(store.getDiagnostics()).toEqual({ foreignKeys: 1, journalMode: 'wal', synchronous: 2, busyTimeoutMs: 250, schemaVersion: 23 });
     const settings = store.getSettings();
     expect(settings).toMatchObject({
-      id: 'local', accountId: null, designatedHost: null, projectsRoot: null, dataRoot: path,
-      automationEnabled: false, revision: 1, maestriSettings: { formatVersion: 1 },
-      timeDefaults: { formatVersion: 1, pollingIntervalMs: 15_000, passageActiveTimeMs: 1_800_000, questionTtl: { state: 'not_configured' } },
-      costDefaults: { formatVersion: 1, limit: { state: 'not_configured' } },
-      artifactPolicy: { formatVersion: 1, automaticDeletion: false },
+      id: 'local', account_id: null, designated_host: hostname(), projects_root: null,
+      automation_enabled: false, revision: 1,
+      time_defaults: { format_version: 1, polling_interval_ms: 15_000, passage_active_time_ms: 1_800_000, question_ttl: { state: 'not_configured' } },
+      artifact_policy: { format_version: 1, automatic_deletion: false },
     });
-    expect(settings.installationId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(settings.createdAtMs).toBe(settings.updatedAtMs);
+    expect(settings.installation_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(settings.created_at_ms).toBe(settings.updated_at_ms);
     inspect(path, (db) => {
       const tables = db.prepare("SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
       expect(tables).toEqual(['accounts', 'artifacts', 'attempt_authority', 'attempt_criteria', 'attempts', 'cancellation_requests', 'capture_runs', 'capture_warnings', 'checks', 'controller_authority', 'creation_reconciliations', 'creation_steps', 'criterion_results', 'deliveries', 'diagnostic_runs', 'effects', 'events', 'execution_profiles', 'execution_questions', 'factory_settings', 'finding_resolutions', 'findings', 'native_open_requests', 'operation_requests', 'passage_events', 'passage_measurements', 'passage_results', 'passages', 'preparation_revisions', 'preparations', 'project_creations', 'project_revisions', 'projects', 'publication_requests', 'publication_upgrades', 'queue_consumptions', 'queue_cycles', 'resource_removals', 'resources', 'reviews', 'rounds', 'schema_migrations', 'verification_runs'].map((name) => ({ name, strict: 1 })));
@@ -63,7 +62,7 @@ describe('initial storage', () => {
       expect(() => db.prepare("UPDATE factory_settings SET revision = 'invalid'").run()).toThrow();
       expect(() => db.prepare('UPDATE factory_settings SET automation_enabled = 2').run()).toThrow();
       expect(() => db.prepare('UPDATE factory_settings SET automation_enabled = 1').run()).toThrow();
-      expect(() => db.prepare("UPDATE factory_settings SET maestri_settings_json = 'invalid'").run()).toThrow();
+      expect(() => db.prepare("UPDATE factory_settings SET time_defaults_json = 'invalid'").run()).toThrow();
       expect(() => db.prepare("UPDATE factory_settings SET account_id = 'unknown'").run()).toThrow();
       expect(() => db.prepare('INSERT INTO factory_settings SELECT * FROM factory_settings').run()).toThrow();
     });
@@ -72,12 +71,12 @@ describe('initial storage', () => {
   it('preserves configured values and installation identity across restarts', () => {
     const path = directory();
     const store = open(path);
-    const identity = store.getSettings().installationId;
+    const identity = store.getSettings().installation_id;
     store.close();
     inspect(path, (db) => {
       db.prepare("UPDATE factory_settings SET designated_host = 'fixture-host', revision = 2").run();
     });
-    expect(open(path).getSettings()).toMatchObject({ installationId: identity, designatedHost: 'fixture-host', revision: 2, automationEnabled: false });
+    expect(open(path).getSettings()).toMatchObject({ installation_id: identity, designated_host: 'fixture-host', revision: 2, automation_enabled: false });
   });
 
   it.each([0, -1, 60_001, Infinity, 1.5])('rejects invalid timeout %s before opening a database', (timeout) => {
@@ -99,7 +98,7 @@ describe('initial storage', () => {
   it.each(['missing', 'invalid'])('does not silently reseed %s settings', (kind) => {
     const path = directory();
     open(path).close();
-    inspect(path, (db) => db.exec(kind === 'missing' ? 'DELETE FROM factory_settings' : `UPDATE factory_settings SET maestri_settings_json = '{"formatVersion":999}'`));
+    inspect(path, (db) => db.exec(kind === 'missing' ? 'DELETE FROM factory_settings' : `UPDATE factory_settings SET time_defaults_json = '{"formatVersion":999}'`));
     expect(() => open(path)).toThrowError(expect.objectContaining({ code: 'SETTINGS_INVALID' }));
   });
 });

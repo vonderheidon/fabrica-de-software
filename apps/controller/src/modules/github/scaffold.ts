@@ -79,7 +79,7 @@ export function createRemoteScaffolder(reader: GraphQLReader, authorization?: Sc
   }
   return {
     scaffoldRemoteCapability(remote: Remote | undefined, accountId: string, push = false) { return { available: Boolean(authorization?.accountId === accountId && authorization.targets.some(t =>
-      (!remote || (t.ownerId === remote.ownerId && t.name === remote.name && t.visibility === remote.visibility)) && (!push || t.allowPush))), reasonCode: 'CREATION_TARGET_NOT_AUTHORIZED' }; },
+      (!remote || (t.ownerId === remote.ownerId && t.name === remote.name && t.visibility === remote.visibility)) && (!push || t.allowPush))), reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' }; },
     inspectScaffoldRemote: inspect,
     reconcileScaffoldRepository: confirm,
     async createScaffoldRepository(effect: EffectView, accountId: string, authorize: () => Promise<void>): Promise<GitHubMutationResult> {

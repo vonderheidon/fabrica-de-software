@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { OperationSummary } from '#contracts';
+import type { HttpOperationSummary as OperationSummary } from '#contracts';
 import { HttpError, requestJson } from '../../api/http.js';
 
 export type OperationLoad = {
@@ -43,7 +43,7 @@ export function useOperation(enabled: boolean) {
       window.removeEventListener('factory-controller-event', onChange);
       window.removeEventListener('factory-controller-resync', onChange);
     };
-  }, [enabled, load.data?.eventCursor, refresh]);
+  }, [enabled, load.data?.event_cursor, refresh]);
 
   return { ...load, refresh };
 }

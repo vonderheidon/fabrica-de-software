@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { OperationView, QueueSaved } from '#contracts';
+import type { OperationView, HttpQueueSaved as QueueSaved } from '#contracts';
+import { enableQueueRequest } from '../../api/observation-requests.js';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 import { recordUncertainOperation, resolveUncertainOperation } from '../../api/uncertain-operations.js';
 import { QueueEnableSummary } from './QueuePanel.js';
@@ -13,10 +14,10 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
   const [operationId, setOperationId] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const observation = load.observation;
-  const authorized = observation?.summaryHash !== null && observation?.summaryHash !== undefined && authorizedSummaryHash === observation.summaryHash;
-  const ready = load.status === 'ready' && observation?.complete === true && observation.valid && observation.eligibleTotal !== null && observation.observationId !== null && observation.summaryHash !== null && load.etag !== null;
+  const authorized = observation?.summary_hash !== null && observation?.summary_hash !== undefined && authorizedSummaryHash === observation.summary_hash;
+  const ready = load.status === 'ready' && observation?.complete === true && observation.valid && observation.eligible_total !== null && observation.observation_id !== null && observation.summary_hash !== null && load.etag !== null;
 
-  useEffect(() => { setAuthorizedSummaryHash(null); }, [observation?.summaryHash]);
+  useEffect(() => { setAuthorizedSummaryHash(null); }, [observation?.summary_hash]);
 
   async function enable(): Promise<void> {
     if (!observation || !load.etag || !ready || !authorized || submitting || uncertain) return;
@@ -28,9 +29,9 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
       const { data, etag } = await requestJsonWithMetadata<QueueSaved>('/api/v1/queue', {
         method: 'PUT',
         headers: { 'If-Match': load.etag, 'Idempotency-Key': id },
-        body: JSON.stringify({ enabled: true, scope: observation.scope, observationId: observation.observationId, authorizedSummaryHash: observation.summaryHash }),
+        body: JSON.stringify(enableQueueRequest(observation)),
       });
-      if (!etag || data.operationId !== id || !data.receipt) throw new Error('O controlador não confirmou a gravação da fila.');
+      if (!etag || data.operation_id !== id || !data.receipt) throw new Error('O controlador não confirmou a gravação da fila.');
       resolveUncertainOperation(id);
       setUncertain(false);
       onEnabled();
@@ -86,7 +87,7 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
     {observation && <QueueEnableSummary observation={observation} />}
     {observation && !observation.complete && <div className="notice" role="status">A consulta está degradada. Habilitar fica indisponível até o controlador confirmar uma leitura completa.</div>}
     {message && <div className="notice queue-dialog-message" role={message.includes('incerta') ? 'alert' : 'status'}>{message}</div>}
-    {ready && <label className="queue-authorization"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorizedSummaryHash(event.currentTarget.checked && observation ? observation.summaryHash : null)} />Autorizo habilitar a fila neste escopo, com estes modos e esta ordenação.</label>}
+    {ready && <label className="queue-authorization"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorizedSummaryHash(event.currentTarget.checked && observation ? observation.summary_hash : null)} />Autorizo habilitar a fila neste escopo, com estes modos e esta ordenação.</label>}
     <div className="row queue-dialog-actions"><button type="button" onClick={onClose} disabled={submitting}>Cancelar</button>{uncertain && <button type="button" onClick={() => void consultOperation()} disabled={submitting}>Consultar operação</button>}<button type="button" className="primary" onClick={() => void enable()} disabled={!ready || !authorized || submitting || uncertain}>{submitting ? 'Aguardando recibo…' : 'Habilitar fila'}</button></div>
   </div>;
 }

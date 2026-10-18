@@ -13,9 +13,9 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
   const f = await attemptFixture(options.temporaryRoot, options.baseSha); await f.pipeline.close();
   if (options.checks) {
     const current = f.storage.getConfiguration(f.projectId);
-    const { id: _id, projectId: _project, revision: _revision, createdAtMs: _time, ...configuration } = current.view.configuration;
+    const { id: _id, project_id: _project, revision: _revision, created_at_ms: _time, ...configuration } = current.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
-      body: { projectChanges: { checks: options.checks } }, configuration: { ...configuration, checks: options.checks }, globalChanges: {} });
+      body: { project_changes: { checks: options.checks } }, configuration: { ...configuration, checks: options.checks }, globalChanges: {} });
   }
   const verifyRetainedDelivery = vi.fn(async () => {});
   const folderCapability = vi.fn(async () => ({ available: false, reason: 'NATIVE_OPEN_UNAVAILABLE' }));

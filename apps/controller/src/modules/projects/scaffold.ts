@@ -21,9 +21,9 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
   };
   const prerequisites = (): Prerequisite[] => {
     const result: Prerequisite[] = [];
-    if (!storage.getSettings().projectsRoot) result.push({ code: 'PROJECTS_ROOT_REQUIRED', message: 'Configure a local projects root.', recovery: 'Save an accessible projects root in settings.' });
+    if (!storage.getSettings().projects_root) result.push({ code: 'PROJECTS_ROOT_REQUIRED', message: 'Configure a local projects root.', recovery: 'Save an accessible projects root in settings.' });
     const capability = workspaces.scaffoldCapability();
-    if (!capability.available) result.push({ code: capability.reasonCode ?? 'CONTEXT_UNAVAILABLE', message: capability.reason ?? 'Git context unavailable.', recovery: capability.recovery ?? 'Start the authorized host.' });
+    if (!capability.available) result.push({ code: capability.reason_code ?? 'CONTEXT_UNAVAILABLE', message: capability.reason ?? 'Git context unavailable.', recovery: capability.recovery ?? 'Start the authorized host.' });
     return result;
   };
   async function plan(input: ScaffoldInput): Promise<ScaffoldPlanned> {
@@ -33,25 +33,25 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
     try { validateScaffoldBranch(input.baseBranch); }
     catch { throw new OperationError(400, 'SCAFFOLD_BRANCH_INVALID', 'Select a valid Git branch name.'); }
     const configuration = storage.getGlobalConfiguration(); const s = configuration.view.settings;
-    if (!s.projectsRoot) throw new OperationError(409, 'PROJECTS_ROOT_REQUIRED', 'Configure the local projects root before planning.');
+    if (!s.projects_root) throw new OperationError(409, 'PROJECTS_ROOT_REQUIRED', 'Configure the local projects root before planning.');
     const catalog = await loadScaffoldCatalog(resourcesDirectory); const template = catalog.templates.find(t => t.id === input.templateId);
     if (!template || template.digest !== input.templateDigest) throw new OperationError(409, 'SCAFFOLD_TEMPLATE_CHANGED', 'The selected template changed or is unavailable. Reload options.');
-    const destination = await workspaces.inspectScaffoldDestination(s.projectsRoot, input.destinationRelative).catch(error => {
+    const destination = await workspaces.inspectScaffoldDestination(s.projects_root, input.destinationRelative).catch(error => {
       throw new OperationError(409, error instanceof ScaffoldWorkspaceError ? error.code : 'SCAFFOLD_DESTINATION_UNAVAILABLE', 'The new destination is unavailable, exists or redirects outside the configured root.');
     });
     const files = renderEngineering(template.files, catalog.engineering, input.triageEnabled);
     const observed = await account();
     let ownerLogin: string | undefined;
     if (input.remote) {
-      if (observed.state !== 'complete' || !s.accountId || observed.id !== s.accountId) throw new OperationError(409,'SCAFFOLD_ACCOUNT_CHANGED','Observe the configured account before remote creation.');
-      if (!github.scaffoldRemoteCapability?.(input.remote,s.accountId,input.creationMode === 'remote_push').available) throw new OperationError(409,'CREATION_TARGET_NOT_AUTHORIZED','The trusted host has not authorized this exact remote target and effects.');
-      const remote = await github.inspectScaffoldRemote!(input.remote,s.accountId);
+      if (observed.state !== 'complete' || !s.account_id || observed.id !== s.account_id) throw new OperationError(409,'SCAFFOLD_ACCOUNT_CHANGED','Observe the configured account before remote creation.');
+      if (!github.scaffoldRemoteCapability?.(input.remote,s.account_id,input.creationMode === 'remote_push').available) throw new OperationError(409,'CREATION_TARGET_NOT_AUTHORIZED','The trusted host has not authorized this exact remote target and effects.');
+      const remote = await github.inspectScaffoldRemote!(input.remote,s.account_id);
       if (remote.state !== 'complete' || !remote.data) throw new OperationError(409,'SCAFFOLD_REMOTE_UNAVAILABLE','The remote owner and name could not be completely observed.');
       if (remote.data.repositoryId) throw new OperationError(409,'SCAFFOLD_REMOTE_EXISTS','The selected repository already exists and will not be adopted.');
       ownerLogin = remote.data.ownerLogin;
     }
     if (configuration.etag !== storage.getGlobalConfiguration().etag) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration changed while planning. Review a new plan.');
-    const value: ScaffoldPlan = { formatVersion: 1, input, installationId: s.installationId, settingsETag: configuration.etag,
+    const value: ScaffoldPlan = { formatVersion: 1, input, installationId: s.installation_id, settingsETag: configuration.etag,
       ...destination, templateDigest: template.digest, files: files.map(f => ({ path: f.path, bytes: Buffer.byteLength(f.content), sha256: fileDigest(f.content) })),
       engineering: engineeringSummary(input.triageEnabled), account: observed, ownerId: input.remote?.ownerId ?? null, ...(ownerLogin ? { ownerLogin } : {}),
       effects: ['create_directory', 'write_template_and_engineering', 'initialize_git', 'create_conventional_baseline',
@@ -86,7 +86,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
   async function currentAuthority(id: string,plan: ScaffoldPlan) {
     const observed = await account(); const current = storage.getCreation(id).creation;
     if (closing || current.state !== 'running' || current.planHash !== scaffoldDigest(plan) || storage.getGlobalConfiguration().etag !== plan.settingsETag ||
-      observed.state !== 'complete' || observed.id !== plan.account.id || observed.login !== plan.account.login || observed.id !== storage.getSettings().accountId) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The creation account, plan or continuity changed.');
+      observed.state !== 'complete' || observed.id !== plan.account.id || observed.login !== plan.account.login || observed.id !== storage.getSettings().account_id) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The creation account, plan or continuity changed.');
     const catalog = await loadScaffoldCatalog(resourcesDirectory);
     if (!catalog.templates.some(t => t.id === plan.input.templateId && t.digest === plan.templateDigest)) throw new OperationError(409,'SCAFFOLD_TEMPLATE_CHANGED','Scaffold resources changed before the effect.');
   }
@@ -123,7 +123,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
   return {
     async getOptions(): Promise<ScaffoldOptions> {
       const catalog = await loadScaffoldCatalog(resourcesDirectory); const configuration = storage.getGlobalConfiguration();
-      const pending = prerequisites(); const projectsRoot = configuration.view.settings.projectsRoot;
+      const pending = prerequisites(); const projectsRoot = configuration.view.settings.projects_root;
       if (projectsRoot) {
         try { await workspaces.inspectScaffoldDestination(projectsRoot, randomUUID()); }
         catch { pending.push({ code: 'PROJECTS_ROOT_UNAVAILABLE', message: 'The configured projects root is inaccessible or redirected.', recovery: 'Choose an accessible local directory.' }); }
@@ -132,9 +132,9 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       return { catalog: { id: catalog.id, version: catalog.version, digest: catalog.digest },
         templates: catalog.templates.map(t => ({ id: t.id, digest: t.digest, label: t.label, engineeringSummary: 'GitHub tracker, domain consumer rules, AGENTS.md pointers and optional triage vocabulary. No skills or labels are installed.' })),
         projectsRoot, creationModes: (['local', 'remote_no_push', 'remote_push'] as const).map(mode => ({ mode, capability: mode === 'local'
-          ? { ...workspaces.scaffoldCapability(), ...(pending.length ? { available: false, reasonCode: pending[0]!.code, reason: pending[0]!.message, recovery: pending[0]!.recovery } : {}) }
-          : { available: pending.length === 0 && observed.state === 'complete' && observed.id === configuration.view.settings.accountId && Boolean(workspaces.executeScaffoldGit && github.scaffoldRemoteCapability?.(undefined,observed.id!,mode === 'remote_push').available), reasonCode: 'CREATION_TARGET_NOT_AUTHORIZED', reason: 'Remote creation requires an exact target authorization from the trusted host.', recovery: 'Configure the host authorization for the selected owner, name, visibility and push.' } })),
-        account: observed, prerequisites: pending, eventCursor: configuration.view.eventCursor };
+          ? { ...workspaces.scaffoldCapability(), ...(pending.length ? { available: false, reason_code: pending[0]!.code, reason: pending[0]!.message, recovery: pending[0]!.recovery } : {}) }
+          : { available: pending.length === 0 && observed.state === 'complete' && observed.id === configuration.view.settings.account_id && Boolean(workspaces.executeScaffoldGit && github.scaffoldRemoteCapability?.(undefined,observed.id!,mode === 'remote_push').available), reason_code: 'CREATION_TARGET_NOT_AUTHORIZED', reason: 'Remote creation requires an exact target authorization from the trusted host.', recovery: 'Configure the host authorization for the selected owner, name, visibility and push.' } })),
+        account: observed, prerequisites: pending, eventCursor: configuration.view.event_cursor };
     },
     plan,
     async create(body: CreateScaffold, operationId: string) {

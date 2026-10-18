@@ -12,7 +12,7 @@ import type { Execution, PassageRequest } from '../../apps/controller/src/module
 import { digest, loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
 
 export const complete = <T>(data: T): GitHubQueryResult<T> => ({ state: 'complete', data, diagnostics: [], retryAtMs: null });
-export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40)) {
+export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high') {
   const directory = mkdtempSync(join(temporaryRoot, 'factory-attempt-'));
   const storage = openStorage({ dataDirectory: directory, busyTimeoutMs: 10 });
   const db = new Database(join(directory, 'factory.sqlite')); db.pragma('foreign_keys = ON');
@@ -20,21 +20,26 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('ACCOUNT_test', 'test-user', 1, 1, 1);
   db.prepare("UPDATE factory_settings SET account_id='ACCOUNT_test'").run();
   storage.saveSettings({ operationId: randomUUID(), expectedRevision: storage.getGlobalConfiguration().etag,
-    changes: { designatedHost: 'test-host', projectsRoot: directory }, body: {
-      changes: { designatedHost: 'test-host', projectsRoot: directory },
-      profileChanges: [{ name: 'Exact', executor: 'maestri-omp', provider: 'provider', model: 'model', effort: 'high', guidance: 'Profile guidance' }],
+    changes: { projects_root: directory }, body: {
+      changes: { projects_root: directory },
+      profile_changes: [
+        { action: 'create', profile: { name: 'Exact Implementer', profile_type: 'implementer', executor: 'maestri-omp', provider: 'provider', model: 'model', effort: profileEffort, guidance: 'Profile guidance' } },
+        { action: 'create', profile: { name: 'Exact Reviewer', profile_type: 'reviewer', executor: 'maestri-omp', provider: 'provider', model: 'model', effort: profileEffort, guidance: 'Reviewer guidance' } },
+      ],
     } });
-  const profile = storage.getGlobalConfiguration().view.profiles[0]!;
+  const profile = storage.getGlobalConfiguration().view.profiles.find((item) => item.profile_type === 'implementer');
+  const reviewerProfile = storage.getGlobalConfiguration().view.profiles.find((item) => item.profile_type === 'reviewer');
+  if (!profile || !reviewerProfile) throw new Error('PROFILE_FIXTURE_INCOMPLETE');
   const repository = { id: 'R_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true };
-  const mapping = { id: 'PVT_test', ownerId: 'OWNER_test', statusFieldId: 'FIELD_test', statusOptionIds: { ready: 'READY', inProgress: 'PROGRESS', inReview: 'REVIEW', delivered: 'DELIVERED' } };
+  const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_test', status_option_ids: { ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' } };
   function register() {
     const projectId = storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
-      body: { name: 'Project', source: { kind: 'github', location: repository.url }, baseBranch: 'main' },
-      source: { kind: 'github', location: repository.url, repositoryId: repository.id, repositoryUrl: repository.url }, originNotes: [] }).resource.id;
+      body: { name: 'Project', source: { kind: 'github', location: repository.url }, base_branch: 'main' },
+      source: { kind: 'github', location: repository.url, repository_id: repository.id, repository_url: repository.url }, originNotes: [] }).resource.id;
     const previous = storage.getConfiguration(projectId);
-    const { id: _id, projectId: _projectId, revision: _revision, createdAtMs: _created, ...configuration } = previous.view.configuration;
-    const changes = { githubProject: mapping, implementerProfileId: profile.id, reviewerProfileId: profile.id };
-    storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: previous.etag, projectId, body: { projectChanges: changes },
+    const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = previous.view.configuration;
+    const changes = { github_project: mapping, implementer_profile_id: profile.id, reviewer_profile_id: reviewerProfile.id };
+    storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: previous.etag, projectId, body: { project_changes: changes },
       configuration: { ...configuration, ...changes }, globalChanges: {} });
     return projectId;
   }
@@ -42,9 +47,9 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const issue: IssueContext = { id: 'I_test', number: 17, url: `${repository.url}/issues/17`, title: 'Executable issue',
     body: '## Objetivo\nDeliver a feature.\n## Critérios de aceite\n- Same text\n- Same text', state: 'OPEN', repository,
     assignees: [{ id: 'ACCOUNT_test', login: 'test-user' }], comments: [], blockers: [], references: [],
-    memberships: [{ itemId: 'ITEM_test', projectId: mapping.id, archived: false, statusValues: [{ fieldId: mapping.statusFieldId, optionId: mapping.statusOptionIds.ready, name: 'Ready' }] }] };
-  const project: GitHubProjectDetails = { project: { id: mapping.id, number: 1, title: 'Project', url: 'https://github.com/orgs/test-org/projects/1', owner: { id: mapping.ownerId, login: 'test-org', kind: 'organization' }, closed: false },
-    singleSelectFields: [{ id: mapping.statusFieldId, name: 'Status', options: Object.values(mapping.statusOptionIds).map(id => ({ id, name: id })) }] };
+    memberships: [{ itemId: 'ITEM_test', projectId: mapping.id, archived: false, statusValues: [{ fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready, name: 'Ready' }] }] };
+  const project: GitHubProjectDetails = { project: { id: mapping.id, number: 1, title: 'Project', url: 'https://github.com/orgs/test-org/projects/1', owner: { id: mapping.owner_id, login: 'test-org', kind: 'organization' }, closed: false },
+    singleSelectFields: [{ id: mapping.status_field_id, name: 'Status', options: Object.values(mapping.status_option_ids).map(id => ({ id, name: id })) }] };
   const observation: OriginInspection = { state: 'identified', source: storage.getConfiguration(projectId).view.configuration.source,
     local: null, base: { branch: 'main', sha: baseSha, observedFrom: 'github' },
     remote: { name: null, url: repository.url, confirmed: true, repository, branch: { repositoryId: repository.id, name: 'main', sha: baseSha } }, diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false };
@@ -62,6 +67,8 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const persistence = storage.executionPersistence();
   const roles = [...loadRoleResources().values()].map(r => r.reference);
   const execution: Execution = {
+    getCatalog: vi.fn(async () => ({ state: 'unavailable' as const, observed_at_ms: 1,
+      diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Test catalog unavailable.', recovery: 'Use a controlled catalog fixture.' }] })),
     continuePassage: vi.fn(async (source, input) => {
       const original = persistence.getPassage(source); const handle = { passageId: input.binding.passageId };
       persistence.reserve({ handle, binding: input.binding, requestHash: digest(input), state: 'starting', roleResource: input.roleResource,
@@ -89,12 +96,12 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const dependencies: PipelineDependencies = { storage, preparations, execution, workspaces, observeTools, hostName: 'test-host', logFailure };
   const pipeline = createPipeline(dependencies);
   async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr') {
-    const saved = await preparations.createPreparation(target, { issueId: issue.id, deliveryMode, guidance: '', overrides: {} }, { operationId: randomUUID(), expectedRevision: undefined });
+    const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '', overrides: {} }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;
-    const body: StartAttempt = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summaryHash, authorized: true };
+    const body: StartAttempt = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true };
     return { body, context: { operationId: randomUUID(), expectedRevision: saved.etag }, saved };
   }
-  return { directory, storage, db, profile, projectId, issue, project, observation, github, workspaces, preparations, persistence, roles, execution, tools, pipeline, dependencies, observeTools, logFailure, register, prepare,
+  return { directory, storage, db, profile, reviewerProfile, projectId, issue, project, observation, github, workspaces, preparations, persistence, roles, execution, tools, pipeline, dependencies, observeTools, logFailure, register, prepare,
     async close() { try { await pipeline.close(); } finally { storage.close(); db.close(); rmSync(directory, { recursive: true }); } } };
 }
 export type AttemptFixture = Awaited<ReturnType<typeof attemptFixture>>;

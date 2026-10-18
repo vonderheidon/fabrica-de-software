@@ -8,5 +8,5 @@ export function removeReviewSchema(db: Database.Database): void {
     DROP INDEX verification_review_binding; DROP INDEX passages_review_binding;
     DROP TRIGGER passage_source_binding; DROP TRIGGER passage_source_immutable;
     ALTER TABLE passages DROP COLUMN session_source_id;
-    DELETE FROM schema_migrations WHERE version=8; PRAGMA user_version=7;`);
+    DELETE FROM schema_migrations WHERE version>=8; PRAGMA user_version=7;`);
 }

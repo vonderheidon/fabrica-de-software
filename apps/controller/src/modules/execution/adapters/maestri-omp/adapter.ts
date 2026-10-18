@@ -18,6 +18,7 @@ const AnswerReceipt = Type.Object({ type: Type.Literal('answer-receipt'), operat
 const Submitted = Type.Object({ type: Type.Literal('task-submitted') }, { additionalProperties: false });
 const Lost = Type.Object({ type: Type.Literal('tracking-lost') }, { additionalProperties: false });
 type Native = ReturnType<typeof createNative>;
+const profileValue = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
 export interface AdapterDependencies { native?: Native; channel?: ChannelFactory; bootstrap?: BootstrapWriter }
 interface LivePassage {
   continuation: { resolve: (record: PassageRecord) => void; reject: () => void } | undefined;
@@ -198,7 +199,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
         lost: (code) => { interrupt(entry, code); void entry.channel?.close().catch(() => { entry.storageFailed = true; }); },
       });
       entry.channel = channel;
-      entry.bootstrap = await (dependencies.bootstrap ?? writeBootstrap)(options.dataDirectory, request, host, role, channel);
+      entry.bootstrap = await (dependencies.bootstrap ?? writeBootstrap)(options.dataDirectory, request, host, role, channel, validation.ompVersion);
       if (entry.cancelled || closed) return store.getPassage(initial.handle);
       timer = setTimeout(() => interrupt(entry, 'HANDSHAKE_TIMEOUT'), executionLimits.handshakeMs);
       // One launch only. Timeout/lost response retains the same identity, never recruits again.
@@ -231,6 +232,14 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   };
 
   return {
+    getCatalog: async () => {
+      try { return await native().getCatalog(); }
+      catch (error) {
+        const code = codeOf(error, 'CLI_UNAVAILABLE');
+        return { state: 'unavailable' as const, observed_at_ms: Date.now(), diagnostics: [{ code,
+          message: 'O catálogo local do OMP não pôde ser consultado.', recovery: 'Confira o executável e a configuração local do OMP; consulte novamente.' }] };
+      }
+    },
     continuePassage: async (source, input) => {
       const entry = live.get(source.passageId); const old = store.getPassage(source);
       const request = { ...input, cwd: entry?.request.cwd ?? '' };
@@ -281,7 +290,8 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     startPassage: (input, signal) => {
       if (closed || !Value.Check(PassageRequest, input)) return Promise.reject(new ExecutionError('INPUT_INVALID'));
       if (input.previousBlockingFindingKeys?.some(id => !input.previousFindingKeys.includes(id))) return Promise.reject(new ExecutionError('INPUT_INVALID'));
-      if (![input.profile.provider, input.profile.model, input.profile.effort].every(value => /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/.test(value))) return Promise.reject(new ExecutionError('INPUT_INVALID'));
+      if (!profileValue.test(input.profile.provider) || !profileValue.test(input.profile.model) ||
+        (input.profile.effort !== null && !profileValue.test(input.profile.effort))) return Promise.reject(new ExecutionError('INPUT_INVALID'));
       if (starts.size >= executionLimits.passages && !starts.has(input.binding.passageId)) return Promise.reject(new ExecutionError('INPUT_INVALID'));
       const request = structuredClone(input);
       const hash = digest(request);

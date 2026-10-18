@@ -6,6 +6,7 @@ import type { Workspaces } from '../workspaces/index.js';
 import type { Verification } from '../verification/index.js';
 
 type Stage = 'inProgress' | 'inReview' | 'delivered';
+const statusKey = (stage: Stage) => stage === 'inProgress' ? 'in_progress' : stage === 'inReview' ? 'in_review' : 'delivered';
 type Snapshot = ReturnType<Storage['getPublicationSnapshot']>;
 export interface PublicationDependencies {
   storage: Storage;
@@ -28,20 +29,20 @@ export function createPublication(deps: PublicationDependencies) {
   function supported() { if (deps.isClosed()) throw new OperationError(503, 'PUBLICATION_CLOSED', 'The controller is shutting down.'); }
   async function observeAuthority(id: string, desired?: Stage): Promise<boolean> {
     supported(); const snapshot = storage.getPublicationSnapshot(id); const capture = snapshot.capture;
-    const mapping = capture.configuration.configuration.githubProject;
-    const currentMapping = snapshot.configuration.configuration.githubProject;
-    const mappingMatches = mapping && currentMapping && mapping.id === currentMapping.id && mapping.ownerId === currentMapping.ownerId &&
-      mapping.statusFieldId === currentMapping.statusFieldId && (['ready','inProgress','inReview','delivered'] as const).every(key => mapping.statusOptionIds[key] === currentMapping.statusOptionIds[key]);
+    const mapping = capture.configuration.configuration.github_project;
+    const currentMapping = snapshot.configuration.configuration.github_project;
+    const mappingMatches = mapping && currentMapping && mapping.id === currentMapping.id && mapping.owner_id === currentMapping.owner_id &&
+      mapping.status_field_id === currentMapping.status_field_id && (['ready','in_progress','in_review','delivered'] as const).every(key => mapping.status_option_ids[key] === currentMapping.status_option_ids[key]);
     const stage = desired ?? stageFor(snapshot);
     const last = snapshot.effects.filter(e => e.kind === 'project_status' && e.state === 'confirmed').at(-1);
-    const original = capture.issue.memberships.find(m => m.projectId === mapping?.id)?.statusValues.find(v => v.fieldId === mapping?.statusFieldId)?.optionId ?? null;
+    const original = capture.issue.memberships.find(m => m.projectId === mapping?.id)?.statusValues.find(v => v.fieldId === mapping?.status_field_id)?.optionId ?? null;
     const expectedStatusId = last?.expectedIdentity.optionId ?? original;
     let observation: AuthorityObservation = { reason: null, observedAccountId: null, expectedStatusId, observedStatusId: null };
     const identity = await github.getIdentity();
     if (identity.state !== 'complete' || !identity.data) observation.reason = 'AUTHORITY_UNAVAILABLE';
     else {
       observation.observedAccountId = identity.data.id;
-      if (identity.data.id !== capture.accountId || identity.data.id !== snapshot.settings.accountId) observation.reason = 'ACCOUNT_CHANGED';
+      if (identity.data.id !== capture.accountId || identity.data.id !== snapshot.settings.account_id) observation.reason = 'ACCOUNT_CHANGED';
     }
     if (!observation.reason) {
       const issueResult = await github.getIssueContextById(capture.issue.id);
@@ -49,22 +50,22 @@ export function createPublication(deps: PublicationDependencies) {
       if (issueResult.state !== 'complete' || !issue || !('body' in issue)) observation.reason = 'AUTHORITY_UNAVAILABLE';
       else if (issue.id !== capture.issue.id || issue.repository.id !== capture.issue.repository.id || issue.state !== 'OPEN' || issue.repository.isArchived || issue.blockers.some(b => b.state === 'OPEN')) observation.reason = 'ISSUE_INELIGIBLE';
       else if (issue.assignees.length !== 1 || issue.assignees[0]?.id !== capture.accountId) observation.reason = 'ASSIGNEE_CHANGED';
-      else if (!mapping || !mappingMatches || snapshot.configuration.configuration.source.repositoryId !== capture.issue.repository.id) observation.reason = 'PUBLICATION_CONFIGURATION_CHANGED';
+      else if (!mapping || !mappingMatches || snapshot.configuration.configuration.source.repository_id !== capture.issue.repository.id) observation.reason = 'PUBLICATION_CONFIGURATION_CHANGED';
       else {
         const [projectResult, repositoryResult] = await Promise.all([github.getProject(mapping.id), github.getRepository({ owner: capture.issue.repository.owner.login, name: capture.issue.repository.name })]);
         const project = projectResult.data;
         const membership = issue.memberships.filter(m => m.projectId === mapping.id);
-        const values = membership[0]?.statusValues.filter(v => v.fieldId === mapping.statusFieldId) ?? [];
+        const values = membership[0]?.statusValues.filter(v => v.fieldId === mapping.status_field_id) ?? [];
         observation.observedStatusId = values[0]?.optionId ?? null;
         if (projectResult.state !== 'complete' || repositoryResult.state !== 'complete' || !project || !repositoryResult.data) observation.reason = 'AUTHORITY_UNAVAILABLE';
-        else if (project.project.id !== mapping.id || project.project.owner.id !== mapping.ownerId || project.project.closed || repositoryResult.data.id !== capture.issue.repository.id || repositoryResult.data.isArchived ||
+        else if (project.project.id !== mapping.id || project.project.owner.id !== mapping.owner_id || project.project.closed || repositoryResult.data.id !== capture.issue.repository.id || repositoryResult.data.isArchived ||
           membership.length !== 1 || membership[0]!.archived || membership[0]!.itemId !== capture.issue.memberships.find(m => m.projectId === mapping.id)?.itemId || values.length !== 1 ||
-          snapshot.configuration.configuration.baseBranch !== capture.configuration.configuration.baseBranch ||
-          !Object.values(mapping.statusOptionIds).every(option => project.singleSelectFields.find(f => f.id === mapping.statusFieldId)?.options.some(o => o.id === option))) observation.reason = 'PUBLICATION_CONFIGURATION_CHANGED';
+          snapshot.configuration.configuration.base_branch !== capture.configuration.configuration.base_branch ||
+          !Object.values(mapping.status_option_ids).every(option => project.singleSelectFields.find(f => f.id === mapping.status_field_id)?.options.some(o => o.id === option))) observation.reason = 'PUBLICATION_CONFIGURATION_CHANGED';
         else {
-          const pendingSameStage = snapshot.effects.some(e => e.kind === 'project_status' && e.expectedIdentity.optionId === mapping.statusOptionIds[stage] && ['running','unknown','confirmed'].includes(e.state));
+          const pendingSameStage = snapshot.effects.some(e => e.kind === 'project_status' && e.expectedIdentity.optionId === mapping.status_option_ids[statusKey(stage)] && ['running','unknown','confirmed'].includes(e.state));
           const observed = observation.observedStatusId;
-          if (observed !== expectedStatusId && !(pendingSameStage && observed === mapping.statusOptionIds[stage])) observation.reason = 'KANBAN_DIVERGENCE';
+          if (observed !== expectedStatusId && !(pendingSameStage && observed === mapping.status_option_ids[statusKey(stage)])) observation.reason = 'KANBAN_DIVERGENCE';
         }
       }
     }
@@ -154,15 +155,15 @@ export function createPublication(deps: PublicationDependencies) {
     await reconcile(id);
     if (!await observeAuthority(id, stage)) return false;
     snapshot = storage.getPublicationSnapshot(id);
-    const mapping = snapshot.capture.configuration.configuration.githubProject;
+    const mapping = snapshot.capture.configuration.configuration.github_project;
     if (!mapping) return false;
-    const optionId = mapping.statusOptionIds[stage];
+    const optionId = mapping.status_option_ids[statusKey(stage)];
     const membership = snapshot.capture.issue.memberships.find(m => m.projectId === mapping.id);
     if (!membership) return false;
     const scope = `${snapshot.status.passageId}:${stage}`;
     const old = snapshot.effects.find(e => e.kind === 'project_status' && e.scopeKey === scope);
     const identity: EffectIdentity = old?.expectedIdentity ?? { repositoryId: snapshot.capture.issue.repository.id, issueId: snapshot.capture.issue.id,
-      projectId: mapping.id, itemId: membership.itemId, fieldId: mapping.statusFieldId, optionId,
+      projectId: mapping.id, itemId: membership.itemId, fieldId: mapping.status_field_id, optionId,
       previousOptionId: snapshot.authority?.observed_status_id ?? null };
     await send(id, 'project_status', scope, identity, sourceOperationId ?? snapshot.status.operationId);
     // Projection failure preserves local work. send() prevents any later remote mutation until reconciliation.
@@ -182,7 +183,7 @@ export function createPublication(deps: PublicationDependencies) {
   function commentBody(snapshot: Snapshot): string {
     const d = snapshot.delivery!; const review = storage.getReview(d.id)!;
     const checks = approvedChecks(d.id,review.verificationId);
-    const marker = `<!-- factory:${snapshot.mode}:${snapshot.settings.installationId}:${snapshot.status.id}:${d.id} -->`;
+    const marker = `<!-- factory:${snapshot.mode}:${snapshot.settings.installation_id}:${snapshot.status.id}:${d.id} -->`;
     const commit = snapshot.effects.find(e => e.kind === 'local_commit' && e.deliveryId === d.id);
     const commitMode = snapshot.mode === 'commit';
     const lines = [marker, commitMode ? '### Resultado Commit local da fábrica' : '### Resultado ICR da fábrica', '', `Tentativa: ${snapshot.status.id}`, `Versão: ${d.id}`, `Tree aprovada: ${d.contentIdentity}`,
@@ -234,9 +235,9 @@ export function createPublication(deps: PublicationDependencies) {
     const open = storage.getOpenFindings(s.status.id,d.round+1);
     if (open.length > 1000) blocked('PR_FINDING_LIMIT');
     const pending = open.filter(f => !f.blocking);
-    const body = [`<!-- factory:pr:${s.settings.installationId}:${s.status.id}:${d.id} -->`,
+    const body = [`<!-- factory:pr:${s.settings.installation_id}:${s.status.id}:${d.id} -->`,
       '### Entrega aprovada da fábrica',`Escopo: ${safe(s.capture.issue.title)}`,`Issue: ${s.capture.issue.url}`,
-      `Tentativa (attemptId): ${s.status.id}`,`Versão: ${d.id}`,`Base configurada: ${safe(s.capture.configuration.configuration.baseBranch)} (${d.baseSha})`,
+      `Tentativa (attemptId): ${s.status.id}`,`Versão: ${d.id}`,`Base configurada: ${safe(s.capture.configuration.configuration.base_branch)} (${d.baseSha})`,
       `Tree aprovada: ${d.contentIdentity}`,`Referência: ${d.gitRef}`,`Parecer: ${review.state}; revisão ${review.id}.`,
       'Critérios:',...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}.`),'Checks do controlador:',
       ...checks.map(c => `- ${c.id}: ${c.state}; exit=${c.exitCode ?? 'n/a'}; evidências: ${c.artifacts.map(a => `${a.id} sha256=${a.sha256}`).join(', ')}.`),
@@ -255,7 +256,7 @@ export function createPublication(deps: PublicationDependencies) {
       if (old && ['confirmed','not_applicable'].includes(old.state)) continue;
       const identity: EffectIdentity = old?.expectedIdentity ?? { repositoryId: s.capture.issue.repository.id,issueId: s.capture.issue.id,contentIdentity: d.contentIdentity!,parentSha: d.baseSha,
         issueNumber: s.capture.issue.number,branchRef: `refs/heads/factory/${s.capture.issue.number}/${s.status.id}`,repositoryOwner: s.capture.issue.repository.owner.login,repositoryName: s.capture.issue.repository.name,
-        baseBranch: s.capture.configuration.configuration.baseBranch,
+        baseBranch: s.capture.configuration.configuration.base_branch,
         ...(commit.receipt ? { commitSha: commit.receipt.id,commitOperationId: commit.operationId } : {}),
         ...(kind === 'pull_request' && body !== null ? { marker: body.split('\n')[0]!,bodyHash: hash(body),title: `feat: deliver issue #${s.capture.issue.number}` } : {}) };
       if (kind === 'pull_request' && body !== null && identity.bodyHash !== hash(body)) blocked('PR_IDENTITY_CHANGED');
@@ -321,7 +322,7 @@ export function createPublication(deps: PublicationDependencies) {
     snapshot = storage.getPublicationSnapshot(id, deliveryId);
     storage.finalizeICR(id, deliveryId, snapshot.stamp, true);
     if (!await projectStage(id, 'delivered', command.operationId)) blocked('PROJECTION_PENDING');
-    const pending = storage.getEffects(id).some(e => ['running','unknown'].includes(e.state) || (e.kind === 'project_status' && e.expectedIdentity.optionId === snapshot.capture.configuration.configuration.githubProject?.statusOptionIds.delivered && e.state !== 'confirmed'));
+    const pending = storage.getEffects(id).some(e => ['running','unknown'].includes(e.state) || (e.kind === 'project_status' && e.expectedIdentity.optionId === snapshot.capture.configuration.configuration.github_project?.status_option_ids.delivered && e.state !== 'confirmed'));
     if (pending) blocked('PROJECTION_PENDING');
   }
   function schedule(command: PublicationCommand): void {
@@ -355,7 +356,7 @@ export function createPublication(deps: PublicationDependencies) {
       supported(); const settings = storage.getSettings(); const identity = await github.getIdentity();
       const observed = identity.state === 'complete' ? identity.data?.id ?? null : null;
       storage.recordControllerAccount(settings.revision,observed);
-      return observed !== null && observed === settings.accountId;
+      return observed !== null && observed === settings.account_id;
     },
     complete: (attemptId: string, body: CompletePublication, context: { operationId: string; expectedRevision: string | undefined }) => accept({ ...context, attemptId, body, kind: 'publication.complete' }),
     reconcile: (attemptId: string, body: ReconcilePublication, context: { operationId: string; expectedRevision: string | undefined }) => accept({ ...context, attemptId, body, kind: 'publication.reconcile' }),
@@ -369,7 +370,7 @@ export function createPublication(deps: PublicationDependencies) {
       const summary = storage.getPublicationSummary(attemptId,body.deliveryId);
       const upgrade = summary.upgrades?.find(u => u.targetMode === body.targetMode);
       if (summary.mode !== body.currentMode || !upgrade) throw new OperationError(409,'MODE_UPGRADE_NOT_ALLOWED','Only a strictly higher mode for the current finished approved version can be authorized.');
-      if (!upgrade.capability.available) throw new OperationError(409,'PUBLICATION_BLOCKED',`Publication is blocked: ${upgrade.capability.reasonCode ?? 'PUBLICATION_BLOCKED'}.`);
+      if (!upgrade.capability.available) throw new OperationError(409,'PUBLICATION_BLOCKED',`Publication is blocked: ${upgrade.capability.reason_code ?? 'PUBLICATION_BLOCKED'}.`);
       if (upgrade.summaryHash !== body.authorizedAdditionalEffectsHash) throw new OperationError(409,'MODE_UPGRADE_NOT_ALLOWED','The additional effects summary changed. Reload the delivery before authorizing.');
       if (!await observeAuthority(attemptId)) throw new OperationError(409,'PUBLICATION_BLOCKED',`Publication is blocked: ${storage.getAttempt(attemptId).suspension ?? 'AUTHORITY_UNAVAILABLE'}.`);
       storage.assertPublicationEligible(attemptId,body.deliveryId,true);
@@ -385,7 +386,7 @@ export function createPublication(deps: PublicationDependencies) {
     async publishApproved(deliveryId: string): Promise<void> {
       const d = storage.getDelivery(deliveryId).delivery; const a = storage.getAttempt(d.attemptId);
       if (a.result || a.suspension || storage.getReview(deliveryId)?.state !== 'approved') return;
-      const mode = storage.getAttemptCapture(a.id).configuration.configuration.defaultDeliveryMode;
+      const mode = storage.getAttemptCapture(a.id).configuration.configuration.default_delivery_mode;
       accept({ operationId: randomUUID(), attemptId: a.id, expectedRevision: `"${a.id}:${a.revision}"`, kind: 'publication.complete', body: { deliveryId, authorizedMode: mode, authorized: true } });
     },
   };

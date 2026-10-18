@@ -11,8 +11,9 @@ function fixture() {
     expectedIdentity: { repositoryId: 'R',issueId: 'I',marker,bodyHash: createHash('sha256').update(body).digest('hex') },confirmedIdentity: null,receipt: null,
     reason: null,authorized: true,revision: 2,sentAtMs: 1,confirmedAtMs: null };
   const authorization = { accountId: 'A',repositoryIds: ['R'],projectIds: ['P'] };
-  const run = vi.fn(async (input: string) => {
+  const run = vi.fn(async (input: string, onSend?: () => void) => {
     const request = JSON.parse(input) as { variables: { input: { clientMutationId: string } } };
+    onSend?.();
     return { exitCode: 0,stdout: 'HTTP/2.0 200 OK\r\ncontent-type: application/json\r\n\r\n'+JSON.stringify({ data: { addComment: { clientMutationId: request.variables.input.clientMutationId,
       commentEdge: { node: { id: 'C',url: 'https://github.com/org/repo/issues/1#issuecomment-1',body,issue: { id: 'I' },repository: { id: 'R' } } } } } }) };
   });
@@ -32,12 +33,12 @@ it('requires trusted target/account authorization before any mutation and valida
 });
 it.each(['timeout','malformed','partial','wrong_subject','wrong_correlation'])('preserves unknown after a sent mutation with %s instead of assuming failure', async scenario => {
   const f = fixture();
-  if (scenario === 'timeout') f.run.mockRejectedValueOnce(new Error('PRIVATE_NATIVE_MESSAGE'));
-  else if (scenario === 'malformed') f.run.mockResolvedValueOnce({ exitCode: 0,stdout: 'not HTTP' });
-  else if (scenario === 'partial') f.run.mockResolvedValueOnce({ exitCode: 1,stdout: 'HTTP/2 200 OK\r\nx:test\r\n\r\n'+JSON.stringify({ data: { addComment: null },errors: [{ type: 'INTERNAL',message: 'PRIVATE_REMOTE_MESSAGE' }] }) });
+  if (scenario === 'timeout') f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); throw new Error('PRIVATE_NATIVE_MESSAGE'); });
+  else if (scenario === 'malformed') f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { exitCode: 0,stdout: 'not HTTP' }; });
+  else if (scenario === 'partial') f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { exitCode: 1,stdout: 'HTTP/2 200 OK\r\nx:test\r\n\r\n'+JSON.stringify({ data: { addComment: null },errors: [{ type: 'INTERNAL',message: 'PRIVATE_REMOTE_MESSAGE' }] }) }; });
   else {
     const response = await f.run(''+JSON.stringify({ variables: { input: { clientMutationId: f.effect.operationId } } })); f.run.mockClear();
-    f.run.mockResolvedValueOnce({ ...response,stdout: scenario === 'wrong_subject' ? response.stdout.replace('"id":"I"','"id":"OTHER"') : response.stdout.replace(f.effect.operationId,randomUUID()) });
+    f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { ...response,stdout: scenario === 'wrong_subject' ? response.stdout.replace('"id":"I"','"id":"OTHER"') : response.stdout.replace(f.effect.operationId,randomUUID()) }; });
   }
   const result = await createEffectWriter(f.reader,f.authorization)({ effect: f.effect,accountId: 'A',body: f.body });
   expect(result.state).toBe('unknown'); expect(result.receipt).toBeNull(); expect(JSON.stringify(result)).not.toContain('PRIVATE_');
@@ -54,7 +55,7 @@ it('requires project authorization and only sends the exact mapped single-select
   expect(request.query).not.toContain('updateIssue');
 });
 it('shares query rate-limit cooldown with mutations and does not send a second request during the delay', async () => {
-  const f = fixture(); f.run.mockResolvedValueOnce({ exitCode: 1,stdout: 'HTTP/2 429 Too Many Requests\r\nretry-after: 120\r\n\r\n{}' });
+  const f = fixture(); f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { exitCode: 1,stdout: 'HTTP/2 429 Too Many Requests\r\nretry-after: 120\r\n\r\n{}' }; });
   const writer = createEffectWriter(f.reader,f.authorization);
   expect((await writer({ effect: f.effect,accountId: 'A',body: f.body })).state).toBe('unknown');
   expect(await writer({ effect: f.effect,accountId: 'A',body: f.body })).toMatchObject({ state: 'failed_known',reason: 'RATE_LIMITED' });

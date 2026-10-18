@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AttemptPage, AttemptSummary } from '#contracts';
+import type { HttpAttemptPage as AttemptPage, HttpAttemptSummary as AttemptSummary } from '#contracts';
 import { HttpError, requestJson } from '../../api/http.js';
 
 type ActiveAttemptLoad = {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import type { ConfigurationView, SettingsView } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 
@@ -38,8 +39,8 @@ export function useConfiguration(projectId: string | null) {
 
   useEffect(() => {
     const onEvent = (event: Event): void => {
-      const detail = (event as CustomEvent<{ eventType?: string; projectId?: string }>).detail;
-      if (detail?.eventType === 'settings.updated' || detail?.eventType === 'project.configuration.updated' && detail.projectId === projectId) setReloadKey((value) => value + 1);
+      const detail = (event as CustomEvent<Partial<ControllerEventNotice>>).detail;
+      if (detail?.event_type === 'settings.updated' || detail?.event_type === 'project.configuration.updated' && detail.project_id === projectId) setReloadKey((value) => value + 1);
     };
     const onResync = (): void => setReloadKey((value) => value + 1);
     window.addEventListener('factory-controller-event', onEvent);

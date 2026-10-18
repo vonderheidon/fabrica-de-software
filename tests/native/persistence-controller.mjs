@@ -135,7 +135,7 @@ async function handle(action) {
     const operation = await pipeline.removeResource(attemptId, resource.id, { confirmed: true, planHash: plan.view.planHash },
       { operationId: randomUUID(), expectedRevision: plan.etag });
     await pipeline.drain(); assert.deepEqual(failures, []);
-    return { operation: storage.getOperation(operation.operationId), resources: storage.getResources(attemptId) };
+    return { operation: storage.getOperation(operation.operation_id), resources: storage.getResources(attemptId) };
   }
   if (action === 'diff') return await pipeline.getDeliveryDiff(deliveryId, {});
   if (action === 'artifact') {

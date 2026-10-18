@@ -25,20 +25,20 @@ export function readEvents(db: Database.Database, query: EventQuery, through?: s
         if (query.projectId && attempt.projectId !== query.projectId) throw new OperationError(404, 'ATTEMPT_NOT_FOUND', 'Attempt not found in this project.');
       }
       const scope = ' FROM events e JOIN operation_requests o ON o.operation_id = e.operation_id WHERE o.installation_id = ? AND o.account_id IS ?';
-      const current = db.prepare<[string, string | null], { seq: number }>(`SELECT coalesce(max(e.seq), 0) AS seq${scope}`).get(settings.installationId, settings.accountId)?.seq ?? 0;
-      if (cursor > current || (cursor > 0 && !db.prepare(`SELECT e.seq${scope} AND e.seq = ?`).get(settings.installationId, settings.accountId, cursor))) {
+      const current = db.prepare<[string, string | null], { seq: number }>(`SELECT coalesce(max(e.seq), 0) AS seq${scope}`).get(settings.installation_id, settings.account_id)?.seq ?? 0;
+      if (cursor > current || (cursor > 0 && !db.prepare(`SELECT e.seq${scope} AND e.seq = ?`).get(settings.installation_id, settings.account_id, cursor))) {
         throw new OperationError(409, 'EVENT_RESYNC_REQUIRED', 'Reload the current snapshot before reconnecting.');
       }
       const ceiling = through === undefined ? current : Number(through);
       if (!Number.isSafeInteger(ceiling) || ceiling < cursor || ceiling > current ||
-        (ceiling > 0 && !db.prepare(`SELECT e.seq${scope} AND e.seq=?`).get(settings.installationId, settings.accountId, ceiling))) {
+        (ceiling > 0 && !db.prepare(`SELECT e.seq${scope} AND e.seq=?`).get(settings.installation_id, settings.account_id, ceiling))) {
         throw new OperationError(409, 'EVENT_RESYNC_REQUIRED', 'The event snapshot is no longer available.');
       }
       const limit = Number(query.limit ?? '25');
       const rows = db.prepare(`SELECT e.seq,e.entity_type,e.entity_id,e.operation_id,e.event_type,e.entity_revision,e.occurred_at_ms,e.project_id,e.attempt_id${scope}
         AND e.seq > ? AND e.seq <= ? AND (? IS NULL OR e.operation_id = ?)
         AND (? IS NULL OR e.project_id = ?) AND (? IS NULL OR e.attempt_id = ?) ORDER BY e.seq LIMIT ?`)
-        .all(settings.installationId, settings.accountId, cursor, ceiling, query.operationId ?? null, query.operationId ?? null,
+        .all(settings.installation_id, settings.account_id, cursor, ceiling, query.operationId ?? null, query.operationId ?? null,
           query.projectId ?? null, query.projectId ?? null, query.attemptId ?? null, query.attemptId ?? null, limit + 1) as EventRow[];
       const items = rows.slice(0, limit).map((row) => {
         const event = {
@@ -50,7 +50,7 @@ export function readEvents(db: Database.Database, query: EventQuery, through?: s
         return event;
       });
       const hasMore = rows.length > limit;
-      return { items, nextCursor: hasMore ? items.at(-1)?.seq ?? null : null, hasMore, eventCursor: String(ceiling) };
+      return { items, next_cursor: hasMore ? items.at(-1)?.seq ?? null : null, has_more: hasMore, event_cursor: String(ceiling) };
     })();
   } catch (error) {
     if (error instanceof OperationError || error instanceof StorageError) throw error;

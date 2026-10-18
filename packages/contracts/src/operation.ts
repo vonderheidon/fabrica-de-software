@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { OperationId } from './base.js';
+import { OperationId, OperationReceipt } from './base.js';
 import { AttemptSummary } from './queries.js';
 
 const closed = { additionalProperties: false } as const;
@@ -37,6 +37,7 @@ export const ContextDiagnostic = Type.Object({
 }, closed);
 export type ContextDiagnostic = Static<typeof ContextDiagnostic>;
 export const DiagnosticReport = Type.Object({
+  receipt: OperationReceipt,
   operationId: OperationId, state: Type.Union((['accepted', 'succeeded', 'failed', 'unknown'] as const).map(s => Type.Literal(s))),
   createdAtMs: time, completedAtMs: Type.Union([time, Type.Null()]),
   checks: Type.Array(DiagnosticCheck, { minItems: 1, maxItems: 4, uniqueItems: true }),

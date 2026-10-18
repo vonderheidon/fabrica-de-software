@@ -108,7 +108,7 @@ export function installSecurity(app: FastifyInstance, configuration: ControllerC
       sessions.set(id, csrfToken);
       reply.setCookie(name, id, { httpOnly: true, sameSite: 'strict', path: '/api/v1', secure: false });
     }
-    return { csrfToken, instanceId };
+    return { csrf_token: csrfToken, instance_id: instanceId };
   });
   return {
     revokeSession,
@@ -137,9 +137,9 @@ export function sendOperationAccepted(reply: FastifyReply, requestId: string, st
   const operation = storage.getOperation(operationId);
   const durableUncertainAnswer = operation && ['scaffold.create', 'scaffold.reconcile', 'question.answer', 'resource.remove', 'folder.open', 'interaction.open', 'publication.complete', 'publication.reconcile', 'attempt.revalidate'].includes(operation.kind) && operation.receipt !== undefined;
   if (!operation || (operation.state === 'unknown' && !durableUncertainAnswer)) throw new HttpError(503, 'OPERATION_NOT_DURABLE', 'Operation acceptance could not be confirmed.');
-  const statusUrl = `/api/v1/operations/${operation.operationId}`;
+  const statusUrl = `/api/v1/operations/${operation.operation_id}`;
   return reply.code(202).header('Location', statusUrl).send({
-    operationId: operation.operationId, resource: operation.resource, statusUrl,
-    ...(operation.receipt ? { receipt: operation.receipt } : {}), requestId,
+    operation_id: operation.operation_id, resource: operation.resource, status_url: statusUrl,
+    ...(operation.receipt ? { receipt: operation.receipt } : {}), request_id: requestId,
   });
 }

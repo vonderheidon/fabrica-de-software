@@ -29,7 +29,7 @@ function issueHeader(db: Database.Database,id: string): AttemptDetail['issue'] {
 export function readAttemptPage(db: Database.Database, query: AttemptListQuery): AttemptPage {
   if (!Value.Check(AttemptListQuery, query)) throw cursorError();
   const s = readSettings(db);
-  const fingerprint = digest([s.installationId, s.accountId, query.projectId ?? null, query.result ?? null, 'attempts:created-desc:id']);
+  const fingerprint = digest([s.installation_id, s.account_id, query.projectId ?? null, query.result ?? null, 'attempts:created-desc:id']);
   const maximum = db.prepare<[], { ceiling: number }>('SELECT coalesce(max(rowid),0) AS ceiling FROM attempts').get()!.ceiling;
   const cursor = decodeCursor(query.cursor, fingerprint, maximum); const limit = Number(query.limit ?? '25');
   // Fixed-width timestamp plus UUID makes ties deterministic. New inserts above ceiling never enter continuation pages.
@@ -40,9 +40,9 @@ export function readAttemptPage(db: Database.Database, query: AttemptListQuery):
     FROM attempts a WHERE a.account_id IS @account AND (@project IS NULL OR a.project_id=@project)
     AND (@result IS NULL OR (@result='active' AND a.result IS NULL) OR a.result=@result) AND a.rowid<=@ceiling
     AND (@after='' OR ${key}<@after) ORDER BY a.created_at_ms DESC,a.id DESC LIMIT @limit`)
-    .all({ account: s.accountId, project: query.projectId ?? null, result: query.result ?? null, ...cursor, limit: limit + 1 });
+    .all({ account: s.account_id, project: query.projectId ?? null, result: query.result ?? null, ...cursor, limit: limit + 1 });
   const selected = rows.slice(0, limit); const last = selected.at(-1); const hasMore = rows.length > limit;
-  return { items: selected.map(({ pageKey: _key, ...row }) => row), hasMore, nextCursor: hasMore && last ? encodeCursor(fingerprint, cursor.ceiling, last.pageKey) : null, eventCursor: eventCursor(db) };
+  return { items: selected.map(({ pageKey: _key, ...row }) => row), has_more: hasMore, next_cursor: hasMore && last ? encodeCursor(fingerprint, cursor.ceiling, last.pageKey) : null, event_cursor: eventCursor(db) };
 }
 interface SectionPlan { from: string; key: string; delivery: string; round: string; select: string }
 const plans: Record<DetailSection, SectionPlan> = {
@@ -51,7 +51,7 @@ const plans: Record<DetailSection, SectionPlan> = {
   passages: { from: 'passages t LEFT JOIN passage_results z ON z.passage_id=t.id', key: "printf('%02d',t.round_number)||':'||t.role||':'||t.id", delivery: 't.delivery_version', round: 't.round_number',
     select: 't.id,t.attempt_id AS attemptId,t.delivery_version AS deliveryId,t.round_number AS round,t.role,t.state,t.tracking_state AS tracking,t.diagnostic,z.receipt_id AS resultReceiptId,t.created_at_ms AS createdAtMs' },
   criteria: { from: 'attempt_criteria t', key: "printf('%06d',t.occurrence_index)||':'||t.criterion_id", delivery: 'NULL', round: 'NULL',
-    select: `t.criterion_id AS id,t.text,t.occurrence_index AS occurrenceIndex,
+    select: `t.criterion_id AS id,t.text,t.occurrence_index AS occurrence_index,
       (SELECT json_extract(j.value,'$.explicit') FROM attempts a,json_each(a.capture_json,'$.criteria') j WHERE a.id=t.attempt_id AND json_extract(j.value,'$.id')=t.criterion_id) AS explicit,
       (SELECT json_object('verdict',c.verdict,'evidence',json(c.evidence_json)) FROM criterion_results c JOIN passages p ON p.id=c.passage_id WHERE c.attempt_id=t.attempt_id AND c.criterion_id=t.criterion_id AND p.delivery_version=@delivery AND p.role='implementer') AS producer_json,
       (SELECT json_object('verdict',c.verdict,'evidence',json(c.evidence_json)) FROM criterion_results c JOIN passages p ON p.id=c.passage_id WHERE c.attempt_id=t.attempt_id AND c.criterion_id=t.criterion_id AND p.delivery_version=@delivery AND p.role='reviewer') AS reviewer_json` },
@@ -74,7 +74,7 @@ export function readDetailPage(db: Database.Database, attemptId: string, query: 
   if (!plan) throw cursorError();
   const selected = query.deliveryId ?? (query.roundId ? db.prepare<[string, number], { id: string }>('SELECT delivery_version AS id FROM rounds WHERE attempt_id=? AND round_number=?').get(attemptId, Number(query.roundId))?.id : a.deliveryId) ?? null;
   if (query.deliveryId && readDelivery(db, query.deliveryId).attemptId !== attemptId) throw new OperationError(404, 'DELIVERY_NOT_FOUND', 'The selected version does not belong to this attempt.');
-  const fingerprint = digest([s.installationId,s.accountId,attemptId,query.section,query.deliveryId ?? null,query.roundId ?? null,selected,'ascending:stable-id']);
+  const fingerprint = digest([s.installation_id,s.account_id,attemptId,query.section,query.deliveryId ?? null,query.roundId ?? null,selected,'ascending:stable-id']);
   const filter = `t.attempt_id=@attempt AND (@round IS NULL OR ${plan.round}=@round OR ${plan.round} IS NULL)
     AND (@filterDelivery IS NULL OR ${plan.delivery}=@filterDelivery OR ${plan.delivery} IS NULL)`;
   const parameters = { attempt: attemptId, round: query.roundId ? Number(query.roundId) : null, filterDelivery: query.deliveryId ?? null, delivery: selected };
@@ -99,7 +99,7 @@ export function readDetailPage(db: Database.Database, attemptId: string, query: 
     if (!Value.Check(DetailItem,value)) throw new StorageError('OPERATION_DATA_INVALID'); return value;
   });
   const last = selectedRows.at(-1); const hasMore = rows.length > limit;
-  return { section: query.section, items, hasMore, nextCursor: hasMore && last ? encodeCursor(fingerprint,cursor.ceiling,String(last.pageKey)) : null, eventCursor: eventCursor(db) };
+  return { section: query.section, items, has_more: hasMore, next_cursor: hasMore && last ? encodeCursor(fingerprint,cursor.ceiling,String(last.pageKey)) : null, event_cursor: eventCursor(db) };
 }
 export function readAttemptDetail(db: Database.Database, id: string, query: AttemptDetailQuery): AttemptDetail {
   if (!Value.Check(AttemptDetailQuery,query)) throw cursorError();

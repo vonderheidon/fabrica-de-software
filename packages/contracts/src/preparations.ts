@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { ArtifactPolicy, CostDefaults, DeliveryMode, OperationId, OperationReceipt, Page, TimeDefaults } from './base.js';
-import { GitHubDiagnostic, GitHubId, IssueContext, ProjectItem } from './github.js';
-import { ExecutionProfile, Prerequisite, ProjectConfiguration, StoredExecutionProfile } from './projects.js';
+import { ArtifactPolicy, DeliveryMode, OperationId, OperationReceipt, Page, TimeDefaults } from './base.js';
+import { GitHubDiagnostic, GitHubId, ConfigurationIssueContext, ConfigurationIssueOption } from './github.js';
+import { ExecutionProfileValue, Prerequisite, ProjectConfiguration, StoredExecutionProfileValue } from './projects.js';
 
 const closed = { additionalProperties: false } as const;
 const revision = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
@@ -10,29 +10,28 @@ const sha = Type.String({ pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$' });
 const hash = Type.String({ pattern: '^[0-9a-f]{64}$' });
 const profileChoice = Type.Union([
   Type.Object({ kind: Type.Literal('reference'), id: OperationId, revision }, closed),
-  Type.Object({ kind: Type.Literal('value'), profile: ExecutionProfile }, closed),
+  Type.Object({ kind: Type.Literal('value'), profile: ExecutionProfileValue }, closed),
 ]);
 export const PreparationOverrides = Type.Partial(Type.Object({
-  baseBranch: ProjectConfiguration.properties.baseBranch,
-  implementerProfile: profileChoice, reviewerProfile: profileChoice,
-  checks: ProjectConfiguration.properties.checks, correctionLimit: ProjectConfiguration.properties.correctionLimit,
-  timeDefaults: TimeDefaults, costDefaults: CostDefaults, artifactPolicy: ArtifactPolicy,
+  base_branch: ProjectConfiguration.properties.base_branch,
+  implementer_profile: profileChoice, reviewer_profile: profileChoice,
+  checks: ProjectConfiguration.properties.checks, correction_limit: ProjectConfiguration.properties.correction_limit,
+  time_defaults: TimeDefaults, artifact_policy: ArtifactPolicy,
 }, closed));
 export type PreparationOverrides = Static<typeof PreparationOverrides>;
 export const PreparationChoices = Type.Object({
-  issueId: GitHubId, deliveryMode: DeliveryMode, guidance: Type.String({ maxLength: 8192 }), overrides: PreparationOverrides,
-  previousAttemptId: Type.Optional(OperationId),
+  issue_id: GitHubId, delivery_mode: DeliveryMode, guidance: Type.String({ maxLength: 8192 }), overrides: PreparationOverrides,
+  previous_attempt_id: Type.Optional(OperationId),
 }, closed);
 export type PreparationChoices = Static<typeof PreparationChoices>;
-export const PreparationChoiceSnapshot = Type.Object({ formatVersion: Type.Literal(1), choices: PreparationChoices }, closed);
-export const PreparationChanges = Type.Partial(Type.Omit(PreparationChoices, ['previousAttemptId']));
+export const PreparationChanges = Type.Partial(Type.Omit(PreparationChoices, ['previous_attempt_id']));
 export const PreparationUpdate = Type.Object({ changes: PreparationChanges }, closed);
 export type PreparationUpdate = Static<typeof PreparationUpdate>;
 export const PreparationRecord = Type.Object({
-  ...PreparationChoices.properties, id: OperationId, projectId: OperationId, projectRevisionId: OperationId, revision,
+  ...PreparationChoices.properties, id: OperationId, project_id: OperationId, project_revision_id: OperationId, revision,
 }, closed);
 export type PreparationRecord = Static<typeof PreparationRecord>;
-export const Criterion = Type.Object({ id: Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), text: text(65536), occurrenceIndex: revision, explicit: Type.Boolean() }, closed);
+export const Criterion = Type.Object({ id: Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), text: text(65536), occurrence_index: revision, explicit: Type.Boolean() }, closed);
 export type Criterion = Static<typeof Criterion>;
 export const CriteriaPreview = Type.Object({
   executable: Type.Boolean(), objective: Type.String({ maxLength: 1_000_000 }), criteria: Type.Array(Criterion, { maxItems: 1000 }),
@@ -41,14 +40,14 @@ export const CriteriaPreview = Type.Object({
 export type CriteriaPreview = Static<typeof CriteriaPreview>;
 const origin = Type.Union([Type.Literal('project'), Type.Literal('global'), Type.Literal('preparation')]);
 export const ChoiceOrigins = Type.Object({
-  baseBranch: origin, implementerProfile: origin, reviewerProfile: origin, checks: origin, correctionLimit: origin,
-  timeDefaults: origin, costDefaults: origin, artifactPolicy: origin, guidance: origin, deliveryMode: origin,
+  base_branch: origin, implementer_profile: origin, reviewer_profile: origin, checks: origin, correction_limit: origin,
+  time_defaults: origin, artifact_policy: origin, guidance: origin, delivery_mode: origin,
 }, closed);
 export const EffectiveConfiguration = Type.Object({
-  configuration: ProjectConfiguration, projectRevisionId: OperationId, settingsRevision: revision,
-  implementerProfile: Type.Union([ExecutionProfile, StoredExecutionProfile, Type.Null()]),
-  reviewerProfile: Type.Union([ExecutionProfile, StoredExecutionProfile, Type.Null()]),
-  timeDefaults: TimeDefaults, costDefaults: CostDefaults, artifactPolicy: ArtifactPolicy,
+  configuration: ProjectConfiguration, project_revision_id: OperationId, settings_revision: revision,
+  implementer_profile: Type.Union([ExecutionProfileValue, StoredExecutionProfileValue, Type.Null()]),
+  reviewer_profile: Type.Union([ExecutionProfileValue, StoredExecutionProfileValue, Type.Null()]),
+  time_defaults: TimeDefaults, artifact_policy: ArtifactPolicy,
   guidance: Type.String({ maxLength: 16385 }),
   origins: ChoiceOrigins,
 }, closed);
@@ -58,24 +57,24 @@ export const PreparationEffect = Type.Object({
   requested: Type.Boolean(), description: text(2048),
 }, closed);
 export const Preparation = Type.Object({
-  ...PreparationRecord.properties, prerequisites: Type.Array(Prerequisite, { maxItems: 100 }), effectiveConfiguration: EffectiveConfiguration,
-  criteriaPreview: CriteriaPreview, effectsPreview: Type.Array(PreparationEffect),
-  issue: Type.Union([IssueContext, Type.Null()]), baseSha: Type.Union([sha, Type.Null()]),
-  summaryHash: hash, diagnostics: Type.Array(GitHubDiagnostic),
-  retryAtMs: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  ...PreparationRecord.properties, prerequisites: Type.Array(Prerequisite, { maxItems: 100 }), effective_configuration: EffectiveConfiguration,
+  criteria_preview: CriteriaPreview, effects_preview: Type.Array(PreparationEffect),
+  issue: Type.Union([ConfigurationIssueContext, Type.Null()]), base_sha: Type.Union([sha, Type.Null()]),
+  summary_hash: hash, diagnostics: Type.Array(GitHubDiagnostic),
+  retry_at_ms: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   // Preview only. A future start command must revalidate and persist intent before effects.
-  canStart: Type.Literal(false),
+  can_start: Type.Literal(false),
 }, closed);
 export type Preparation = Static<typeof Preparation>;
 export const PreparationParams = Type.Object({ preparationId: OperationId }, closed);
-export const PreparationView = Type.Object({ preparation: Preparation, eventCursor: Type.String({ pattern: '^[0-9]+$' }) }, closed);
+export const PreparationView = Type.Object({ preparation: Preparation, event_cursor: Type.String({ pattern: '^[0-9]+$' }) }, closed);
 export type PreparationView = Static<typeof PreparationView>;
-export const PreparationCreated = Type.Object({ ...PreparationView.properties, operationId: OperationId, receipt: OperationReceipt }, closed);
+export const PreparationCreated = Type.Object({ ...PreparationView.properties, operation_id: OperationId, receipt: OperationReceipt }, closed);
 export type PreparationCreated = Static<typeof PreparationCreated>;
 export const IssueOptions = Type.Object({
-  ...Page(Type.Object({ ...ProjectItem.properties, reasons: Type.Array(text(128)) }, closed)).properties,
+  ...Page(Type.Object({ ...ConfigurationIssueOption.properties, reasons: Type.Array(text(128)) }, closed)).properties,
   completeness: Type.Union([Type.Literal('complete'), Type.Literal('partial'), Type.Literal('unavailable')]),
-  diagnostics: Type.Array(GitHubDiagnostic), retryAtMs: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  diagnostics: Type.Array(GitHubDiagnostic), retry_at_ms: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   prerequisites: Type.Array(Prerequisite),
 }, closed);
 export type IssueOptions = Static<typeof IssueOptions>;

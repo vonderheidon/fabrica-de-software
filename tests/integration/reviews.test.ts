@@ -1,3 +1,4 @@
+import { toHttpRoundHistory, toHttpProducerResult } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -14,9 +15,9 @@ afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 async function fixture(limit = 2) {
   const f = await attemptFixture(); fixtures.push(f);
   const config = f.storage.getConfiguration(f.projectId);
-  const { id: _id, projectId: _projectId, revision: _revision, createdAtMs: _createdAtMs, ...configuration } = config.view.configuration;
-  if (limit !== configuration.correctionLimit) f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: config.etag, projectId: f.projectId,
-    body: { projectChanges: { correctionLimit: limit } }, globalChanges: {}, configuration: { ...configuration, correctionLimit: limit } });
+  const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _createdAtMs, ...configuration } = config.view.configuration;
+  if (limit !== configuration.correction_limit) f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: config.etag, projectId: f.projectId,
+    body: { project_changes: { correction_limit: limit } }, globalChanges: {}, configuration: { ...configuration, correction_limit: limit } });
   const verify = vi.fn(async (id: string) => {
     const plan = f.storage.beginVerification(id); f.storage.finishVerification(plan.id);
   });
@@ -173,11 +174,11 @@ it('keeps rejected review and durable receipt across reopen without replaying re
 it('migrates real SQLite v7 without reseeding, changing captured refs or fabricating reviews', async () => {
   const f = await fixture(); delete f.dependencies.verification;
   f.implement(); await f.pipeline.drain(); const d = f.status().deliveryId!;
-  const old = f.storage.getDelivery(d); const identity = f.storage.getSettings().installationId;
+  const old = f.storage.getDelivery(d); const identity = f.storage.getSettings().installation_id;
   await f.pipeline.close(); f.storage.close(); removeReviewSchema(f.db);
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getDelivery(d)).toMatchObject({ delivery: old.delivery, verification: old.verification }); expect(reopened.getReview(d)).toBeNull();
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   } finally { reopened.close(); }
@@ -195,11 +196,11 @@ it('exposes scoped lightweight round history and on-demand review/producer detai
     const bootstrap = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host, origin: config.browserOrigin, 'x-factory-client': 'web', 'content-type': 'application/json' }, payload: {} });
     expect(bootstrap.statusCode).toBe(200); const headers = { host, cookie: bootstrap.cookies.map(c => `${c.name}=${c.value}`).join('; ') };
     const rounds = await app.inject({ url: paths[0]!, headers }); expect(rounds.statusCode).toBe(200);
-    expect(rounds.json()).toEqual(f.storage.getRounds(f.attemptId)); expect(rounds.body).not.toContain('Response value is incorrect');
+    expect(rounds.json()).toEqual(toHttpRoundHistory(f.storage.getRounds(f.attemptId))); expect(rounds.body).not.toContain('Response value is incorrect');
     const review = await app.inject({ url: paths[1]!, headers }); expect(review.statusCode).toBe(200);
     expect(review.json()).toMatchObject({ state: 'rejected', findings: [{ problem: 'Response value is incorrect' }] });
     const producer = await app.inject({ url: paths[2]!, headers }); expect(producer.statusCode).toBe(200);
-    expect(producer.json()).toEqual(f.storage.getProducerResult(d));
+    expect(producer.json()).toEqual(toHttpProducerResult(f.storage.getProducerResult(d)));
     for (const url of paths) expect((await app.inject({ url: url + '?unexpected=1', headers })).statusCode).toBe(400);
     f.db.prepare("UPDATE factory_settings SET account_id=NULL").run();
     for (const url of paths) expect((await app.inject({ url, headers })).statusCode).toBe(404);

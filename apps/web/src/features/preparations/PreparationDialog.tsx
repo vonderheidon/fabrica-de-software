@@ -1,5 +1,7 @@
+import { startAttemptBody } from '../attempts/execution-requests.js';
+import { changedChoices } from './preparation-requests.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ConfigurationView, DeliveryMode, IssueOptions, OperationAccepted, OperationView, Preparation, PreparationCreated, PreparationChoices, PreparationUpdate, AttemptDetail, SettingsView, StoredExecutionProfile } from '#contracts';
+import type { ConfigurationView, DeliveryMode, IssueOptions, OperationAccepted, OperationView, Preparation, PreparationCreated, PreparationChoices, PreparationUpdate, HttpAttemptDetail as AttemptDetail, SettingsView, StoredExecutionProfile } from '#contracts';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 import { readUncertainOperations, recordUncertainOperation, resolveUncertainOperation } from '../../api/uncertain-operations.js';
 
@@ -37,7 +39,7 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
   const latestChoicesRef = useRef<PreparationChoices | null>(null);
   const saveLoopRef = useRef<Promise<void> | null>(null);
   const timerRef = useRef<number | null>(null);
-  const startCommandRef = useRef<{ operationId: string; body: { preparationId: string; preparationRevision: number; authorizedSummaryHash: string; authorized: true }; etag: string } | null>(null);
+  const startCommandRef = useRef<{ operationId: string; body: ReturnType<typeof startAttemptBody>; etag: string } | null>(null);
   const createPendingRef = useRef(false);
   const startInFlightRef = useRef(false);
   const identity = projectId ? savedKey(projectId, previousAttemptId) : '';
@@ -57,8 +59,8 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
     if (cached) {
       draftRef.current = cached;
       setDraftState(cached);
-      setIssueId(cached.choices.issueId);
-      setMode(cached.choices.deliveryMode);
+      setIssueId(cached.choices.issue_id);
+      setMode(cached.choices.delivery_mode);
       setGuidance(cached.choices.guidance);
       setConfigurationReady(true);
       void requestJsonWithMetadata<{ preparation: Preparation }>(`/api/v1/preparations/${encodeURIComponent(cached.preparationId)}`, { signal: controller.signal }).then(({ data, etag }) => {
@@ -71,7 +73,7 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
     if (!cached) setConfigurationReady(false);
     void requestJson<ConfigurationView>(`/api/v1/projects/${encodeURIComponent(projectId)}/configuration`, { signal: controller.signal }).then((configuration) => {
       if (!active || cached) return;
-      setMode(configuration.configuration.defaultDeliveryMode);
+      setMode(configuration.configuration.default_delivery_mode);
       setGuidance(configuration.configuration.guidance);
       setConfigurationReady(true);
     }).catch((error: unknown) => { if (active) { setIssuesError(errorMessage(error)); setConfigurationReady(false); } });
@@ -100,18 +102,18 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
     createPendingRef.current = true;
     setCreating(true);
     let active = true;
-    const choices: PreparationChoices = { issueId, deliveryMode: mode, guidance, overrides: {}, ...(previousAttemptId ? { previousAttemptId } : {}) };
+    const choices: PreparationChoices = { issue_id: issueId, delivery_mode: mode, guidance, overrides: {}, ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}) };
     void createPreparationDraft(identity, projectId, choices).then((value) => {
       if (!active) return;
       installDraft(value);
-      setIssueId(value.choices.issueId); setMode(value.choices.deliveryMode); setGuidance(value.choices.guidance);
+      setIssueId(value.choices.issue_id); setMode(value.choices.delivery_mode); setGuidance(value.choices.guidance);
     }).catch((error: unknown) => { if (active) setIssuesError(errorMessage(error)); }).finally(() => { createPendingRef.current = false; if (active) setCreating(false); });
     return () => { active = false; };
   }, [configurationReady, guidance, identity, installDraft, issueId, issues, mode, previousAttemptId, projectId]);
 
   const choices = useMemo<PreparationChoices | null>(() => {
     if (!draft) return null;
-    return { ...draft.choices, issueId, deliveryMode: mode, guidance, ...(previousAttemptId ? { previousAttemptId } : {}) };
+    return { ...draft.choices, issue_id: issueId, delivery_mode: mode, guidance, ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}) };
   }, [draft, guidance, issueId, mode, previousAttemptId]);
 
   useEffect(() => {
@@ -161,14 +163,14 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
   function updateChoices(update: (current: PreparationChoices) => PreparationChoices): void {
     const current = draftRef.current;
     if (!current) return;
-    const next = update({ ...current.choices, issueId, deliveryMode: mode, guidance });
+    const next = update({ ...current.choices, issue_id: issueId, delivery_mode: mode, guidance });
     latestChoicesRef.current = next;
     const value = { ...current, choices: next };
     installDraft(value);
-    setIssueId(next.issueId); setMode(next.deliveryMode); setGuidance(next.guidance);
+    setIssueId(next.issue_id); setMode(next.delivery_mode); setGuidance(next.guidance);
   }
 
-  function updateProfileChoice(role: 'implementerProfile' | 'reviewerProfile', value: string): void {
+  function updateProfileChoice(role: 'implementer_profile' | 'reviewer_profile', value: string): void {
     const profile = profiles.find((item) => `${item.id}:${item.revision}` === value);
     const overrides = { ...((draftRef.current?.choices.overrides) ?? {}) };
     if (!profile) delete overrides[role];
@@ -179,18 +181,18 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
   async function authorizeSummary(): Promise<void> {
     await saveLatest();
     const latest = draftRef.current;
-    if (latest && !saveLoopRef.current && sameChoices(latestChoicesRef.current ?? latest.savedChoices, latest.savedChoices) && latest.current.canStart === false) {
-      setAuthorizedHash(latest.current.summaryHash);
+    if (latest && !saveLoopRef.current && sameChoices(latestChoicesRef.current ?? latest.savedChoices, latest.savedChoices) && latest.current.can_start === false) {
+      setAuthorizedHash(latest.current.summary_hash);
     }
   }
 
   async function submitStart(): Promise<void> {
     if (startInFlightRef.current) return;
     const latest = draftRef.current;
-    if (!latest || !authorizedHash || authorizedHash !== latest.current.summaryHash) return;
+    if (!latest || !authorizedHash || authorizedHash !== latest.current.summary_hash) return;
     const command = startCommandRef.current ?? {
       operationId: crypto.randomUUID(), etag: latest.etag,
-      body: { preparationId: latest.preparationId, preparationRevision: latest.current.revision, authorizedSummaryHash: authorizedHash, authorized: true as const },
+      body: startAttemptBody(latest.preparationId, latest.current.revision, authorizedHash),
     };
     startCommandRef.current = command;
     startInFlightRef.current = true;
@@ -247,24 +249,24 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
     if (startState.status === 'uncertain') void inspectStart(startState.operationId);
   }, [startState]);
 
-  const pendingStartId = startState.status === 'uncertain' ? startState.operationId : startState.status === 'observed' && ['unknown', 'accepted', 'running'].includes(startState.operation.state) ? startState.operation.operationId : null;
+  const pendingStartId = startState.status === 'uncertain' ? startState.operationId : startState.status === 'observed' && ['unknown', 'accepted', 'running'].includes(startState.operation.state) ? startState.operation.operation_id : null;
   if (!projectId) return <div className="preparation-dialog"><div className="notice"><b>Selecione um projeto</b><p>Abra a preparação a partir de um projeto configurado para consultar issues e pré-requisitos atuais.</p></div>{pendingStartId && <div className="notice"><b>Início incerto</b><p>Operação {pendingStartId}</p><button type="button" onClick={() => void inspectStart(pendingStartId)}>Consultar operação original</button>{startState.status === 'observed' && <p>Estado: {startState.operation.state} · recurso {startState.operation.resource.type}/{startState.operation.resource.id}</p>}</div>}</div>;
-  const selectedIssue = issues?.items.find((item) => item.contentId === issueId);
-  const blocked = Boolean(!draft || saving || saveError || draft.conflict || !draft.current.criteriaPreview.executable || draft.current.prerequisites.length > 0 || !draft.current.baseSha || !draft.current.issue || !draft.current.effectiveConfiguration.implementerProfile || !draft.current.effectiveConfiguration.reviewerProfile || !draft.current.summaryHash);
-  const configuration = draft?.current.effectiveConfiguration;
+  const selectedIssue = issues?.items.find((item) => item.content_id === issueId);
+  const blocked = Boolean(!draft || saving || saveError || draft.conflict || !draft.current.criteria_preview.executable || draft.current.prerequisites.length > 0 || !draft.current.base_sha || !draft.current.issue || !draft.current.effective_configuration.implementer_profile || !draft.current.effective_configuration.reviewer_profile || !draft.current.summary_hash);
+  const configuration = draft?.current.effective_configuration;
 
   return <div className="preparation-dialog">
     {previousAttemptId && <div className="notice"><b>Nova tentativa · {previousAttemptId}</b><p>A preparação consulta a issue e a base atuais. O histórico, a sessão e as alterações da tentativa anterior não serão reutilizados.</p></div>}
     <section className="card preparation-section"><div className="eyebrow">Escolha do trabalho</div><div className="form-grid">
-      <label className="form-field">Projeto<input value={draft?.current.projectId ?? projectId} readOnly aria-label="Projeto" /></label>
-      <label className="form-field">Issue<select value={issueId} onChange={(event) => { const value = event.currentTarget.value; if (draftRef.current) updateChoices((current) => ({ ...current, issueId: value })); else setIssueId(value); }} disabled={!issues || !configurationReady || creating}><option value="">Selecione uma issue elegível</option>{previousAttemptId && issueId && !issues?.items.some((item) => item.contentId === issueId) && <option value={issueId}>Issue da tentativa anterior · {issueId}</option>}{issues?.items.filter((item) => item.kind === 'issue' && item.executable && item.contentId).map((item) => <option key={item.id} value={item.contentId ?? ''}>{item.title} · {item.id}</option>)}</select></label>
-      <label className="form-field">Modo de entrega<select value={mode} onChange={(event) => { const value = event.currentTarget.value as DeliveryMode; setMode(value); updateChoices((current) => ({ ...current, deliveryMode: value })); }} disabled={!configurationReady || !draft}>{modes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+      <label className="form-field">Projeto<input value={draft?.current.project_id ?? projectId} readOnly aria-label="Projeto" /></label>
+      <label className="form-field">Issue<select value={issueId} onChange={(event) => { const value = event.currentTarget.value; if (draftRef.current) updateChoices((current) => ({ ...current, issue_id: value })); else setIssueId(value); }} disabled={!issues || !configurationReady || creating}><option value="">Selecione uma issue elegível</option>{previousAttemptId && issueId && !issues?.items.some((item) => item.content_id === issueId) && <option value={issueId}>Issue da tentativa anterior · {issueId}</option>}{issues?.items.filter((item) => item.kind === 'issue' && item.executable && item.content_id).map((item) => <option key={item.id} value={item.content_id ?? ''}>{item.title} · {item.id}</option>)}</select></label>
+      <label className="form-field">Modo de entrega<select value={mode} onChange={(event) => { const value = event.currentTarget.value as DeliveryMode; setMode(value); updateChoices((current) => ({ ...current, delivery_mode: value })); }} disabled={!configurationReady || !draft}>{modes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
       <label className="form-field field-full">Orientação<textarea value={guidance} onChange={(event) => { setGuidance(event.currentTarget.value); updateChoices((current) => ({ ...current, guidance: event.currentTarget.value })); }} disabled={!draft} maxLength={8192} /></label>
       {draft && <>
-        <label className="form-field">Branch-base<input value={String(draft.choices.overrides.baseBranch ?? draft.current.effectiveConfiguration.configuration.baseBranch)} onChange={(event) => updateChoices((current) => ({ ...current, overrides: { ...current.overrides, baseBranch: event.currentTarget.value } }))} /></label>
-        <label className="form-field">Limite de correções<input type="number" min={0} max={5} value={draft.choices.overrides.correctionLimit ?? draft.current.effectiveConfiguration.configuration.correctionLimit} onChange={(event) => updateChoices((current) => ({ ...current, overrides: { ...current.overrides, correctionLimit: Math.max(0, Math.min(5, Number(event.currentTarget.value) || 0)) } }))} /></label>
-        <label className="form-field">Perfil implementador<select value={profileChoiceId(draft.choices.overrides.implementerProfile, draft.current.effectiveConfiguration.implementerProfile)} onChange={(event) => updateProfileChoice('implementerProfile', event.currentTarget.value)} disabled={profiles.length === 0}><option value="">Usar perfil efetivo do projeto</option>{profiles.map((profile) => <option key={profile.id} value={`${profile.id}:${profile.revision}`}>{profile.name} · {profile.provider}/{profile.model}</option>)}</select></label>
-        <label className="form-field">Perfil revisor<select value={profileChoiceId(draft.choices.overrides.reviewerProfile, draft.current.effectiveConfiguration.reviewerProfile)} onChange={(event) => updateProfileChoice('reviewerProfile', event.currentTarget.value)} disabled={profiles.length === 0}><option value="">Usar perfil efetivo do projeto</option>{profiles.map((profile) => <option key={profile.id} value={`${profile.id}:${profile.revision}`}>{profile.name} · {profile.provider}/{profile.model}</option>)}</select></label>
+        <label className="form-field">Branch-base<input value={String(draft.choices.overrides.base_branch ?? draft.current.effective_configuration.configuration.base_branch)} onChange={(event) => updateChoices((current) => ({ ...current, overrides: { ...current.overrides, base_branch: event.currentTarget.value } }))} /></label>
+        <label className="form-field">Limite de correções<input type="number" min={0} max={5} value={draft.choices.overrides.correction_limit ?? draft.current.effective_configuration.configuration.correction_limit} onChange={(event) => updateChoices((current) => ({ ...current, overrides: { ...current.overrides, correction_limit: Math.max(0, Math.min(5, Number(event.currentTarget.value) || 0)) } }))} /></label>
+        <label className="form-field">Perfil implementador<select value={profileChoiceId(draft.choices.overrides.implementer_profile, draft.current.effective_configuration.implementer_profile)} onChange={(event) => updateProfileChoice('implementer_profile', event.currentTarget.value)} disabled={profiles.length === 0}><option value="">Usar perfil efetivo do projeto</option>{profiles.map((profile) => <option key={profile.id} value={`${profile.id}:${profile.revision}`}>{profile.name} · {profile.provider}/{profile.model}</option>)}</select></label>
+        <label className="form-field">Perfil revisor<select value={profileChoiceId(draft.choices.overrides.reviewer_profile, draft.current.effective_configuration.reviewer_profile)} onChange={(event) => updateProfileChoice('reviewer_profile', event.currentTarget.value)} disabled={profiles.length === 0}><option value="">Usar perfil efetivo do projeto</option>{profiles.map((profile) => <option key={profile.id} value={`${profile.id}:${profile.revision}`}>{profile.name} · {profile.provider}/{profile.model}</option>)}</select></label>
       </>}
     </div>
     {issuesError && <div className="queue-error" role="alert"><p>{issuesError}</p><button type="button" onClick={() => { setIssues(null); setIssuesError(null); setIssueReload((value) => value + 1); }}>Consultar novamente</button></div>}
@@ -274,22 +276,22 @@ export function PreparationDialog({ projectId, previousAttemptId = null, onOpenA
 
     {draft && <>
       <section className="card preparation-section"><div className="line panel-title"><div><div className="eyebrow">Resumo revalidável</div><h3>Escolhas efetivas</h3></div><span className={`pill ${saving ? 'warn' : 'neutral'}`}>{saving ? 'Salvando' : 'Salvo no controlador'}</span></div>
-        <dl className="preparation-facts"><div><dt>Issue atual</dt><dd>{draft.current.issue ? `#${draft.current.issue.number} · ${draft.current.issue.title}` : 'Não confirmada'}</dd></div><div><dt>Estado e responsáveis</dt><dd>{draft.current.issue ? `${draft.current.issue.state} · ${draft.current.issue.assignees.map((person) => `@${person.login}`).join(', ') || 'sem responsável observado'}` : 'Não confirmados'}</dd></div><div><dt>Base consultada</dt><dd className="mono">{draft.current.baseSha ?? 'Indisponível'}</dd></div><div><dt>Modo</dt><dd>{modes.find((item) => item.value === draft.current.deliveryMode)?.label}</dd></div><div><dt>Implementador</dt><dd>{profileName(configuration?.implementerProfile ?? null)}</dd></div><div><dt>Revisor</dt><dd>{profileName(configuration?.reviewerProfile ?? null)}</dd></div><div><dt>Limite de correções</dt><dd>{configuration?.configuration.correctionLimit ?? '—'}</dd></div><div><dt>Tempo ativo por passagem</dt><dd>{configuration ? `${Math.round(configuration.timeDefaults.passageActiveTimeMs / 1000)} s` : '—'}</dd></div><div><dt>TTL da pergunta</dt><dd>{limitLabel(configuration?.timeDefaults.questionTtl)}</dd></div><div><dt>Limite de custo</dt><dd>{limitLabel(configuration?.costDefaults.limit)}</dd></div><div><dt>Política de artefatos</dt><dd>{configuration?.artifactPolicy.automaticDeletion ? 'Exclusão automática habilitada' : 'Sem exclusão automática'}</dd></div></dl>
+        <dl className="preparation-facts"><div><dt>Issue atual</dt><dd>{draft.current.issue ? `#${draft.current.issue.number} · ${draft.current.issue.title}` : 'Não confirmada'}</dd></div><div><dt>Estado e responsáveis</dt><dd>{draft.current.issue ? `${draft.current.issue.state} · ${draft.current.issue.assignees.map((person) => `@${person.login}`).join(', ') || 'sem responsável observado'}` : 'Não confirmados'}</dd></div><div><dt>Base consultada</dt><dd className="mono">{draft.current.base_sha ?? 'Indisponível'}</dd></div><div><dt>Modo</dt><dd>{modes.find((item) => item.value === draft.current.delivery_mode)?.label}</dd></div><div><dt>Implementador</dt><dd>{profileName(configuration?.implementer_profile ?? null)}</dd></div><div><dt>Revisor</dt><dd>{profileName(configuration?.reviewer_profile ?? null)}</dd></div><div><dt>Limite de correções</dt><dd>{configuration?.configuration.correction_limit ?? '—'}</dd></div><div><dt>Tempo ativo por passagem</dt><dd>{configuration ? `${Math.round(configuration.time_defaults.passage_active_time_ms / 1000)} s` : '—'}</dd></div><div><dt>TTL da pergunta</dt><dd>{limitLabel(configuration?.time_defaults.question_ttl)}</dd></div><div><dt>Política de artefatos</dt><dd>{configuration?.artifact_policy.automatic_deletion ? 'Exclusão automática habilitada' : 'Sem exclusão automática'}</dd></div></dl>
         <p className="muted">Origem das escolhas: {configuration ? Object.entries(configuration.origins).map(([field, origin]) => `${originLabel(field)}: ${originLabel(origin)}`).join(' · ') : 'aguardando configuração efetiva'}.</p>
-        <h3>Checks capturados</h3>{configuration?.configuration.checks.length ? <ul className="compact-list">{configuration.configuration.checks.map((check) => <li key={check.id}><code>{check.command}</code> · cwd {check.cwdRelative} · {check.timeoutMs ?? 'padrão'} ms</li>)}</ul> : <p className="muted">Nenhum check configurado.</p>}
-        <h3>Critérios de aceite</h3>{draft.current.criteriaPreview.executable ? <ol className="preparation-criteria">{draft.current.criteriaPreview.criteria.map((criterion) => <li key={`${criterion.id}:${criterion.occurrenceIndex}`}><b>{criterion.id}</b> · {criterion.text}</li>)}</ol> : <div className="notice"><b>Critérios não executáveis</b><p>{draft.current.criteriaPreview.reasons.join(' · ') || 'A issue atual não contém critérios de aceite válidos.'}</p></div>}
-        <h3>Efeitos previstos</h3><ul className="compact-list">{draft.current.effectsPreview.map((effect, index) => <li key={`${effect.kind}-${index}`}>{effect.requested ? 'Será solicitado' : 'Não solicitado'} · {effect.description}</li>)}</ul>
+        <h3>Checks capturados</h3>{configuration?.configuration.checks.length ? <ul className="compact-list">{configuration.configuration.checks.map((check) => <li key={check.id}><code>{check.command}</code> · cwd {check.cwd_relative} · {check.timeout_ms ?? 'padrão'} ms</li>)}</ul> : <p className="muted">Nenhum check configurado.</p>}
+        <h3>Critérios de aceite</h3>{draft.current.criteria_preview.executable ? <ol className="preparation-criteria">{draft.current.criteria_preview.criteria.map((criterion) => <li key={`${criterion.id}:${criterion.occurrence_index}`}><b>{criterion.id}</b> · {criterion.text}</li>)}</ol> : <div className="notice"><b>Critérios não executáveis</b><p>{draft.current.criteria_preview.reasons.join(' · ') || 'A issue atual não contém critérios de aceite válidos.'}</p></div>}
+        <h3>Efeitos previstos</h3><ul className="compact-list">{draft.current.effects_preview.map((effect, index) => <li key={`${effect.kind}-${index}`}>{effect.requested ? 'Será solicitado' : 'Não solicitado'} · {effect.description}</li>)}</ul>
         {draft.current.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos pendentes</b><ul>{draft.current.prerequisites.map((item) => <li key={item.code}>{item.message} {item.recovery}</li>)}</ul></div>}
       </section>
-      {draft.conflict && <section className="card conflict-current" role="alert"><h3>Configuração atual do controlador</h3><p>A revisão atual foi consultada separadamente. Seu rascunho continua no formulário.</p><p>Issue atual: {draft.conflict.issue?.title ?? draft.conflict.issueId} · modo {draft.conflict.deliveryMode}</p><button type="button" onClick={() => { const value = { ...draft, etag: `"${draft.conflict!.id}:${draft.conflict!.revision}"`, current: draft.conflict!, savedChoices: draft.conflict!, conflict: null }; installDraft(value); latestChoicesRef.current = draft.choices; void saveLatest(); }}>Manter meu rascunho e salvar sobre os dados atuais</button></section>}
+      {draft.conflict && <section className="card conflict-current" role="alert"><h3>Configuração atual do controlador</h3><p>A revisão atual foi consultada separadamente. Seu rascunho continua no formulário.</p><p>Issue atual: {draft.conflict.issue?.title ?? draft.conflict.issue_id} · modo {draft.conflict.delivery_mode}</p><button type="button" onClick={() => { const value = { ...draft, etag: `"${draft.conflict!.id}:${draft.conflict!.revision}"`, current: draft.conflict!, savedChoices: draft.conflict!, conflict: null }; installDraft(value); latestChoicesRef.current = draft.choices; void saveLatest(); }}>Manter meu rascunho e salvar sobre os dados atuais</button></section>}
       {saveError && <div className="queue-error" role="alert"><p>{saveError}</p></div>}
       {summaryNotice && <div className="notice" role="status"><p>{summaryNotice}</p></div>}
       {activeConflictId && <div className="notice" role="alert"><b>Esta issue já tem uma tentativa ativa</b><p>O controlador identificou a tentativa existente. Consulte-a sem criar outra.</p><button type="button" onClick={() => onOpenAttempt(activeConflictId)}>Consultar tentativa</button></div>}
-      {startState.status === 'accepted' && <div className="notice" role="status"><b>Início aceito pelo controlador</b><p>Operação {startState.operation.operationId} · a aceitação não significa que clone ou passagem estejam prontos.</p>{startState.operation.resource.type === 'attempt' && <button type="button" onClick={() => onOpenAttempt(startState.operation.resource.id)}>Consultar tentativa</button>}</div>}
+      {startState.status === 'accepted' && <div className="notice" role="status"><b>Início aceito pelo controlador</b><p>Operação {startState.operation.operation_id} · a aceitação não significa que clone ou passagem estejam prontos.</p>{startState.operation.resource.type === 'attempt' && <button type="button" onClick={() => onOpenAttempt(startState.operation.resource.id)}>Consultar tentativa</button>}</div>}
       {pendingStartId && <div className="notice" role="status"><b>Resposta do início incerta</b><p>Consulte a operação original. O cliente não enviará outro início.</p><button type="button" onClick={() => void inspectStart(pendingStartId)}>Consultar operação</button>{startState.status === 'observed' && <p>Estado observado: {startState.operation.state} · recurso {startState.operation.resource.type}/{startState.operation.resource.id}</p>}</div>}
-      {startState.status === 'observed' && !pendingStartId && <div className="notice" role="status"><b>Operação de início {startState.operation.state === 'succeeded' ? 'concluída' : 'encerrada'}</b><p>{startState.operation.operationId} · {startState.operation.resource.type}/{startState.operation.resource.id}</p>{startState.operation.resource.type === 'attempt' && <button type="button" onClick={() => onOpenAttempt(startState.operation.resource.id)}>Consultar tentativa identificada</button>}{startState.operation.state === 'failed' && <p>Revise o estado atual da preparação e autorize novamente antes de tentar outro início.</p>}</div>}
+      {startState.status === 'observed' && !pendingStartId && <div className="notice" role="status"><b>Operação de início {startState.operation.state === 'succeeded' ? 'concluída' : 'encerrada'}</b><p>{startState.operation.operation_id} · {startState.operation.resource.type}/{startState.operation.resource.id}</p>{startState.operation.resource.type === 'attempt' && <button type="button" onClick={() => onOpenAttempt(startState.operation.resource.id)}>Consultar tentativa identificada</button>}{startState.operation.state === 'failed' && <p>Revise o estado atual da preparação e autorize novamente antes de tentar outro início.</p>}</div>}
       <div className="preparation-actions">
-        {!authorizedHash ? <button type="button" className="primary" disabled={saving || Boolean(saveError) || blocked} onClick={() => void authorizeSummary()}>Revisar e autorizar resumo atual</button> : <><p role="status">Resumo autorizado: {authorizedHash.slice(0, 12)}… · edição invalida esta autorização.</p><button type="button" className="primary" disabled={blocked || authorizedHash !== draft.current.summaryHash || ['sending', 'accepted', 'observed'].includes(startState.status) || Boolean(pendingStartId)} onClick={() => void submitStart()}>Iniciar tentativa</button></>}
+        {!authorizedHash ? <button type="button" className="primary" disabled={saving || Boolean(saveError) || blocked} onClick={() => void authorizeSummary()}>Revisar e autorizar resumo atual</button> : <><p role="status">Resumo autorizado: {authorizedHash.slice(0, 12)}… · edição invalida esta autorização.</p><button type="button" className="primary" disabled={blocked || authorizedHash !== draft.current.summary_hash || ['sending', 'accepted', 'observed'].includes(startState.status) || Boolean(pendingStartId)} onClick={() => void submitStart()}>Iniciar tentativa</button></>}
         {saving && <span role="status">Aguardando a última gravação…</span>}
       </div>
     </>}
@@ -314,21 +316,13 @@ async function createPreparationDraft(identity: string, projectId: string, choic
   try { return await pending; }
   finally { if (creationPromises.get(identity) === pending) creationPromises.delete(identity); }
 }
-function changedChoices(before: PreparationChoices, after: PreparationChoices): PreparationUpdate['changes'] {
-  const changes: PreparationUpdate['changes'] = {};
-  if (before.issueId !== after.issueId) changes.issueId = after.issueId;
-  if (before.deliveryMode !== after.deliveryMode) changes.deliveryMode = after.deliveryMode;
-  if (before.guidance !== after.guidance) changes.guidance = after.guidance;
-  if (JSON.stringify(before.overrides) !== JSON.stringify(after.overrides)) changes.overrides = after.overrides;
-  return changes;
-}
 function errorMessage(error: unknown): string { return error instanceof HttpError ? `${error.message}${error.requestId ? ` · Solicitação ${error.requestId}` : ''}` : 'Não foi possível concluir a consulta. Verifique a operação antes de repetir.'; }
 function safelyResolveOperation(operationId: string): void { try { resolveUncertainOperation(operationId); } catch { /* A later reload may query this harmless operation again. */ } }
-function profileName(profile: Preparation['effectiveConfiguration']['implementerProfile']): string { return profile ? `${profile.name} · ${profile.provider}/${profile.model}` : 'Não confirmado'; }
-function profileChoiceId(choice: PreparationChoices['overrides']['implementerProfile'], effective: Preparation['effectiveConfiguration']['implementerProfile']): string {
+function profileName(profile: Preparation['effective_configuration']['implementer_profile']): string { return profile ? `${profile.name} · ${profile.provider}/${profile.model}` : 'Não confirmado'; }
+function profileChoiceId(choice: PreparationChoices['overrides']['implementer_profile'], effective: Preparation['effective_configuration']['implementer_profile']): string {
   if (choice?.kind === 'reference') return `${choice.id}:${choice.revision}`;
   if (effective && 'revision' in effective) return `${effective.id}:${effective.revision}`;
   return '';
 }
 function limitLabel(value: { state: 'configured'; value: number; unit: string } | { state: 'not_configured' } | undefined): string { return !value || value.state === 'not_configured' ? 'Não configurado' : `${value.value} ${value.unit}`; }
-function originLabel(value: string): string { return ({ project: 'Projeto', global: 'Global', preparation: 'Preparação', baseBranch: 'Base', implementerProfile: 'Implementador', reviewerProfile: 'Revisor', checks: 'Checks', correctionLimit: 'Correções', timeDefaults: 'Tempo', costDefaults: 'Custo', artifactPolicy: 'Artefatos', guidance: 'Orientação', deliveryMode: 'Entrega' } as Record<string, string>)[value] ?? value; }
+function originLabel(value: string): string { return ({ project: 'Projeto', global: 'Global', preparation: 'Preparação', base_branch: 'Base', implementer_profile: 'Implementador', reviewer_profile: 'Revisor', checks: 'Checks', correction_limit: 'Correções', time_defaults: 'Tempo', artifact_policy: 'Artefatos', guidance: 'Orientação', delivery_mode: 'Entrega' } as Record<string, string>)[value] ?? value; }

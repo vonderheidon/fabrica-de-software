@@ -46,11 +46,59 @@ async function session(app: ReturnType<typeof createApp>, existing?: string) {
   const setCookie = response.headers['set-cookie'];
   const cookie = existing ?? String(setCookie).split(';')[0]!;
   const body = response.json<SessionResponse>();
-  return { cookie, body, response, headers: { host, origin, cookie, 'content-type': 'application/json', 'x-csrf-token': body.csrfToken } };
+  return { cookie, body, response, headers: { host, origin, cookie, 'content-type': 'application/json', 'x-csrf-token': body.csrf_token } };
 }
 afterEach(async () => {
   for (const app of apps.splice(0)) await app.close();
   for (const directory of directories.splice(0)) rmSync(directory, { recursive: true });
+});
+
+describe('shared public representation', () => {
+  it('serializes common objects together while preserving private JSON bytes and event fields', async () => {
+    const { app, storage, directory } = fixture();
+    const auth = await session(app);
+    expect(Object.keys(auth.body).sort()).toEqual(['csrf_token', 'instance_id']);
+    const operationId = randomUUID();
+    const times = { ...storage.getSettings().time_defaults, polling_interval_ms: 3 };
+    const accepted = await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', payload: times,
+      headers: { ...auth.headers, 'idempotency-key': operationId, 'if-match': storage.getSettingsETag() } });
+    expect(accepted.statusCode).toBe(202);
+    const response = accepted.json<import('#contracts').OperationAccepted>();
+    expect(Value.Check(OperationAccepted, response)).toBe(true);
+    expect(response).toMatchObject({ operation_id: operationId, status_url: `/api/v1/operations/${operationId}`, receipt: { revision: 2, event_cursor: '1' } });
+    expect(response).not.toHaveProperty('operationId'); expect(response).not.toHaveProperty('requestId');
+    const db = new Database(join(directory, 'factory.sqlite'), { readonly: true });
+    const persisted = () => ({ settings: db.prepare('SELECT time_defaults_json,artifact_policy_json FROM factory_settings').get(),
+      operation: db.prepare('SELECT receipt_json FROM operation_requests WHERE operation_id=?').get(operationId) });
+    try {
+      const before = persisted();
+      expect(before.operation).toEqual({ receipt_json: '{"revision":2,"eventCursor":"1"}' });
+      const operation = await app.inject({ url: response.status_url, headers: auth.headers });
+      expect(Value.Check(OperationView, operation.json())).toBe(true);
+      expect(operation.json()).toMatchObject({ operation_id: operationId, receipt: response.receipt });
+      const settings = await app.inject({ url: '/api/v1/settings', headers: auth.headers });
+      expect(settings.json().settings).toMatchObject({ time_defaults: times, artifact_policy: { format_version: 1, automatic_deletion: false } });
+      const events = await app.inject({ url: '/api/v1/events', headers: auth.headers });
+      expect(events.json()).toMatchObject({ has_more: false, next_cursor: null, event_cursor: '1', items: [{ operation_id: operationId, event_type: 'settings.time-defaults.updated' }] });
+      expect(persisted()).toEqual(before);
+    } finally { db.close(); }
+    await app.close();
+    const reopened = openStorage({ dataDirectory: directory });
+    try { expect(reopened.getOperation(operationId)?.receipt).toEqual(response.receipt); expect(reopened.getSettings().time_defaults).toEqual(times); }
+    finally { reopened.close(); }
+  });
+  it('rejects aliases in closed common objects and aggregate partials without writes', async () => {
+    const { app, storage } = fixture(); const auth = await session(app); const before = storage.getSettings();
+    for (const changes of [
+      { time_defaults: { pollingIntervalMs: 3 } }, { artifact_policy: { automaticDeletion: false } },
+      { projectsRoot: null }, { automationEnabled: false }, { timeDefaults: {} },
+    ]) {
+      const response = await app.inject({ method: 'PUT', url: '/api/v1/settings', headers: { ...auth.headers, 'idempotency-key': randomUUID(), 'if-match': storage.getGlobalConfiguration().etag }, payload: { changes } });
+      expect(response.statusCode).toBe(400); expect(Value.Check(ErrorResponse, response.json())).toBe(true);
+      expect(response.json()).toHaveProperty('request_id'); expect(response.json()).not.toHaveProperty('requestId');
+      expect(storage.getSettings()).toEqual(before); expect(storage.getEvents({}).items).toEqual([]);
+    }
+  });
 });
 
 describe('technical session boundary', () => {
@@ -88,8 +136,8 @@ describe('technical session boundary', () => {
     const first = await session(app);
     const cookieValue = first.cookie.split('=')[1]!;
     expect(Buffer.from(cookieValue, 'base64url')).toHaveLength(32);
-    expect(Buffer.from(first.body.csrfToken, 'base64url')).toHaveLength(32);
-    expect(cookieValue).not.toBe(first.body.csrfToken);
+    expect(Buffer.from(first.body.csrf_token, 'base64url')).toHaveLength(32);
+    expect(cookieValue).not.toBe(first.body.csrf_token);
     expect(first.response.headers['set-cookie']).toMatch(/Path=\/api\/v1; HttpOnly; SameSite=Strict/);
     expect(first.response.headers['set-cookie']).not.toMatch(/Domain=|Secure|Expires=|Max-Age=|__Host-|__Secure-/);
     expect(first.response.headers['cache-control']).toBe('no-store');
@@ -98,11 +146,11 @@ describe('technical session boundary', () => {
     expect(next.response.headers['set-cookie']).toBeUndefined();
     expect(storage.getSettings()).toEqual(before);
     const unknown = await session(app, first.cookie.replace(cookieValue, 'A'.repeat(43)));
-    expect(unknown.body.csrfToken).not.toBe(first.body.csrfToken);
+    expect(unknown.body.csrf_token).not.toBe(first.body.csrf_token);
   });
   it('GETs never bootstrap; operational reads and SSE require session; preflight remains closed', async () => {
     const { app } = fixture();
-    for (const url of ['/api/v1/session', `/api/v1/operations/${randomUUID()}`, '/api/v1/events', '/api/v1/events/stream']) {
+    for (const url of ['/api/v1/session', `/api/v1/operations/${randomUUID()}`, '/api/v1/events', '/api/v1/events/stream', '/api/v1/settings/github-options']) {
       const response = await app.inject({ url, headers: { host } });
       expect(response.statusCode).toBe(401);
       expect(response.headers['set-cookie']).toBeUndefined();
@@ -122,10 +170,10 @@ describe('technical session boundary', () => {
       [{ ...headers, cookie: '' }, 401],
       [{ ...headers, 'x-csrf-token': '' }, 403],
       [{ ...headers, 'x-csrf-token': 'bad' }, 403],
-      [{ ...headers, 'x-csrf-token': second.body.csrfToken }, 403],
+      [{ ...headers, 'x-csrf-token': second.body.csrf_token }, 403],
       [{ ...headers, origin: '' }, 403],
       [{ ...headers, 'content-type': 'text/plain' }, 415],
-    ] as const) expect((await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers: changed, payload: JSON.stringify(storage.getSettings().timeDefaults) })).statusCode).toBe(expected);
+    ] as const) expect((await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers: changed, payload: JSON.stringify(storage.getSettings().time_defaults) })).statusCode).toBe(expected);
     expect(storage.getSettings().revision).toBe(1);
   });
   it('revokes previous-instance cookies and CSRF at restart', async () => {
@@ -138,8 +186,8 @@ describe('technical session boundary', () => {
     apps.push(next);
     expect((await next.inject({ url: '/api/v1/events', headers: { host, cookie: valid.cookie } })).statusCode).toBe(401);
     const renewed = await session(next, valid.cookie);
-    expect(renewed.body.instanceId).not.toBe(valid.body.instanceId);
-    expect(renewed.body.csrfToken).not.toBe(valid.body.csrfToken);
+    expect(renewed.body.instance_id).not.toBe(valid.body.instance_id);
+    expect(renewed.body.csrf_token).not.toBe(valid.body.csrf_token);
     expect(renewed.response.headers['set-cookie']).toBeDefined();
   });
   it('bounds bootstrap rate and documents finite server limits', async () => {
@@ -188,7 +236,7 @@ describe('technical session boundary', () => {
     const invalid = await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers, payload: { handle: marker } });
     expect(invalid.statusCode).toBe(400);
     const combined = [...logs, oversized.body, failed.body, invalid.body, JSON.stringify(storage.getEvents({}))].join('\n');
-    for (const secret of [marker, valid.body.csrfToken, valid.cookie.split('=')[1]!]) expect(combined).not.toContain(secret);
+    for (const secret of [marker, valid.body.csrf_token, valid.cookie.split('=')[1]!]) expect(combined).not.toContain(secret);
     const db = new Database(join(directory, 'factory.sqlite'), { readonly: true });
     try { expect(db.prepare('SELECT * FROM operation_requests').all()).toEqual([]); } finally { db.close(); }
   });
@@ -209,7 +257,7 @@ describe('durable operation HTTP boundary', () => {
     const valid = await session(app);
     const operationId = randomUUID();
     const headers = { ...valid.headers, 'idempotency-key': operationId, 'if-match': storage.getSettingsETag() };
-    const payload = { ...storage.getSettings().timeDefaults, pollingIntervalMs: 25_000 };
+    const payload = { ...storage.getSettings().time_defaults, polling_interval_ms: 25_000 };
     const response = await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers, payload });
     expect(response.statusCode).toBe(202);
     expect(Value.Check(OperationAccepted, response.json())).toBe(true);
@@ -217,14 +265,14 @@ describe('durable operation HTTP boundary', () => {
     const receipt = await app.inject({ url: response.headers.location!, headers: { host, cookie: valid.cookie } });
     expect(receipt.statusCode).toBe(200);
     expect(Value.Check(OperationView, receipt.json())).toBe(true);
-    expect(receipt.json()).toMatchObject({ operationId, state: 'succeeded', receipt: { revision: 2, eventCursor: '1' } });
-    const replay = await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers, payload: { questionTtl: payload.questionTtl, passageActiveTimeMs: payload.passageActiveTimeMs, pollingIntervalMs: payload.pollingIntervalMs, formatVersion: 1 } });
+    expect(receipt.json()).toMatchObject({ operation_id: operationId, state: 'succeeded', receipt: { revision: 2, event_cursor: '1' } });
+    const replay = await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers, payload: { question_ttl: payload.question_ttl, passage_active_time_ms: payload.passage_active_time_ms, polling_interval_ms: payload.polling_interval_ms, format_version: 1 } });
     expect(replay.statusCode).toBe(202);
     expect(replay.json().receipt).toEqual(response.json().receipt);
-    expect(replay.json().requestId).not.toBe(response.json().requestId);
+    expect(replay.json().request_id).not.toBe(response.json().request_id);
     expect(storage.getSettings().revision).toBe(2);
     for (const modified of [
-      { headers, payload: { ...payload, pollingIntervalMs: 99 } },
+      { headers, payload: { ...payload, polling_interval_ms: 99 } },
       { headers: { ...headers, 'if-match': storage.getSettingsETag() }, payload },
     ]) expect((await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', ...modified })).statusCode).toBe(409);
     expect((await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers: { ...headers, 'idempotency-key': randomUUID() }, payload })).statusCode).toBe(412);
@@ -248,7 +296,7 @@ describe('durable operation HTTP boundary', () => {
     const db = new Database(join(directory, 'factory.sqlite'));
     try {
       db.exec("CREATE TRIGGER fail_event BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT, 'SYNTHETIC_SECRET_DISK'); END");
-      const response = await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers: { ...valid.headers, 'idempotency-key': operationId, 'if-match': storage.getSettingsETag() }, payload: initial.timeDefaults });
+      const response = await app.inject({ method: 'PUT', url: '/api/v1/test/time-defaults', headers: { ...valid.headers, 'idempotency-key': operationId, 'if-match': storage.getSettingsETag() }, payload: initial.time_defaults });
       expect(response.statusCode).toBe(503);
       expect(response.headers.location).toBeUndefined();
       expect(response.body).not.toContain('SYNTHETIC_SECRET');
@@ -290,21 +338,21 @@ describe('durable operation HTTP boundary', () => {
     for (let index = 0; index < 3; index += 1) {
       const operationId = randomUUID();
       operationIds.push(operationId);
-      const command = { operationId, expectedRevision: storage.getSettingsETag(), timeDefaults: storage.getSettings().timeDefaults };
+      const command = { operationId, expectedRevision: storage.getSettingsETag(), timeDefaults: storage.getSettings().time_defaults };
       storage.saveTimeDefaults(command);
       storage.saveTimeDefaults(command);
     }
     const readHeaders = { host, cookie: valid.cookie };
     const first = await app.inject({ url: '/api/v1/events?limit=2', headers: readHeaders });
-    expect(first.json()).toMatchObject({ items: [{ seq: '1' }, { seq: '2' }], hasMore: true, eventCursor: '3' });
-    const nextCursor: string = first.json().nextCursor;
+    expect(first.json()).toMatchObject({ items: [{ seq: '1' }, { seq: '2' }], has_more: true, event_cursor: '3' });
+    const nextCursor: string = first.json().next_cursor;
     expect(nextCursor).not.toBe('2');
     const next = await app.inject({ url: '/api/v1/events?limit=2&cursor='+nextCursor, headers: readHeaders });
-    expect(next.json()).toMatchObject({ items: [{ seq: '3' }], nextCursor: null, hasMore: false });
-    const filtered = await app.inject({ url: '/api/v1/events?operationId='+operationIds[1], headers: readHeaders });
+    expect(next.json()).toMatchObject({ items: [{ seq: '3' }], next_cursor: null, has_more: false });
+    const filtered = await app.inject({ url: '/api/v1/events?operation_id='+operationIds[1], headers: readHeaders });
     expect(filtered.json().items).toHaveLength(1);
     expect(filtered.json().items[0].seq).toBe('2');
-    expect((await app.inject({ url: `/api/v1/events?cursor=${nextCursor}&operationId=${operationIds[0]}`, headers: readHeaders })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/v1/events?cursor=${nextCursor}&operation_id=${operationIds[0]}`, headers: readHeaders })).statusCode).toBe(400);
     expect((await app.inject({ url: '/api/v1/events?cursor=invalid', headers: readHeaders })).statusCode).toBe(400);
     expect(() => storage.getEvents({ cursor: '99' })).toThrowError(expect.objectContaining({ code: 'EVENT_RESYNC_REQUIRED' }));
     expect((await app.inject({ url: '/api/v1/events?limit=101', headers: readHeaders })).statusCode).toBe(400);

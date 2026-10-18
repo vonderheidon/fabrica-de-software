@@ -35,9 +35,9 @@ export function beginVerification(db: Database.Database, deliveryId: string): Ve
     const n = db.prepare<[string], { n: number }>('SELECT coalesce(max(run_number),0)+1 AS n FROM verification_runs WHERE delivery_id=?').get(deliveryId)!.n;
     db.prepare("INSERT INTO verification_runs(id,delivery_id,attempt_id,content_identity,run_number,state,started_at_ms) VALUES (?,?,?,?,?,'running',?)")
       .run(id, deliveryId, delivery.attemptId, delivery.contentIdentity, n, now);
-    const checks = definitions.map(definition => ({ id: randomUUID(), definition, timeoutMs: definition.timeoutMs ?? 300_000 }));
+    const checks = definitions.map(definition => ({ id: randomUUID(), definition, timeoutMs: definition.timeout_ms ?? 300_000 }));
     for (const c of checks) db.prepare(`INSERT INTO checks(id,verification_id,delivery_id,attempt_id,content_identity,check_definition_id,run_number,command,cwd_relative,timeout_ms,state)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'pending')`).run(c.id, id, deliveryId, delivery.attemptId, delivery.contentIdentity, c.definition.id, n, c.definition.command, c.definition.cwdRelative, c.timeoutMs);
+      VALUES (?,?,?,?,?,?,?,?,?,?,'pending')`).run(c.id, id, deliveryId, delivery.attemptId, delivery.contentIdentity, c.definition.id, n, c.definition.command, c.definition.cwd_relative, c.timeoutMs);
     db.prepare('UPDATE attempts SET suspension=NULL,diagnostic=NULL,revision=revision+1,updated_at_ms=? WHERE id=?').run(now, delivery.attemptId);
     attemptEvent(db, delivery.attemptId, 'verification.started');
     return { id, delivery, checks };

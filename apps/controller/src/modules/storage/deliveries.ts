@@ -1,3 +1,4 @@
+import { serializeOperationReceipt } from './common-json.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -77,7 +78,7 @@ export function recoverCaptureRetry(db: Database.Database, c: RetryCaptureComman
   const hash = retryHash(c); const settings = readSettings(db);
   const old = db.prepare<[string], { installation_id: string; account_id: string | null; request_hash: string }>('SELECT installation_id,account_id,request_hash FROM operation_requests WHERE operation_id=?').get(c.operationId);
   if (!old) return null;
-  if (old.installation_id !== settings.installationId || old.account_id !== settings.accountId || old.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
+  if (old.installation_id !== settings.installation_id || old.account_id !== settings.account_id || old.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
   const op = readOperation(db, c.operationId); if (!op?.receipt || op.kind !== 'capture.retry') throw new StorageError('OPERATION_DATA_INVALID'); return op;
 }
 export function retryCapture(db: Database.Database, c: RetryCaptureCommand): { operation: StoredOperation; claim: CaptureClaim | null } {
@@ -90,9 +91,9 @@ export function retryCapture(db: Database.Database, c: RetryCaptureCommand): { o
     if (c.expectedRevision !== `"${a.id}:${a.revision}"`) throw retryDenied();
     eligible(db, d);
     const settings = readSettings(db); const seq = db.prepare<[], { n: number }>('SELECT coalesce(max(seq),0)+1 AS n FROM events').get()!.n;
-    const receipt = { revision: d.revision + 1, eventCursor: String(seq) };
+    const receipt = { revision: d.revision + 1, event_cursor: String(seq) };
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
-      VALUES (?,?,?,'capture.retry','delivery',?,?,?,?)`).run(c.operationId, settings.installationId, settings.accountId, d.id, retryHash(c), JSON.stringify({ etag: c.expectedRevision }), JSON.stringify(receipt));
+      VALUES (?,?,?,'capture.retry','delivery',?,?,?,?)`).run(c.operationId, settings.installation_id, settings.account_id, d.id, retryHash(c), JSON.stringify({ etag: c.expectedRevision }), serializeOperationReceipt(receipt));
     db.prepare(`INSERT INTO events(entity_type,entity_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms,project_id,attempt_id)
       VALUES ('delivery',?,?,'capture.retry.accepted',?,'{}',?,?,?)`).run(d.id, c.operationId, receipt.revision, Date.now(), a.projectId, a.id);
     const reserved = claim(db, d, c.operationId);

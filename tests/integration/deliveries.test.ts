@@ -1,3 +1,4 @@
+import { toHttpCaptureRetry } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -36,13 +37,13 @@ async function fixture(http = false) {
 describe('durable immutable deliveries', () => {
   it('migrates an actual version-five database preserving prior results and receipt, without restoring capture authority', async () => {
     const f = await fixture(); const accepted = f.accept(); await f.pipeline.drain();
-    const identity = f.storage.getSettings().installationId; await f.pipeline.close(); f.storage.close();
+    const identity = f.storage.getSettings().installation_id; await f.pipeline.close(); f.storage.close();
     // Reconstruct the prior schema only inside this temporary fixture; production never downgrades.
     removeReviewSchema(f.db);
     f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DROP TABLE capture_warnings; DROP TABLE capture_runs; DROP TABLE deliveries; DELETE FROM schema_migrations WHERE version>=6; PRAGMA user_version=5;');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-      expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(accepted);
       expect(reopened.getDelivery(f.binding.deliveryVersion).delivery).toMatchObject({ captureState: 'failed', diagnostic: 'CAPTURE_CONTINUITY_REVOKED', contentIdentity: null });
       const command = { operationId: randomUUID(), attemptId: f.a.id, deliveryId: f.binding.deliveryVersion, body: { producerPassageId: f.a.passageId },
@@ -158,23 +159,23 @@ describe('durable immutable deliveries', () => {
   it('protects the HTTP detail/diff/retry contracts with session, CSRF, exact linkage and recoverable operation IDs', async () => {
     const f = await fixture(true); const app = f.app!; const host = '127.0.0.1:4310'; const origin = `http://${host}`;
     const bootstrap = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host, origin, 'content-type': 'application/json', 'x-factory-client': 'web' }, payload: {} });
-    const cookie = String(bootstrap.headers['set-cookie']).split(';')[0]!; const csrf = bootstrap.json<SessionResponse>().csrfToken;
+    const cookie = String(bootstrap.headers['set-cookie']).split(';')[0]!; const csrf = bootstrap.json<SessionResponse>().csrf_token;
     f.capture.mockRejectedValueOnce(new CaptureError('CAPTURE_IO_FAILED')); f.accept(); await f.pipeline.drain();
     const id = f.binding.deliveryVersion; const command = f.retry(); const url = `/api/v1/attempts/${f.a.id}/deliveries/${id}/capture/retry`;
     expect((await app.inject({ url: `/api/v1/deliveries/${id}`, headers: { host } })).statusCode).toBe(401);
-    expect((await app.inject({ method: 'POST', url, headers: { host, origin, cookie, 'content-type': 'application/json' }, payload: command.body })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url, headers: { host, origin, cookie, 'content-type': 'application/json' }, payload: toHttpCaptureRetry(command.body) })).statusCode).toBe(403);
     const headers = { host, origin, cookie, 'content-type': 'application/json', 'x-csrf-token': csrf, 'idempotency-key': command.operationId, 'if-match': command.expectedRevision! };
-    const response = await app.inject({ method: 'POST', url, headers, payload: command.body });
+    const response = await app.inject({ method: 'POST', url, headers, payload: toHttpCaptureRetry(command.body) });
     expect(response.statusCode, response.body).toBe(202); expect(response.headers.location).toBe(`/api/v1/operations/${command.operationId}`);
     await f.pipeline.drain();
-    const detail = await app.inject({ url: `/api/v1/deliveries/${id}`, headers: { host, cookie } }); expect(detail.statusCode).toBe(200); expect(detail.json().delivery.captureState).toBe('captured');
+    const detail = await app.inject({ url: `/api/v1/deliveries/${id}`, headers: { host, cookie } }); expect(detail.statusCode).toBe(200); expect(detail.json().delivery.capture_state).toBe('captured');
     expect(detail.body).not.toContain(f.directory); expect(detail.body).not.toContain('EXCLUDED_IGNORED_BYTES');
     const diff = await app.inject({ url: `/api/v1/deliveries/${id}/diff`, headers: { host, cookie } }); expect(diff.statusCode, diff.body).toBe(200); expect(diff.json().entries.length).toBeGreaterThan(0);
     const paged = await app.inject({ url: `/api/v1/deliveries/${id}/diff?limit=1`, headers: { host, cookie } });
-    expect(paged.statusCode, paged.body).toBe(200); expect(paged.json().entries).toHaveLength(1); expect(paged.json().hasMore).toBe(true);
+    expect(paged.statusCode, paged.body).toBe(200); expect(paged.json().entries).toHaveLength(1); expect(paged.json().has_more).toBe(true);
     expect((await app.inject({ url: `/api/v1/deliveries/${id}/diff?limit=101`, headers: { host, cookie } })).statusCode).toBe(400);
     expect((await app.inject({ url: `/api/v1/deliveries/${id}/diff?cursor=invalid`, headers: { host, cookie } })).json()).toMatchObject({ code: 'DIFF_CURSOR_INVALID' });
-    expect((await app.inject({ method: 'POST', url, headers, payload: command.body })).statusCode).toBe(202);
+    expect((await app.inject({ method: 'POST', url, headers, payload: toHttpCaptureRetry(command.body) })).statusCode).toBe(202);
   });
   it('measures database/WAL, auxiliary bytes and summary payload/latency before and after growing ignored caches', async () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain(); const id = f.binding.deliveryVersion;

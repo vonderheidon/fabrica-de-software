@@ -11,7 +11,7 @@ import { installAssets } from './assets.js';
 import { httpLimits, installSecurity } from './security/index.js';
 import { installEventRoutes } from './routes/events.js';
 import { createProjects, type ProjectDependencies } from '../modules/projects/index.js';
-import { createGitHub } from '../modules/github/index.js';
+import { createGitHub, type GitHub } from '../modules/github/index.js';
 import { createWorkspaces } from '../modules/workspaces/index.js';
 import { installProjectRoutes } from './routes/projects.js';
 import { createPreparations, type PreparationDependencies } from '../modules/projects/index.js';
@@ -28,7 +28,9 @@ import { installScaffoldRoutes } from './routes/scaffold.js';
 import { createDiagnostics, type DiagnosticDependencies } from '../modules/diagnostics/index.js';
 import { installOperationRoutes } from './routes/operation.js';
 
-export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: Pick<ProjectDependencies, 'github' | 'workspaces'>, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>) {
+type ProjectAppDependencies = Partial<Pick<ProjectDependencies, 'github' | 'githubSetup' | 'workspaces' | 'execution' | 'selectProjectsDirectory' | 'selectGitHubExecutable'>> & { githubRuntime?: GitHub };
+
+export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: ProjectAppDependencies, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>) {
   const app = Fastify({
     logger: {
       level: configuration.logLevel,
@@ -46,7 +48,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
     clientErrorHandler: (error, socket) => {
       if (!socket.writable) return;
       const status = error.code === 'HPE_HEADER_OVERFLOW' ? 431 : error.code === 'ERR_HTTP_REQUEST_TIMEOUT' ? 408 : 400;
-      const body = JSON.stringify({ code: 'REQUEST_REJECTED', message: 'The request format is invalid.', requestId: randomUUID() });
+      const body = JSON.stringify({ code: 'REQUEST_REJECTED', message: 'The request format is invalid.', request_id: randomUUID() });
       socket.end(`HTTP/1.1 ${status} Request Rejected\r\nConnection: close\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
     },
     bodyLimit: httpLimits.bodyBytes,
@@ -67,12 +69,15 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   app.server.maxConnections = httpLimits.connections;
   app.server.headersTimeout = httpLimits.headersTimeoutMs;
   installErrors(app);
-  const security = installSecurity(app, configuration, storage.getSettings().installationId);
+  const security = installSecurity(app, configuration, storage.getSettings().installation_id);
   installEventRoutes(app, storage, security);
-  const defaultGitHub = createGitHub();
+  const defaultGitHub = projectDependencies?.githubRuntime ?? createGitHub({ savedExecutablePath: storage.getGitHubExecutablePath });
   const github = projectDependencies?.github ?? defaultGitHub;
   const workspaces = projectDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub });
-  const projects = createProjects({ storage, github, workspaces, directoryBase: configuration.dataDirectory });
+  const projects = createProjects({ storage, github, githubSetup: projectDependencies?.githubSetup ?? defaultGitHub, workspaces, directoryBase: configuration.dataDirectory,
+    ...(projectDependencies?.execution ? { execution: projectDependencies.execution } : {}),
+    ...(projectDependencies?.selectProjectsDirectory ? { selectProjectsDirectory: projectDependencies.selectProjectsDirectory } : {}),
+    ...(projectDependencies?.selectGitHubExecutable ? { selectGitHubExecutable: projectDependencies.selectGitHubExecutable } : {}) });
   installProjectRoutes(app, projects);
   installQueueRoutes(app, projects);
   const preparations = createPreparations({ storage, github: preparationDependencies?.github ?? defaultGitHub, workspaces: preparationDependencies?.workspaces ?? workspaces });
@@ -82,7 +87,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
     validatePassageScope: async binding => { if (!await pipeline.revalidateScope(binding)) throw new ExecutionError('RESULT_INVALID'); } });
   const verificationWorkspaces = createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory });
   storage.interruptCreations();
-  const scaffold = createScaffold({ storage, github: scaffoldDependencies?.github ?? github, workspaces: scaffoldDependencies?.workspaces ?? verificationWorkspaces,
+  const scaffold = createScaffold({ storage, github: scaffoldDependencies?.github ?? defaultGitHub, workspaces: scaffoldDependencies?.workspaces ?? verificationWorkspaces,
     logFailure: code => app.log.error({ code }, 'Scaffold creation stopped') });
   installScaffoldRoutes(app,scaffold,storage);
   const verification = createVerification({ storage, workspaces: verificationWorkspaces, dataDirectory: configuration.dataDirectory, logFailure: code => app.log.error({ code }, 'Verification failed') });
@@ -117,7 +122,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
     const operation = storage.getOperation(request.params.operationId);
     if (!operation) throw new HttpError(404, 'OPERATION_NOT_FOUND', 'Operation not found in the current scope.');
     const { error, ...view } = operation;
-    return { ...view, ...(error ? { error: { ...error,requestId: request.id } } : {}), requestId: request.id };
+    return { ...view, ...(error ? { error: { ...error,request_id: request.id } } : {}), request_id: request.id };
   });
 
   // Technical liveness only; no settings, operational data or authority exposed.
@@ -129,7 +134,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
       return { status: 'ok' as const };
     } catch {
       request.log.error({ code: 'STORAGE_UNAVAILABLE' }, 'Health check failed');
-      return reply.code(503).send({ code: 'STORAGE_UNAVAILABLE', message: 'Storage is unavailable.', requestId: request.id });
+      return reply.code(503).send({ code: 'STORAGE_UNAVAILABLE', message: 'Storage is unavailable.', request_id: request.id });
     }
   });
   return app;

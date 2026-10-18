@@ -1,3 +1,4 @@
+import { toHttpCompletePublication } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
 import { readFileSync } from 'node:fs';
@@ -64,7 +65,7 @@ it('reconciles a lost response without a second commit and completes only on an 
   expect(f.storage.getEffects(f.attemptId).find(e => e.kind === 'local_commit')?.state).toBe('confirmed');
   expect(f.status().result).toBeNull(); expect(f.issue.comments).toEqual([]);
   const context = f.context(); const op = f.pipeline.completePublication(f.attemptId,request(f),context); await f.pipeline.drain();
-  expect(f.storage.getOperation(op.operationId)?.state).toBe('succeeded');
+  expect(f.storage.getOperation(op.operation_id)?.state).toBe('succeeded');
   expect(f.pipeline.completePublication(f.attemptId,request(f),context).receipt).toEqual(op.receipt); await f.pipeline.drain();
   expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce(); expect(f.issue.comments).toHaveLength(1);
 });
@@ -120,7 +121,7 @@ it('completes from retained content after implementation removal and restart wit
       cancelAttempt: async () => {},isClosed: () => false,logFailure: vi.fn(),enqueue: task => { tasks.push(task()); } });
     const op = publication.complete(f.attemptId,{ deliveryId,authorizedMode: 'commit',authorized: true },{ operationId: randomUUID(),expectedRevision: `"${f.attemptId}:${storage.getAttempt(f.attemptId).revision}"` });
     await Promise.all(tasks);
-    expect(storage.getOperation(op.operationId)?.state).toBe('succeeded'); expect(storage.getAttempt(f.attemptId).result).toBe('delivered');
+    expect(storage.getOperation(op.operation_id)?.state).toBe('succeeded'); expect(storage.getAttempt(f.attemptId).result).toBe('delivered');
     expect(f.folderCapability).not.toHaveBeenCalled(); expect(storage.getReview(deliveryId)?.state).toBe('approved');
   } finally { storage.close(); }
 });
@@ -142,7 +143,7 @@ it('does not send a comment when recording the Git receipt fails, and reconciles
 
 it('migrates actual v13 effect/request definitions preserving confirmed historical receipts and their order', async () => {
   const f = await publicationFixture(); fixtures.push(f); await f.implement(); await f.approve();
-  const effects = f.storage.getEffects(f.attemptId); const instanceId = f.storage.getSettings().installationId;
+  const effects = f.storage.getEffects(f.attemptId); const instanceId = f.storage.getSettings().installation_id;
   await f.pipeline.close(); f.storage.close();
   const sql = readFileSync(new URL('../../apps/controller/src/modules/storage/migrations/011_publication_queries.sql',import.meta.url),'utf8');
   f.db.transaction(() => {
@@ -164,7 +165,7 @@ it('migrates actual v13 effect/request definitions preserving confirmed historic
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(18); expect(storage.getSettings().installationId).toBe(instanceId);
+    expect(storage.getDiagnostics().schemaVersion).toBe(23); expect(storage.getSettings().installation_id).toBe(instanceId);
     expect(storage.getEffects(f.attemptId)).toEqual(effects); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='changed' WHERE operation_id=?").run(effects[0]!.operationId)).toThrow();
     expect(storage.getAttempt(f.attemptId).result).toBe('delivered');
@@ -183,15 +184,15 @@ it('exposes Commit completion and its receipt through the existing protected HTT
     const boot = await app.inject({ method: 'POST',url: '/api/v1/session',headers: { host: '127.0.0.1:4317',origin: 'http://127.0.0.1:4317','x-factory-client': 'web' },payload: {} });
     const cookie = String(boot.headers['set-cookie']).split(';')[0]!;
     const context = f.context(); const path = `/api/v1/attempts/${f.attemptId}/publication/complete`;
-    const headers = { host: '127.0.0.1:4317',origin: 'http://127.0.0.1:4317',cookie,'x-csrf-token': boot.json<{ csrfToken: string }>().csrfToken,'if-match': context.expectedRevision,'idempotency-key': context.operationId };
-    const denied = await app.inject({ method: 'POST',url: path,headers: { ...headers,'x-csrf-token': 'invalid' },payload: request(f) });
+    const headers = { host: '127.0.0.1:4317',origin: 'http://127.0.0.1:4317',cookie,'x-csrf-token': boot.json<{ csrf_token: string }>().csrf_token,'if-match': context.expectedRevision,'idempotency-key': context.operationId };
+    const denied = await app.inject({ method: 'POST',url: path,headers: { ...headers,'x-csrf-token': 'invalid' },payload: toHttpCompletePublication(request(f)) });
     expect(denied.statusCode).toBe(403);
-    const response = await app.inject({ method: 'POST',url: path,headers,payload: request(f) });
+    const response = await app.inject({ method: 'POST',url: path,headers,payload: toHttpCompletePublication(request(f)) });
     expect({ status: response.statusCode,code: response.statusCode >= 400 ? response.json<{ code: string }>().code : null }).toEqual({ status: 202,code: null });
     expect(response.headers.location).toBe(`/api/v1/operations/${context.operationId}`);
     await f.pipeline.drain();
     const get = await app.inject({ method: 'GET',url: `/api/v1/deliveries/${f.status().deliveryId}`,headers: { host: headers.host,cookie } });
     expect(get.statusCode).toBe(200);
-    expect(get.json<{ publication: { commit: unknown; localState: string } }>().publication).toMatchObject({ localState: 'completed',commit: { state: 'confirmed',sha: 'c'.repeat(40) } });
+    expect(get.json<{ publication: { commit: unknown; local_state: string } }>().publication).toMatchObject({ local_state: 'completed',commit: { state: 'confirmed',sha: 'c'.repeat(40) } });
   } finally { await app.close(); }
 });

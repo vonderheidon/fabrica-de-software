@@ -43,7 +43,7 @@ export function createVerification(options: VerificationOptions, seams: { runner
           let execution: CheckProcessResult | undefined;
           try {
             const root = await workspaces.materializeCheck(plan.delivery, check.id);
-            const cwd = await checkDirectory(root, check.definition.cwdRelative, seams.canonicalize);
+            const cwd = await checkDirectory(root, check.definition.cwd_relative, seams.canonicalize);
             if (signal.aborted) throw new VerificationError('VERIFICATION_CANCELLED');
             // Recheck live scope immediately before starting another owned process.
             const a = storage.getAttempt(plan.delivery.attemptId);

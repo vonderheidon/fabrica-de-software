@@ -24,7 +24,7 @@ describe('session stream ownership', () => {
     try {
       for (let index = 0; index < 5; index += 1) {
         const session = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { ...headers, 'x-factory-client': 'web' }, payload: {} });
-        sessions.push({ cookie: String(session.headers['set-cookie']).split(';')[0]!, csrf: session.json().csrfToken });
+        sessions.push({ cookie: String(session.headers['set-cookie']).split(';')[0]!, csrf: session.json().csrf_token });
       }
       const track = (index: number) => {
         const session = sessions[index]!;

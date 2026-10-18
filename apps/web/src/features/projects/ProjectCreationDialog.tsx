@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { CreationMode, CreationView, OperationAccepted, OperationView, ScaffoldInput, ScaffoldOptions, ScaffoldPlanned } from '#contracts';
+import type { HttpCreationMode as CreationMode, HttpCreationView as CreationView, OperationAccepted, OperationView, HttpScaffoldInput as ScaffoldInput, HttpScaffoldOptions as ScaffoldOptions, HttpScaffoldPlanned as ScaffoldPlanned } from '#contracts';
+import { createScaffoldRequest } from '../../api/observation-requests.js';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 import { readUncertainOperations, recordUncertainOperation, resolveUncertainOperation } from '../../api/uncertain-operations.js';
 import './ProjectCreationDialog.css';
@@ -155,11 +156,11 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     return () => { active = false; if (timer) clearTimeout(timer); };
   }, [creationId, reconcileAccepted]);
 
-  const modeCapability = options?.creationModes.find((item) => item.mode === form.creationMode)?.capability;
+  const modeCapability = options?.creation_modes.find((item) => item.mode === form.creationMode)?.capability;
   const remoteMode = form.creationMode !== 'local';
   const currentView = creation.status === 'ready' ? creation.view : null;
   const canReconcile = Boolean(currentView && currentView.creation.state === 'partial' && creation.status === 'ready' && creation.etag &&
-    currentView.remoteEffects.some((effect) => ['unknown', 'running', 'failed_known'].includes(effect.state)));
+    currentView.remote_effects.some((effect) => ['unknown', 'running', 'failed_known'].includes(effect.state)));
 
   function invalidatePlan(update: (current: FormState) => FormState): void {
     planVersion.current += 1;
@@ -173,14 +174,14 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   function inputFor(current: FormState): ScaffoldInput {
     const template = options?.templates.find((item) => item.id === current.templateId);
     if (!template) throw new Error('Selecione um template disponível.');
-    const base = {
-      name: current.name.trim(), templateId: template.id, templateDigest: template.digest,
-      destinationRelative: current.destinationRelative.trim(), creationMode: current.creationMode,
-      baseBranch: current.baseBranch.trim(), triageEnabled: current.triageEnabled,
+    const base: ScaffoldInput = {
+      name: current.name.trim(), template_id: template.id, template_digest: template.digest,
+      destination_relative: current.destinationRelative.trim(), creation_mode: current.creationMode,
+      base_branch: current.baseBranch.trim(), triage_enabled: current.triageEnabled,
     };
     return current.creationMode === 'local' ? base : {
       ...base,
-      remote: { ownerId: current.ownerId.trim(), name: current.remoteName.trim(), visibility: current.visibility },
+      remote: { owner_id: current.ownerId.trim(), name: current.remoteName.trim(), visibility: current.visibility },
     };
   }
 
@@ -210,9 +211,9 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     try {
       const accepted = await requestJson<OperationAccepted>('/api/v1/scaffold/creations', {
         method: 'POST', headers: { 'Idempotency-Key': operationId },
-        body: JSON.stringify({ planHash: stablePlan.planHash, plan: stablePlan.plan, authorized: true }),
+        body: JSON.stringify(createScaffoldRequest(stablePlan)),
       });
-      if (accepted.operationId !== operationId || accepted.resource.type !== 'creation') throw new Error('O recibo aceito não corresponde à criação solicitada.');
+      if (accepted.operation_id !== operationId || accepted.resource.type !== 'creation') throw new Error('O recibo aceito não corresponde à criação solicitada.');
       resolveUncertainOperation(operationId);
       setUncertain(false);
       onCreationId(accepted.resource.id);
@@ -260,7 +261,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
       const accepted = await requestJson<OperationAccepted>(`/api/v1/scaffold/creations/${encodeURIComponent(creationId)}/reconcile`, {
         method: 'POST', headers: { 'If-Match': creation.etag, 'Idempotency-Key': operationId }, body: '{}',
       });
-      if (accepted.operationId !== operationId || accepted.resource.id !== creationId) throw new Error('A reconciliação retornou outra criação.');
+      if (accepted.operation_id !== operationId || accepted.resource.id !== creationId) throw new Error('A reconciliação retornou outra criação.');
       recordUncertainOperation({ operationId, kind: 'scaffold-reconcile', recordedAt: Date.now() });
       setReconcileAccepted(true);
       setReconcileNotice('Reconciliação aceita. A mesma criação será consultada novamente.');
@@ -312,14 +313,14 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     {planError && <div className="read-state" role="alert">{planError}</div>}
     <div className="creation-plan-grid">
       <div><small>Destino</small><code>{plan.plan.destination}</code></div>
-      <div><small>Template e digest</small><b>{options?.templates.find((item) => item.id === plan.plan.input.templateId)?.label}</b><code>{plan.plan.templateDigest}</code></div>
-      <div><small>Branch-base</small><code>{plan.plan.input.baseBranch}</code></div>
+      <div><small>Template e digest</small><b>{options?.templates.find((item) => item.id === plan.plan.input.template_id)?.label}</b><code>{plan.plan.template_digest}</code></div>
+      <div><small>Branch-base</small><code>{plan.plan.input.base_branch}</code></div>
       <div><small>Conta observada</small><b>{plan.plan.account.login ?? plan.plan.account.state}</b><code>{plan.plan.account.id ?? 'ID indisponível'}</code></div>
-      <div><small>Identidade do destino pai</small><code>{plan.plan.parentIdentity}</code></div>
-      {plan.plan.input.remote && <div><small>Repositório remoto</small><b>{plan.plan.ownerLogin ?? plan.plan.input.remote.ownerId}/{plan.plan.input.remote.name}</b><code>{plan.plan.input.remote.visibility === 'private' ? 'Privado' : 'Público'} · owner ID {plan.plan.ownerId}</code></div>}
+      <div><small>Identidade do destino pai</small><code>{plan.plan.parent_identity}</code></div>
+      {plan.plan.input.remote && <div><small>Repositório remoto</small><b>{plan.plan.owner_login ?? plan.plan.input.remote.owner_id}/{plan.plan.input.remote.name}</b><code>{plan.plan.input.remote.visibility === 'private' ? 'Privado' : 'Público'} · owner ID {plan.plan.owner_id}</code></div>}
     </div>
     <div className="creation-resource-list"><h4>Arquivos planejados</h4>{plan.plan.files.map((file) => <div className="creation-resource-row" key={file.path}><code>{file.path}</code><span>{file.bytes} bytes</span><code>{file.sha256}</code></div>)}</div>
-    <div className="notice creation-engineering"><b>Engenharia incluída</b><p>Tracker {plan.plan.engineering.tracker} · domínio {plan.plan.engineering.domain} · instruções em {plan.plan.engineering.instructionFile} · triagem {plan.plan.engineering.triageEnabled ? 'incluída' : 'desativada'}. Nenhuma skill será instalada nem label criada.</p></div>
+    <div className="notice creation-engineering"><b>Engenharia incluída</b><p>Tracker {plan.plan.engineering.tracker} · domínio {plan.plan.engineering.domain} · instruções em {plan.plan.engineering.instruction_file} · triagem {plan.plan.engineering.triage_enabled ? 'incluída' : 'desativada'}. Nenhuma skill será instalada nem label criada.</p></div>
     <div className="creation-effect-list"><h4>Efeitos previstos</h4><ul>{plan.plan.effects.map((effect) => <li key={effect}>{stepLabels[effect] ?? effect}</li>)}</ul></div>
     {plan.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos ainda pendentes</b><ul>{plan.prerequisites.map((item) => <li key={item.code}>{item.message} {item.recovery}</li>)}</ul></div>}
     <label className="creation-authorization"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.currentTarget.checked)} />Confirmo uma vez este plano e seus efeitos.</label>
@@ -336,11 +337,11 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     {operationNotice && <div className="read-state" role="status">{operationNotice}{uncertain && <button type="button" onClick={() => void consultOperation()} disabled={submitting}>{submitting ? 'Consultando…' : 'Consultar operação'}</button>}</div>}
     <div className="form-grid">
       <label className="form-field" htmlFor="creation-name">Nome do projeto<input id="creation-name" value={form.name} required onChange={(event) => { const name = event.currentTarget.value; invalidatePlan((current) => ({ ...current, name, ...(!destinationEdited ? { destinationRelative: suggestedPath(name) } : {}), ...(!remoteNameEdited ? { remoteName: suggestedPath(name) } : {}) })); }} /></label>
-      <label className="form-field" htmlFor="creation-template">Template<select id="creation-template" value={form.templateId} required disabled={!options?.templates.length} onChange={(event) => invalidatePlan((current) => ({ ...current, templateId: event.currentTarget.value }))}><option value="">Selecione…</option>{options?.templates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select>{options?.templates.find((template) => template.id === form.templateId) && <small>{options.templates.find((template) => template.id === form.templateId)?.engineeringSummary}</small>}</label>
-      <label className="form-field" htmlFor="creation-destination">Diretório relativo ao destino configurado<input id="creation-destination" value={form.destinationRelative} required onChange={(event) => { setDestinationEdited(true); invalidatePlan((current) => ({ ...current, destinationRelative: event.currentTarget.value })); }} />{options?.projectsRoot && <small>Raiz configurada: <code>{options.projectsRoot}</code></small>}</label>
+      <label className="form-field" htmlFor="creation-template">Template<select id="creation-template" value={form.templateId} required disabled={!options?.templates.length} onChange={(event) => invalidatePlan((current) => ({ ...current, templateId: event.currentTarget.value }))}><option value="">Selecione…</option>{options?.templates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select>{options?.templates.find((template) => template.id === form.templateId) && <small>{options.templates.find((template) => template.id === form.templateId)?.engineering_summary}</small>}</label>
+      <label className="form-field" htmlFor="creation-destination">Diretório relativo ao destino configurado<input id="creation-destination" value={form.destinationRelative} required onChange={(event) => { setDestinationEdited(true); invalidatePlan((current) => ({ ...current, destinationRelative: event.currentTarget.value })); }} />{options?.projects_root && <small>Raiz configurada: <code>{options.projects_root}</code></small>}</label>
       <label className="form-field" htmlFor="creation-branch">Branch-base<input id="creation-branch" value={form.baseBranch} required onChange={(event) => invalidatePlan((current) => ({ ...current, baseBranch: event.currentTarget.value }))} /></label>
       <label className="form-field field-full" htmlFor="creation-mode">Modalidade de criação<select id="creation-mode" value={form.creationMode} onChange={(event) => invalidatePlan((current) => ({ ...current, creationMode: event.currentTarget.value as CreationMode }))}>{(['local', 'remote_no_push', 'remote_push'] as const).map((mode) => {
-        const capability = options?.creationModes.find((item) => item.mode === mode)?.capability;
+        const capability = options?.creation_modes.find((item) => item.mode === mode)?.capability;
         return <option key={mode} value={mode}>{modeLabels[mode]}{capability && !capability.available ? ' · indisponível neste host' : ''}</option>;
       })}</select>{modeCapability && !modeCapability.available && <small className="error">{modeCapability.reason} {modeCapability.recovery}</small>}</label>
       {remoteMode && <>
@@ -362,17 +363,17 @@ function CreationResult({ load, onRefresh, onOpenProject, canReconcile, reconcil
 }) {
   if (load.status === 'loading') return <section className="creation-flow" aria-busy="true"><p role="status">Consultando a criação pelo identificador persistido…</p></section>;
   if (load.status === 'error') return <section className="creation-flow"><div className="read-state" role="alert">{load.message}</div><p>A identidade da criação permanece na URL. Consulte novamente quando o controlador estiver acessível.</p><button type="button" onClick={onRefresh}>Tentar consulta</button></section>;
-  const { creation, effects, remoteEffects, confirmedEffects, pendingEffects, prerequisites, diagnostics } = load.view;
+  const { creation, effects, remote_effects: remoteEffects, confirmed_effects: confirmedEffects, pending_effects: pendingEffects, prerequisites, diagnostics } = load.view;
   const complete = creation.state === 'completed';
   const heading = complete ? 'Criação concluída' : creation.state === 'partial' ? 'Criação parcial' : creation.state === 'failed' ? 'Criação falhou' : 'Criação em andamento';
   return <section className="creation-flow" aria-labelledby="creation-result-title">
     <div className={`creation-result-banner ${complete ? 'is-complete' : creation.state === 'partial' || creation.state === 'failed' ? 'is-problem' : ''}`}><span className="eyebrow">{creation.state} · criação {creation.id}</span><h3 id="creation-result-title">{heading}</h3><p>{complete ? 'A operação terminou e seus efeitos estão consultáveis.' : 'As etapas confirmadas e pendentes permanecem separadas; nenhum agente ou issue foi iniciado.'}</p></div>
-    <dl className="creation-result-grid"><div><dt>Pasta</dt><dd><code>{creation.plan.destination}</code></dd></div><div><dt>Template</dt><dd>{creation.plan.input.templateId} · <code>{creation.plan.templateDigest}</code></dd></div><div><dt>Branch-base</dt><dd><code>{creation.plan.input.baseBranch}</code></dd></div><div><dt>Baseline</dt><dd><code>{creation.baselineSha ?? 'não confirmado'}</code></dd></div><div><dt>Referência local</dt><dd><code>{creation.baselineRef ?? 'não confirmada'}</code></dd></div><div><dt>Conta</dt><dd>{creation.plan.account.login ?? creation.plan.account.state} · <code>{creation.plan.account.id ?? 'sem ID'}</code></dd></div></dl>
-    <div className="creation-effect-list"><h4>Efeitos da criação</h4>{[...effects.map((effect) => ({ id: effect.operationId, kind: effect.kind, state: effect.state, reason: effect.reason, receipt: effect.receipt, identity: null })), ...remoteEffects.map((effect) => ({ id: effect.operationId ?? effect.kind, kind: effect.kind, state: effect.state, reason: effect.reason, receipt: null, identity: effect.identity }))].map((effect) => <div className="creation-effect-row" key={effect.id}><b>{stepLabels[effect.kind] ?? effect.kind}</b><span className={`pill ${effect.state === 'confirmed' ? '' : effect.state === 'failed_known' ? 'warn' : 'neutral'}`}>{effect.state}</span>{effect.reason && <small>{effect.reason}</small>}{effect.receipt?.url && <code>{effect.receipt.url}</code>}{effect.receipt?.id && <code>Identidade confirmada {effect.receipt.id}</code>}{effect.receipt?.branchRef && <code>{effect.receipt.branchRef}</code>}{effect.receipt?.commitSha && <code>{effect.receipt.commitSha}</code>}{effect.identity && <code>{[effect.identity.repositoryOwner, effect.identity.repositoryName, effect.identity.branchRef, effect.identity.commitSha].filter(Boolean).join(' · ')}</code>}</div>)}</div>
+    <dl className="creation-result-grid"><div><dt>Pasta</dt><dd><code>{creation.plan.destination}</code></dd></div><div><dt>Template</dt><dd>{creation.plan.input.template_id} · <code>{creation.plan.template_digest}</code></dd></div><div><dt>Branch-base</dt><dd><code>{creation.plan.input.base_branch}</code></dd></div><div><dt>Baseline</dt><dd><code>{creation.baseline_sha ?? 'não confirmado'}</code></dd></div><div><dt>Referência local</dt><dd><code>{creation.baseline_ref ?? 'não confirmada'}</code></dd></div><div><dt>Conta</dt><dd>{creation.plan.account.login ?? creation.plan.account.state} · <code>{creation.plan.account.id ?? 'sem ID'}</code></dd></div></dl>
+    <div className="creation-effect-list"><h4>Efeitos da criação</h4>{[...effects.map((effect) => ({ id: effect.operation_id, kind: effect.kind, state: effect.state, reason: effect.reason, receipt: effect.receipt, identity: null })), ...remoteEffects.map((effect) => ({ id: effect.operation_id ?? effect.kind, kind: effect.kind, state: effect.state, reason: effect.reason, receipt: null, identity: effect.identity }))].map((effect) => <div className="creation-effect-row" key={effect.id}><b>{stepLabels[effect.kind] ?? effect.kind}</b><span className={`pill ${effect.state === 'confirmed' ? '' : effect.state === 'failed_known' ? 'warn' : 'neutral'}`}>{effect.state}</span>{effect.reason && <small>{effect.reason}</small>}{effect.receipt?.url && <code>{effect.receipt.url}</code>}{effect.receipt?.id && <code>Identidade confirmada {effect.receipt.id}</code>}{effect.receipt?.branch_ref && <code>{effect.receipt.branch_ref}</code>}{effect.receipt?.commit_sha && <code>{effect.receipt.commit_sha}</code>}{effect.identity && <code>{[effect.identity.repository_owner, effect.identity.repository_name, effect.identity.branch_ref, effect.identity.commit_sha].filter(Boolean).join(' · ')}</code>}</div>)}</div>
     <div className="creation-progress-grid"><div><b>Etapas locais confirmadas</b><ul>{confirmedEffects.map((item) => <li key={item.step}>{stepLabels[item.step] ?? item.step}: {item.state}</li>)}</ul></div><div><b>Etapas pendentes ou incertas</b><ul>{pendingEffects.map((item) => <li key={item.step}>{stepLabels[item.step] ?? item.step}: {item.state}</li>)}{pendingEffects.length === 0 && remoteEffects.filter((item) => ['unknown', 'running', 'failed_known'].includes(item.state)).map((item) => <li key={item.kind}>{stepLabels[item.kind] ?? item.kind}: {item.state} · {item.reason ?? 'sem confirmação'}</li>)}</ul></div></div>
     {creation.diagnostic && <div className="read-state" role="alert"><b>Diagnóstico</b><p>{creation.diagnostic}</p></div>}{diagnostics.length > 0 && <div className="notice"><b>Diagnósticos</b><ul>{diagnostics.map((item, index) => <li key={`${item}-${index}`}>{item}</li>)}</ul></div>}
     {prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos do projeto</b><ul>{prerequisites.map((item) => <li key={item.code}>{item.message} {item.recovery}</li>)}</ul></div>}
     {reconcileNotice && <div className="read-state" role="status">{reconcileNotice}</div>}
-    <div className="form-actions">{canReconcile && !reconcileUncertain && <button type="button" onClick={onReconcile} disabled={reconciling}>{reconciling ? 'Reconciliando…' : 'Reconciliar esta criação'}</button>}{reconcileUncertain && <button type="button" onClick={onConsultReconcile} disabled={reconciling}>{reconciling ? 'Consultando…' : 'Consultar reconciliação'}</button>}{creation.projectId && <button type="button" className="primary" onClick={() => onOpenProject(creation.projectId!)}>Abrir configuração do projeto</button>}</div>
+    <div className="form-actions">{canReconcile && !reconcileUncertain && <button type="button" onClick={onReconcile} disabled={reconciling}>{reconciling ? 'Reconciliando…' : 'Reconciliar esta criação'}</button>}{reconcileUncertain && <button type="button" onClick={onConsultReconcile} disabled={reconciling}>{reconciling ? 'Consultando…' : 'Consultar reconciliação'}</button>}{creation.project_id && <button type="button" className="primary" onClick={() => onOpenProject(creation.project_id!)}>Abrir configuração do projeto</button>}</div>
   </section>;
 }

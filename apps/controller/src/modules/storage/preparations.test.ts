@@ -6,7 +6,8 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage, type PreparationCommand } from './index.js';
 import { applyMigrations, loadMigrations } from './migrations.js';
-import { readSettings, seedSettings } from './settings.js';
+import { readSettings } from './settings.js';
+import { seedLegacySettings as seedSettings } from '../../../../../tests/fixtures/legacy-settings.js';
 import { saveTimeDefaults, settingsETag } from './operations.js';
 
 const resources: { close(): unknown }[] = []; const directories: string[] = [];
@@ -15,10 +16,10 @@ function fixture() {
   const path = directory(); const storage = openStorage({ dataDirectory: path, busyTimeoutMs: 10 }); resources.push(storage);
   const db = new Database(join(path, 'factory.sqlite')); db.pragma('foreign_keys = ON'); resources.push(db);
   const project = storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
-    body: { name: 'Storage fixture', source: { kind: 'github', location: 'https://github.com/test/repo' }, baseBranch: 'main' },
-    source: { kind: 'github', location: 'https://github.com/test/repo', repositoryId: 'R_test', repositoryUrl: 'https://github.com/test/repo' }, originNotes: [] });
+    body: { name: 'Storage fixture', source: { kind: 'github', location: 'https://github.com/test/repo' }, base_branch: 'main' },
+    source: { kind: 'github', location: 'https://github.com/test/repo', repository_id: 'R_test', repository_url: 'https://github.com/test/repo' }, originNotes: [] });
   const command: PreparationCommand = { kind: 'preparation.create', operationId: randomUUID(), expectedRevision: undefined, projectId: project.resource.id,
-    body: { issueId: 'I_test', deliveryMode: 'icr', guidance: '', overrides: {} } };
+    body: { issue_id: 'I_test', delivery_mode: 'icr', guidance: '', overrides: {} } };
   return { storage, db, projectId: project.resource.id, command, configurationETag: storage.getConfiguration(project.resource.id).etag };
 }
 afterEach(async () => {
@@ -31,11 +32,11 @@ describe('preparation storage durability and migration', () => {
     let operationId: string; let installationId: string;
     try {
       old.pragma('foreign_keys = ON'); applyMigrations(old, loadMigrations().slice(0, 3), () => seedSettings(old, path));
-      const settings = readSettings(old); installationId = settings.installationId; operationId = randomUUID();
-      saveTimeDefaults(old, { operationId, expectedRevision: settingsETag(settings.installationId, settings.revision), timeDefaults: settings.timeDefaults });
+      const settings = readSettings(old); installationId = settings.installation_id; operationId = randomUUID();
+      saveTimeDefaults(old, { operationId, expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
     } finally { old.close(); }
     const storage = openStorage({ dataDirectory: path }); resources.push(storage);
-    expect(storage.getDiagnostics().schemaVersion).toBe(18); expect(storage.getSettings().installationId).toBe(installationId);
+    expect(storage.getDiagnostics().schemaVersion).toBe(23); expect(storage.getSettings().installation_id).toBe(installationId);
     expect(storage.getOperation(operationId)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
     const db = new Database(join(path, 'factory.sqlite')); resources.push(db);
     expect(db.prepare('SELECT count(*) AS n FROM preparations').get()).toEqual({ n: 0 });
@@ -56,7 +57,7 @@ describe('preparation storage durability and migration', () => {
     const operationId = randomUUID();
     expect(() => f.storage.savePreparation({ command: { kind: 'preparation.update', preparationId: before.view.id, operationId, expectedRevision: before.etag, body: { changes: { guidance: 'Must roll back' } } }, configurationETag: f.configurationETag })).toThrow();
     expect(f.storage.getPreparation(first.resource.id)).toEqual(before); expect(f.storage.getOperation(operationId)).toBeNull();
-    expect(f.storage.getOperation(first.operationId)).toEqual(first);
+    expect(f.storage.getOperation(first.operation_id)).toEqual(first);
   });
   it('fails under a finite write lock without accepting a preparation or operation', () => {
     const f = fixture(); f.db.exec('BEGIN IMMEDIATE');
@@ -68,7 +69,7 @@ describe('preparation storage durability and migration', () => {
   it('does not allow a project revision from another project to enter preparation history', () => {
     const f = fixture(); const first = f.storage.savePreparation({ command: f.command, configurationETag: f.configurationETag });
     const other = f.storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
-      body: { name: 'Other', source: { kind: 'github', location: 'https://github.com/test/other' }, baseBranch: 'main' },
+      body: { name: 'Other', source: { kind: 'github', location: 'https://github.com/test/other' }, base_branch: 'main' },
       source: { kind: 'github', location: 'https://github.com/test/other' }, originNotes: [] });
     const otherRevision = f.storage.getConfiguration(other.resource.id).view.configuration.id;
     expect(() => f.db.prepare('INSERT INTO preparation_revisions(preparation_id, revision, project_id, project_revision_id, choices_json, created_at_ms) VALUES (?, 2, ?, ?, ?, 1)')

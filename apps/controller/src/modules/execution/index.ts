@@ -1,4 +1,4 @@
-import type { ExecutionProfile, ExecutionQuestion, PassageBinding, PassageRequest, PassageResult, RoleResourceReference } from '#contracts';
+import type { CatalogModel, ExecutionCatalog, ExecutionProfileValue, ExecutionQuestion, PassageBinding, PassageRequest, PassageResult, RoleResourceReference } from '#contracts';
 import { createMaestriOmp } from './adapters/maestri-omp/adapter.js';
 import { loadRoleResources } from './roles.js';
 
@@ -10,7 +10,7 @@ export type PassageState = 'starting' | 'ready' | 'partial' | 'interrupted' | 'c
 export interface PassageRecord {
   handle: PassageHandle; binding: PassageBinding; requestHash: string; state: PassageState;
   roleResource: RoleResourceReference; terminalName: string; diagnostic: ExecutionCode | null;
-  effectiveProfile: ExecutionProfile | null; executorVersion: string | null;
+  effectiveProfile: ExecutionProfileValue | null; executorVersion: string | null;
 }
 export interface ExecutionEvent { sequence: number; type: 'passage-ready' | 'question-raised' | 'question-answer-receipt' | 'result-accepted' | 'tracking-lost' | 'cleanup-updated'; code: ExecutionCode | null }
 export interface ResultRecord { binding: PassageBinding; result: PassageResult; sha256: string; receiptId: string }
@@ -28,7 +28,7 @@ export interface ExecutionPersistence {
   getPassage(handle: PassageHandle): PassageRecord;
   record(handle: PassageHandle, state: PassageState, code: ExecutionCode | null, event: ExecutionEvent['type']): void;
   /** Atomically save the observed exact profile/version, ready state and passage-ready event. */
-  confirmReady(handle: PassageHandle, profile: ExecutionProfile, executorVersion: string): void;
+  confirmReady(handle: PassageHandle, profile: ExecutionProfileValue, executorVersion: string): void;
   observe(handle: PassageHandle, after: number, limit: number): ExecutionEvent[];
   acceptResult(input: Omit<ResultRecord, 'receiptId'>): ResultRecord;
   getResult(handle: PassageHandle): ResultRecord | null;
@@ -63,6 +63,7 @@ export interface InteractionSurface {
   open: (() => Promise<void>) | null;
 }
 export interface Execution {
+  getCatalog(): Promise<ExecutionCatalog>;
   continuePassage(source: PassageHandle, request: Omit<PassageRequest, 'cwd'>): Promise<PassageRecord>;
   observeVersions(): Promise<ToolObservation[]>;
   roleResources(): RoleResourceReference[];
@@ -78,4 +79,4 @@ export interface Execution {
 export function createExecution(options: ExecutionOptions): Execution {
   return createMaestriOmp(options, loadRoleResources(options.roleDirectory));
 }
-export type { ExecutionProfile, ExecutionQuestion, PassageBinding, PassageRequest, PassageResult, RoleResourceReference };
+export type { CatalogModel, ExecutionCatalog, ExecutionProfileValue, ExecutionProfileValue as ExecutionProfile, ExecutionQuestion, PassageBinding, PassageRequest, PassageResult, RoleResourceReference };

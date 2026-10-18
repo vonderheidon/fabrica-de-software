@@ -87,3 +87,26 @@ export const IssueContext = Type.Object({
   memberships: Type.Array(IssueMembership), references: Type.Array(text(4096)),
 }, closed);
 export type IssueContext = Static<typeof IssueContext>;
+
+// Configuration-family DTOs. GitHub adapter models and external GraphQL keys
+// retain their own representation; only these explicit public fields change.
+const ConfigurationRepository = Type.Object({
+  ...Type.Omit(GitHubRepository, ['defaultBranch', 'isArchived', 'isPrivate']).properties,
+  default_branch: GitHubRepository.properties.defaultBranch,
+  is_archived: GitHubRepository.properties.isArchived, is_private: GitHubRepository.properties.isPrivate,
+}, closed);
+const ConfigurationComment = Type.Object({ ...Type.Omit(IssueComment, ['updatedAt']).properties, updated_at: IssueComment.properties.updatedAt }, closed);
+const ConfigurationMembership = Type.Object({
+  ...Type.Omit(IssueMembership, ['itemId', 'projectId', 'statusValues', 'numberValues']).properties,
+  item_id: GitHubId, project_id: GitHubId,
+  status_values: Type.Array(Type.Object({ field_id: GitHubId, option_id: Type.Union([GitHubId, Type.Null()]), name: Type.Union([text(), Type.Null()]) }, closed)),
+  number_values: Type.Optional(Type.Array(Type.Object({ field_id: GitHubId, value: Type.Union([Type.Number(), Type.Null()]) }, closed))),
+}, closed);
+export const ConfigurationIssueContext = Type.Object({
+  ...Type.Omit(IssueContext, ['repository', 'comments', 'memberships']).properties,
+  repository: ConfigurationRepository, comments: Type.Array(ConfigurationComment), memberships: Type.Array(ConfigurationMembership),
+}, closed);
+export type ConfigurationIssueContext = Static<typeof ConfigurationIssueContext>;
+export const ConfigurationIssueOption = Type.Object({
+  ...Type.Omit(ProjectItem, ['contentId']).properties, content_id: ProjectItem.properties.contentId,
+}, closed);

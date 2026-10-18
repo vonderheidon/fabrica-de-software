@@ -1,3 +1,4 @@
+import { serializeOperationReceipt } from './common-json.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -19,13 +20,13 @@ export function recoverCreation(db: Database.Database, command: CreationCommand)
   const hash = hashCommand(command); const settings = readSettings(db);
   const prior = db.prepare<[string], { request_hash: string; installation_id: string; account_id: string | null }>('SELECT request_hash,installation_id,account_id FROM operation_requests WHERE operation_id=?').get(command.operationId);
   if (!prior) return null;
-  if (prior.request_hash !== hash || prior.installation_id !== settings.installationId || prior.account_id !== settings.accountId) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
+  if (prior.request_hash !== hash || prior.installation_id !== settings.installation_id || prior.account_id !== settings.account_id) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
   const operation = readOperation(db, command.operationId); if (!operation) throw new StorageError('OPERATION_DATA_INVALID'); return operation;
 }
 export function readCreation(db: Database.Database, id: string): CreationView {
   if (!Value.Check(OperationId, id)) throw new OperationError(400, 'CREATION_ID_INVALID', 'Creation ID must be a UUID.');
   const s = readSettings(db);
-  const r = db.prepare<[string, string, string | null], Row>('SELECT * FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(id, s.installationId, s.accountId);
+  const r = db.prepare<[string, string, string | null], Row>('SELECT * FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(id, s.installation_id, s.account_id);
   if (!r) throw new OperationError(404, 'CREATION_NOT_FOUND', 'Creation not found in the current scope.');
   const recorded = db.prepare<[string], CreationStep>('SELECT step,state FROM creation_steps WHERE creation_id=? ORDER BY rowid').all(id);
   const steps = (['directory','files','git','baseline','registration'] as const).map(step => recorded.find(s => s.step === step) ?? { step, state: 'not_started' as const });
@@ -51,15 +52,15 @@ export function acceptCreation(db: Database.Database, command: CreationCommand):
   return guarded(() => db.transaction(() => {
     const prior = recoverCreation(db, command); if (prior) return { created: false, operation: prior };
     const s = readSettings(db); const plan = command.body.plan;
-    if (plan.installationId !== s.installationId || plan.settingsETag !== configurationETag(readSettingsView(db)) ||
-      (plan.input.creationMode !== 'local' && (!s.accountId || plan.account.id !== s.accountId || plan.account.state !== 'complete' || !plan.input.remote || plan.ownerId !== plan.input.remote.ownerId || !plan.ownerLogin))) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration or account changed. Review a new creation plan.');
+    if (plan.installationId !== s.installation_id || plan.settingsETag !== configurationETag(readSettingsView(db)) ||
+      (plan.input.creationMode !== 'local' && (!s.account_id || plan.account.id !== s.account_id || plan.account.state !== 'complete' || !plan.input.remote || plan.ownerId !== plan.input.remote.ownerId || !plan.ownerLogin))) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration or account changed. Review a new creation plan.');
     if (db.prepare('SELECT id FROM project_creations WHERE destination=? COLLATE NOCASE').get(plan.destination)) throw new OperationError(409, 'SCAFFOLD_DESTINATION_RESERVED', 'A creation already identifies this destination. Inspect that creation.');
     const id = randomUUID(); const next = db.prepare<[], { seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()!.seq;
-    const receipt = { revision: 1, eventCursor: String(next) };
+    const receipt = { revision: 1, event_cursor: String(next) };
     db.prepare("INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json) VALUES (?,?,?,'scaffold.create','creation',?,?,'{}',?)")
-      .run(command.operationId,s.installationId,s.accountId,id,hashCommand(command),JSON.stringify(receipt));
+      .run(command.operationId,s.installation_id,s.account_id,id,hashCommand(command),serializeOperationReceipt(receipt));
     db.prepare("INSERT INTO project_creations(id,operation_id,installation_id,account_id,plan_hash,plan_json,destination,state,created_at_ms) VALUES (?,?,?,?,?,?,?,'pending',?)")
-      .run(id,command.operationId,s.installationId,s.accountId,command.body.planHash,JSON.stringify(plan),plan.destination,Date.now());
+      .run(id,command.operationId,s.installation_id,s.account_id,command.body.planHash,JSON.stringify(plan),plan.destination,Date.now());
     creationEvent(db,id,'creation.accepted');
     return { created: true, operation: readOperation(db,command.operationId)! };
   }).immediate());
@@ -89,8 +90,8 @@ export function completeCreation(db: Database.Database, id: string): void {
     if (!['running','partial'].includes(c.state) || !c.baselineSha || c.plan.settingsETag !== configurationETag(readSettingsView(db)) || confirmed !== 4 || required.some(kind => !effects.some(e => e.kind === kind && e.state === 'confirmed'))) throw new OperationError(409,'SCAFFOLD_INCOMPLETE','The creation has unconfirmed effects.');
     const remote = effects.find(e => e.kind === 'create_repository')?.receipt;
     const registration = registerProject(db,{ operationId: randomUUID(), expectedRevision: undefined,
-      body: { name: c.plan.input.name, baseBranch: c.plan.input.baseBranch, source: { kind: 'local',location: c.plan.destination } },
-      source: { kind: 'local',location: c.plan.destination, ...(remote ? { repositoryId: remote.id, repositoryUrl: remote.url! } : {}) },originNotes: [] });
+      body: { name: c.plan.input.name, base_branch: c.plan.input.baseBranch, source: { kind: 'local',location: c.plan.destination } },
+      source: { kind: 'local',location: c.plan.destination, ...(remote ? { repository_id: remote.id, repository_url: remote.url! } : {}) },originNotes: [] });
     db.prepare("INSERT INTO creation_steps(creation_id,step,state) VALUES (?,'registration','confirmed')").run(id);
     db.prepare("UPDATE project_creations SET project_id=?,state='completed',diagnostic=NULL,revision=revision+1 WHERE id=?").run(registration.resource.id,id);
     creationEvent(db,id,'creation.completed');
@@ -120,7 +121,7 @@ export function acceptCreationReconciliation(db: Database.Database,c: ReconcileC
     const hash = reconciliationHash(c); const s = readSettings(db);
     const prior = db.prepare<[string],{ request_hash: string; account_id: string | null; installation_id: string }>('SELECT * FROM operation_requests WHERE operation_id=?').get(c.operationId);
     if (prior) {
-      if (prior.request_hash !== hash || prior.account_id !== s.accountId || prior.installation_id !== s.installationId) throw new OperationError(409,'IDEMPOTENCY_CONFLICT','Reconciliation identity conflicts with an accepted command.');
+      if (prior.request_hash !== hash || prior.account_id !== s.account_id || prior.installation_id !== s.installation_id) throw new OperationError(409,'IDEMPOTENCY_CONFLICT','Reconciliation identity conflicts with an accepted command.');
       return { created: false,operation: readOperation(db,c.operationId)! };
     }
     const creation = readCreation(db,c.creationId).creation;
@@ -129,7 +130,7 @@ export function acceptCreationReconciliation(db: Database.Database,c: ReconcileC
     if (['pending','running'].includes(creation.state)) throw new OperationError(409,'CREATION_BUSY','Wait for creation to stop before reconciling.');
     const revision = creation.revision; const seq = db.prepare<[],{ n: number }>('SELECT coalesce(max(seq),0)+1 AS n FROM events').get()!.n;
     db.prepare("INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json) VALUES (?,?,?,'scaffold.reconcile','creation',?,?,?,?)")
-      .run(c.operationId,s.installationId,s.accountId,c.creationId,hash,JSON.stringify({ etag: c.expectedRevision }),JSON.stringify({ revision,eventCursor: String(seq) }));
+      .run(c.operationId,s.installation_id,s.account_id,c.creationId,hash,JSON.stringify({ etag: c.expectedRevision }),serializeOperationReceipt({ revision,event_cursor: String(seq) }));
     db.prepare("INSERT INTO creation_reconciliations(operation_id,creation_id,state) VALUES (?,?,'accepted')").run(c.operationId,c.creationId);
     db.prepare("INSERT INTO events(entity_type,entity_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms) VALUES ('creation',?,?,'creation.reconcile.accepted',?,'{}',?)").run(c.creationId,c.operationId,revision,Date.now());
     return { created: true,operation: readOperation(db,c.operationId)! };

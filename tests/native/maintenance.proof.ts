@@ -8,7 +8,7 @@ import { createVerification } from '../../apps/controller/src/modules/verificati
 it('executes an additional configured check through the existing lifecycle using real local Node processes', async () => {
   await mkdir(join(process.cwd(), '.cache'), { recursive: true });
   if (/["%!\r\n]/.test(process.execPath)) throw new Error('NATIVE_CHECK_EXECUTABLE_PATH_UNSUPPORTED');
-  const definitions = ['existing', 'additional'].map(id => ({ id, command: `"${process.execPath}" probe.mjs ${id}`, cwdRelative: '.', timeoutMs: 15_000 }));
+  const definitions = ['existing', 'additional'].map(id => ({ id, command: `"${process.execPath}" probe.mjs ${id}`, cwd_relative: '.', timeout_ms: 15_000 }));
   const f = await publicationFixture(false, 'icr', true, { temporaryRoot: join(process.cwd(), '.cache'), checks: definitions });
   try {
     let canonicalization = 'real'; let canonicalize: (path: string) => Promise<string> = path => realpath(path);

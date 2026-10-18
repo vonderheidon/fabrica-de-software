@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { QueueObservation } from '#contracts';
+import type { HttpQueueObservation as QueueObservation } from '#contracts';
+import { queueQuery } from '../../api/observation-requests.js';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 
 type QueueFailure = { message: string; requestId: string | null };
@@ -25,10 +26,8 @@ export function useQueue(projectId: string | null, enabled: boolean) {
     const currentVersion = ++version.current;
     setLoad((current) => ({ status: 'loading', observation: current.observation, etag: current.etag,
       previousError: current.status === 'error' ? { message: current.message, requestId: current.requestId } : current.status === 'loading' ? current.previousError : null }));
-    const params = new URLSearchParams({ limit: '25' });
-    if (projectId) params.set('projectId', projectId);
-    if (cursor) params.set('cursor', cursor);
-    requestJsonWithMetadata<QueueObservation>(`/api/v1/queue?${params.toString()}`, { signal: controller.signal }).then(({ data, etag }) => {
+    const query = queueQuery(projectId, cursor);
+    requestJsonWithMetadata<QueueObservation>(`/api/v1/queue?${query}`, { signal: controller.signal }).then(({ data, etag }) => {
       if (active && currentVersion === version.current) {
         readFailures.current = 0;
         setLoad({ status: 'ready', observation: data, etag });
@@ -57,8 +56,8 @@ export function useQueue(projectId: string | null, enabled: boolean) {
     window.addEventListener('factory-controller-event', onUpdated);
     window.addEventListener('factory-controller-resync', onUpdated);
     const polling = load.observation?.polling;
-    const delay = load.status === 'ready' && polling ? Math.max(1, polling.nextPollAtMs - Date.now())
-      : Math.min(polling?.backoffMaxMs ?? 60_000, (polling?.intervalMs ?? 15_000) * 2 ** readFailures.current);
+    const delay = load.status === 'ready' && polling ? Math.max(1, polling.next_poll_at_ms - Date.now())
+      : Math.min(polling?.backoff_max_ms ?? 60_000, (polling?.interval_ms ?? 15_000) * 2 ** readFailures.current);
     const timer = load.status === 'loading' ? undefined : window.setTimeout(refresh, Math.min(delay, 2_147_483_647));
     return () => {
       window.clearTimeout(timer);
@@ -70,8 +69,8 @@ export function useQueue(projectId: string | null, enabled: boolean) {
 
   const nextPage = useCallback(() => {
     const observation = load.observation;
-    const nextCursor = observation?.page.nextCursor;
-    if (!nextCursor || observation.page.hasMore !== true) return;
+    const nextCursor = observation?.page.next_cursor;
+    if (!nextCursor || observation.page.has_more !== true) return;
     setHistory((current) => [...current, cursor]);
     setCursor(nextCursor);
   }, [cursor, load.observation]);

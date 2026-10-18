@@ -4,13 +4,15 @@ const text = (maxLength = 2048) => Type.String({ minLength: 1, maxLength });
 const timestamp = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 const revision = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const unconfigured = Type.Object({ state: Type.Literal('not_configured') }, { additionalProperties: false });
+const durationMs = Type.Integer({ minimum: 1, maximum: 2_147_483_647 });
+export const OperationId = Type.String({ pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' });
 
 export const DeliveryMode = Type.Union([Type.Literal('icr'), Type.Literal('commit'), Type.Literal('pr')]);
 export type DeliveryMode = Static<typeof DeliveryMode>;
 
 export const Capability = Type.Object({
   available: Type.Boolean(),
-  reasonCode: Type.Optional(text(128)),
+  reason_code: Type.Optional(text(128)),
   reason: Type.Optional(text()),
   recovery: Type.Optional(text()),
 }, { additionalProperties: false });
@@ -18,7 +20,7 @@ export type Capability = Static<typeof Capability>;
 
 export const MeasuredValue = Type.Union([
   Type.Object({ state: Type.Literal('measured'), value: Type.Number({ minimum: 0 }), unit: text(64) }, { additionalProperties: false }),
-  Type.Object({ state: Type.Literal('unavailable'), reason: text(), affectedRequirements: Type.Array(text(128), { minItems: 1, maxItems: 100 }) }, { additionalProperties: false }),
+  Type.Object({ state: Type.Literal('unavailable'), reason: text(), affected_requirements: Type.Array(text(128), { minItems: 1, maxItems: 100 }) }, { additionalProperties: false }),
   Type.Object({ state: Type.Literal('not_applicable'), reason: text() }, { additionalProperties: false }),
 ]);
 export type MeasuredValue = Static<typeof MeasuredValue>;
@@ -32,52 +34,40 @@ export type ConfiguredLimit = Static<typeof ConfiguredLimit>;
 export const ErrorResponse = Type.Object({
   code: text(128),
   message: text(),
-  requestId: text(128),
-  fieldErrors: Type.Optional(Type.Array(Type.Object({ field: text(256), message: text() }, { additionalProperties: false }), { maxItems: 100 })),
+  request_id: text(128),
+  field_errors: Type.Optional(Type.Array(Type.Object({ field: text(256), message: text() }, { additionalProperties: false }), { maxItems: 100 })),
   resource: Type.Optional(Type.Object({ type: text(128), id: text(256) }, { additionalProperties: false })),
-  operationId: Type.Optional(text(256)),
+  operation_id: Type.Optional(OperationId),
   facts: Type.Optional(Type.Record(Type.String({ maxLength: 128 }), Type.Union([Type.String({ maxLength: 2048 }), Type.Number(), Type.Boolean(), Type.Null()]))),
-  affectedRequirements: Type.Optional(Type.Array(text(128), { maxItems: 100 })),
+  affected_requirements: Type.Optional(Type.Array(text(128), { maxItems: 100 })),
   recovery: Type.Optional(text()),
 }, { additionalProperties: false });
 export type ErrorResponse = Static<typeof ErrorResponse>;
 
 export const TimeDefaults = Type.Object({
-  formatVersion: Type.Literal(1),
-  pollingIntervalMs: Type.Integer({ minimum: 1, maximum: 2_147_483_647 }),
-  pollingBackoffMaxMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647 })),
-  passageActiveTimeMs: Type.Integer({ minimum: 1, maximum: 2_147_483_647 }),
-  questionTtl: ConfiguredLimit,
+  format_version: Type.Literal(1),
+  polling_interval_ms: durationMs,
+  polling_backoff_max_ms: Type.Optional(durationMs),
+  passage_active_time_ms: durationMs,
+  question_ttl: ConfiguredLimit,
 }, { additionalProperties: false });
 export type TimeDefaults = Static<typeof TimeDefaults>;
 
-export const CostDefaults = Type.Object({ formatVersion: Type.Literal(1), limit: ConfiguredLimit }, { additionalProperties: false });
-export type CostDefaults = Static<typeof CostDefaults>;
-
-export const ArtifactPolicy = Type.Object({ formatVersion: Type.Literal(1), automaticDeletion: Type.Literal(false) }, { additionalProperties: false });
+export const ArtifactPolicy = Type.Object({ format_version: Type.Literal(1), automatic_deletion: Type.Literal(false) }, { additionalProperties: false });
 export type ArtifactPolicy = Static<typeof ArtifactPolicy>;
-
-export const MaestriSettings = Type.Object({
-  formatVersion: Type.Literal(1),
-  workspaceId: Type.Optional(Type.Union([text(256), Type.Null()])),
-}, { additionalProperties: false });
-export type MaestriSettings = Static<typeof MaestriSettings>;
 
 export const FactorySettings = Type.Object({
   id: Type.Literal('local'),
-  installationId: text(128),
-  accountId: Type.Union([text(256), Type.Null()]),
-  designatedHost: Type.Union([text(256), Type.Null()]),
-  projectsRoot: Type.Union([text(4096), Type.Null()]),
-  dataRoot: text(4096),
-  maestriSettings: MaestriSettings,
-  automationEnabled: Type.Boolean(),
-  timeDefaults: TimeDefaults,
-  costDefaults: CostDefaults,
-  artifactPolicy: ArtifactPolicy,
+  installation_id: text(128),
+  account_id: Type.Union([text(256), Type.Null()]),
+  designated_host: Type.Union([text(256), Type.Null()]),
+  projects_root: Type.Union([text(4096), Type.Null()]),
+  automation_enabled: Type.Boolean(),
+  time_defaults: TimeDefaults,
+  artifact_policy: ArtifactPolicy,
   revision,
-  createdAtMs: timestamp,
-  updatedAtMs: timestamp,
+  created_at_ms: timestamp,
+  updated_at_ms: timestamp,
 }, { additionalProperties: false });
 export type FactorySettings = Static<typeof FactorySettings>;
 
@@ -87,28 +77,31 @@ export type HealthResponse = Static<typeof HealthResponse>;
 export const EmptyQuery = Type.Object({}, { additionalProperties: false });
 
 export const EmptyBody = Type.Object({}, { additionalProperties: false });
-export const OperationId = Type.String({ pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' });
 export const OperationParams = Type.Object({ operationId: OperationId }, { additionalProperties: false });
 export const SessionResponse = Type.Object({
-  csrfToken: Type.String({ pattern: '^[A-Za-z0-9_-]{43}$' }),
-  instanceId: OperationId,
+  csrf_token: Type.String({ pattern: '^[A-Za-z0-9_-]{43}$' }),
+  instance_id: OperationId,
 }, { additionalProperties: false });
 export type SessionResponse = Static<typeof SessionResponse>;
 export const OperationResource = Type.Object({ type: text(128), id: text(256) }, { additionalProperties: false });
 export type OperationResource = Static<typeof OperationResource>;
 // Receipts contain only non-sensitive references and counters, never arbitrary payloads.
 export const OperationReceipt = Type.Object({
-  revision: Type.Optional(revision), eventCursor: Type.Optional(Type.String({ pattern: '^[0-9]+$', maxLength: 20 })),
+  revision: Type.Optional(revision), event_cursor: Type.Optional(Type.String({ pattern: '^[0-9]+$', maxLength: 20 })),
 }, { additionalProperties: false });
+export type OperationReceipt = Static<typeof OperationReceipt>;
+export const OperationWarning = Type.Object({ code: text(128), message: text() }, { additionalProperties: false });
+export type OperationWarning = Static<typeof OperationWarning>;
 export const OperationAccepted = Type.Object({
-  operationId: OperationId, resource: OperationResource, statusUrl: text(512),
-  receipt: Type.Optional(OperationReceipt), requestId: text(128),
+  operation_id: OperationId, resource: OperationResource, status_url: text(512),
+  receipt: Type.Optional(OperationReceipt), request_id: text(128),
 }, { additionalProperties: false });
 export type OperationAccepted = Static<typeof OperationAccepted>;
 export const OperationView = Type.Object({
-  operationId: OperationId, kind: text(128), resource: OperationResource,
+  operation_id: OperationId, kind: text(128), resource: OperationResource,
   state: Type.Union(['accepted', 'running', 'succeeded', 'failed', 'unknown'].map((state) => Type.Literal(state))),
-  receipt: Type.Optional(OperationReceipt), error: Type.Optional(ErrorResponse), requestId: text(128),
+  receipt: Type.Optional(OperationReceipt), warnings: Type.Optional(Type.Array(OperationWarning, { maxItems: 10 })),
+  error: Type.Optional(ErrorResponse), request_id: text(128),
 }, { additionalProperties: false });
 export type OperationView = Static<typeof OperationView>;
 
@@ -139,8 +132,8 @@ export const EventStreamQuery = Type.Object({
 }, { additionalProperties: false });
 export function Page<T extends import('@sinclair/typebox').TSchema>(item: T) {
   return Type.Object({
-    items: Type.Array(item, { maxItems: 100 }), nextCursor: Type.Union([text(512), Type.Null()]),
-    hasMore: Type.Boolean(), eventCursor: Type.String({ pattern: '^[0-9]+$', maxLength: 20 }),
+    items: Type.Array(item, { maxItems: 100 }), next_cursor: Type.Union([text(512), Type.Null()]),
+    has_more: Type.Boolean(), event_cursor: Type.String({ pattern: '^[0-9]+$', maxLength: 20 }),
   }, { additionalProperties: false });
 }
 export const EventPage = Page(ControllerEvent);

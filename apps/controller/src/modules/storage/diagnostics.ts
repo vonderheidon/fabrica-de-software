@@ -1,3 +1,4 @@
+import { serializeOperationReceipt } from './common-json.js';
 import type Database from 'better-sqlite3';
 import { hostname } from 'node:os';
 import { Value } from '@sinclair/typebox/value';
@@ -39,25 +40,23 @@ export function diagnosticContext(db: Database.Database, context: DiagnosticCont
   }
   if (context.scope === 'creation') {
     const c = db.prepare<[string, string, string | null], { project_id: string | null; revision: number; diagnostic: string | null }>(
-      'SELECT project_id,revision,diagnostic FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(context.id, settings.installationId, settings.accountId);
+      'SELECT project_id,revision,diagnostic FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(context.id, settings.installation_id, settings.account_id);
     if (!c) throw new OperationError(404, 'CREATION_NOT_FOUND', 'Creation not found in this account.');
     creationId = context.id; projectId = c.project_id; revision = c.revision; reason = c.diagnostic;
   }
   const profileCount = db.prepare<[], { n: number }>('SELECT count(*) AS n FROM execution_profiles').get()!.n;
   const profileRevisions = db.prepare<[], { id: string; revision: number }>('SELECT id,revision FROM execution_profiles ORDER BY id').all();
-  const projectRevision = projectId ? readProject(db, projectId).project.currentRevisionId : null;
-  const facts: ContextDiagnostic['facts'] = { expectedAccountId: settings.accountId, expectedHost: settings.designatedHost, observedHost: hostname(),
+  const projectRevision = projectId ? readProject(db, projectId).project.current_revision_id : null;
+  const facts: ContextDiagnostic['facts'] = { expectedAccountId: settings.account_id, expectedHost: settings.designated_host, observedHost: hostname(),
     profileCount, ...(projectId ? { projectId } : {}), ...(attemptId ? { attemptId } : {}), ...(creationId ? { creationId } : {}) };
   return { context, projectId, attemptId, creationId, revision, tracking, reason, facts, settings,
-    stamp: digest([settings.installationId, settings.accountId, settings.revision, context, revision, projectRevision, profileRevisions]),
+    stamp: digest([settings.installation_id, settings.account_id, settings.revision, context, revision, projectRevision, profileRevisions]),
     supportedChecks: supportedChecks(context.scope) };
 }
 
 export function configurationDiagnostics(db: Database.Database, context: DiagnosticContext): ContextDiagnostic[] {
   const c = diagnosticContext(db, context); const items: ContextDiagnostic[] = [];
-  if (!c.settings.accountId) items.push(diagnostic('configuration', 'ACCOUNT_UNOBSERVED', 'Conta GitHub ainda não vinculada a uma observação.', 'Vincule a conta observada no host autorizado.', c.facts));
-  if (!c.settings.designatedHost) items.push(diagnostic('configuration', 'DESIGNATED_HOST_REQUIRED', 'Host executor não configurado.', 'Configure o host executor.', c.facts));
-  else if (c.settings.designatedHost !== c.facts.observedHost) items.push(diagnostic('configuration', 'HOST_MISMATCH', 'Este processo não está no host designado.', 'Inicie o controlador no host executor configurado.', c.facts));
+  if (!c.settings.account_id) items.push(diagnostic('configuration', 'ACCOUNT_UNOBSERVED', 'Conta GitHub ainda não vinculada a uma observação.', 'Vincule a conta observada no host autorizado.', c.facts));
   if (c.projectId) {
     for (const p of readProject(db, c.projectId).prerequisites.slice(0, 90)) items.push(diagnostic('configuration', p.code, p.message, p.recovery, c.facts,
       p.code === 'LOCAL_CHANGES_EXCLUDED' ? 'passed' : 'blocked'));
@@ -70,8 +69,8 @@ export function configurationDiagnostics(db: Database.Database, context: Diagnos
 }
 
 interface RunRow { operation_id: string; state: DiagnosticReport['state']; created_at_ms: number; completed_at_ms: number | null; checks_json: string; diagnostics_json: string }
-function report(row: RunRow): DiagnosticReport {
-  const value = { operationId: row.operation_id, state: row.state, createdAtMs: row.created_at_ms, completedAtMs: row.completed_at_ms,
+function report(db: Database.Database, row: RunRow): DiagnosticReport {
+  const value = { operationId: row.operation_id, receipt: readOperation(db, row.operation_id)?.receipt, state: row.state, createdAtMs: row.created_at_ms, completedAtMs: row.completed_at_ms,
     checks: JSON.parse(row.checks_json) as unknown, diagnostics: JSON.parse(row.diagnostics_json) as unknown };
   if (!Value.Check(DiagnosticReport, value)) throw new StorageError('OPERATION_DATA_INVALID');
   return value;
@@ -80,7 +79,7 @@ export function readContextDiagnostics(db: Database.Database, context: Diagnosti
   const c = diagnosticContext(db, context);
   const reports = db.prepare<[string, string | null, string, string], RunRow>(`SELECT operation_id,state,created_at_ms,completed_at_ms,checks_json,diagnostics_json FROM diagnostic_runs
     WHERE installation_id=? AND account_id IS ? AND scope=? AND context_id=? ORDER BY created_at_ms DESC,rowid DESC LIMIT 4`)
-    .all(c.settings.installationId, c.settings.accountId, context.scope, context.scope === 'host' ? 'local' : context.id).map(report);
+    .all(c.settings.installation_id, c.settings.account_id, context.scope, context.scope === 'host' ? 'local' : context.id).map(row => report(db, row));
   return { context, supportedChecks: c.supportedChecks, diagnostics: configurationDiagnostics(db, context), reports, eventCursor: eventCursor(db) };
 }
 function commandHash(command: DiagnosticCommand) {
@@ -93,7 +92,7 @@ export function recoverDiagnostic(db: Database.Database, command: DiagnosticComm
   const hash = commandHash(command); const s = readSettings(db);
   const row = db.prepare<[string], { installation_id: string; account_id: string | null; request_hash: string }>('SELECT installation_id,account_id,request_hash FROM operation_requests WHERE operation_id=?').get(command.operationId);
   if (!row) return null;
-  if (row.installation_id !== s.installationId || row.account_id !== s.accountId || row.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'Operation conflicts with an accepted command.');
+  if (row.installation_id !== s.installation_id || row.account_id !== s.account_id || row.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'Operation conflicts with an accepted command.');
   return readOperation(db, command.operationId);
 }
 export function acceptDiagnostic(db: Database.Database, command: DiagnosticCommand) {
@@ -101,13 +100,13 @@ export function acceptDiagnostic(db: Database.Database, command: DiagnosticComma
     const prior = recoverDiagnostic(db, command); if (prior) return { created: false, operation: prior };
     const { checks, ...context } = command.body; const c = diagnosticContext(db, context);
     if (db.prepare(`SELECT 1 FROM diagnostic_runs WHERE installation_id=? AND account_id IS ? AND scope=? AND context_id=? AND state='accepted'`)
-      .get(c.settings.installationId, c.settings.accountId, context.scope, context.scope === 'host' ? 'local' : context.id)) throw new OperationError(409, 'DIAGNOSTIC_ACTIVE', 'A check is already pending in this context.');
+      .get(c.settings.installation_id, c.settings.account_id, context.scope, context.scope === 'host' ? 'local' : context.id)) throw new OperationError(409, 'DIAGNOSTIC_ACTIVE', 'A check is already pending in this context.');
     const seq = db.prepare<[], { n: number }>('SELECT coalesce(max(seq),0)+1 AS n FROM events').get()!.n;
-    const receipt = { revision: 1, eventCursor: String(seq) }; const now = Date.now();
+    const receipt = { revision: 1, event_cursor: String(seq) }; const now = Date.now();
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
-      VALUES (?,?,?,'diagnostics.check','diagnostic',?,?,'{}',?)`).run(command.operationId, c.settings.installationId, c.settings.accountId, command.operationId, commandHash(command), JSON.stringify(receipt));
+      VALUES (?,?,?,'diagnostics.check','diagnostic',?,?,'{}',?)`).run(command.operationId, c.settings.installation_id, c.settings.account_id, command.operationId, commandHash(command), serializeOperationReceipt(receipt));
     db.prepare(`INSERT INTO diagnostic_runs(operation_id,installation_id,account_id,scope,context_id,project_id,creation_id,attempt_id,context_stamp,checks_json,state,created_at_ms)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'accepted',?)`).run(command.operationId, c.settings.installationId, c.settings.accountId, context.scope,
+      VALUES (?,?,?,?,?,?,?,?,?,?,'accepted',?)`).run(command.operationId, c.settings.installation_id, c.settings.account_id, context.scope,
         context.scope === 'host' ? 'local' : context.id, c.projectId, c.creationId, c.attemptId, c.stamp, JSON.stringify(checks), now);
     db.prepare(`INSERT INTO events(seq,entity_type,entity_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms,project_id,attempt_id)
       VALUES (?,'diagnostic',?,?,'diagnostic.accepted',1,'{}',?,?,?)`).run(seq, command.operationId, command.operationId, now, c.projectId, c.attemptId);
@@ -120,7 +119,7 @@ export function finishDiagnostic(db: Database.Database, command: DiagnosticComma
     const row = db.prepare<[string], { state: string; context_stamp: string; installation_id: string; account_id: string | null; project_id: string | null; attempt_id: string | null; created_at_ms: number }>('SELECT state,context_stamp,installation_id,account_id,project_id,attempt_id,created_at_ms FROM diagnostic_runs WHERE operation_id=?').get(command.operationId);
     if (!row || row.state !== 'accepted') return;
     const s = readSettings(db);
-    const sameScope = s.installationId === row.installation_id && s.accountId === row.account_id;
+    const sameScope = s.installation_id === row.installation_id && s.account_id === row.account_id;
     const unchanged = sameScope && diagnosticContext(db, context).stamp === row.context_stamp;
     if (results.length !== checks.length || new Set(results.map(r => r.check)).size !== checks.length || results.some(r => !checks.includes(r.check) || !Value.Check(ContextDiagnostic, r))) throw new StorageError('OPERATION_DATA_INVALID');
     const completed = unchanged ? results : checks.map(check => diagnostic(check, 'DIAGNOSTIC_CONTEXT_CHANGED', 'O contexto mudou durante a verificação.', 'Releia o contexto e solicite nova verificação.', {}, 'unavailable'));
@@ -136,7 +135,7 @@ export function interruptDiagnostics(db: Database.Database): void {
     const rows = db.prepare<[], { operation_id: string; checks_json: string; project_id: string | null; attempt_id: string | null; created_at_ms: number }>("SELECT operation_id,checks_json,project_id,attempt_id,created_at_ms FROM diagnostic_runs WHERE state='accepted'").all();
     for (const r of rows) {
       const checks: unknown = JSON.parse(r.checks_json);
-      const parsed = { operationId: r.operation_id, state: 'accepted', createdAtMs: r.created_at_ms, completedAtMs: null, checks, diagnostics: [] };
+      const parsed = { operationId: r.operation_id, receipt: readOperation(db, r.operation_id)?.receipt, state: 'accepted', createdAtMs: r.created_at_ms, completedAtMs: null, checks, diagnostics: [] };
       if (!Value.Check(DiagnosticReport, parsed)) throw new StorageError('OPERATION_DATA_INVALID');
       const items = parsed.checks.map(check => diagnostic(check, 'DIAGNOSTIC_INTERRUPTED', 'A verificação não terminou antes do encerramento.', 'Consulte o contexto e solicite outra verificação explicitamente.', {}, 'unavailable'));
       const now = Math.max(Date.now(), r.created_at_ms);

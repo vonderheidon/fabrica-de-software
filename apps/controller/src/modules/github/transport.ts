@@ -1,32 +1,108 @@
 import { execFile, spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
-import type { GitHubDiagnostic, GitHubQueryResult, ToolObservation } from '#contracts';
+import type { GitHubDiagnostic, GitHubQueryResult, GitHubSetupDiagnostic, ToolObservation } from '#contracts';
 
-export interface GitHubContext {
-  /** Supplied by trusted host composition after verifying access to its Windows keyring. */
+export interface GitHubHostAccess {
+  /** Supplied only by trusted host composition; an executable path cannot create this capability. */
   kind: 'windows_keyring';
-  executable: string;
   cwd: string;
 }
+
+export interface GitHubContext extends GitHubHostAccess {
+  executable: string;
+}
 export interface CommandResponse { exitCode: number; stdout: string }
-export type GhRunner = (input: string) => Promise<CommandResponse>;
+export type GhRunner = (input: string, onSend?: () => void) => Promise<CommandResponse>;
 export const queryLimits = Object.freeze({ timeoutMs: 15_000, responseBytes: 4_194_304, pages: 100, pageSize: 100, operationQueries: 250, operationBytes: 16_777_216 });
 
-export async function observeGhVersion(context?: GitHubContext): Promise<ToolObservation> {
+export class GitHubRunnerError extends Error {
+  constructor(readonly code: 'CONTEXT_UNAVAILABLE' | 'CLI_UNAVAILABLE') { super(code); }
+}
+
+type GhCommandExecutor = (context: GitHubContext, args: readonly string[], maxBuffer: number, timeoutMs: number) => Promise<CommandResponse>;
+
+function commandEnvironment(): NodeJS.ProcessEnv {
+  return { ...process.env, GH_PROMPT_DISABLED: '1', GH_PAGER: '', GH_DEBUG: '' };
+}
+
+function execute(context: GitHubContext, args: readonly string[], maxBuffer: number, timeoutMs: number): Promise<CommandResponse> {
+  return new Promise(resolve => {
+    if (context.kind !== 'windows_keyring' || !isAbsolute(context.cwd) || !isAbsolute(context.executable)) {
+      resolve({ exitCode: -1, stdout: '' });
+      return;
+    }
+    try {
+      execFile(context.executable, [...args], {
+        cwd: context.cwd, shell: false, windowsHide: true, timeout: timeoutMs, maxBuffer, encoding: 'utf8', env: commandEnvironment(),
+      }, (error, stdout) => resolve({ exitCode: error ? 1 : 0, stdout: error ? '' : stdout }));
+    } catch {
+      resolve({ exitCode: -1, stdout: '' });
+    }
+  });
+}
+
+export async function queryGhAuthentication(context?: GitHubContext | null, runCommand: GhCommandExecutor = execute): Promise<{
+  state: 'observed' | 'unavailable';
+  accounts: Array<{ login: string; active: boolean; valid: boolean }>;
+  diagnostics: GitHubSetupDiagnostic[];
+}> {
+  const unavailable = (code: string, message: string, recovery: string) => ({
+    state: 'unavailable' as const, accounts: [], diagnostics: [{ code, message, recovery }],
+  });
+  if (!context || context.kind !== 'windows_keyring' || !isAbsolute(context.cwd) || !isAbsolute(context.executable)) {
+    return unavailable('GITHUB_CONTEXT_UNAVAILABLE', 'O contexto autorizado do GitHub CLI não está disponível.', 'Inicie a fábrica no host autorizado e consulte novamente.');
+  }
+  const response = await runCommand(context, ['auth', 'status', '--hostname', 'github.com', '--json', 'hosts'], 262_144, queryLimits.timeoutMs);
+  if (response.exitCode !== 0) {
+    return unavailable('GITHUB_AUTH_STATUS_UNAVAILABLE', 'O GitHub CLI não concluiu a consulta de autenticação.', 'Confira o contexto do host e a conectividade; consulte novamente sem refazer login pela fábrica.');
+  }
+  try {
+    const payload: unknown = JSON.parse(response.stdout);
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('RESPONSE_INVALID');
+    const hosts = (payload as Record<string, unknown>).hosts;
+    if (!hosts || typeof hosts !== 'object' || Array.isArray(hosts)) throw new Error('RESPONSE_INVALID');
+    const githubAccounts = (hosts as Record<string, unknown>)['github.com'];
+    if (githubAccounts === undefined || (Array.isArray(githubAccounts) && githubAccounts.length === 0)) return { state: 'observed', accounts: [], diagnostics: [
+      { code: 'GITHUB_AUTH_REQUIRED', message: 'O GitHub CLI não reportou contas autenticadas em github.com.', recovery: 'Autentique ou ative uma conta no GitHub CLI fora da fábrica e consulte novamente.' },
+    ] };
+    if (!Array.isArray(githubAccounts) || githubAccounts.length > 100) throw new Error('RESPONSE_INVALID');
+    const accounts: Array<{ login: string; active: boolean; valid: boolean }> = [];
+    const seen = new Set<string>();
+    for (const entry of githubAccounts) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) throw new Error('RESPONSE_INVALID');
+      const account = entry as Record<string, unknown>;
+      if (account.host !== 'github.com' || typeof account.login !== 'string' ||
+          !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/.test(account.login) ||
+          typeof account.active !== 'boolean' || !['success', 'error', 'timeout'].includes(String(account.state))) {
+        throw new Error('RESPONSE_INVALID');
+      }
+      const key = account.login.toLowerCase();
+      if (seen.has(key)) throw new Error('RESPONSE_INVALID');
+      seen.add(key);
+      // In JSON mode the CLI can exit successfully while individual account checks fail.
+      accounts.push({ login: account.login, active: account.active, valid: account.state === 'success' });
+    }
+    const diagnostics = accounts.some(account => !account.valid)
+      ? [{ code: 'GITHUB_AUTH_NEEDS_ATTENTION', message: 'Uma ou mais contas do GitHub CLI precisam de regularização.', recovery: 'Ative a conta ou regularize a autenticação no GitHub CLI fora da fábrica e consulte novamente.' }]
+      : [];
+    return { state: 'observed', accounts, diagnostics };
+  } catch {
+    return unavailable('GITHUB_AUTH_RESPONSE_INVALID', 'A resposta de autenticação do GitHub CLI não pôde ser validada.', 'Confira a versão do CLI e consulte novamente.');
+  }
+}
+
+export async function observeGhVersion(context?: GitHubContext, timeoutMs: number = queryLimits.timeoutMs): Promise<ToolObservation> {
   const base = { tool: 'gh' as const, observedAtMs: Date.now(), affectedRequirements: ['RF-22'] };
   if (!context || context.kind !== 'windows_keyring' || !isAbsolute(context.executable) || !isAbsolute(context.cwd)) return { ...base, state: 'unavailable', version: null, cause: 'CONTEXT_UNAVAILABLE' };
-  return new Promise<ToolObservation>(resolve => {
-    execFile(context.executable, ['--version'], { cwd: context.cwd, shell: false, windowsHide: true, timeout: queryLimits.timeoutMs, maxBuffer: 4096, encoding: 'utf8',
-      env: { ...process.env, GH_PROMPT_DISABLED: '1', GH_PAGER: '', GH_DEBUG: '' } }, (error, stdout) => {
-      const version = /^gh version ([0-9]+\.[0-9]+\.[0-9]+)(?:[ \r\n]|$)/.exec(stdout)?.[1];
-      resolve(!error && version ? { ...base, state: 'observed', version, cause: null, affectedRequirements: [] }
-        : { ...base, state: 'unavailable', version: null, cause: 'GH_VERSION_QUERY_FAILED' });
-    });
-  }).catch(() => ({ ...base, state: 'unavailable', version: null, cause: 'GH_VERSION_QUERY_FAILED' }));
+  const response = await execute(context, ['--version'], 4096, timeoutMs);
+  const version = /^gh version ([0-9]+\.[0-9]+\.[0-9]+)(?:[ \r\n]|$)/.exec(response.stdout)?.[1];
+  return response.exitCode === 0 && version
+    ? { ...base, state: 'observed', version, cause: null, affectedRequirements: [] }
+    : { ...base, state: 'unavailable', version: null, cause: 'GH_VERSION_QUERY_FAILED' };
 }
 
 export function createGhRunner(context: GitHubContext): GhRunner {
-  return (input) => new Promise((resolve, reject) => {
+  return (input, onSend) => new Promise((resolve, reject) => {
     if (context.kind !== 'windows_keyring' || !isAbsolute(context.executable) || !isAbsolute(context.cwd)) {
       reject(new Error('CONTEXT_UNAVAILABLE'));
       return;
@@ -53,7 +129,10 @@ export function createGhRunner(context: GitHubContext): GhRunner {
       clearTimeout(timer);
       if (!failed) resolve({ exitCode: exitCode ?? -1, stdout: Buffer.concat(chunks).toString('utf8') });
     });
-    child.stdin.end(input, 'utf8');
+    child.once('spawn', () => {
+      onSend?.();
+      child.stdin.end(input, 'utf8');
+    });
   });
 }
 
@@ -109,8 +188,11 @@ export class GraphQLReader {
     if (this.budget && (this.budget.queries <= 0 || this.budget.bytes <= 0)) return result('unavailable', null, ['QUERY_LIMIT']);
     if (this.budget) this.budget.queries--;
     let response: CommandResponse;
-    try { onSend?.(); response = await this.run(JSON.stringify({ query, variables })); }
-    catch { return result('unavailable', null, ['CLI_UNAVAILABLE']); }
+    try { response = await this.run(JSON.stringify({ query, variables }), onSend); }
+    catch (error) {
+      if (error instanceof GitHubRunnerError && error.code === 'CONTEXT_UNAVAILABLE') return result('context_unavailable', null, ['CONTEXT_UNAVAILABLE']);
+      return result('unavailable', null, ['CLI_UNAVAILABLE']);
+    }
     if (this.budget) {
       this.budget.bytes -= Buffer.byteLength(response.stdout, 'utf8');
       if (this.budget.bytes < 0) return result('unavailable', null, ['QUERY_LIMIT']);

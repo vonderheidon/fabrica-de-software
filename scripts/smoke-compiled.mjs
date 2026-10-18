@@ -23,7 +23,7 @@ await new Promise((resolve, reject) => reservation.close((error) => error ? reje
 const directory = mkdtempSync(join(tmpdir(), 'factory-compiled-'));
 const changes = {
   NODE_ENV: 'production', FACTORY_BIND_HOST: '127.0.0.1', FACTORY_PORT: String(address.port),
-  FACTORY_BROWSER_ORIGIN: `http://127.0.0.1:${address.port}`, FACTORY_DATA_DIR: directory, FACTORY_LOG_LEVEL: 'silent',
+  FACTORY_BROWSER_ORIGIN: `http://127.0.0.1:${address.port}`, FACTORY_LOG_LEVEL: 'silent',
 };
 const previous = Object.fromEntries(Object.keys(changes).map((key) => [key, process.env[key]]));
 const previousCwd = process.cwd();
@@ -40,12 +40,12 @@ async function waitForExit(processHandle) {
   });
 }
 function startChild(environment) {
-  return fork(main, [], { cwd: directory, env: { ...process.env, ...environment }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  return fork(main, [directory], { cwd: directory, env: { ...process.env, ...environment }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
 }
 try {
   Object.assign(process.env, changes);
   process.chdir(directory);
-  app = await startController({}, controlledDependencies);
+  app = await startController({}, { ...controlledDependencies, dataDirectory: directory });
   const response = await fetch(changes.FACTORY_BROWSER_ORIGIN + '/api/v1/health');
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: 'ok' });
@@ -64,30 +64,30 @@ try {
   assert.equal(scaffoldOptions.catalog.id, 'factory.engineering');
   assert.match(scaffoldOptions.catalog.digest, /^[a-f0-9]{64}$/);
   assert.equal(scaffoldOptions.templates[0]?.id, 'engineering.v1');
-  assert.equal(scaffoldOptions.projectsRoot, null);
+  assert.equal(scaffoldOptions.projects_root, null);
   assert(scaffoldOptions.prerequisites.some(p => p.code === 'PROJECTS_ROOT_REQUIRED'));
-  assert(scaffoldOptions.creationModes.every(m => !m.capability.available));
+  assert(scaffoldOptions.creation_modes.every(m => !m.capability.available));
   const storage = openStorage({ dataDirectory: directory });
   const operationId = randomUUID();
   try {
-    storage.saveTimeDefaults({ operationId, expectedRevision: storage.getSettingsETag(), timeDefaults: storage.getSettings().timeDefaults });
+    storage.saveTimeDefaults({ operationId, expectedRevision: storage.getSettingsETag(), timeDefaults: storage.getSettings().time_defaults });
   } finally { storage.close(); }
   const operation = await fetch(origin + '/api/v1/operations/'+operationId, { headers: { cookie } });
   assert.equal(operation.status, 200);
-  assert.equal((await operation.json()).operationId, operationId);
+  assert.equal((await operation.json()).operation_id, operationId);
   const settingsRead = await fetch(origin + '/api/v1/settings', { headers: { cookie } });
   assert.equal(settingsRead.status, 200);
   const settingsETag = settingsRead.headers.get('etag');
   assert(settingsETag);
   const settingsBefore = await settingsRead.json();
   const settingsKey = randomUUID();
-  const settingsHeaders = { cookie, origin, 'content-type': 'application/json', 'x-csrf-token': bootstrap.csrfToken, 'idempotency-key': settingsKey, 'if-match': settingsETag };
-  const settingsBody = JSON.stringify({ changes: { timeDefaults: { passageActiveTimeMs: settingsBefore.settings.timeDefaults.passageActiveTimeMs + 1 } } });
+  const settingsHeaders = { cookie, origin, 'content-type': 'application/json', 'x-csrf-token': bootstrap.csrf_token, 'idempotency-key': settingsKey, 'if-match': settingsETag };
+  const settingsBody = JSON.stringify({ changes: { time_defaults: { passage_active_time_ms: settingsBefore.settings.time_defaults.passage_active_time_ms + 1 } } });
   const settingsWrite = await fetch(origin + '/api/v1/settings', { method: 'PUT', headers: settingsHeaders, body: settingsBody });
   assert.equal(settingsWrite.status, 200);
   const settingsSaved = await settingsWrite.json();
-  assert.equal(settingsSaved.settings.timeDefaults.pollingIntervalMs, settingsBefore.settings.timeDefaults.pollingIntervalMs);
-  assert.equal(settingsSaved.settings.timeDefaults.passageActiveTimeMs, settingsBefore.settings.timeDefaults.passageActiveTimeMs + 1);
+  assert.equal(settingsSaved.settings.time_defaults.polling_interval_ms, settingsBefore.settings.time_defaults.polling_interval_ms);
+  assert.equal(settingsSaved.settings.time_defaults.passage_active_time_ms, settingsBefore.settings.time_defaults.passage_active_time_ms + 1);
   assert.notEqual(settingsWrite.headers.get('etag'), settingsETag);
   const recoveredSettings = await fetch(origin + '/api/v1/settings', { method: 'PUT', headers: settingsHeaders, body: settingsBody });
   assert.equal(recoveredSettings.status, 200);
@@ -97,7 +97,7 @@ try {
   await staleSettings.arrayBuffer();
   const catalog = await fetch(origin + '/api/v1/projects', { headers: { cookie } });
   assert.equal(catalog.status, 200); assert.deepEqual((await catalog.json()).items, []);
-  const noGitContext = await fetch(origin + '/api/v1/projects', { method: 'POST', headers: { ...settingsHeaders, 'idempotency-key': randomUUID() }, body: JSON.stringify({ name: 'Smoke origin', source: { kind: 'local', location: directory }, baseBranch: 'main' }) });
+  const noGitContext = await fetch(origin + '/api/v1/projects', { method: 'POST', headers: { ...settingsHeaders, 'idempotency-key': randomUUID() }, body: JSON.stringify({ name: 'Smoke origin', source: { kind: 'local', location: directory }, base_branch: 'main' }) });
   assert.equal(noGitContext.status, 503);
   assert.equal((await noGitContext.json()).code, 'ORIGIN_UNAVAILABLE');
   const anonymous = await fetch(origin + '/api/v1/events/stream');
@@ -106,9 +106,9 @@ try {
   const operational = await fetch(origin + '/api/v1/operation', { headers: { cookie } });
   assert.equal(operational.status, 200);
   const snapshot = await operational.json();
-  assert.equal(snapshot.activeAttempt, null);
-  assert.deepEqual(snapshot.nextCandidates, []);
-  assert.equal(snapshot.integrationStatus.provesProviderExecution, false);
+  assert.equal(snapshot.active_attempt, null);
+  assert.deepEqual(snapshot.next_candidates, []);
+  assert.equal(snapshot.integration_status.proves_provider_execution, false);
   const priorDiagnosis = await fetch(origin + '/api/v1/diagnostics?scope=host', { headers: { cookie } });
   assert.equal(priorDiagnosis.status, 200); assert.deepEqual((await priorDiagnosis.json()).reports, []);
   const diagnosticId = randomUUID();
@@ -126,26 +126,27 @@ try {
     await new Promise(resolve => setTimeout(resolve, 10));
   } while (Date.now() < diagnosisDeadline);
   assert.equal(diagnosis.reports[0]?.state, 'succeeded');
-  assert.equal(diagnosis.reports[0]?.operationId, diagnosticId);
+  assert.equal(diagnosis.reports[0]?.operation_id, diagnosticId);
   assert.equal(diagnosis.reports[0]?.diagnostics.length, 3);
-  assert(Number(diagnosis.eventCursor) > Number(snapshot.eventCursor));
-  const replay = await fetch(origin + '/api/v1/events/stream?cursor=invalid', { headers: { cookie, 'last-event-id': snapshot.eventCursor } });
+  assert(Number(diagnosis.event_cursor) > Number(snapshot.event_cursor));
+  const replay = await fetch(origin + '/api/v1/events/stream?cursor=invalid', { headers: { cookie, 'last-event-id': snapshot.event_cursor }, signal: AbortSignal.timeout(5000) });
   assert.equal(replay.status, 200);
   const replayReader = replay.body?.getReader(); assert(replayReader);
   let replayText = '';
-  while (!replayText.includes('event: diagnostic.completed')) {
+  while (!replayText.includes('"event_type":"diagnostic.completed"')) {
     const chunk = await replayReader.read(); assert(!chunk.done);
     replayText += new TextDecoder().decode(chunk.value);
   }
-  assert(replayText.includes(diagnosticId)); assert(!replayText.includes(bootstrap.csrfToken));
+  assert(replayText.includes('event: controller-event\n'));
+  assert(replayText.includes(diagnosticId)); assert(!replayText.includes(bootstrap.csrf_token));
   const replayIds = [...replayText.matchAll(/^id: ([0-9]+)$/gm)].map(match => match[1]);
   assert.equal(new Set(replayIds).size, replayIds.length);
-  assert(replayIds.every(id => Number(id) > Number(snapshot.eventCursor)));
+  assert(replayIds.every(id => Number(id) > Number(snapshot.event_cursor)));
   await replayReader.cancel();
   await new Promise(resolve => setTimeout(resolve, 10));
   const malformedHeaders = await fetch(origin + '/api/v1/health', { headers: { 'x-large': 'S'.repeat(9000) } });
   assert.equal(malformedHeaders.status, 431);
-  assert.equal(typeof (await malformedHeaders.json()).requestId, 'string');
+  assert.equal(typeof (await malformedHeaders.json()).request_id, 'string');
   const manyHeaders = Object.fromEntries(Array.from({ length: 70 }, (_, index) => [`x-test-${index}`, 'value']));
   const excessiveHeaders = await fetch(origin + '/api/v1/health', { headers: manyHeaders });
   assert.equal(excessiveHeaders.status, 431);
@@ -164,7 +165,7 @@ try {
       text += new TextDecoder().decode(chunk.value);
     }
     assert(text.includes(operationId));
-    assert(!text.includes(bootstrap.csrfToken));
+    assert(!text.includes(bootstrap.csrf_token));
     assert(!text.includes(cookie.split('=')[1]));
     streams.push(reader);
   }
@@ -209,7 +210,7 @@ try {
   assert(child.kill('SIGKILL'));
   await exited;
   child = undefined;
-  app = await startController({}, controlledDependencies);
+  app = await startController({}, { ...controlledDependencies, dataDirectory: directory });
   const revoked = await fetch(origin + '/api/v1/operations/'+operationId, { headers: { cookie } });
   assert.equal(revoked.status, 401);
   await revoked.arrayBuffer();

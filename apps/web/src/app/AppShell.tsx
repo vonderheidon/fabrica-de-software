@@ -9,7 +9,7 @@ import { QueueEnableDialog } from '../features/queue/QueueEnableDialog.js';
 import { QueueAuthorityDialog } from '../features/queue/QueueAuthorityDialog.js';
 import { PreparationDialog } from '../features/preparations/PreparationDialog.js';
 import { AttemptDetailDialog } from '../features/attempts/AttemptDetailDialog.js';
-import type { AttemptDetail } from '#contracts';
+import type { HttpAttemptDetail as AttemptDetail } from '#contracts';
 import { readUncertainOperations } from '../api/uncertain-operations.js';
 import { useControllerEvents } from './useControllerEvents.js';
 import { useDialogs } from './useDialogs.js';
@@ -154,7 +154,7 @@ export function AppShell() {
             if (deliveryId) params.set('deliveryId', deliveryId); else params.delete('deliveryId');
             window.history.replaceState(null, '', buildHash('tentativas', params));
             window.dispatchEvent(new HashChangeEvent('hashchange'));
-          }} onRetry={(attempt: AttemptDetail) => openDialog('preparation', returnFocusRef.current ?? document.activeElement as HTMLElement, { projectId: attempt.projectId, previousAttemptId: attempt.id })} /> : dialog === 'enable-queue' ? <QueueEnableDialog projectId={null} onClose={closeDialog} onEnabled={() => {
+          }} onRetry={(attempt: AttemptDetail) => openDialog('preparation', returnFocusRef.current ?? document.activeElement as HTMLElement, { projectId: attempt.project_id, previousAttemptId: attempt.id })} /> : dialog === 'enable-queue' ? <QueueEnableDialog projectId={null} onClose={closeDialog} onEnabled={() => {
             window.dispatchEvent(new Event('factory-queue-updated'));
             closeDialog();
           }} /> : dialog === 'authority' && route.params.get('attemptId') ? <QueueAuthorityDialog attemptId={route.params.get('attemptId')!} onClose={closeDialog} onChanged={() => window.dispatchEvent(new Event('factory-queue-updated'))} /> : dialogState.status === 'ready' && <p>{dialogState.message}</p>}

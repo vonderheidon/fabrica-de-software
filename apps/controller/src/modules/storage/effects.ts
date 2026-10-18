@@ -1,3 +1,4 @@
+import { serializeOperationReceipt } from './common-json.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -18,11 +19,11 @@ export interface EffectIntent {
 function validateCreationEffect(db: Database.Database, creationId: string, kind: EffectView['kind'], identity: EffectIdentity, scope: string, authorization: EffectIntent['authorization']): void {
   const s = readSettings(db);
   const c = db.prepare<[string,string,string | null],{ operation_id: string; plan_hash: string; plan_json: string; state: string; baseline_sha: string | null; baseline_ref: string | null }>(
-    'SELECT * FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(creationId,s.installationId,s.accountId);
+    'SELECT * FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(creationId,s.installation_id,s.account_id);
   if (!c) throw new OperationError(404,'CREATION_NOT_FOUND','Creation not found in this account.');
   const p = JSON.parse(c.plan_json) as ScaffoldPlan; const r = p.input.remote;
   if (!r || !c.baseline_sha || c.baseline_ref !== `refs/heads/${p.input.baseBranch}` || !db.prepare("SELECT creation_id FROM creation_steps WHERE creation_id=? AND step='baseline' AND state='confirmed'").get(creationId) || !['pending','running'].includes(c.state) || p.settingsETag !== configurationETag(readSettingsView(db)) ||
-    p.account.id !== s.accountId || authorization.accountId !== p.account.id || authorization.sourceOperationId !== c.operation_id ||
+    p.account.id !== s.account_id || authorization.accountId !== p.account.id || authorization.sourceOperationId !== c.operation_id ||
     authorization.mode !== p.input.creationMode || identity.planHash !== c.plan_hash || scope !== creationId || identity.issueId !== undefined ||
     identity.ownerId !== r.ownerId || identity.repositoryOwner !== p.ownerLogin || identity.repositoryName !== r.name || identity.visibility !== r.visibility ||
     !['create_repository','associate_origin','baseline_push'].includes(kind)) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The effect differs from the authorized creation plan.');
@@ -68,15 +69,15 @@ function validateAttemptEffect(db: Database.Database, attemptId: string, deliver
       if (mode !== 'pr' || !explicit || !commit || !['confirmed','not_applicable'].includes(commit.state) ||
         identity.commitSha !== sha || identity.branchRef !== `refs/heads/factory/${capture.issue.number}/${attemptId}` ||
         identity.repositoryOwner !== capture.issue.repository.owner.login || identity.repositoryName !== capture.issue.repository.name ||
-        identity.baseBranch !== capture.configuration.configuration.baseBranch || identity.parentSha !== d.base_sha) {
+        identity.baseBranch !== capture.configuration.configuration.base_branch || identity.parentSha !== d.base_sha) {
         throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','Remote publication requires the authorized repository, branch, base and confirmed commit.');
       }
       if (kind === 'pull_request' && !db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id=? AND kind='push' AND state IN ('confirmed','not_applicable')").get(attemptId,deliveryId)) throw new OperationError(409,'PUSH_PENDING','Confirm the exact remote ref and SHA before creating a pull request.');
     }
   } else {
-    const mapping = capture.configuration.configuration.githubProject;
-    const stage = a.result === 'delivered' ? 'delivered' : ['reviewing','publishing'].includes(a.phase) ? 'inReview' : 'inProgress';
-    if (!mapping || identity.projectId !== mapping.id || identity.fieldId !== mapping.statusFieldId || identity.optionId !== mapping.statusOptionIds[stage] ||
+    const mapping = capture.configuration.configuration.github_project;
+    const stage = a.result === 'delivered' ? 'delivered' : ['reviewing','publishing'].includes(a.phase) ? 'in_review' : 'in_progress';
+    if (!mapping || identity.projectId !== mapping.id || identity.fieldId !== mapping.status_field_id || identity.optionId !== mapping.status_option_ids[stage] ||
       identity.itemId !== capture.issue.memberships.find(m => m.projectId === mapping.id)?.itemId || a.result === 'interrupted') {
       throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','The Status effect does not represent the current factory stage.');
     }
@@ -100,7 +101,7 @@ export function effectView(row: Row): EffectView {
 export function readEffect(db: Database.Database, id: string): EffectView {
   const s = readSettings(db);
   const row = db.prepare<[string, string, string | null], Row>(`SELECT e.* FROM effects e JOIN operation_requests o ON o.operation_id=e.operation_id
-    WHERE e.operation_id=? AND o.installation_id=? AND o.account_id IS ?`).get(id, s.installationId, s.accountId);
+    WHERE e.operation_id=? AND o.installation_id=? AND o.account_id IS ?`).get(id, s.installation_id, s.account_id);
   if (!row) throw new OperationError(404, 'EFFECT_NOT_FOUND', 'Effect not found in the current scope.');
   if (row.attempt_id) readAttempt(db, row.attempt_id);
   return effectView(row);
@@ -117,7 +118,7 @@ export function recordEffectIntent(db: Database.Database, input: EffectIntent): 
   return guarded(() => db.transaction(() => {
     const s = readSettings(db); const { origin, authorization } = input;
     if (!Value.Check(EffectIdentity, input.expectedIdentity) || !Value.Check(OperationId, origin.attemptId ?? origin.creationId) ||
-      !Value.Check(OperationId, authorization.sourceOperationId) || authorization.accountId !== s.accountId || !['icr','commit','pr','local','remote_no_push','remote_push'].includes(authorization.mode) ||
+      !Value.Check(OperationId, authorization.sourceOperationId) || authorization.accountId !== s.account_id || !['icr','commit','pr','local','remote_no_push','remote_push'].includes(authorization.mode) ||
       !['issue_comment','project_status','local_commit','push','pull_request','create_repository','associate_origin','baseline_push'].includes(input.kind) || input.scopeKey.length < 1 || input.scopeKey.length > 4096 ||
       (['local_commit','push','pull_request'].includes(input.kind) && (input.scopeKey !== origin.deliveryId || !origin.attemptId)) ||
       (origin.attemptId !== undefined) === (origin.creationId !== undefined)) {
@@ -125,7 +126,7 @@ export function recordEffectIntent(db: Database.Database, input: EffectIntent): 
     }
     if (origin.attemptId) {
       const a = readAttempt(db, origin.attemptId);
-      const source = db.prepare(`SELECT operation_id FROM operation_requests WHERE operation_id=? AND account_id IS ? AND resource_id=?`).get(authorization.sourceOperationId, s.accountId, a.id);
+      const source = db.prepare(`SELECT operation_id FROM operation_requests WHERE operation_id=? AND account_id IS ? AND resource_id=?`).get(authorization.sourceOperationId, s.account_id, a.id);
       if (!source) throw new OperationError(409, 'EFFECT_AUTHORIZATION_INVALID', 'The effect requires a durable authorization for this attempt.');
       if (authorization.mode !== authorizedMode(db,a.id)) throw new OperationError(409,'EFFECT_AUTHORIZATION_INVALID','The effect mode differs from the durable authorization.');
       validateAttemptEffect(db,a.id,origin.deliveryId ?? null,input.kind,input.expectedIdentity,authorization.sourceOperationId);
@@ -142,9 +143,9 @@ export function recordEffectIntent(db: Database.Database, input: EffectIntent): 
       return readEffect(db, prior.operation_id);
     }
     const id = randomUUID(); const next = db.prepare<[],{ seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()!.seq;
-    const receipt = { revision: 1, eventCursor: String(next) };
+    const receipt = { revision: 1, event_cursor: String(next) };
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
-      VALUES (?,?,?,'effect.execute','effect',?,?,'{}',?)`).run(id, s.installationId, s.accountId, id, digest(input), JSON.stringify(receipt));
+      VALUES (?,?,?,'effect.execute','effect',?,?,'{}',?)`).run(id, s.installation_id, s.account_id, id, digest(input), serializeOperationReceipt(receipt));
     db.prepare(`INSERT INTO effects(operation_id,creation_id,attempt_id,delivery_id,kind,scope_key,authorization_json,expected_identity_json,state,created_at_ms)
       VALUES (?,?,?,?,?,?,?,?,'not_started',?)`).run(id, origin.creationId ?? null, origin.attemptId ?? null, origin.deliveryId ?? null, input.kind, input.scopeKey,
       JSON.stringify(authorization), JSON.stringify(input.expectedIdentity), Date.now());

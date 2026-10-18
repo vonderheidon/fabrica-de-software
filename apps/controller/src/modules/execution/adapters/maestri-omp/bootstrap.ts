@@ -11,8 +11,14 @@ export interface Bootstrap {
   path: string;
   removeSecret(): Promise<void>;
 }
-export type BootstrapWriter = (data: string, request: PassageRequest, host: ExecutionHost, role: RoleResource, channel: PassageChannel) => Promise<Bootstrap>;
-export const writeBootstrap: BootstrapWriter = async (data, request, host, role, channel) => {
+export type BootstrapWriter = (data: string, request: PassageRequest, host: ExecutionHost, role: RoleResource, channel: PassageChannel, ompVersion: string) => Promise<Bootstrap>;
+export function buildOmpArguments(request: PassageRequest, extensionPath: string): string[] {
+  const args = ['--provider', request.profile.provider, '--model', request.profile.model];
+  if (request.profile.effort !== null) args.push('--thinking', request.profile.effort);
+  args.push('--extension', extensionPath);
+  return args;
+}
+export const writeBootstrap: BootstrapWriter = async (data, request, host, role, channel, ompVersion) => {
   if (!isAbsolute(data) || !isAbsolute(request.cwd)) throw new ExecutionError('INPUT_INVALID');
   const root = await realpath(data);
   if ((await lstat(data)).isSymbolicLink()) throw new ExecutionError('RESOURCE_INVALID');
@@ -38,10 +44,11 @@ export const writeBootstrap: BootstrapWriter = async (data, request, host, role,
   if (relative(root, target).startsWith(`..${sep}`)) throw new ExecutionError('RESOURCE_INVALID');
   const extensionPath = new URL('./extension.js', import.meta.url);
   const { fileURLToPath } = await import('node:url');
+  const extensionFile = fileURLToPath(extensionPath);
   const payload = {
     protocolVersion: 1, host: '127.0.0.1', port: channel.port, token: channel.token,
-    cwd, ompExecutable: host.ompExecutable, ompVersion: '18.11.1',
-    args: ['--provider', request.profile.provider, '--model', request.profile.model, '--thinking', request.profile.effort, '--extension', fileURLToPath(extensionPath)],
+    cwd, ompExecutable: host.ompExecutable, ompVersion,
+    args: buildOmpArguments(request, extensionFile),
     role, task: request.task, guidance: request.profile.guidance, gitNexusRequired: request.gitNexusRequired,
   };
   const handle = await open(target, 'wx', 0o600);

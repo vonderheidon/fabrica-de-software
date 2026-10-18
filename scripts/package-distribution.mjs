@@ -48,7 +48,7 @@ export function createDistribution() {
     copy(source, join(target, name), true);
     packages++;
   }
-  writeFileSync(join(target, 'distribution.json'), JSON.stringify({ formatVersion: 1, nodeMajor: 24,
+  writeFileSync(join(target, 'distribution.json'), JSON.stringify({ formatVersion: 1, nodeMajor: 24, databasePath: 'var/factory/factory.sqlite',
     platform: process.platform, architecture: process.arch, nativeModulesAbi: process.versions.modules, packages }, null, 2) + '\n', { flag: 'wx' });
   return target;
 }

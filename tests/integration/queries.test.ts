@@ -18,7 +18,7 @@ it('consults a planned round before capture without inventing a delivery or revi
   const detail = f.storage.getAttemptDetail(f.attemptId,{});
   expect(Value.Check(AttemptDetail,detail)).toBe(true);
   expect(detail).toMatchObject({ selectedDeliveryId: null,selectedRound: 1,
-    publication: { reviewState: null,localState: 'pending',completeCapability: { available: false,reasonCode: 'DELIVERY_NOT_CAPTURED' } } });
+    publication: { reviewState: null,localState: 'pending',completeCapability: { available: false,reason_code: 'DELIVERY_NOT_CAPTURED' } } });
   for (const section of ['rounds','passages','criteria','checks','reviews','findings','questions','effects','resources'] as const) {
     const selected = f.storage.getAttemptDetail(f.attemptId,{ roundId: '1',section,limit: '1' });
     expect(Value.Check(AttemptDetail,selected)).toBe(true);
@@ -38,9 +38,9 @@ it('returns independently paged sections with version-specific evidence, no GET 
     expect(Value.Check(AttemptDetail,first)).toBe(true); expect(Value.Check(DetailPage,first.details)).toBe(true);
     expect(first.details!.items.length).toBeLessThanOrEqual(1);
     let page = first.details!; const all = [...page.items];
-    while (page.hasMore) {
-      expect(page.nextCursor).not.toBeNull();
-      page = f.storage.getAttemptDetail(f.attemptId,{ deliveryId,section,limit: '1',cursor: page.nextCursor! }).details!;
+    while (page.has_more) {
+      expect(page.next_cursor).not.toBeNull();
+      page = f.storage.getAttemptDetail(f.attemptId,{ deliveryId,section,limit: '1',cursor: page.next_cursor! }).details!;
       all.push(...page.items);
     }
     if (section === 'criteria') expect(all).toMatchObject([{ id: 'ac-1',producer: { verdict: 'passed' },reviewer: { verdict: 'passed' } },{ id: 'ac-2' }]);
@@ -82,9 +82,9 @@ it('pages questions with receipt/timing metadata while leaving decision and answ
 it('binds section cursors to account, attempt, version and filters', async () => {
   const f = await fixture(); await f.implement(); await f.approve(); const deliveryId = f.status().deliveryId!;
   const page = f.storage.getAttemptDetail(f.attemptId,{ section: 'criteria',deliveryId,limit: '1' }).details!;
-  expect(page.hasMore).toBe(true);
-  expect(() => f.storage.getAttemptDetail(f.attemptId,{ section: 'effects',deliveryId,cursor: page.nextCursor! })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
-  expect(() => f.storage.getAttemptDetail(f.attemptId,{ section: 'criteria',deliveryId,roundId: '1',cursor: page.nextCursor! })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
+  expect(page.has_more).toBe(true);
+  expect(() => f.storage.getAttemptDetail(f.attemptId,{ section: 'effects',deliveryId,cursor: page.next_cursor! })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
+  expect(() => f.storage.getAttemptDetail(f.attemptId,{ section: 'criteria',deliveryId,roundId: '1',cursor: page.next_cursor! })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
   expect(() => f.storage.getDeliveryDetail(deliveryId,{ section: 'criteria',cursor: 'malformed' })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
   expect(() => f.storage.getAttemptDetail(f.attemptId,{ deliveryId: randomUUID() })).toThrow(expect.objectContaining({ statusCode: 404 }));
   f.db.prepare('UPDATE factory_settings SET account_id=NULL').run();
@@ -99,12 +99,12 @@ it('keeps list cursors stable with equal timestamps and new inserts and rejects 
     const p = await f.prepare(); const op = await f.pipeline.startAttempt(p.body,p.context); await f.pipeline.drain(); return op.resource.id;
   }
   const second = await add(18);
-  const first = f.storage.listAttempts({ projectId: f.projectId,limit: '1' }); expect(first.hasMore).toBe(true);
+  const first = f.storage.listAttempts({ projectId: f.projectId,limit: '1' }); expect(first.has_more).toBe(true);
   const added = await add(19);
-  const next = f.storage.listAttempts({ projectId: f.projectId,limit: '1',cursor: first.nextCursor! });
+  const next = f.storage.listAttempts({ projectId: f.projectId,limit: '1',cursor: first.next_cursor! });
   expect(next.items).toHaveLength(1); expect(next.items[0]!.id).not.toBe(first.items[0]!.id); expect(next.items[0]!.id).not.toBe(added);
   expect(new Set([first.items[0]!.id,next.items[0]!.id])).toEqual(new Set([f.attemptId,second]));
-  expect(() => f.storage.listAttempts({ projectId: f.projectId,result: 'active',cursor: first.nextCursor! })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
+  expect(() => f.storage.listAttempts({ projectId: f.projectId,result: 'active',cursor: first.next_cursor! })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
   expect(JSON.stringify(first)).not.toContain('criteria'); expect(JSON.stringify(first)).not.toContain('capture_json');
 });
 
@@ -112,9 +112,9 @@ it('reads real check definitions and artifact metadata without accessing log byt
   const f = await fixture(false);
   // Configure a new attempt before its capture, preserving the first attempt's captured configuration.
   const config = f.storage.getConfiguration(f.projectId);
-  const { id: _id,projectId: _projectId,revision: _revision,createdAtMs: _created,...configuration } = config.view.configuration;
-  const checks = [{ id: 'test',command: 'node --version',cwdRelative: '.' }];
-  f.storage.saveConfiguration({ operationId: randomUUID(),expectedRevision: config.etag,projectId: f.projectId,body: { projectChanges: { checks } },configuration: { ...configuration,checks },globalChanges: {} });
+  const { id: _id,project_id: _projectId,revision: _revision,created_at_ms: _created,...configuration } = config.view.configuration;
+  const checks = [{ id: 'test',command: 'node --version',cwd_relative: '.' }];
+  f.storage.saveConfiguration({ operationId: randomUUID(),expectedRevision: config.etag,projectId: f.projectId,body: { project_changes: { checks } },configuration: { ...configuration,checks },globalChanges: {} });
   f.issue.id = 'ISSUE_CHECK'; f.issue.number = 20;
   const p = await f.prepare(); const op = await f.pipeline.startAttempt(p.body,p.context); await f.pipeline.drain(); const attemptId = op.resource.id;
   // The controlled verifier completes SQL metadata only. Filesystem artifacts have separate integration coverage.

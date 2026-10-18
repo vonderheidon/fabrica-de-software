@@ -14,9 +14,9 @@ async function fixture(ttl: number | null = null, active = 100_000) {
   const f = await attemptFixture(); fixtures.push(f);
   const settings = f.storage.getGlobalConfiguration();
   f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag,
-    changes: { timeDefaults: { passageActiveTimeMs: active,
-      questionTtl: ttl === null ? { state: 'not_configured' } : { state: 'configured', value: ttl, unit: 'ms' } } },
-    body: { changes: { timeDefaults: { passageActiveTimeMs: active, questionTtl: ttl === null ? { state: 'not_configured' } : { state: 'configured', value: ttl, unit: 'ms' } } } } });
+    changes: { time_defaults: { passage_active_time_ms: active,
+      question_ttl: ttl === null ? { state: 'not_configured' } : { state: 'configured', value: ttl, unit: 'ms' } } },
+    body: { changes: { time_defaults: { passage_active_time_ms: active, question_ttl: ttl === null ? { state: 'not_configured' } : { state: 'configured', value: ttl, unit: 'ms' } } } } });
   const prepared = await f.prepare(); const op = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
   const id = op.resource.id; const handle = { passageId: f.storage.getAttempt(id).passageId }; const binding = f.persistence.getPassage(handle).binding;
   const question: ExecutionQuestion = { formatVersion: 1, decision: 'Choose the product behavior', context: 'A real decision with context 😀', alternatives: ['First behavior', 'Second behavior'] };
@@ -167,18 +167,17 @@ describe('captured scope and current criteria', () => {
 });
 
 describe('independent clocks and limits', () => {
-  it('keeps configured cost distinct from unavailable measurement and does not invent cost consumption', async () => {
+  it('starts without inference limits and keeps cost observations separate', async () => {
     const f = await attemptFixture(); fixtures.push(f);
-    f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: f.storage.getGlobalConfiguration().etag,
-      changes: { costDefaults: { limit: { state: 'configured', value: 0, unit: 'USD' } } }, body: { changes: { costDefaults: { limit: { state: 'configured', value: 0, unit: 'USD' } } } } });
     f.tools[0]!.state = 'unavailable'; f.tools[0]!.version = null; f.tools[0]!.cause = 'TEST_UNAVAILABLE'; f.tools[0]!.affectedRequirements = ['RF-22'];
     const c = await f.prepare(); const op = await f.pipeline.startAttempt(c.body, c.context); await f.pipeline.drain();
-    expect(f.storage.getMeasurements(op.resource.id)).toMatchObject({ cost: { state: 'not_applicable' }, activeTime: { state: 'not_applicable' }, costLimit: { state: 'configured', value: 0, unit: 'USD' } });
+    expect(f.storage.getMeasurements(op.resource.id)).toMatchObject({ cost: { state: 'not_applicable' }, activeTime: { state: 'not_applicable' } });
     f.issue.id = 'I_cost_observed'; f.issue.number = 19;
     Object.assign(f.tools[0]!, { state: 'observed', version: '24.0.0', cause: null, affectedRequirements: [] });
     const ready = await f.prepare(); const started = await f.pipeline.startAttempt(ready.body, ready.context); await f.pipeline.drain();
     const metrics = f.storage.getMeasurements(started.resource.id);
-    expect(metrics).toMatchObject({ cost: { state: 'unavailable', reason: 'EXECUTOR_COST_NOT_OBSERVED' }, costLimitState: 'unavailable', costLimit: { state: 'configured', value: 0 } });
+    expect(metrics).toMatchObject({ cost: { state: 'unavailable', reason: 'EXECUTOR_COST_NOT_OBSERVED' } });
+    expect(metrics).not.toHaveProperty('costLimit'); expect(metrics).not.toHaveProperty('costLimitState');
     expect(metrics.passages[0]?.activeTime.state).toBe('measured'); expect(f.execution.cancelAttempt).not.toHaveBeenCalled();
   });
   it('measures zero and separates human wait through unknown delivery from active time; silence alone is not failure', async () => {
@@ -188,7 +187,7 @@ describe('independent clocks and limits', () => {
     now += 1000; const q = f.raise(); const c = f.command(q); f.storage.recordAnswer(c); f.persistence.claimAnswer(f.handle, c.operationId);
     const active = f.storage.getMeasurements(f.id).activeTime; now += 60_000; f.storage.expireLimits();
     f.persistence.confirmAnswer(f.handle, c.operationId, 'delivery_unknown');
-    expect(f.storage.getMeasurements(f.id)).toMatchObject({ activeTime: active, humanWait: { state: 'measured', value: 60_000 }, cost: { state: 'unavailable', reason: 'EXECUTOR_COST_NOT_OBSERVED' }, costLimitState: 'not_configured' });
+    expect(f.storage.getMeasurements(f.id)).toMatchObject({ activeTime: active, humanWait: { state: 'measured', value: 60_000 }, cost: { state: 'unavailable', reason: 'EXECUTOR_COST_NOT_OBSERVED' } });
     expect(f.storage.getAttempt(f.id)).toMatchObject({ tracking: 'tracked', suspension: 'HUMAN_DECISION' });
     f.persistence.confirmAnswer(f.handle, c.operationId, 'delivered'); now += 1000;
     const after = f.storage.getMeasurements(f.id); expect(after.activeTime).toMatchObject({ state: 'measured', value: active.state === 'measured' ? active.value + 1000 : -1 });
@@ -197,8 +196,10 @@ describe('independent clocks and limits', () => {
   it.each([0, 1000])('records question TTL %s expiration, refuses late answers and receipts, without declaring physical stop', async ttl => {
     const f = await fixture(ttl); let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now);
     const q = f.raise(); const c = f.command(q);
+    const active = f.storage.getMeasurements(f.id).activeTime;
     if (ttl > 0) { f.storage.recordAnswer(c); f.persistence.claimAnswer(f.handle, c.operationId); }
     now += ttl; f.storage.expireLimits();
+    expect(f.storage.getMeasurements(f.id).activeTime).toEqual(active);
     expect(f.storage.getQuestion(f.id, q).view).toMatchObject({ state: 'expired', expiredAtMs: now });
     expect(f.storage.getAttempt(f.id)).toMatchObject({ phase: 'implementing', suspension: 'QUESTION_EXPIRED', round: 1 });
     expect(() => f.persistence.confirmAnswer(f.handle, c.operationId, 'delivered')).toThrow('ANSWER_CONFLICT');
@@ -221,11 +222,11 @@ describe('independent clocks and limits', () => {
     expect(f.db.prepare("SELECT stop_state FROM resources WHERE attempt_id=? AND kind='terminal'").get(f.id)).toEqual({ stop_state: 'uncertain' });
   });
   it('migrates SQLite v8 preserving question identity and bytes, revokes incomplete historical coordination and reports unavailable timing', async () => {
-    const f = await fixture(); const q = f.raise(); const old = f.storage.getQuestion(f.id, q).view; const identity = f.storage.getSettings().installationId;
+    const f = await fixture(); const q = f.raise(); const old = f.storage.getQuestion(f.id, q).view; const identity = f.storage.getSettings().installation_id;
     await f.pipeline.close(); f.storage.close(); removeQuestionSchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-      expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getQuestion(f.id, q).view).toMatchObject({ id: q, question: old.question, state: 'cancelled', deliveryReceipt: null });
       expect(reopened.getMeasurements(f.id).activeTime.state).toBe('unavailable'); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     } finally { reopened.close(); }
@@ -243,7 +244,7 @@ it('offers protected question/answer/measurement HTTP with question ETag, operat
   try {
     expect((await app.inject({ url, headers: { host } })).statusCode).toBe(401);
     const session = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host, origin, 'x-factory-client': 'web', 'content-type': 'application/json' }, payload: {} });
-    const headers = { host, origin, cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrfToken, 'idempotency-key': randomUUID(), 'content-type': 'application/json' };
+    const headers = { host, origin, cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrf_token, 'idempotency-key': randomUUID(), 'content-type': 'application/json' };
     const read = await app.inject({ url, headers }); expect(read.statusCode).toBe(200); expect(read.headers['cache-control']).toBe('no-store');
     expect((await app.inject({ method: 'POST', url: url + '/answer', headers, payload: { answer: 'Decision' } })).statusCode).toBe(428);
     expect((await app.inject({ method: 'POST', url: url + '/answer', headers: { ...headers, 'if-match': String(read.headers.etag), 'x-csrf-token': '' }, payload: { answer: 'Decision' } })).statusCode).toBe(403);
@@ -256,7 +257,7 @@ it('offers protected question/answer/measurement HTTP with question ETag, operat
     expect((await app.inject({ url: String(accepted.headers.location), headers })).json()).toMatchObject({ kind: 'question.answer', state: 'unknown' });
     expect((await write()).statusCode).toBe(202); await f.pipeline.drain(); expect(f.execution.answerQuestion).toHaveBeenCalledTimes(1);
     const metrics = await app.inject({ url: `/api/v1/attempts/${id}/measurements`, headers }); expect(metrics.statusCode, metrics.body).toBe(200);
-    expect(metrics.json()).toMatchObject({ cost: { state: 'unavailable' }, questionTtl: { state: 'not_configured' } });
+    expect(metrics.json()).toMatchObject({ cost: { state: 'unavailable' }, question_ttl: { state: 'not_configured' } });
     f.db.prepare("UPDATE factory_settings SET account_id=NULL").run(); expect((await app.inject({ url, headers })).statusCode).toBe(404);
   } finally { await app.close(); }
 });

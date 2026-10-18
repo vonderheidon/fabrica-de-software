@@ -69,10 +69,10 @@ describe('first slice contracts across domain boundaries (controlled)', () => {
     expect(f.issue.comments).toHaveLength(1);
     expect(f.issue.comments[0]!.body).toContain(f.storage.getDelivery(approvedId).delivery.contentIdentity);
     expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(captured);
-    expect(f.storage.getAttemptDetail(f.attemptId, { section: 'rounds', limit: '1' }).details?.hasMore).toBe(true);
+    expect(f.storage.getAttemptDetail(f.attemptId, { section: 'rounds', limit: '1' }).details?.has_more).toBe(true);
     // S1: subsequent defaults and tool observations cannot rewrite the attempt.
     const settings = f.storage.getGlobalConfiguration();
-    const changes = { timeDefaults: { passageActiveTimeMs: 90_000 } };
+    const changes = { time_defaults: { passage_active_time_ms: 90_000 } };
     f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, changes, body: { changes } });
     f.tools[0]!.version = 'changed-after-capture';
     expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(captured);
@@ -84,20 +84,20 @@ describe('first slice contracts across domain boundaries (controlled)', () => {
     await f.pipeline.cancelAttempt(oldId, {}, { operationId: randomUUID(), expectedRevision: undefined });
     await f.pipeline.drain();
     f.issue.memberships[0]!.statusValues[0]!.optionId = 'PROGRESS';
-    const saved = await f.preparations.createPreparation(f.projectId, { issueId: f.issue.id, deliveryMode: 'icr', guidance: 'Nova tentativa 😀', overrides: {}, previousAttemptId: oldId }, { operationId: randomUUID(), expectedRevision: undefined });
+    const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: 'Nova tentativa 😀', overrides: {}, previous_attempt_id: oldId }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;
     const command = { operationId: randomUUID(), expectedRevision: saved.etag };
-    const body = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summaryHash, authorized: true as const };
+    const body = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true as const };
     const operation = await f.pipeline.startAttempt(body, command); await f.pipeline.drain();
-    expect((await f.pipeline.startAttempt(body, command)).operationId).toBe(operation.operationId);
+    expect((await f.pipeline.startAttempt(body, command)).operation_id).toBe(operation.operation_id);
     expect(operation.resource.id).not.toBe(oldId);
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(2);
     expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
     expect(f.execution.continuePassage).not.toHaveBeenCalled();
     // S3 API contract: a new active attempt does not change the selected old one.
     const page = f.storage.listAttempts({ limit: '1' });
-    expect(page.hasMore).toBe(true);
-    const next = f.storage.listAttempts({ limit: '1', cursor: page.nextCursor! });
+    expect(page.has_more).toBe(true);
+    const next = f.storage.listAttempts({ limit: '1', cursor: page.next_cursor! });
     expect(new Set([...page.items, ...next.items].map(a => a.id))).toEqual(new Set([oldId, operation.resource.id]));
     expect(f.storage.getAttemptDetail(oldId, {}).result).toBe('cancelled');
     expect(f.storage.getAttemptCapture(oldId)).toEqual(captured);

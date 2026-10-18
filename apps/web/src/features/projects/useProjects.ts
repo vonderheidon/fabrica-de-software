@@ -36,10 +36,10 @@ export function useProjects(search: string, enabled = true) {
 
   const loadMore = useCallback(async () => {
     const current = state.page;
-    if (!current?.nextCursor || state.loading) return;
+    if (!current?.next_cursor || state.loading) return;
     const version = requestVersion.current;
     setState((value) => ({ ...value, loading: true, error: null }));
-    const params = new URLSearchParams({ cursor: current.nextCursor, limit: '25' });
+    const params = new URLSearchParams({ cursor: current.next_cursor, limit: '25' });
     if (query) params.set('search', query);
     try {
       const next = await requestJson<ProjectPage>(`/api/v1/projects?${params.toString()}`);

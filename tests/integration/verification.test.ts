@@ -14,14 +14,14 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 
 const fixtures: AttemptFixture[] = []; const apps: ReturnType<typeof createApp>[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const f of fixtures.splice(0)) await f.close(); });
-const definitions: CheckDefinition[] = [{ id: 'typecheck', command: 'npm run typecheck', cwdRelative: '.', timeoutMs: 1234 }, { id: 'lint', command: 'npm run lint', cwdRelative: 'src' }];
+const definitions: CheckDefinition[] = [{ id: 'typecheck', command: 'npm run typecheck', cwd_relative: '.', timeout_ms: 1234 }, { id: 'lint', command: 'npm run lint', cwd_relative: 'src' }];
 async function fixture(auto = false, checks = definitions) {
   await mkdir(join(process.cwd(), '.cache'), { recursive: true });
   const f = await attemptFixture(join(process.cwd(), '.cache')); fixtures.push(f);
   const c = f.storage.getConfiguration(f.projectId);
-  const { id: _id, projectId: _project, revision: _revision, createdAtMs: _time, ...configuration } = c.view.configuration;
+  const { id: _id, project_id: _project, revision: _revision, created_at_ms: _time, ...configuration } = c.view.configuration;
   if (checks.length) f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: c.etag, projectId: f.projectId,
-    body: { projectChanges: { checks } }, configuration: { ...configuration, checks }, globalChanges: {} });
+    body: { project_changes: { checks } }, configuration: { ...configuration, checks }, globalChanges: {} });
   const prepared = await f.prepare(); const op = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
   const a = f.storage.getAttempt(op.resource.id); const binding = f.persistence.getPassage({ passageId: a.passageId }).binding;
   const captured = await captureFixture(f.directory, { attemptId: a.id, passageId: a.passageId, deliveryId: binding.deliveryVersion });
@@ -66,8 +66,8 @@ describe('controller verification and external evidence', () => {
   it('keeps historical runs on the same tree with bounded pagination and captured commands despite later project changes', async () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain(); await f.run();
     const previous = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
-    const c = f.storage.getConfiguration(f.projectId); const { id: _id, projectId: _p, revision: _r, createdAtMs: _t, ...configuration } = c.view.configuration;
-    f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: c.etag, projectId: f.projectId, body: { projectChanges: { checks: [] } }, configuration: { ...configuration, checks: [] }, globalChanges: {} });
+    const c = f.storage.getConfiguration(f.projectId); const { id: _id, project_id: _p, revision: _r, created_at_ms: _t, ...configuration } = c.view.configuration;
+    f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: c.etag, projectId: f.projectId, body: { project_changes: { checks: [] } }, configuration: { ...configuration, checks: [] }, globalChanges: {} });
     await f.run();
     const first = f.storage.getCheckHistory(f.binding.deliveryVersion, { limit: '1' }); expect(first.hasMore).toBe(true);
     const second = f.storage.getCheckHistory(f.binding.deliveryVersion, { cursor: first.nextCursor!, limit: '100' });
@@ -157,13 +157,13 @@ describe('controller verification and external evidence', () => {
   });
   it('migrates a real version-six database preserving captured refs and official result without fabricating check success', async () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain();
-    const old = f.storage.getDelivery(f.binding.deliveryVersion).delivery; const identity = f.storage.getSettings().installationId;
+    const old = f.storage.getDelivery(f.binding.deliveryVersion).delivery; const identity = f.storage.getSettings().installation_id;
     const result = f.persistence.getResult({ passageId: f.a.passageId }); await f.pipeline.close(); f.storage.close();
     removeReviewSchema(f.db);
     f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DELETE FROM schema_migrations WHERE version=7; PRAGMA user_version=6');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-      expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getDelivery(old.id)).toMatchObject({ delivery: old, verification: null });
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(result);
       expect(reopened.getCheckHistory(old.id, {}).entries).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -177,7 +177,7 @@ describe('controller verification and external evidence', () => {
     const url = `/api/v1/artifacts/${artifact.id}`;
     expect((await app.inject({ url, headers: { host: new URL(configuration.browserOrigin).host } })).statusCode).toBe(401);
     const bootstrap = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host: new URL(configuration.browserOrigin).host, origin: configuration.browserOrigin, 'x-factory-client': 'web', 'content-type': 'application/json' }, payload: {} });
-    expect(bootstrap.statusCode).toBe(200); const session = bootstrap.json<SessionResponse>(); expect(session.csrfToken).toBeDefined();
+    expect(bootstrap.statusCode).toBe(200); const session = bootstrap.json<SessionResponse>(); expect(session.csrf_token).toBeDefined();
     const cookie = bootstrap.cookies.map(c => `${c.name}=${c.value}`).join('; '); const headers = { host: new URL(configuration.browserOrigin).host, cookie };
     const response = await app.inject({ url, headers }); expect(response.statusCode).toBe(200); expect(response.body).toContain('<script>');
     expect(response.headers['content-type']).toContain('text/plain'); expect(response.headers['x-content-type-options']).toBe('nosniff');
@@ -187,7 +187,7 @@ describe('controller verification and external evidence', () => {
     await writeFile(path, Buffer.alloc(bytes.length, 65));
     expect((await app.inject({ url, headers })).json()).toMatchObject({ code: 'ARTIFACT_INTEGRITY_FAILED' });
     await rm(path); expect((await app.inject({ url, headers })).json()).toMatchObject({ code: 'ARTIFACT_MISSING' });
-    expect((await app.inject({ url: `/api/v1/deliveries/${f.binding.deliveryVersion}/checks`, headers })).json()).toMatchObject({ entries: expect.any(Array), hasMore: false });
+    expect((await app.inject({ url: `/api/v1/deliveries/${f.binding.deliveryVersion}/checks`, headers })).json()).toMatchObject({ entries: expect.any(Array), has_more: false });
     f.db.prepare('UPDATE factory_settings SET account_id=NULL').run(); expect((await app.inject({ url, headers })).statusCode).toBe(404);
   });
 });

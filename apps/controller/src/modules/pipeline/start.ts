@@ -1,7 +1,6 @@
-import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type ExecutionProfile, type PassageRequest, type ToolObservation, type PassageBinding, type QueueQuery, type QueueItem, type QueueObservation } from '#contracts';
+import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueQuery, type QueueItem, type QueueObservation } from '#contracts';
 import { OperationError, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import { interpretIssue, preparationDigest } from './criteria.js';
@@ -26,10 +25,41 @@ export interface PipelineDependencies {
   hostName?: string;
   logFailure: (code: string) => void;
 }
-function profile(value: ExecutionProfile): ExecutionProfile {
+function profile(value: ExecutionProfileValue): ExecutionProfileValue {
   const { name, executor, provider, model, effort, guidance } = value;
   return { name, executor, provider, model, effort, guidance };
 }
+
+type ExecutionCatalogResult = Awaited<ReturnType<Execution['getCatalog']>>;
+
+function validateSavedProfile(
+  role: 'implementer' | 'reviewer',
+  value: ExecutionProfileValue,
+  catalog: ExecutionCatalogResult | null,
+): void {
+  if (!catalog || catalog.state !== 'loaded') return;
+  const available = catalog.models.find((model) => model.provider === value.provider && model.model === value.model);
+  const effortIsValid = available !== undefined && (available.efforts.length === 0
+    ? value.effort === null
+    : value.effort !== null && available.efforts.includes(value.effort));
+  if (!effortIsValid) {
+    throw new OperationError(409, 'PROFILE_CATALOG_MISMATCH', 'The saved execution profile is not present in the current OMP catalog.', {
+      facts: { profile_role: role, profile_id: value.id ?? null },
+      affected_requirements: ['RF-89', 'RF-90'],
+      recovery: 'Open Configuration > Profiles to edit this profile, or refresh execution options and try again.',
+    });
+  }
+}
+
+async function observeStartCatalog(execution: Execution, logFailure: (code: string) => void): Promise<ExecutionCatalogResult | null> {
+  try {
+    return await execution.getCatalog();
+  } catch (error) {
+    logFailure(error instanceof ExecutionError ? error.code : 'OMP_CATALOG_UNAVAILABLE');
+    return null;
+  }
+}
+
 export function createPipeline(deps: PipelineDependencies) {
   const { storage, execution, preparations, workspaces } = deps;
   const pending = new Set<Promise<void>>(); const abort = new AbortController(); let closed = false;
@@ -82,23 +112,34 @@ export function createPipeline(deps: PipelineDependencies) {
     if (context.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
     const saved = storage.getPreparation(body.preparationId);
     if (saved.etag !== context.expectedRevision) throw new OperationError(412, 'REVISION_CONFLICT', 'The preparation changed.');
-    const config = storage.getConfiguration(saved.view.projectId);
+    const config = storage.getConfiguration(saved.view.project_id);
+    const profileCounts = storage.getGlobalConfiguration().view.profile_counts;
+    const missingProfileTypes = (['implementer', 'reviewer'] as const).filter((role) => profileCounts[role] === 0);
+    if (missingProfileTypes.length > 0) {
+      throw new OperationError(409, 'PROFILE_TYPES_REQUIRED', 'At least one live profile of each role type is required to start an attempt.', {
+        facts: { missing_profile_types: missingProfileTypes.join(',') },
+        affected_requirements: ['RF-88', 'RF-89'],
+        recovery: 'Open Configuration > Profiles, create a live Implementer and Reviewer profile, then retry the start.',
+      });
+    }
     if (publication && !await publication.observeControllerAccount()) throw new OperationError(409, 'ACCOUNT_CHANGED', 'Dispatch is paused until the configured account is observed.');
     const current = await preparations.revalidateSummary(body); const p = current.view.preparation;
     const reasons = p.prerequisites.filter(r => r.code !== 'EXECUTOR_REVALIDATION_REQUIRED');
-    if (reasons.length || !p.issue || !p.baseSha || !p.criteriaPreview.executable || !config.view.settings.accountId ||
-      !p.effectiveConfiguration.implementerProfile || !p.effectiveConfiguration.reviewerProfile) {
+    if (reasons.length || !p.issue || !p.base_sha || !p.criteria_preview.executable || !config.view.settings.account_id ||
+      !p.effective_configuration.implementer_profile || !p.effective_configuration.reviewer_profile) {
       throw new OperationError(409, 'START_PREREQUISITES', 'The issue, committed base, account and configuration must satisfy all start prerequisites.');
     }
-    if ((deps.hostName ?? hostname()).toLowerCase() !== config.view.settings.designatedHost?.toLowerCase()) throw new OperationError(409, 'EXECUTOR_HOST_MISMATCH', 'Start the controller on the designated executor host.');
+    const catalog = await observeStartCatalog(execution, deps.logFailure);
+    validateSavedProfile('implementer', p.effective_configuration.implementer_profile, catalog);
+    validateSavedProfile('reviewer', p.effective_configuration.reviewer_profile, catalog);
     const roleResources = execution.roleResources();
     if (roleResources.length !== 2 || roleResources.some(r => !Value.Check(RoleResourceReference, r) || r.id !== `factory.${r.role}`) || new Set(roleResources.map(r => r.role)).size !== 2) {
       throw new OperationError(503, 'ROLE_RESOURCE_REQUIRED', 'Both distributed versioned role contracts are required before dispatch.');
     }
     const tools = await deps.observeTools();
-    const capture: AttemptCapture = { formatVersion: 1, preparationId: p.id, preparationRevision: p.revision, summaryHash: p.summaryHash,
-      accountId: config.view.settings.accountId, issue: p.issue, baseSha: p.baseSha, configuration: p.effectiveConfiguration,
-      criteria: p.criteriaPreview.criteria, criteriaDigest: p.criteriaPreview.digest, roleResources, tools };
+    const capture: AttemptCapture = { formatVersion: 1, preparationId: p.id, preparationRevision: p.revision, summaryHash: p.summary_hash,
+      accountId: config.view.settings.account_id, issue: p.issue, baseSha: p.base_sha, configuration: p.effective_configuration,
+      criteria: p.criteria_preview.criteria, criteriaDigest: p.criteria_preview.digest, roleResources, tools };
     const accepted = storage.createAttempt({ command, capture, configurationETag: config.etag, preparationETag: current.etag, ...(queueCycle ? { queueCycle } : {}) });
     if (accepted.created) schedule(accepted.operation.resource.id);
     return accepted.operation;
@@ -107,7 +148,7 @@ export function createPipeline(deps: PipelineDependencies) {
     if (!deps.queue || queueDispatching || closed) return;
     if (Date.now() < nextQueuePollAt) return;
     queueDispatching = true;
-    nextQueuePollAt = Date.now() + storage.getSettings().timeDefaults.pollingIntervalMs;
+    nextQueuePollAt = Date.now() + storage.getSettings().time_defaults.polling_interval_ms;
     try {
       if (publication && !await publication.observeControllerAccount()) return;
       const scan = await deps.queue.observe({ limit: '100' });
@@ -126,12 +167,12 @@ export function createPipeline(deps: PipelineDependencies) {
       if (!cycle || cycle.consumedAttemptId !== null || !cycle.ready) return;
       const mode = current.observation.modesByProject.find(item => item.projectId === candidate.projectId)?.mode;
       if (!mode) return;
-      const preparation = await preparations.createPreparation(candidate.projectId, { issueId: candidate.issueId, deliveryMode: mode, guidance: '', overrides: {} },
+      const preparation = await preparations.createPreparation(candidate.projectId, { issue_id: candidate.issueId, delivery_mode: mode, guidance: '', overrides: {} },
         { operationId: randomUUID(), expectedRevision: undefined });
-      if (closed || !storage.getSettings().automationEnabled || !storage.getConfiguration(candidate.projectId).view.configuration.automationEnabled) return;
+      if (closed || !storage.getSettings().automation_enabled || !storage.getConfiguration(candidate.projectId).view.configuration.automation_enabled) return;
       const prepared = await preparations.getPreparation(preparation.view.preparation.id);
       await startAttempt({ preparationId: prepared.view.preparation.id, preparationRevision: prepared.view.preparation.revision,
-        authorizedSummaryHash: prepared.view.preparation.summaryHash, authorized: true }, { operationId: randomUUID(), expectedRevision: prepared.etag },
+        authorizedSummaryHash: prepared.view.preparation.summary_hash, authorized: true }, { operationId: randomUUID(), expectedRevision: prepared.etag },
         { accountId: current.observation.account.id!, projectId: candidate.projectId, issueId: candidate.issueId, cycleNumber: cycle.cycleNumber });
     } catch (error) {
       deps.logFailure(error instanceof OperationError ? error.code : 'QUEUE_DISPATCH_FAILED');
@@ -146,7 +187,7 @@ export function createPipeline(deps: PipelineDependencies) {
       await execution.cancelAttempt(attemptId, randomUUID());
     }
     if (scopePolling) return;
-    if (deps.github && Date.now() - lastScopePoll >= storage.getSettings().timeDefaults.pollingIntervalMs) {
+    if (deps.github && Date.now() - lastScopePoll >= storage.getSettings().time_defaults.polling_interval_ms) {
       scopePolling = true; lastScopePoll = Date.now();
       try {
         if (publication) for (const id of storage.getAuthorityCandidates()) await publication.observeAuthority(id);
@@ -200,7 +241,7 @@ export function createPipeline(deps: PipelineDependencies) {
         const current = storage.getAttempt(delivery.attemptId);
         if (closed || current.result || current.suspension || current.deliveryId !== delivery.id) return;
         const passage = storage.executionPersistence().getPassage({ passageId: claimed.passageId });
-        const reviewer = capture.configuration.reviewerProfile; if (!reviewer) throw new ExecutionError('RESOURCE_INVALID');
+        const reviewer = capture.configuration.reviewer_profile; if (!reviewer) throw new ExecutionError('RESOURCE_INVALID');
         const findings = storage.getOpenFindings(delivery.attemptId, delivery.round);
         // Only structured scope, criteria, version, checks and findings. No implementer conversation.
         await execution.startPassage({ binding: passage.binding, cwd, profile: profile(reviewer), criterionIds: capture.criteria.map(c => c.id),
@@ -242,11 +283,11 @@ export function createPipeline(deps: PipelineDependencies) {
       }
       const capture = storage.getAttemptCapture(plan.review.attemptId);
       const p = storage.executionPersistence().getPassage({ passageId: plan.passageId });
-      const implementer = capture.configuration.implementerProfile; if (!implementer) throw new ExecutionError('RESOURCE_INVALID');
+      const implementer = capture.configuration.implementer_profile; if (!implementer) throw new ExecutionError('RESOURCE_INVALID');
       // Runtime owns and verifies the cwd and session; continuation cannot recruit a replacement.
       await execution.continuePassage({ passageId: plan.sourcePassageId }, { binding: p.binding, profile: profile(implementer),
         criterionIds: capture.criteria.map(c => c.id), previousFindingKeys: plan.findings.map(f => f.id), gitNexusRequired: false, roleResource: p.roleResource,
-        task: JSON.stringify({ formatVersion: 1, round: p.binding.round, maximumRound: 1 + capture.configuration.configuration.correctionLimit,
+        task: JSON.stringify({ formatVersion: 1, round: p.binding.round, maximumRound: 1 + capture.configuration.configuration.correction_limit,
           review: plan.review, findings: plan.findings, criteria: capture.criteria,
           checks: storage.getCheckHistory(deliveryId, { limit: '100' }).entries.filter(c => c.verificationId === plan.review.verificationId),
           authority: 'Correct the supplied review in this same implementation checkout and session. Report findingResponses for every supplied finding id. Stop all owned writers before execution_complete. This creates a new captured delivery and independent review.' }) });
@@ -315,14 +356,14 @@ export function createPipeline(deps: PipelineDependencies) {
       const current = storage.getAttempt(id);
       if (closed || current.result || current.suspension) return;
       const passage = storage.executionPersistence().getPassage({ passageId: status.passageId });
-      const implementer = capture.configuration.implementerProfile;
+      const implementer = capture.configuration.implementer_profile;
       if (!implementer) throw new ExecutionError('RESOURCE_INVALID');
       const request: PassageRequest = { binding: passage.binding, profile: profile(implementer), cwd: workspace.resource.path,
         criterionIds: capture.criteria.map(c => c.id), previousFindingKeys: [], gitNexusRequired: false, roleResource: passage.roleResource,
         task: JSON.stringify({ formatVersion: 1, issue: { id: capture.issue.id, title: capture.issue.title, url: capture.issue.url },
           objective: capture.issue.body, criteria: capture.criteria, baseSha: capture.baseSha,
           guidance: capture.configuration.guidance, profileGuidance: implementer.guidance, checks: capture.configuration.configuration.checks,
-          deliveryMode: capture.configuration.configuration.defaultDeliveryMode,
+          deliveryMode: capture.configuration.configuration.default_delivery_mode,
           authority: 'Implement in the owned checkout. Stop all owned product writers before execution_complete. Publication is performed only by the controller.' }) };
       await execution.startPassage(request, signalFor(id));
     };

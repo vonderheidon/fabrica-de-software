@@ -61,7 +61,7 @@ it('recovers approved ref/tree/base from real Git after physical stops, controll
   await mkdir(join(process.cwd(), '.cache'), { recursive: true });
   const objects = retainedGitObjects();
   const f = await publicationFixture(false, 'icr', true, { temporaryRoot: join(process.cwd(), '.cache'), baseSha: objects.baseSha,
-    checks: [{ id: 'recovery-evidence', command: 'controlled evidence producer', cwdRelative: '.' }] });
+    checks: [{ id: 'recovery-evidence', command: 'controlled evidence producer', cwd_relative: '.' }] });
   const controllers: ReturnType<typeof controller>[] = [];
   const markers = [objects.approvedBytes, 'RECOVERY_IGNORED_CACHE_BYTES', 'diff --git'];
   try {

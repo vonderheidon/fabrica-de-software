@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
-import type { Question } from '#contracts';
+import type { HttpQuestion as Question } from '#contracts';
 import { useDecision } from './useDecision.js';
 
 type QuestionSummary = Pick<Question, 'id' | 'state'>;
 type Props = { attemptId: string; summary: QuestionSummary };
 
-const stateLabels: Record<QuestionSummary['state'], string> = {
+const stateLabels: Record<QuestionSummary["state"], string> = {
   pending: 'Pendente', answer_recorded: 'Resposta gravada', sending: 'Enviando', delivered: 'Entregue',
   delivery_unknown: 'Entrega incerta', expired: 'Expirada', cancelled: 'Cancelada',
 };
-const operationStateLabels: Record<NonNullable<ReturnType<typeof useDecision>['operation']>['state'], string> = {
+const operationStateLabels: Record<NonNullable<ReturnType<typeof useDecision>['operation']>["state"], string> = {
   accepted: 'Aceita', running: 'Em processamento', succeeded: 'Resposta registrada', failed: 'Falhou', unknown: 'Incerta',
 };
 
@@ -31,7 +31,7 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
   if (decision.loading && !question) return <article className="attempt-record" aria-busy="true"><h4>Pergunta</h4><p className="muted" role="status">Consultando estado e recibo…</p></article>;
   if (!question) return <article className="attempt-record"><h4>Pergunta</h4><p className="error" role="alert">{decision.error ?? 'A pergunta não está disponível.'}</p><button type="button" onClick={() => void decision.refresh()}>Consultar novamente</button></article>;
 
-  const scopeChange = question.scopeChange;
+  const scopeChange = question.scope_change;
   const canAnswer = question.state === 'pending' && decision.etag !== null && decision.draft.trim().length > 0 &&
     (!scopeChange || decision.scopeChoice === 'keep_captured') && !decision.submitting && !decision.submissionLocked;
 
@@ -40,7 +40,7 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
       <h4 id={`question-title-${question.id}`}>{scopeChange ? 'Decisão sobre mudança de critérios' : 'Decisão da passagem'}</h4>
       <span className={`pill ${question.state === 'delivered' ? '' : question.state === 'pending' ? 'warn' : 'neutral'}`} aria-label={`Estado da pergunta: ${stateLabels[question.state]}`}>{stateLabels[question.state]}</span>
     </div>
-    <p className="muted decision-binding">Pergunta <span className="mono">{question.id}</span> · passagem <span className="mono">{question.passageId}</span></p>
+    <p className="muted decision-binding">Pergunta <span className="mono">{question.id}</span> · passagem <span className="mono">{question.passage_id}</span></p>
     <h5>{question.question.decision}</h5>
     <p className="decision-context">{question.question.context}</p>
     <div className="decision-alternatives"><b>Alternativas apresentadas</b><ol>{question.question.alternatives.map((alternative, index) => <li key={`${index}:${alternative}`}>{alternative}</li>)}</ol></div>
@@ -49,8 +49,8 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
       <h5 id={`scope-title-${question.id}`}>Mudança relevante nos critérios</h5>
       {scopeChange.reasons.length > 0 && <ul>{scopeChange.reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
       <div className="decision-criteria-compare">
-        <div><b>Capturados · {scopeChange.capturedCriteria.length}</b><ul>{scopeChange.capturedCriteria.map((criterion) => <li key={criterion.id}><span className="mono">{criterion.id}</span> · {criterion.text}</li>)}</ul></div>
-        <div><b>Atuais · {scopeChange.currentCriteria.length}</b><ul>{scopeChange.currentCriteria.map((criterion) => <li key={criterion.id}><span className="mono">{criterion.id}</span> · {criterion.text}</li>)}</ul></div>
+        <div><b>Capturados · {scopeChange.captured_criteria.length}</b><ul>{scopeChange.captured_criteria.map((criterion) => <li key={criterion.id}><span className="mono">{criterion.id}</span> · {criterion.text}</li>)}</ul></div>
+        <div><b>Atuais · {scopeChange.current_criteria.length}</b><ul>{scopeChange.current_criteria.map((criterion) => <li key={criterion.id}><span className="mono">{criterion.id}</span> · {criterion.text}</li>)}</ul></div>
       </div>
       <fieldset className="decision-scope-choice" disabled={question.state !== 'pending'}>
         <legend>Como deseja prosseguir?</legend>
@@ -76,14 +76,14 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
     {decision.error && <p className="error" role="alert">{decision.error}</p>}
     {decision.notice && <p className="decision-notice" role="status">{decision.notice}</p>}
     <dl className="decision-timing">
-      <div><dt>Pergunta criada</dt><dd>{new Date(question.raisedAtMs).toLocaleString('pt-BR')}</dd></div>
-      <div><dt>Espera observada</dt><dd>{formatDuration(Math.max(0, (question.answeredAtMs ?? now) - question.raisedAtMs))}</dd></div>
+      <div><dt>Pergunta criada</dt><dd>{new Date(question.raised_at_ms).toLocaleString('pt-BR')}</dd></div>
+      <div><dt>Espera observada</dt><dd>{formatDuration(Math.max(0, (question.answered_at_ms ?? now) - question.raised_at_ms))}</dd></div>
       <div><dt>TTL configurado</dt><dd>{question.ttl.state === 'configured' ? formatDuration(question.ttl.value) : 'Não configurado'}</dd></div>
-      <div><dt>Resposta gravada em</dt><dd>{question.answeredAtMs === null ? 'Ainda não' : new Date(question.answeredAtMs).toLocaleString('pt-BR')}</dd></div>
-      <div><dt>Expiração</dt><dd>{question.expiredAtMs === null ? question.ttl.state === 'configured' ? new Date(question.raisedAtMs + question.ttl.value).toLocaleString('pt-BR') : 'Sem TTL configurado' : new Date(question.expiredAtMs).toLocaleString('pt-BR')}</dd></div>
+      <div><dt>Resposta gravada em</dt><dd>{question.answered_at_ms === null ? 'Ainda não' : new Date(question.answered_at_ms).toLocaleString('pt-BR')}</dd></div>
+      <div><dt>Expiração</dt><dd>{question.expired_at_ms === null ? question.ttl.state === 'configured' ? new Date(question.raised_at_ms + question.ttl.value).toLocaleString('pt-BR') : 'Sem TTL configurado' : new Date(question.expired_at_ms).toLocaleString('pt-BR')}</dd></div>
     </dl>
-    {decision.operation && <p className="decision-operation">Operação <span className="mono">{decision.operation.operationId}</span> · {operationStateLabels[decision.operation.state]}</p>}
-    {question.deliveryReceipt && question.state === 'delivered' ? <p className="decision-receipt" role="status">Entrega confirmada na passagem {question.deliveryReceipt.passageId} em {new Date(question.deliveryReceipt.receivedAtMs).toLocaleString('pt-BR')}. A suspensão desta pergunta foi resolvida.</p>
+    {decision.operation && <p className="decision-operation">Operação <span className="mono">{decision.operation.operation_id}</span> · {operationStateLabels[decision.operation.state]}</p>}
+    {question.delivery_receipt && question.state === 'delivered' ? <p className="decision-receipt" role="status">Entrega confirmada na passagem {question.delivery_receipt.passage_id} em {new Date(question.delivery_receipt.received_at_ms).toLocaleString('pt-BR')}. A suspensão desta pergunta foi resolvida.</p>
       : question.state === 'expired' ? <p className="notice" role="status">A pergunta expirou. A passagem continua suspensa até a coordenação encerrar ou resolver esse estado.</p>
         : question.state === 'cancelled' ? <p className="notice" role="status">A pergunta foi cancelada; a passagem não é reaberta por este diálogo.</p>
           : question.state === 'delivery_unknown' ? <p className="notice" role="status">A resposta foi gravada, mas a entrega ainda não foi confirmada. Consultar o recibo não envia a resposta novamente.</p>

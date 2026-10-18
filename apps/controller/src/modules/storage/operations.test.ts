@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { acquireControllerLock, openStorage, type Storage } from './index.js';
 import { applyMigrations, loadMigrations } from './migrations.js';
-import { seedSettings } from './settings.js';
+import { seedLegacySettings as seedSettings } from '../../../../../tests/fixtures/legacy-settings.js';
 
 const directories: string[] = [];
 const resources: { close(): void }[] = [];
@@ -18,7 +18,7 @@ function fixture() {
   return { directory, storage };
 }
 function save(storage: Storage, operationId = randomUUID()) {
-  return storage.saveTimeDefaults({ operationId, expectedRevision: storage.getSettingsETag(), timeDefaults: storage.getSettings().timeDefaults });
+  return storage.saveTimeDefaults({ operationId, expectedRevision: storage.getSettingsETag(), timeDefaults: storage.getSettings().time_defaults });
 }
 afterEach(() => {
   for (const resource of resources.splice(0)) resource.close();
@@ -31,12 +31,12 @@ describe('operations and local ownership', () => {
     storage.close();
     const next = openStorage({ dataDirectory: directory });
     resources.push(next);
-    expect(next.getOperation(accepted.operationId)).toEqual(accepted);
-    expect(save(next).receipt?.eventCursor).toBe('2');
+    expect(next.getOperation(accepted.operation_id)).toEqual(accepted);
+    expect(save(next).receipt?.event_cursor).toBe('2');
     const db = new Database(join(directory, 'factory.sqlite'));
     try {
-      const row = db.prepare('SELECT * FROM operation_requests WHERE operation_id = ?').get(accepted.operationId);
-      expect(Object.keys(row as object).sort()).toEqual(['operation_id', 'installation_id', 'account_id', 'operation_kind', 'resource_type', 'resource_id', 'request_hash', 'expected_revision_json', 'receipt_json'].sort());
+      const row = db.prepare('SELECT * FROM operation_requests WHERE operation_id = ?').get(accepted.operation_id);
+      expect(Object.keys(row as object).sort()).toEqual(['operation_id', 'installation_id', 'account_id', 'operation_kind', 'resource_type', 'resource_id', 'request_hash', 'expected_revision_json', 'receipt_json', 'result_account_id'].sort());
       expect(JSON.stringify(row)).not.toMatch(/pollingIntervalMs|passageActiveTimeMs|csrf|cookie|authorization/i);
       expect(() => db.exec("UPDATE operation_requests SET request_hash = 'changed'")).toThrow('IMMUTABLE_RECORD');
       expect(() => db.exec('DELETE FROM operation_requests')).toThrow('IMMUTABLE_RECORD');
@@ -76,8 +76,8 @@ describe('operations and local ownership', () => {
     try { identity = snapshot.prepare('SELECT installation_id FROM factory_settings').get(); } finally { snapshot.close(); }
     const upgraded = openStorage({ dataDirectory: oldDirectory });
     resources.push(upgraded);
-    expect(upgraded.getDiagnostics().schemaVersion).toBe(18);
-    expect({ installation_id: upgraded.getSettings().installationId }).toEqual(identity);
+    expect(upgraded.getDiagnostics().schemaVersion).toBe(23);
+    expect({ installation_id: upgraded.getSettings().installation_id }).toEqual(identity);
     expect(upgraded.getSettings().revision).toBe(1);
     expect(save(upgraded).state).toBe('succeeded');
   });

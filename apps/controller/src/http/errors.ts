@@ -6,7 +6,7 @@ export class HttpError extends Error {
   constructor(readonly statusCode: number, readonly code: string, message: string) { super(message); }
 }
 
-function validationFieldErrors(error: FastifyError): NonNullable<ErrorResponse['fieldErrors']> {
+function validationFieldErrors(error: FastifyError): NonNullable<ErrorResponse["field_errors"]> {
   if (!error.validation) return [];
   const fields = new Map<string, string>();
   for (const issue of error.validation) {
@@ -20,7 +20,7 @@ function validationFieldErrors(error: FastifyError): NonNullable<ErrorResponse['
   return [...fields].map(([field, message]) => ({ field, message })).slice(0, 100);
 }
 
-function operationFieldErrors(error: FastifyError): NonNullable<ErrorResponse['fieldErrors']> {
+function operationFieldErrors(error: FastifyError): NonNullable<ErrorResponse["field_errors"]> {
   if (!(error instanceof OperationError)) return [];
   const fieldByCode: Record<string, string> = {
     REGISTRATION_INVALID: 'name',
@@ -49,12 +49,16 @@ export function installErrors(app: FastifyInstance): void {
     return reply.code(status).send({
       code, message: error instanceof HttpError || error instanceof OperationError ? error.message
         : status >= 500 ? 'The request could not be completed.' : 'The request format is invalid.',
-      requestId: request.id,
+      request_id: request.id,
       ...(error instanceof AttemptConflict ? { resource: error.resource } : {}),
-      ...(fieldErrors.length ? { fieldErrors } : {}),
+      ...(error instanceof OperationError && error.details?.facts ? { facts: error.details.facts } : {}),
+      ...(error instanceof OperationError && error.details?.affected_requirements
+        ? { affected_requirements: error.details.affected_requirements } : {}),
+      ...(error instanceof OperationError && error.details?.recovery ? { recovery: error.details.recovery } : {}),
+      ...(fieldErrors.length ? { field_errors: fieldErrors } : {}),
     } satisfies ErrorResponse);
   });
   app.setNotFoundHandler((request, reply) => reply.code(404).send({
-    code: 'NOT_FOUND', message: 'Resource not found.', requestId: request.id,
+    code: 'NOT_FOUND', message: 'Resource not found.', request_id: request.id,
   } satisfies ErrorResponse));
 }

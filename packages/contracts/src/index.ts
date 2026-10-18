@@ -1,5 +1,6 @@
 export * from './base.js';
 export * from './github.js';
+export * from './github-setup.js';
 export * from './workspaces.js';
 export * from './projects.js';
 export * from './preparations.js';
@@ -15,3 +16,6 @@ export * from './publication.js';
 export * from './queries.js';
 export * from './scaffold.js';
 export * from './operation.js';
+
+export * from './http-execution/index.js';
+export * from './http-observation/index.js';

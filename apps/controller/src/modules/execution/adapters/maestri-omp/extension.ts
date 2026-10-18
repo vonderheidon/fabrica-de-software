@@ -4,7 +4,7 @@ import { connect } from 'node:net';
 import { ExecutionError } from '../../errors.js';
 import { connectWire, executionLimits, type Wire } from './wire.js';
 
-// Structural view of the supported OMP 18.11.1 extension API. OMP supplies these
+// Structural view of the supported OMP extension API. OMP supplies these
 // objects; importing another OMP distribution would create a second runtime.
 interface Context {
   mode: string; hasUI: boolean; cwd: string; model?: { provider: string; id: string };
@@ -30,7 +30,7 @@ interface ExtensionApi {
   sendUserMessage(message: string, options?: { deliverAs: 'followUp' }): void;
 }
 interface Launch {
-  protocolVersion: 1; host: '127.0.0.1'; port: number; token: string; cwd: string; ompVersion: '18.11.1';
+  protocolVersion: 1; host: '127.0.0.1'; port: number; token: string; cwd: string; ompVersion: string;
   role: { reference: { sha256: string }; instructions: string; resultSchema: Record<string, unknown>; questionSchema: Record<string, unknown> };
   task: string; guidance: string; gitNexusRequired: boolean;
 }
@@ -61,7 +61,8 @@ function loadLaunch(): Launch {
     const raw = object(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
     if (raw.protocolVersion !== 1 || raw.host !== '127.0.0.1' || !Number.isInteger(raw.port) || Number(raw.port) < 1 || Number(raw.port) > 65535 ||
       typeof raw.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw.token) || typeof raw.cwd !== 'string' ||
-      typeof raw.task !== 'string' || typeof raw.guidance !== 'string' || raw.ompVersion !== '18.11.1') throw new ExecutionError('RESOURCE_INVALID');
+      typeof raw.task !== 'string' || typeof raw.guidance !== 'string' || typeof raw.ompVersion !== 'string' ||
+      raw.ompVersion.length < 1 || raw.ompVersion.length > 128) throw new ExecutionError('RESOURCE_INVALID');
     const role = object(raw.role); const reference = object(role.reference);
     if (typeof role.instructions !== 'string' || typeof reference.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(reference.sha256)) throw new ExecutionError('RESOURCE_INVALID');
     return raw as unknown as Launch;
@@ -86,8 +87,9 @@ export default function executionExtension(api: ExtensionApi): void {
     context?.ui.notify('Acompanhamento da fábrica interrompido. Trabalho preservado; use nova tentativa para retomar a coordenação.', 'error');
   };
   const sameSession = (ctx: Context) => ctx.sessionManager.getSessionId() === trackedSession && ctx.cwd === launch.cwd;
-  const sameProfile = (ctx: Context) => ctx.model?.provider === initialProfile?.provider && ctx.model?.id === initialProfile?.model && api.getThinkingLevel() === initialProfile?.effort;
-  let initialProfile: { provider: string; model: string; effort: string } | undefined;
+  const currentEffort = () => api.getThinkingLevel() ?? null;
+  const sameProfile = (ctx: Context) => ctx.model?.provider === initialProfile?.provider && ctx.model?.id === initialProfile?.model && currentEffort() === initialProfile?.effort;
+  let initialProfile: { provider: string; model: string; effort: string | null } | undefined;
   const request = async (tool: string, payload: unknown, ctx: Context): Promise<ToolResult> => {
     if (!alive || !sameSession(ctx) || !sameProfile(ctx) || !wire) throw new ExecutionError('TRACKING_LOST');
     if (pending.size >= executionLimits.pendingCalls) throw new ExecutionError('CHANNEL_TIMEOUT');
@@ -125,7 +127,7 @@ export default function executionExtension(api: ExtensionApi): void {
       ctx.ui.notify('A fábrica exige uma TUI OMP nativa com sessão nova.', 'error'); return;
     }
     started = true; context = ctx; trackedSession = ctx.sessionManager.getSessionId();
-    initialProfile = { provider: ctx.model.provider, model: ctx.model.id, effort: api.getThinkingLevel() ?? '' };
+    initialProfile = { provider: ctx.model.provider, model: ctx.model.id, effort: currentEffort() };
     const socket = connect({ host: launch.host, port: launch.port });
     wire = connectWire(socket, async (value) => {
       const frame = object(value);

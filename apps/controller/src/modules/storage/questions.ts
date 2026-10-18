@@ -1,6 +1,8 @@
+import { serializeOperationReceipt } from './common-json.js';
+import { readScopeChange } from './configuration-json.js';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { AnswerQuestion, OperationId, Question, type ScopeChange } from '#contracts';
+import { AnswerQuestion, OperationId, Question } from '#contracts';
 import { readAttempt, readCapture } from './attempts.js';
 import { digest, guarded } from './configuration-reads.js';
 import { readSettings } from './settings.js';
@@ -25,9 +27,9 @@ export function readQuestion(db: Database.Database, attemptId: string, id: strin
   const q = questionRow(db, attemptId, id);
   const view: Question = {
     id: q.id, attemptId, passageId: q.passage_id, deliveryId: q.delivery_version, question: JSON.parse(q.question_json) as Question['question'],
-    scopeChange: q.scope_json ? JSON.parse(q.scope_json) as ScopeChange : null,
+    scopeChange: q.scope_json ? readScopeChange(JSON.parse(q.scope_json) as unknown) : null,
     state: q.state === 'recorded' ? 'answer_recorded' : q.state, revision: q.revision, raisedAtMs: q.created_at_ms,
-    answeredAtMs: q.answered_at_ms, ttl: readCapture(db, attemptId).configuration.timeDefaults.questionTtl, expiredAtMs: q.expired_at_ms,
+    answeredAtMs: q.answered_at_ms, ttl: readCapture(db, attemptId).configuration.time_defaults.question_ttl, expiredAtMs: q.expired_at_ms,
     answer: q.answer, answerOperationId: q.answer_operation_id, deliveryReceipt: q.receipt_json ? JSON.parse(q.receipt_json) as Question['deliveryReceipt'] : null,
   };
   if (!Value.Check(Question, view)) throw new OperationError(503, 'QUESTION_DATA_INVALID', 'The question record is invalid.');
@@ -42,7 +44,7 @@ export function recoverAnswer(db: Database.Database, c: AnswerCommand): StoredOp
   const hash = commandHash(c); const s = readSettings(db);
   const previous = db.prepare<[string], { request_hash: string; installation_id: string; account_id: string | null }>('SELECT request_hash,installation_id,account_id FROM operation_requests WHERE operation_id=?').get(c.operationId);
   if (!previous) return null;
-  if (previous.request_hash !== hash || previous.installation_id !== s.installationId || previous.account_id !== s.accountId) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
+  if (previous.request_hash !== hash || previous.installation_id !== s.installation_id || previous.account_id !== s.account_id) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
   return readOperation(db, c.operationId);
 }
 export function recordAnswer(db: Database.Database, c: AnswerCommand): StoredOperation {
@@ -58,9 +60,9 @@ export function recordAnswer(db: Database.Database, c: AnswerCommand): StoredOpe
     if (c.body.scopeChoice === 'adopt_new') throw new OperationError(409, 'NEW_ATTEMPT_REQUIRED', 'Update the GitHub issue and prepare a new attempt to adopt new criteria.');
     if (q.scope_json && c.body.scopeChoice !== 'keep_captured') throw new OperationError(409, 'SCOPE_DECISION_REQUIRED', 'Explicitly keep the captured scope or prepare a new attempt.');
     const seq = db.prepare<[], { seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()!.seq;
-    const receipt = { revision: q.revision + 1, eventCursor: String(seq) }; const now = Date.now();
+    const receipt = { revision: q.revision + 1, event_cursor: String(seq) }; const now = Date.now();
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
-      VALUES (?,?,?,'question.answer','question',?,?,?,?)`).run(c.operationId, s.installationId, s.accountId, q.id, commandHash(c), JSON.stringify({ etag: c.expectedRevision }), JSON.stringify(receipt));
+      VALUES (?,?,?,'question.answer','question',?,?,?,?)`).run(c.operationId, s.installation_id, s.account_id, q.id, commandHash(c), JSON.stringify({ etag: c.expectedRevision }), serializeOperationReceipt(receipt));
     const updated = db.prepare("UPDATE execution_questions SET answer=?,answer_hash=?,answer_operation_id=?,answered_at_ms=?,state='recorded',revision=revision+1 WHERE id=? AND revision=?")
       .run(c.body.answer, digest(c.body), c.operationId, now, q.id, q.revision);
     if (updated.changes !== 1) throw new OperationError(412, 'REVISION_CONFLICT', 'The question changed.');

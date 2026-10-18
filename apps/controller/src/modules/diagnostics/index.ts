@@ -29,7 +29,7 @@ export function createDiagnostics({ storage, github, execution, logFailure }: Di
         } else if (check === 'github_identity') {
           const identity = await github.getIdentity();
           const complete = identity.state === 'complete' && identity.data !== null;
-          const matches = complete && identity.data!.id === c.settings.accountId;
+          const matches = complete && identity.data!.id === c.settings.account_id;
           const rawCode = complete ? (matches ? 'GITHUB_IDENTITY_CONFIRMED' : 'ACCOUNT_MISMATCH') : identity.diagnostics[0]?.code ?? 'CONTEXT_UNAVAILABLE';
           results.push(make(check, rawCode, complete ? (matches ? 'Conta observada corresponde à configuração.' : 'Conta observada diverge da conta configurada.') : 'Não foi possível confirmar a identidade no contexto autorizado.',
             'Confira o contexto GitHub e a conta no host autorizado. Não refaça login pelo controlador.',

@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { OperationId } from './base.js';
-import { ExecutionProfile } from './projects.js';
+import { ExecutionProfileValue } from './projects.js';
 
 const closed = { additionalProperties: false } as const;
 const text = (maxLength = 4096) => Type.String({ minLength: 1, maxLength, pattern: '.*\\S.*' });
@@ -50,7 +50,7 @@ export const ReviewerResult = Type.Object({
 export type ReviewerResult = Static<typeof ReviewerResult>;
 export type PassageResult = ImplementerResult | ReviewerResult;
 export const PassageRequest = Type.Object({
-  binding: PassageBinding, profile: ExecutionProfile, cwd: text(8192), task: text(1_000_000),
+  binding: PassageBinding, profile: ExecutionProfileValue, cwd: text(8192), task: text(1_000_000),
   criterionIds: Type.Array(CriterionOutcome.properties.criterionId, { minItems: 1, maxItems: 1000, uniqueItems: true }),
   previousFindingKeys: Type.Array(text(128), { maxItems: 1000, uniqueItems: true }),
   previousBlockingFindingKeys: Type.Optional(Type.Array(text(128), { maxItems: 1000, uniqueItems: true })),

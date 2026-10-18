@@ -23,6 +23,8 @@ function contractExecutor(port: ExecutionPersistence, roles: RoleResourceReferen
     return port.getPassage(record.handle);
   };
   return {
+    getCatalog: async () => ({ state: 'unavailable', observed_at_ms: 1,
+      diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Controlled catalog unavailable.', recovery: 'No catalog call is required by this acceptance.' }] }),
     roleResources: () => structuredClone(roles), preflight: async () => ({ ready: true, code: null, ompVersion: 'contract-test' }), observeVersions: async () => [],
     startPassage: start,
     continuePassage: async () => { throw new Error('TEST_CONTINUATION_UNSUPPORTED'); },
@@ -50,7 +52,7 @@ it('composes a test execution implementation with real SQL and unchanged query D
     pipeline = createPipeline({ ...f.dependencies, execution, observeTools: async () => structuredClone(tools) });
     const prepared = await f.prepare(); const operation = await pipeline.startAttempt(prepared.body, prepared.context); await pipeline.drain();
     const status = f.storage.getAttempt(operation.resource.id); const handle = { passageId: status.passageId };
-    expect(f.storage.getOperation(operation.operationId)?.resource.id).toBe(status.id);
+    expect(f.storage.getOperation(operation.operation_id)?.resource.id).toBe(status.id);
     expect(execution.observe(handle).some(e => e.type === 'passage-ready')).toBe(true);
     const passage = f.persistence.getPassage(handle); expect(passage.effectiveProfile).toMatchObject({ name: f.profile.name, provider: f.profile.provider, model: f.profile.model, effort: f.profile.effort });
     const content = { formatVersion: 1 as const, decision: 'Choose one', context: 'Contract test decision', alternatives: ['Continue', 'Stop'] };

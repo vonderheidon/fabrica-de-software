@@ -1,19 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { EventPage } from '#contracts';
+import type { HttpEventPage as EventPage } from '#contracts';
+import { eventListQuery } from '../../api/observation-requests.js';
 import { HttpError, requestJson } from '../../api/http.js';
 
 export type RecordFilters = { projectId: string; attemptId: string; operationId: string };
 type PageRequest = { cursor: string | null; index: number; stack: Array<string | null>; serial: number };
 type RecordState = { page: EventPage | null; loading: boolean; refreshing: boolean; stale: boolean; error: string | null; requestId: string | null; emptyKind: 'none' | 'no-events' | 'no-matches' | 'unknown' };
-
-function queryFor(filters: RecordFilters, cursor: string | null): string {
-  const query = new URLSearchParams({ limit: '25' });
-  if (filters.projectId) query.set('projectId', filters.projectId);
-  if (filters.attemptId) query.set('attemptId', filters.attemptId);
-  if (filters.operationId) query.set('operationId', filters.operationId);
-  if (cursor) query.set('cursor', cursor);
-  return query.toString();
-}
 
 export function useRecords(filters: RecordFilters) {
   const [request, setRequest] = useState<PageRequest>({ cursor: null, index: 0, stack: [null], serial: 0 });
@@ -32,7 +24,7 @@ export function useRecords(filters: RecordFilters) {
     const controller = new AbortController();
     const hasFilter = Boolean(stableFilters.projectId || stableFilters.attemptId || stableFilters.operationId);
     setState((current) => ({ ...current, loading: current.page === null, refreshing: current.page !== null, stale: current.page !== null }));
-    void requestJson<EventPage>(`/api/v1/events?${queryFor(stableFilters, request.cursor)}`, { signal: controller.signal }).then(async (page) => {
+    void requestJson<EventPage>(`/api/v1/events?${eventListQuery(stableFilters, request.cursor)}`, { signal: controller.signal }).then(async (page) => {
       let emptyKind: RecordState['emptyKind'] = 'none';
       if (page.items.length === 0) {
         if (!hasFilter) emptyKind = 'no-events';
@@ -68,8 +60,8 @@ export function useRecords(filters: RecordFilters) {
   }, [refresh]);
 
   function nextPage(): void {
-    const nextCursor = state.page?.nextCursor;
-    if (!state.page?.hasMore || !nextCursor || state.loading || state.refreshing) return;
+    const nextCursor = state.page?.next_cursor;
+    if (!state.page?.has_more || !nextCursor || state.loading || state.refreshing) return;
     setRequest({ cursor: nextCursor, index: committed.current.index + 1, stack: [...committed.current.stack, committed.current.cursor], serial: request.serial + 1 });
   }
 

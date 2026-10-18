@@ -54,7 +54,7 @@ export interface LocalScaffoldInput {
 }
 export function createLocalScaffolder(git?: GitReader, acquireGuard: ScaffoldPathGuardFactory = acquireScaffoldPathGuard) {
   return {
-    scaffoldCapability() { return { available: git !== undefined, ...(git ? {} : { reasonCode: 'CONTEXT_UNAVAILABLE', reason: 'The authorized Git host context is unavailable.', recovery: 'Start the controller in the authorized host context.' }) }; },
+    scaffoldCapability() { return { available: git !== undefined, ...(git ? {} : { reason_code: 'CONTEXT_UNAVAILABLE', reason: 'The authorized Git host context is unavailable.', recovery: 'Start the controller in the authorized host context.' }) }; },
     inspectScaffoldDestination,
     async createLocalScaffold({ plan, files, record }: LocalScaffoldInput): Promise<{ baselineSha: string; baselineRef: string }> {
       if (!git) throw new ScaffoldWorkspaceError('CONTEXT_UNAVAILABLE');

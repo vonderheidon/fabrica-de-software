@@ -14,10 +14,10 @@ function fixture() {
   const node: Record<string,unknown> = { id: 'PR_123',url: 'https://github.com/org/repo/pull/123',title: effect.expectedIdentity.title,body,
     headRefName: branchRef.slice(11),headRefOid: sha,baseRefName: 'main',state: 'OPEN',author: { id: 'A' },repository: { id: 'R' },headRepository: { id: 'R' },baseRepository: { id: 'R' } };
   let created = false; let hidden = false; let lost = false; let partial = false; let duplicate = false; let pageTwo = false;
-  const run = vi.fn(async (input: string) => {
+  const run = vi.fn(async (input: string, onSend?: () => void) => {
     const request = JSON.parse(input) as { query: string; variables: { cursor?: string; input?: object } };
     let data: unknown;
-    if (request.query.includes('mutation FactoryPullRequest')) { created = true; if (lost) throw new Error('PRIVATE_TRANSPORT'); data = { createPullRequest: { clientMutationId: effect.operationId,pullRequest: { id: 'SIMILAR' } } }; }
+    if (request.query.includes('mutation FactoryPullRequest')) { onSend?.(); created = true; if (lost) throw new Error('PRIVATE_TRANSPORT'); data = { createPullRequest: { clientMutationId: effect.operationId,pullRequest: { id: 'SIMILAR' } } }; }
     else {
       const nodes = created && !hidden ? [node,...(duplicate ? [{ ...node,id: 'PR_duplicate' }] : [])] : [];
       data = { node: { id: 'R',headRef: { target: { oid: sha } },baseRef: { target: { oid: 'a'.repeat(40) } },pullRequests: { nodes: pageTwo && !request.variables.cursor ? [] : nodes,pageInfo: { hasNextPage: pageTwo && !request.variables.cursor,endCursor: 'page-2' } } } };

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AttemptDetail } from '#contracts';
+import type { HttpAttemptDetail as AttemptDetail } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 
 type AttemptState = { id: string; value: AttemptDetail | null; etag: string | null; error: string | null };

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { DiagnosticCheck, DiagnosticContext, DiagnosticsView, OperationAccepted, OperationView } from '#contracts';
+import type { HttpDiagnosticCheck as DiagnosticCheck, HttpDiagnosticContext as DiagnosticContext, HttpDiagnosticsView as DiagnosticsView, OperationAccepted, OperationView } from '#contracts';
 import { HttpError, requestJson } from '../../api/http.js';
 
 type DiagnosticLoad = { identity: string; view: DiagnosticsView | null; loading: boolean; refreshing: boolean; stale: boolean; error: string | null; requestId: string | null };
@@ -23,7 +23,7 @@ export function useDiagnostics(context: DiagnosticContext | null) {
   const [actionError, setActionError] = useState<{ identity: string; message: string; requestId: string | null } | null>(null);
   const shouldPollReceipt = Boolean(verification?.identity === identity && ['accepted', 'running'].includes(verification.state));
   const refresh = useCallback(() => setReload((value) => value + 1), []);
-  const supportedChecks = useMemo(() => load.identity === identity ? load.view?.supportedChecks ?? [] : [], [identity, load.identity, load.view]);
+  const supportedChecks = useMemo(() => load.identity === identity ? load.view?.supported_checks ?? [] : [], [identity, load.identity, load.view]);
 
   useEffect(() => {
     if (!context) { setLoad({ identity, view: null, loading: false, refreshing: false, stale: false, error: null, requestId: null }); return; }
@@ -84,7 +84,7 @@ export function useDiagnostics(context: DiagnosticContext | null) {
       const accepted = await requestJson<OperationAccepted>(`/api/v1/diagnostics?${query}`, {
         method: 'POST', headers: { 'Idempotency-Key': operationId }, body: JSON.stringify({ checks }),
       });
-      if (accepted.operationId !== operationId || !accepted.receipt) throw new Error('O recibo não corresponde à verificação solicitada.');
+      if (accepted.operation_id !== operationId || !accepted.receipt) throw new Error('O recibo não corresponde à verificação solicitada.');
       setVerification({ identity, operationId, state: 'accepted', error: null });
     } catch (error: unknown) {
       if (error instanceof HttpError && error.status < 500) {
@@ -103,7 +103,7 @@ export function useDiagnostics(context: DiagnosticContext | null) {
   const current = load.identity === identity ? load : { identity, view: null, loading: Boolean(context), refreshing: false, stale: false, error: null, requestId: null };
   const scopedVerification = verification?.identity === identity ? verification : null;
   const scopedActionError = actionError?.identity === identity ? actionError : null;
-  const verifiedReport = scopedVerification && current.view?.reports.find((report) => report.operationId === scopedVerification.operationId);
+  const verifiedReport = scopedVerification && current.view?.reports.find((report) => report.operation_id === scopedVerification.operationId);
   const previous = Boolean(scopedVerification && !verifiedReport);
   return { ...current, supportedChecks, verification: scopedVerification, previous, verifiedReport: verifiedReport ?? null, actionError: scopedActionError, refresh, verify, retryReceipt };
 }

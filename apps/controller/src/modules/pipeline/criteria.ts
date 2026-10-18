@@ -67,7 +67,7 @@ export function interpretIssue(input: { title: string; body: string }): Criteria
   const criteria: Criterion[] = parsed.map((entry, index) => {
     while (used.has(`ac-${next}`)) next++;
     const id = entry.id ?? `ac-${next++}`; used.add(id);
-    return { id, text: entry.text, occurrenceIndex: index + 1, explicit: entry.id !== undefined };
+    return { id, text: entry.text, occurrence_index: index + 1, explicit: entry.id !== undefined };
   });
   // Invalid lists never become a capturable set, even when some entries were individually valid.
   const valid = reasons.length === 0;

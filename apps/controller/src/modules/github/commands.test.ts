@@ -63,6 +63,7 @@ describe('native CLI invocation with fake processes', () => {
     const context = { kind: 'windows_keyring' as const, executable: join(tmpdir(), 'gh.exe'), cwd: tmpdir() };
     const input = JSON.stringify({ query: 'query FactoryIdentity { viewer { id login } }', variables: {} });
     const pending = createGhRunner(context)(input);
+    child.emit('spawn');
     const bytes = Buffer.from('português 😀');
     child.stdout.write(bytes.subarray(0, bytes.length - 2));
     child.stdout.write(bytes.subarray(bytes.length - 2));

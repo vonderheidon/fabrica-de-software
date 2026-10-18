@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import type { CheckDefinition, Delivery, OperationSummary } from '#contracts';
+import type { CheckDefinition, Delivery, HttpOperationSummary as OperationSummary } from '#contracts';
 import { publicationFixture } from '../fixtures/publication.js';
 import { captureFixture } from '../fixtures/capture.js';
 import { assertNoContent, auditDatabase, inventory, sha256, sizes } from '../fixtures/persistence-measurement.js';
@@ -22,8 +22,8 @@ import type { GitReader } from '../../apps/controller/src/modules/workspaces/git
 
 const markers = ['changed tracked bytes\n', 'IMPLEMENTATION_INDEX_UNCHANGED', 'EXCLUDED_IGNORED_BYTES_987', 'EXCLUDED_SECRET_BYTES_123', 'CACHE_CONTENT_AC29_76543210', 'diff --git'];
 const checks: CheckDefinition[] = [
-  { id: 'existing-check', command: 'fixture existing check', cwdRelative: '.' },
-  { id: 'additional-check', command: 'fixture additional check', cwdRelative: '.', timeoutMs: 1234 },
+  { id: 'existing-check', command: 'fixture existing check', cwd_relative: '.' },
+  { id: 'additional-check', command: 'fixture additional check', cwd_relative: '.', timeout_ms: 1234 },
 ];
 
 function observeContentIO(directory: string) {
@@ -83,7 +83,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains approved identity
     expect(bootstrap.statusCode).toBe(200);
     const headers = { host: '127.0.0.1:4310', cookie: bootstrap.cookies.map(c => `${c.name}=${c.value}`).join('; ') };
     const endpoints = {
-      catalog: '/api/v1/projects', listings: '/api/v1/attempts', history: `/api/v1/events?attemptId=${f.attemptId}`,
+      catalog: '/api/v1/projects', listings: '/api/v1/attempts', history: `/api/v1/events?attempt_id=${f.attemptId}`,
       polling: `/api/v1/attempts/${f.attemptId}`, delivery: `/api/v1/deliveries/${deliveryId}`,
       checks: `/api/v1/deliveries/${deliveryId}/checks`, rounds: `/api/v1/attempts/${f.attemptId}/rounds`, dashboard: '/api/v1/operation',
       pagedHistory: `/api/v1/attempts/${f.attemptId}?section=checks&limit=1`,
@@ -117,7 +117,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains approved identity
           if (name === 'dashboard') {
             const dto = response.json<OperationSummary>();
             // Read-time diagnostics have an observation timestamp. Preserve every other field.
-            dto.impediments = dto.impediments.map(d => ({ ...d, observedAtMs: 0 })); body = JSON.stringify(dto);
+            dto.impediments = dto.impediments.map(d => ({ ...d, observed_at_ms: 0 })); body = JSON.stringify(dto);
           }
           if (!baseline.has(name)) baseline.set(name, body);
           expect(body, name).toBe(baseline.get(name)); assertNoContent(Buffer.from(body), markers);
@@ -176,7 +176,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains approved identity
     const plan = await recoveryPipeline.getRemovalPlan(f.attemptId, resource.id);
     expect(plan.view.capability.available).toBe(true);
     const operation = await recoveryPipeline.removeResource(f.attemptId, resource.id, { confirmed: true, planHash: plan.view.planHash }, { operationId: randomUUID(), expectedRevision: plan.etag });
-    await recoveryPipeline.drain(); expect(restarted.getOperation(operation.operationId)?.state).toBe('succeeded');
+    await recoveryPipeline.drain(); expect(restarted.getOperation(operation.operation_id)?.state).toBe('succeeded');
     expect(restarted.getResources(f.attemptId).entries.find(r => r.id === resource.id)?.removed).toBe(true);
     expect((await inventory(f.directory)).filter(file => file.path.startsWith('artifacts/'))).toEqual(evidenceBefore);
     const afterRemovalSizes = sizes(await inventory(f.directory));

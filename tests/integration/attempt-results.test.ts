@@ -102,7 +102,7 @@ describe('durable official results', () => {
     f.storage.recordReviewWorkspace(f.binding.deliveryVersion, true, null);
     const binding = { ...f.binding, passageId: id, role: 'reviewer' as const }; const handle = { passageId: id };
     f.persistence.reserve({ handle, binding, requestHash: 'a'.repeat(64), state: 'starting', roleResource: reviewer, terminalName: `factory-${id}`, diagnostic: null, effectiveProfile: null, executorVersion: null });
-    const { id: _id, revision: _revision, createdAtMs: _created, updatedAtMs: _updated, ...profile } = f.profile;
+    const { id: _id, revision: _revision, created_at_ms: _created, updated_at_ms: _updated, ...profile } = f.profile;
     f.persistence.confirmReady(handle, profile, '18.11.1');
     f.storage.recordReviewIntegrity(binding, true);
     const result = { formatVersion: 1 as const, summary: 'Review complete', verdict: 'approved' as const, criteria: f.result.criteria,
@@ -133,7 +133,8 @@ describe('private adapter with real SQL persistence', () => {
     const adapter = createMaestriOmp({ dataDirectory: f.directory, persistence: f.persistence,
       host: { maestriExecutable: 'C:\\tools\\maestri.exe', ompExecutable: 'C:\\tools\\omp.exe', powershellExecutable: 'C:\\tools\\powershell.exe',
         inheritedEnvironment: { MAESTRI_PIPE: 'fixture-only', MAESTRI_WORKSPACE_ID: workspaceId, MAESTRI_TERMINAL_ID: anchorId } } }, loadRoleResources(), {
-      native: { validate: async () => ({ anchor: { workspaceId, terminalId: anchorId }, ompVersion: '18.11.1' }), recruit, stop: async () => 'uncertain' },
+      native: { getCatalog: async () => ({ state: 'unavailable', observed_at_ms: 1, diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Controlled catalog unavailable.', recovery: 'No catalog call in this fixture.' }] }),
+        validate: async () => ({ anchor: { workspaceId, terminalId: anchorId }, ompVersion: '18.11.1' }), recruit, stop: async () => 'uncertain' },
       bootstrap: async () => ({ path: 'fixture-only', removeSecret: async () => {} }),
       channel: async cb => {
         callbacks = cb;

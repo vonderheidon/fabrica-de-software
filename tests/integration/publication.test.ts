@@ -22,22 +22,22 @@ it('requires explicit current authorization and reconciled resources after resta
   const f = await fixture(); await f.implement();
   const write = f.mutateEffect.getMockImplementation()!;
   f.mutateEffect.mockImplementation(input => input.effect.kind === 'issue_comment' ? Promise.resolve({ state: 'failed_known',receipt: null,reason: 'MUTATION_NOT_AUTHORIZED',retryAtMs: null }) : write(input));
-  await f.approve(); const deliveryId = f.status().deliveryId!; const identity = f.storage.getSettings().installationId;
+  await f.approve(); const deliveryId = f.status().deliveryId!; const identity = f.storage.getSettings().installation_id;
   await f.pipeline.close(); f.storage.close();
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getAttempt(f.attemptId).result).toBe('interrupted'); expect(reopened.getSettings().installationId).toBe(identity);
+    expect(reopened.getAttempt(f.attemptId).result).toBe('interrupted'); expect(reopened.getSettings().installation_id).toBe(identity);
     const n = vi.mocked(f.execution.startPassage).mock.calls.length;
     const local = publicationServiceFixture(f,reopened);
     const request = { deliveryId,authorizedMode: 'icr' as const,authorized: true as const };
     const context = () => ({ operationId: randomUUID(),expectedRevision: `"${f.attemptId}:${reopened.getAttempt(f.attemptId).revision}"` });
     expect(() => local.publication.complete(f.attemptId,request,context())).toThrow(expect.objectContaining({ code: 'RESOURCES_NOT_RECONCILED' }));
-    expect(reopened.getDeliveryDetail(deliveryId,{}).publication.completeCapability).toEqual({ available: false,reasonCode: 'RESOURCES_NOT_RECONCILED' });
+    expect(reopened.getDeliveryDetail(deliveryId,{}).publication.completeCapability).toEqual({ available: false,reason_code: 'RESOURCES_NOT_RECONCILED' });
     // Controlled trusted-host stop observation. No claim that Maestri was physically exercised.
     f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
     f.mutateEffect.mockImplementation(write);
     const op = local.publication.complete(f.attemptId,request,context()); await local.drain();
-    expect(reopened.getOperation(op.operationId)?.state).toBe('succeeded'); expect(reopened.getAttempt(f.attemptId).result).toBe('delivered');
+    expect(reopened.getOperation(op.operation_id)?.state).toBe('succeeded'); expect(reopened.getAttempt(f.attemptId).result).toBe('delivered');
     expect(vi.mocked(f.execution.startPassage).mock.calls).toHaveLength(n); expect(f.issue.comments).toHaveLength(1);
   } finally { reopened.close(); }
 });
@@ -70,7 +70,7 @@ it('orders projected transitions by their durable insertion even when all timest
 
 it('reserves global receipt sequences even when another account has more recent events', async () => {
   const f = await fixture(); await f.implement();
-  const operationId = randomUUID(); const installationId = f.storage.getSettings().installationId;
+  const operationId = randomUUID(); const installationId = f.storage.getSettings().installation_id;
   f.db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('OTHER','other',1,1,1);
   f.db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
     VALUES (?,?,'OTHER','settings.update','settings','local',?,'{}','{}')`).run(operationId,installationId,'a'.repeat(64));
@@ -142,18 +142,18 @@ it('preserves approval on an unknown comment, reconciles its exact marker/hash/a
   await f.approve(); expect(f.status().result).toBeNull();
   expect(f.storage.getReview(f.status().deliveryId!)?.state).toBe('approved');
   expect(f.storage.getDeliveryDetail(f.status().deliveryId!,{}).publication).toMatchObject({
-    completeCapability: { available: false,reasonCode: 'EFFECT_UNRESOLVED' },reconcileCapability: { available: true },unknownEffects: 1,
+    completeCapability: { available: false,reason_code: 'EFFECT_UNRESOLVED' },reconcileCapability: { available: true },unknownEffects: 1,
   });
   const command = f.context(); const body = { deliveryId: f.status().deliveryId! };
   const op = f.pipeline.reconcilePublication(f.attemptId,body,command); await f.pipeline.drain();
-  expect(f.storage.getOperation(op.operationId)?.state).toBe('succeeded');
+  expect(f.storage.getOperation(op.operation_id)?.state).toBe('succeeded');
   expect(f.issue.comments).toHaveLength(1);
   expect(f.storage.getDeliveryDetail(body.deliveryId,{}).publication.completeCapability.available).toBe(true);
   const completion = f.context(); const request = { deliveryId: body.deliveryId, authorizedMode: 'icr' as const, authorized: true as const };
   const completed = f.pipeline.completePublication(f.attemptId,request,completion); await f.pipeline.drain();
-  expect(f.storage.getOperation(completed.operationId)?.state).toBe('succeeded');
+  expect(f.storage.getOperation(completed.operation_id)?.state).toBe('succeeded');
   expect(f.status().result).toBe('delivered');
-  expect(f.storage.getDeliveryDetail(body.deliveryId,{}).publication.completeCapability).toEqual({ available: false,reasonCode: 'MODE_COMPLETED' });
+  expect(f.storage.getDeliveryDetail(body.deliveryId,{}).publication.completeCapability).toEqual({ available: false,reason_code: 'MODE_COMPLETED' });
   const calls = f.mutateEffect.mock.calls.length;
   expect(f.pipeline.completePublication(f.attemptId,request,completion).receipt).toEqual(completed.receipt);
   await f.pipeline.drain(); expect(f.mutateEffect).toHaveBeenCalledTimes(calls);
@@ -168,7 +168,7 @@ it('refuses ICR completion when the owned implementation environment has been re
   await f.approve(); const deliveryId = f.status().deliveryId!;
   f.db.prepare("UPDATE resources SET removed=1,revision=revision+1 WHERE attempt_id=? AND kind='implementation'").run(f.attemptId);
   const calls = f.mutateEffect.mock.calls.length;
-  expect(f.storage.getDeliveryDetail(deliveryId,{}).publication.completeCapability).toEqual({ available: false,reasonCode: 'ICR_ENVIRONMENT_UNAVAILABLE' });
+  expect(f.storage.getDeliveryDetail(deliveryId,{}).publication.completeCapability).toEqual({ available: false,reason_code: 'ICR_ENVIRONMENT_UNAVAILABLE' });
   expect(() => f.pipeline.completePublication(f.attemptId,{ deliveryId,authorizedMode: 'icr',authorized: true },f.context()))
     .toThrow(expect.objectContaining({ code: 'ICR_ENVIRONMENT_UNAVAILABLE' }));
   expect(f.mutateEffect).toHaveBeenCalledTimes(calls);
@@ -185,7 +185,7 @@ it('keeps an absent, partial, forged or duplicate marker unknown without blind r
       body: effect.expectedIdentity.marker+'\nforged body', author: { id: 'OTHER', login: 'other' }, updatedAt: '2026-10-17' }));
     if (scenario === 'partial') vi.mocked(f.github.getIssueContextById).mockResolvedValueOnce({ state: 'partial', data: f.issue, diagnostics: [], retryAtMs: null });
     const op = f.pipeline.reconcilePublication(f.attemptId,{ deliveryId },f.context()); await f.pipeline.drain();
-    expect(f.storage.getOperation(op.operationId)?.state).toBe('unknown');
+    expect(f.storage.getOperation(op.operation_id)?.state).toBe('unknown');
     f.pipeline.completePublication(f.attemptId,{ deliveryId, authorizedMode: 'icr', authorized: true },f.context()); await f.pipeline.drain();
     expect(f.mutateEffect).toHaveBeenCalledTimes(count); expect(f.status().result).toBeNull();
   }
@@ -347,14 +347,14 @@ it('keeps historical metadata and effects after reopen without GET mutations or 
 it('migrates v10 without changing approved content, receipts or identity, and without inventing effects', async () => {
   const f = await publicationFixture(false); fixtures.push(f); await f.implement(); await f.approve();
   const deliveryId = f.status().deliveryId!; const delivery = f.storage.getDelivery(deliveryId).delivery;
-  const identity = f.storage.getSettings().installationId; const review = f.storage.getReview(deliveryId);
+  const identity = f.storage.getSettings().installation_id; const review = f.storage.getReview(deliveryId);
   const receipt = f.storage.getOperation(f.status().operationId)?.receipt;
   expect(f.storage.getEffects(f.attemptId)).toEqual([]);
   await f.pipeline.close(); f.storage.close();
   removePublicationSchema(f.db);
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getReview(deliveryId)).toEqual(review); expect(reopened.getDelivery(deliveryId).delivery).toEqual(delivery);
     expect(reopened.getOperation(reopened.getAttempt(f.attemptId).operationId)?.receipt).toEqual(receipt);
     expect(reopened.getEffects(f.attemptId)).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -371,12 +371,12 @@ it('exposes protected summary/detail/section/publication routes with CAS and ide
     expect((await app.inject({ method: 'GET', url: '/api/v1/attempts', headers: { host } })).statusCode).toBe(401);
     const bootstrap = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host, origin, 'x-factory-client': 'web', 'content-type': 'application/json' }, payload: {} });
     const cookie = bootstrap.headers['set-cookie']?.toString().split(';')[0] ?? '';
-    const csrf = (bootstrap.json() as { csrfToken: string }).csrfToken;
+    const csrf = (bootstrap.json() as { csrf_token: string }).csrf_token;
     const headers = { host, origin, cookie, 'x-csrf-token': csrf, 'content-type': 'application/json' };
     const list = await app.inject({ method: 'GET',url: '/api/v1/attempts',headers }); expect(list.statusCode).toBe(200);
     const detail = await app.inject({ method: 'GET',url: `/api/v1/attempts/${f.attemptId}?section=criteria&limit=1`,headers }); expect(detail.statusCode).toBe(200);
     const delivery = await app.inject({ method: 'GET',url: `/api/v1/deliveries/${f.status().deliveryId!}?section=effects&limit=1`,headers }); expect(delivery.statusCode).toBe(200);
-    const command = await app.inject({ method: 'POST',url: `/api/v1/attempts/${f.attemptId}/publication/reconcile`,headers: { ...headers, 'idempotency-key': randomUUID(), 'if-match': detail.headers.etag! },payload: { deliveryId: f.status().deliveryId! } });
+    const command = await app.inject({ method: 'POST',url: `/api/v1/attempts/${f.attemptId}/publication/reconcile`,headers: { ...headers, 'idempotency-key': randomUUID(), 'if-match': detail.headers.etag! },payload: { delivery_id: f.status().deliveryId! } });
     expect(command.statusCode).toBe(202); await f.pipeline.drain();
   } finally { await app.close(); }
 });
@@ -390,15 +390,15 @@ it('returns the durable 202 receipt for a replay whose remote outcome is unknown
   try {
     const host = new URL(config.browserOrigin).host;
     const session = await app.inject({ method: 'POST',url: '/api/v1/session',headers: { host,origin: config.browserOrigin,'x-factory-client': 'web','content-type': 'application/json' },payload: {} });
-    const headers = { host,origin: config.browserOrigin,cookie: session.cookies.map(c => c.name+'='+c.value).join('; '),'x-csrf-token': (session.json() as { csrfToken: string }).csrfToken,'content-type': 'application/json','idempotency-key': randomUUID(),'if-match': `"${f.attemptId}:${f.status().revision}"` };
-    const input = { method: 'POST' as const,url: `/api/v1/attempts/${f.attemptId}/publication/reconcile`,headers,payload: { deliveryId: f.status().deliveryId! } };
+    const headers = { host,origin: config.browserOrigin,cookie: session.cookies.map(c => c.name+'='+c.value).join('; '),'x-csrf-token': (session.json() as { csrf_token: string }).csrf_token,'content-type': 'application/json','idempotency-key': randomUUID(),'if-match': `"${f.attemptId}:${f.status().revision}"` };
+    const input = { method: 'POST' as const,url: `/api/v1/attempts/${f.attemptId}/publication/reconcile`,headers,payload: { delivery_id: f.status().deliveryId! } };
     const first = await app.inject(input); expect(first.statusCode).toBe(202); await f.pipeline.drain();
     const replay = await app.inject(input); expect(replay.statusCode).toBe(202);
-    const operationId = (first.json() as { operationId: string }).operationId;
+    const operationId = first.json<import('#contracts').OperationAccepted>().operation_id;
     const response = await app.inject({ url: '/api/v1/operations/'+operationId,headers: { host,cookie: headers.cookie } });
     expect(response.statusCode).toBe(200);
-    const op = response.json() as { state: string; requestId: string; error: { code: string; requestId: string } };
-    expect(op.state).toBe('unknown'); expect(op.error.code).toBe('EFFECT_UNRESOLVED'); expect(op.error.requestId).toBe(op.requestId);
+    const op = response.json() as { state: string; request_id: string; error: { code: string; request_id: string } };
+    expect(op.state).toBe('unknown'); expect(op.error.code).toBe('EFFECT_UNRESOLVED'); expect(op.error.request_id).toBe(op.request_id);
     expect(f.mutateEffect.mock.calls.filter(([input]) => input.effect.kind === 'issue_comment')).toHaveLength(1);
   } finally { await app.close(); }
 });

@@ -1,3 +1,4 @@
+import { toHttpStartAttempt } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -44,7 +45,7 @@ describe('manual attempt composition and HTTP', () => {
     const capture = f.storage.getAttemptCapture(operation.resource.id);
     expect(Value.Check(AttemptCapture, capture)).toBe(true);
     expect(capture.criteria.map(c => c.id)).toEqual(['ac-1', 'ac-2']);
-    expect(capture.configuration.origins).toMatchObject({ checks: 'project', timeDefaults: 'global', deliveryMode: 'preparation' });
+    expect(capture.configuration.origins).toMatchObject({ checks: 'project', time_defaults: 'global', delivery_mode: 'preparation' });
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
   it('returns 202 and Location without awaiting a clone, then recovers a lost response before new IO', async () => {
@@ -55,29 +56,29 @@ describe('manual attempt composition and HTTP', () => {
     const host = '127.0.0.1:4310'; const origin = `http://${host}`;
     const bootstrap = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host, origin, 'content-type': 'application/json', 'x-factory-client': 'web' }, payload: {} });
     const headers = { host, origin, 'content-type': 'application/json', cookie: String(bootstrap.headers['set-cookie']).split(';')[0]!,
-      'x-csrf-token': bootstrap.json<SessionResponse>().csrfToken, 'idempotency-key': command.context.operationId, 'if-match': command.context.expectedRevision };
+      'x-csrf-token': bootstrap.json<SessionResponse>().csrf_token, 'idempotency-key': command.context.operationId, 'if-match': command.context.expectedRevision };
     let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; });
     const original = f.workspaces.prepareAttempt.getMockImplementation()!;
     f.workspaces.prepareAttempt.mockImplementationOnce(async input => { await wait; return original(input); });
     try {
-      const response = await app.inject({ method: 'POST', url: '/api/v1/attempts', headers, payload: command.body });
+      const response = await app.inject({ method: 'POST', url: '/api/v1/attempts', headers, payload: toHttpStartAttempt(command.body) });
       expect(response.statusCode, response.body).toBe(202); expect(Value.Check(OperationAccepted, response.json())).toBe(true);
       expect(response.headers.location).toBe(`/api/v1/operations/${command.context.operationId}`);
       const attempts = f.db.prepare('SELECT count(*) AS n FROM attempts').get();
-      const replay = await app.inject({ method: 'POST', url: '/api/v1/attempts', headers, payload: command.body });
+      const replay = await app.inject({ method: 'POST', url: '/api/v1/attempts', headers, payload: toHttpStartAttempt(command.body) });
       expect(replay.statusCode).toBe(202); expect(replay.json<OperationAccepted>().receipt).toEqual(response.json<OperationAccepted>().receipt);
       expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual(attempts);
       expect(f.observeTools).toHaveBeenCalledTimes(1);
       const get = await app.inject({ url: String(response.headers.location), headers: { host, cookie: headers.cookie } });
       expect(get.statusCode).toBe(200); expect(get.json().resource).toEqual(response.json().resource);
-      expect((await app.inject({ method: 'POST', url: '/api/v1/attempts', headers: { ...headers, 'x-csrf-token': '' }, payload: command.body })).statusCode).toBe(403);
-      expect((await app.inject({ method: 'POST', url: '/api/v1/attempts', headers, payload: { ...command.body, extra: 'secret-marker' } })).statusCode).toBe(400);
+      expect((await app.inject({ method: 'POST', url: '/api/v1/attempts', headers: { ...headers, 'x-csrf-token': '' }, payload: toHttpStartAttempt(command.body) })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'POST', url: '/api/v1/attempts', headers, payload: { ...toHttpStartAttempt(command.body), extra: 'secret-marker' } })).statusCode).toBe(400);
     } finally { release(); await f.pipeline.drain(); }
     const id = f.storage.getOperation(command.context.operationId)!.resource.id;
     const detail = await app.inject({ url: `/api/v1/attempts/${id}`, headers: { host, cookie: headers.cookie } });
     expect(detail.statusCode).toBe(200); expect(detail.headers.etag).toBeDefined(); expect(detail.body).not.toContain('capture_json');
     const second = await f.prepare(f.register());
-    const conflict = await app.inject({ method: 'POST', url: '/api/v1/attempts', headers: { ...headers, 'idempotency-key': second.context.operationId, 'if-match': second.context.expectedRevision }, payload: second.body });
+    const conflict = await app.inject({ method: 'POST', url: '/api/v1/attempts', headers: { ...headers, 'idempotency-key': second.context.operationId, 'if-match': second.context.expectedRevision }, payload: toHttpStartAttempt(second.body) });
     expect(conflict.statusCode, conflict.body).toBe(409); expect(conflict.json()).toMatchObject({ code: 'ATTEMPT_ACTIVE', resource: { type: 'attempt', id } });
   });
   it('serializes simultaneous starts across duplicate project registrations by account/repository/issue', async () => {
@@ -89,12 +90,12 @@ describe('manual attempt composition and HTTP', () => {
   });
   it.each(['icr', 'commit', 'pr'] as const)('revalidates Ready and all authority prerequisites for %s', async mode => {
     const f = await fixture(); const p = await f.prepare();
-    const updated = await f.preparations.updatePreparation(p.body.preparationId, { changes: { deliveryMode: mode } }, { operationId: randomUUID(), expectedRevision: p.context.expectedRevision });
-    const body = { ...p.body, preparationRevision: 2, authorizedSummaryHash: updated.view.preparation.summaryHash };
+    const updated = await f.preparations.updatePreparation(p.body.preparationId, { changes: { delivery_mode: mode } }, { operationId: randomUUID(), expectedRevision: p.context.expectedRevision });
+    const body = { ...p.body, preparationRevision: 2, authorizedSummaryHash: updated.view.preparation.summary_hash };
     f.issue.assignees.push({ id: 'OTHER', login: 'other' });
     await expect(f.pipeline.startAttempt(body, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: 'SUMMARY_CHANGED' });
     const current = await f.preparations.getPreparation(p.body.preparationId);
-    await expect(f.pipeline.startAttempt({ ...body, authorizedSummaryHash: current.view.preparation.summaryHash }, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
+    await expect(f.pipeline.startAttempt({ ...body, authorizedSummaryHash: current.view.preparation.summary_hash }, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
     expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
   });
   it.each(['closed', 'ready', 'project', 'membership', 'remote', 'base', 'dependency', 'account', 'partial'] as const)('refuses invalid %s observations before effects', async target => {
@@ -122,7 +123,7 @@ describe('manual attempt composition and HTTP', () => {
   it('rechecks configuration after version observation and revalidates authority again after clone', async () => {
     const f = await fixture(); const c = await f.prepare();
     f.observeTools.mockImplementationOnce(async () => {
-      f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().timeDefaults }); return f.tools;
+      f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults }); return f.tools;
     });
     await expect(f.pipeline.startAttempt(c.body, c.context)).rejects.toMatchObject({ statusCode: 412 });
     const original = f.workspaces.prepareAttempt.getMockImplementation()!;
@@ -144,10 +145,10 @@ describe('manual attempt composition and HTTP', () => {
   });
   it('keeps independent captures when defaults, resources and observed versions change', async () => {
     const f = await fixture(); const first = await start(f); const bytes = JSON.stringify(first.capture);
-    f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: { ...f.storage.getSettings().timeDefaults, passageActiveTimeMs: 123456 } });
+    f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: { ...f.storage.getSettings().time_defaults, passage_active_time_ms: 123456 } });
     f.roles[0]!.sha256 = 'f'.repeat(64); f.tools[1]!.version = '2.0.0'; f.issue.id = 'I_second'; f.issue.number = 18;
     const second = await start(f);
-    expect(second.capture.configuration.timeDefaults.passageActiveTimeMs).toBe(123456);
+    expect(second.capture.configuration.time_defaults.passage_active_time_ms).toBe(123456);
     expect(second.capture.roleResources).not.toEqual(first.capture.roleResources); expect(second.capture.tools).not.toEqual(first.capture.tools);
     expect(JSON.stringify(f.storage.getAttemptCapture(first.id))).toBe(bytes);
     const passage = f.persistence.getPassage({ passageId: second.status.passageId });

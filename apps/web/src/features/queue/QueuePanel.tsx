@@ -1,4 +1,4 @@
-import type { QueueItem, QueueObservation } from '#contracts';
+import type { HttpQueueItem as QueueItem, HttpQueueObservation as QueueObservation } from '#contracts';
 import type { QueueLoad } from './useQueue.js';
 
 const reasonLabels: Record<QueueItem['reasons'][number], string> = {
@@ -38,12 +38,11 @@ export function QueuePanel({ load, pageNotice, pauseNotice, pauseOperationId, pa
       </div>
       <p className="muted">A fila projeta o GitHub. Pausá-la impede novos inícios automáticos; uma tentativa ativa continua acompanhada.</p>
       <dl className="queue-facts">
-        <div><dt>Total elegível</dt><dd>{observation?.complete && observation.eligibleTotal !== null ? observation.eligibleTotal : 'Não confirmado'}</dd></div>
+        <div><dt>Total elegível</dt><dd>{observation?.complete && observation.eligible_total !== null ? observation.eligible_total : 'Não confirmado'}</dd></div>
         <div><dt>Visíveis nesta página</dt><dd>{observation?.page.items.length ?? '—'}</dd></div>
         <div><dt>Ordem</dt><dd>{observation?.order.description ?? 'Aguardando observação completa'}</dd></div>
         <div><dt>Conta</dt><dd>{observation?.account.login ? `@${observation.account.login}` : 'Indisponível'}</dd></div>
-        <div><dt>Host executor</dt><dd>{observation?.host.expected ?? 'Não configurado'}{observation ? ` · ${observation.host.matches ? 'corresponde' : 'divergente'}` : ''}</dd></div>
-        <div><dt>Modos autorizados</dt><dd>{observation?.modesByProject.length ? observation.modesByProject.map((item) => modeLabel(item.mode)).join(', ') : 'Nenhum modo disponível'}</dd></div>
+        <div><dt>Modos autorizados</dt><dd>{observation?.modes_by_project.length ? observation.modes_by_project.map((item) => modeLabel(item.mode)).join(', ') : 'Nenhum modo disponível'}</dd></div>
       </dl>
       {!observation?.complete && <div className="notice queue-degraded" role="status"><b>Consulta degradada</b><p>{observation?.diagnostics.map((item) => item.message).join(' ') || 'O controlador ainda não confirmou uma leitura completa. A quantidade não representa ausência de candidatos.'}</p></div>}
       <div className="row queue-actions">
@@ -60,19 +59,19 @@ export function QueuePanel({ load, pageNotice, pauseNotice, pauseOperationId, pa
     </div>
 
     <div className="card queue-list-card">
-      <div className="line panel-title"><div><span className="eyebrow">Project observado</span><h2>Issues e elegibilidade</h2></div><span className="muted">{observation?.observedAtMs ? `Atualizado ${new Date(observation.observedAtMs).toLocaleTimeString('pt-BR')}` : 'Sem horário observado'}</span></div>
+      <div className="line panel-title"><div><span className="eyebrow">Project observado</span><h2>Issues e elegibilidade</h2></div><span className="muted">{observation?.observed_at_ms ? `Atualizado ${new Date(observation.observed_at_ms).toLocaleTimeString('pt-BR')}` : 'Sem horário observado'}</span></div>
       {pageNotice && <p className="queue-page-notice" role="status">{pageNotice}</p>}
       {observation?.page.items.length ? <div className="table-wrap"><table className="queue-table"><thead><tr><th>Ordem / issue</th><th>Responsável</th><th>Status</th><th>Elegibilidade</th><th>Consumo</th><th>Ação</th></tr></thead><tbody>
-        {observation.page.items.map((item) => <tr key={`${item.projectId}:${item.itemId}`}>
-          <td><b>{String(item.order.position).padStart(2, '0')} · {item.number === null ? item.kind === 'draft' ? 'Rascunho' : item.kind === 'pull_request' ? 'Pull request' : 'Item inacessível' : `#${item.number}`} {item.title ?? 'Título indisponível'}</b><br /><small>{item.projectName} · {item.order.criterion}{item.order.value !== null ? ` ${item.order.value}` : ''}</small>{item.url && <><br /><a href={item.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a></>}</td>
+        {observation.page.items.map((item) => <tr key={`${item.project_id}:${item.item_id}`}>
+          <td><b>{String(item.order.position).padStart(2, '0')} · {item.number === null ? item.kind === 'draft' ? 'Rascunho' : item.kind === 'pull_request' ? 'Pull request' : 'Item inacessível' : `#${item.number}`} {item.title ?? 'Título indisponível'}</b><br /><small>{item.project_name} · {item.order.criterion}{item.order.value !== null ? ` ${item.order.value}` : ''}</small>{item.url && <><br /><a href={item.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a></>}</td>
           <td>{item.assignees.length ? item.assignees.map((assignee) => `@${assignee.login}`).join(', ') : 'Sem responsável'}</td>
           <td>{item.status ?? 'Não observado'}</td>
           <td><span className={`pill ${item.eligible ? '' : 'warn'}`}>{item.eligible ? 'Elegível' : item.reasons.map((reason) => reasonLabels[reason]).join('; ') || 'Inelegível'}</span></td>
-          <td>{consumptionLabel(item.consumption, item.attemptId)}</td>
-          <td>{item.attemptId ? <button type="button" onClick={(event) => onAuthority(item.attemptId!, event.currentTarget)}>Ver autoridade</button> : item.eligible ? <span className="muted">Aguardando consumo automático</span> : '—'}</td>
+          <td>{consumptionLabel(item.consumption, item.attempt_id)}</td>
+          <td>{item.attempt_id ? <button type="button" onClick={(event) => onAuthority(item.attempt_id!, event.currentTarget)}>Ver autoridade</button> : item.eligible ? <span className="muted">Aguardando consumo automático</span> : '—'}</td>
         </tr>)}
       </tbody></table></div> : <div className="queue-empty" role="status"><h3>{observation?.complete ? 'Nenhum item nesta página' : 'Aguardando leitura válida'}</h3><p>{observation?.complete ? 'A consulta completa não retornou candidatos visíveis.' : 'Itens não são considerados ausentes enquanto a consulta estiver parcial ou indisponível.'}</p></div>}
-      <div className="queue-pagination"><button type="button" onClick={onPreviousPage} disabled={!canGoBack || load.status === 'loading'}>Página anterior</button><span>{observation?.page.hasMore ? 'Há mais itens nesta observação.' : 'Fim dos itens observados.'}</span><button type="button" onClick={onNextPage} disabled={!observation?.page.hasMore || load.status === 'loading'}>Próxima página</button></div>
+      <div className="queue-pagination"><button type="button" onClick={onPreviousPage} disabled={!canGoBack || load.status === 'loading'}>Página anterior</button><span>{observation?.page.has_more ? 'Há mais itens nesta observação.' : 'Fim dos itens observados.'}</span><button type="button" onClick={onNextPage} disabled={!observation?.page.has_more || load.status === 'loading'}>Próxima página</button></div>
       {observation?.diagnostics.map((item) => <p className="queue-diagnostic" key={`${item.code}:${item.message}`}>{item.message} <span>{item.recovery}</span></p>)}
     </div>
   </section>;
@@ -80,16 +79,16 @@ export function QueuePanel({ load, pageNotice, pauseNotice, pauseOperationId, pa
 
 export function QueueEnableSummary({ observation }: { observation: QueueObservation }) {
   return <dl className="queue-enable-summary">
-    <div><dt>Quantidade elegível observada</dt><dd>{observation.eligibleTotal ?? 'Não confirmada'}</dd></div>
-    <div><dt>Escopo</dt><dd>{observation.scope.kind === 'account' ? 'Conta' : `${observation.scope.projectIds.length} projeto(s)`}</dd></div>
-    <div><dt>Modos por projeto</dt><dd>{observation.modesByProject.map((item) => modeLabel(item.mode)).join(', ') || 'Nenhum modo configurado'}</dd></div>
-    <div><dt>Conta / host</dt><dd>{observation.account.login ? `@${observation.account.login}` : 'Conta indisponível'} · {observation.host.expected ?? 'Host não configurado'} ({observation.host.matches ? 'observado neste host' : 'host divergente'})</dd></div>
+    <div><dt>Quantidade elegível observada</dt><dd>{observation.eligible_total ?? 'Não confirmada'}</dd></div>
+    <div><dt>Escopo</dt><dd>{observation.scope.kind === 'account' ? 'Conta' : `${observation.scope.project_ids.length} projeto(s)`}</dd></div>
+    <div><dt>Modos por projeto</dt><dd>{observation.modes_by_project.map((item) => modeLabel(item.mode)).join(', ') || 'Nenhum modo configurado'}</dd></div>
+    <div><dt>Conta</dt><dd>{observation.account.login ? `@${observation.account.login}` : 'Conta indisponível'}</dd></div>
     <div><dt>Validade</dt><dd>{observation.valid && observation.complete ? 'Observação completa e válida' : 'Precisa revalidar antes de habilitar'}</dd></div>
     <div><dt>Ordem</dt><dd>{observation.order.description}</dd></div>
   </dl>;
 }
 
-function modeLabel(mode: QueueObservation['modesByProject'][number]['mode']): string {
+function modeLabel(mode: QueueObservation['modes_by_project'][number]['mode']): string {
   return mode === 'icr' ? 'ICR' : mode === 'commit' ? 'ICR + commit' : 'ICR + commit + PR';
 }
 

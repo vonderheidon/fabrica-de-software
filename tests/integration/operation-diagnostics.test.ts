@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DiagnosticsView, OperationSummary, type DiagnosticRequest, type SessionResponse } from '#contracts';
+import { HttpControllerEventFrame, HttpDiagnosticsView, HttpOperationSummary, DiagnosticsView, type DiagnosticRequest, type SessionResponse } from '#contracts';
+import { toHttpDiagnosticsView } from '../../apps/controller/src/http/observation-views.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
@@ -13,7 +14,7 @@ import { createDiagnostics } from '../../apps/controller/src/modules/diagnostics
 import { createGitHub } from '../../apps/controller/src/modules/github/index.js';
 import { createWorkspaces } from '../../apps/controller/src/modules/workspaces/index.js';
 import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { seedSettings } from '../../apps/controller/src/modules/storage/settings.js';
+import { seedLegacySettings as seedSettings } from '../fixtures/legacy-settings.js';
 import { attemptFixture } from '../fixtures/attempt.js';
 
 const cleanup: (() => void | Promise<void>)[] = [];
@@ -36,7 +37,7 @@ async function httpFixture() {
   cleanup.push(() => app.close());
   const base = { host, origin: `http://${host}`, 'content-type': 'application/json', 'x-factory-client': 'web' };
   const response = await app.inject({ method: 'POST', url: '/api/v1/session', headers: base, payload: {} });
-  const headers = { ...base, cookie: String(response.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': response.json<SessionResponse>().csrfToken };
+  const headers = { ...base, cookie: String(response.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': response.json<SessionResponse>().csrf_token };
   return { ...f, app, headers };
 }
 
@@ -46,12 +47,12 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const observer = new Database(join(f.directory, 'factory.sqlite')); cleanup.push(() => { observer.close(); });
     const before = observer.pragma('data_version', { simple: true });
     const response = await f.app.inject({ url: '/api/v1/operation', headers: f.headers });
-    expect(response.statusCode).toBe(200); expect(Value.Check(OperationSummary, response.json())).toBe(true);
-    expect(response.json()).toMatchObject({ account: { id: null, observedId: null }, automation: { enabled: false, dispatchPaused: true },
-      activeAttempt: null, nextCandidates: [], recentResults: [], integrationStatus: { state: 'not_checked', provesProviderExecution: false }, eventCursor: '0' });
+    expect(response.statusCode).toBe(200); expect(Value.Check(HttpOperationSummary, response.json())).toBe(true);
+    expect(response.json()).toMatchObject({ account: { id: null, observed_id: null }, automation: { enabled: false, dispatch_paused: true },
+      active_attempt: null, next_candidates: [], recent_results: [], integration_status: { state: 'not_checked', proves_provider_execution: false }, event_cursor: '0' });
     const diagnosis = await f.app.inject({ url: '/api/v1/diagnostics?scope=host', headers: f.headers });
-    expect(diagnosis.statusCode).toBe(200); expect(Value.Check(DiagnosticsView, diagnosis.json())).toBe(true);
-    expect(diagnosis.json<DiagnosticsView>().diagnostics.map(d => d.code)).toContain('ACCOUNT_UNOBSERVED');
+    expect(diagnosis.statusCode).toBe(200); expect(Value.Check(HttpDiagnosticsView, diagnosis.json())).toBe(true);
+    expect(diagnosis.json<HttpDiagnosticsView>().diagnostics.map(d => d.code)).toContain('ACCOUNT_UNOBSERVED');
     expect(observer.pragma('data_version', { simple: true })).toBe(before);
     expect(f.identity).not.toHaveBeenCalled(); expect(f.preflight).not.toHaveBeenCalled();
     expect(f.db.prepare('SELECT count(*) AS n FROM diagnostic_runs').get()).toEqual({ n: 0 });
@@ -95,11 +96,12 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const settings = f.storage.getSettings(); const id = randomUUID();
     const response = await f.app.inject({ method: 'POST', url, headers: { ...f.headers, 'idempotency-key': id }, payload });
     expect(response.statusCode).toBe(202); expect(response.headers.location).toBe('/api/v1/operations/'+id);
-    expect(response.json()).toMatchObject({ operationId: id, resource: { type: 'diagnostic', id }, receipt: { revision: 1, eventCursor: '1' } });
+    expect(response.json()).toMatchObject({ operation_id: id, resource: { type: 'diagnostic', id }, receipt: { revision: 1, event_cursor: '1' } });
     await vi.waitFor(() => expect(f.storage.getOperation(id)?.state).toBe('succeeded'));
     expect(f.storage.getSettings()).toEqual(settings);
-    const report = (await f.app.inject({ url, headers: f.headers })).json<DiagnosticsView>();
+    const report = (await f.app.inject({ url, headers: f.headers })).json<HttpDiagnosticsView>();
     expect(report.reports[0]?.diagnostics[0]).toMatchObject({ code: 'ACCOUNT_UNOBSERVED', state: 'blocked' });
+    expect(report.reports[0]?.receipt).toEqual(response.json().receipt);
     expect((await f.app.inject({ url: '/api/v1/operations/'+id, headers: f.headers })).json()).toMatchObject({ state: 'succeeded' });
   });
   it('rejects changed context and never records credentials or raw exceptions', async () => {
@@ -110,7 +112,7 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     });
     const id = randomUUID(); await f.diagnostics.verify({ scope: 'host', checks: ['github_identity'] }, id);
     await vi.waitFor(() => expect(f.identity).toHaveBeenCalled());
-    f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().timeDefaults });
+    f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults });
     release(); await f.diagnostics.drain();
     expect(f.storage.getOperation(id)?.state).toBe('failed');
     const report = f.diagnostics.get({ scope: 'host' }); expect(report.reports[0]?.diagnostics[0]?.code).toBe('DIAGNOSTIC_CONTEXT_CHANGED');
@@ -129,6 +131,7 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const reopened = openStorage({ dataDirectory: f.directory }); cleanup.push(() => reopened.close()); reopened.interruptDiagnostics();
     expect(reopened.getOperation(command.operationId)).toMatchObject({ state: 'unknown', receipt: accepted.receipt });
     expect(reopened.getContextDiagnostics({ scope: 'host' }).reports[0]?.diagnostics[0]?.code).toBe('DIAGNOSTIC_INTERRUPTED');
+    expect(reopened.getContextDiagnostics({ scope: 'host' }).reports[0]?.receipt).toEqual(accepted.receipt);
     expect(reopened.recoverDiagnostic(command)?.receipt).toEqual(accepted.receipt);
     reopened.interruptDiagnostics(); expect(reopened.getEvents({}).items.map(e => e.eventType)).toEqual(['diagnostic.accepted', 'diagnostic.interrupted']);
     expect(f.identity).not.toHaveBeenCalled();
@@ -152,13 +155,18 @@ describe('operational snapshots and contextual diagnostic observations', () => {
   });
   it('keeps a stable event-page ceiling when new events arrive and binds cursors to filters', async () => {
     const f = await httpFixture();
-    for (let i = 0; i < 3; i++) f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().timeDefaults });
-    const first = (await f.app.inject({ url: '/api/v1/events?limit=1', headers: f.headers })).json<{ nextCursor: string; eventCursor: string }>();
-    f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().timeDefaults });
-    const next = await f.app.inject({ url: '/api/v1/events?cursor='+first.nextCursor+'&limit=100', headers: f.headers });
-    expect(next.json()).toMatchObject({ items: [{ seq: '2' }, { seq: '3' }], eventCursor: first.eventCursor, hasMore: false });
-    expect(f.storage.getEvents({ cursor: first.eventCursor }).items.map(e => e.seq)).toEqual(['4']);
-    expect((await f.app.inject({ url: '/api/v1/events?cursor='+first.nextCursor+'&operationId='+randomUUID(), headers: f.headers })).statusCode).toBe(400);
+    for (let i = 0; i < 3; i++) f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults });
+    const first = (await f.app.inject({ url: '/api/v1/events?limit=1', headers: f.headers })).json<{ next_cursor: string; event_cursor: string }>();
+    f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults });
+    const next = await f.app.inject({ url: '/api/v1/events?cursor='+first.next_cursor+'&limit=100', headers: f.headers });
+    expect(next.json()).toMatchObject({ items: [{ seq: '2' }, { seq: '3' }], event_cursor: first.event_cursor, has_more: false });
+    expect(f.storage.getEvents({ cursor: first.event_cursor }).items.map(e => e.seq)).toEqual(['4']);
+    expect((await f.app.inject({ url: '/api/v1/events?cursor='+first.next_cursor+'&operation_id='+randomUUID(), headers: f.headers })).statusCode).toBe(400);
+    const other = await httpFixture();
+    expect((await other.app.inject({ url: '/api/v1/events?cursor='+first.next_cursor, headers: other.headers })).statusCode).toBe(400);
+    f.db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('OTHER_SCOPE', 'other', 1, 1, 1);
+    f.db.prepare('UPDATE factory_settings SET account_id=?,revision=revision+1').run('OTHER_SCOPE');
+    expect((await f.app.inject({ url: '/api/v1/events?cursor='+first.next_cursor, headers: f.headers })).statusCode).toBe(400);
     for (const cursor of ['bad', '9007199254740992', '9999']) {
       const result = await f.app.inject({ url: '/api/v1/events/stream?cursor='+cursor, headers: f.headers });
       expect(result.statusCode).toBe(200); expect(result.body).toContain('event: resync'); expect(result.body).not.toContain('id: ');
@@ -168,10 +176,16 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const f = await httpFixture();
     const snapshot = f.storage.getOperationSummary({});
     const operationId = randomUUID();
-    f.storage.saveTimeDefaults({ operationId, expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().timeDefaults });
+    f.storage.saveTimeDefaults({ operationId, expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults });
     const read = f.storage.getEvents.bind(f.storage);
     const getEvents = vi.spyOn(f.storage, 'getEvents').mockImplementationOnce(query => read(query)).mockImplementation(() => { throw new Error('stop fixture stream'); });
     const first = await f.app.inject({ url: '/api/v1/events/stream?cursor=invalid', headers: { ...f.headers, 'last-event-id': snapshot.eventCursor } });
+    const frameLine = first.body.split('\n').find(line => line.startsWith('data: {"entity"'));
+    expect(frameLine).toBeDefined();
+    const frame: unknown = JSON.parse(frameLine!.slice(6));
+    expect(Value.Check(HttpControllerEventFrame, frame)).toBe(true);
+    expect(frame).toMatchObject({ operation_id: operationId, event_type: 'settings.time-defaults.updated' });
+    expect(frame).not.toHaveProperty('seq');
     expect(first.body.match(/^id: /gm)).toHaveLength(1); expect(first.body).toContain('id: 1\n'); expect(first.body).toContain(operationId);
     expect(getEvents.mock.calls[0]?.[0].cursor).toBe(snapshot.eventCursor);
     getEvents.mockReset().mockImplementationOnce(query => read(query)).mockImplementation(() => { throw new Error('stop fixture stream'); });
@@ -205,9 +219,9 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const f = fixture(); const creationId = randomUUID(); const sourceOperationId = randomUUID(); const settings = f.storage.getSettings();
     // Poison full documents deliberately: these existing-fact projections must never deserialize them.
     f.db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,operation_kind,resource_type,resource_id,request_hash)
-      VALUES (?,?,'scaffold.create','creation',?,?)`).run(sourceOperationId, settings.installationId, creationId, 'a'.repeat(64));
+      VALUES (?,?,'scaffold.create','creation',?,?)`).run(sourceOperationId, settings.installation_id, creationId, 'a'.repeat(64));
     f.db.prepare(`INSERT INTO project_creations(id,operation_id,installation_id,plan_hash,plan_json,destination,state,created_at_ms)
-      VALUES (?,?,?,?,?,?,'partial',1)`).run(creationId, sourceOperationId, settings.installationId, 'a'.repeat(64), '{"private_plan":"SYNTHETIC_SECRET"}', join(f.directory, 'own-creation'));
+      VALUES (?,?,?,?,?,?,'partial',1)`).run(creationId, sourceOperationId, settings.installation_id, 'a'.repeat(64), '{"private_plan":"SYNTHETIC_SECRET"}', join(f.directory, 'own-creation'));
     const id = randomUUID(); const body: DiagnosticRequest = { scope: 'creation', id: creationId, checks: ['github_identity'] };
     await f.diagnostics.verify(body, id); await f.diagnostics.drain();
     const view = f.diagnostics.get({ scope: 'creation', id: creationId });
@@ -221,9 +235,9 @@ describe('operational snapshots and contextual diagnostic observations', () => {
   });
   it('projects only recorded eligible candidates in observed order and preserves current results', async () => {
     const f = await attemptFixture(); cleanup.push(() => f.close());
-    const previous = f.storage.getConfiguration(f.projectId); const { id: _id, projectId: _projectId, revision: _revision, createdAtMs: _createdAtMs, ...config } = previous.view.configuration;
-    f.storage.saveConfiguration({ operationId: randomUUID(), projectId: f.projectId, expectedRevision: previous.etag, body: { projectChanges: { automationEnabled: true } },
-      configuration: { ...config, automationEnabled: true }, globalChanges: {} });
+    const previous = f.storage.getConfiguration(f.projectId); const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _createdAtMs, ...config } = previous.view.configuration;
+    f.storage.saveConfiguration({ operationId: randomUUID(), projectId: f.projectId, expectedRevision: previous.etag, body: { project_changes: { automation_enabled: true } },
+      configuration: { ...config, automation_enabled: true }, globalChanges: {} });
     f.storage.recordQueueObservations(['I_z', 'I_a', 'I_blocked'].map((issueId, i) => ({ accountId: 'ACCOUNT_test', projectId: f.projectId, issueId, ready: true, eligible: i < 2, existingAttemptId: null })));
     const summary = f.storage.getOperationSummary({ projectId: f.projectId });
     expect(summary.nextCandidates.map(c => c.issueId)).toEqual(['I_z', 'I_a']); expect(summary.candidateObservation.requiresRevalidation).toBe(true);
@@ -240,8 +254,49 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const db = new Database(join(directory, 'factory.sqlite')); applyMigrations(db, loadMigrations().slice(0, 17), () => seedSettings(db, directory));
     const identity = db.prepare('SELECT installation_id FROM factory_settings').get(); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toEqual((identity as { installation_id: string }).installation_id);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
     expect(reopened.getContextDiagnostics({ scope: 'host' }).reports).toEqual([]); expect(reopened.getOperationSummary({}).integrationStatus.state).toBe('not_checked');
-    expect(f.storage.getDiagnostics().schemaVersion).toBe(18);
+    expect(f.storage.getDiagnostics().schemaVersion).toBe(23);
   });
 });
+
+  it('refuses camelCase query and command aliases without any accepted operation or partial write', async () => {
+    const f = await httpFixture(); const id = randomUUID();
+    const before = { operations: f.db.prepare('SELECT * FROM operation_requests').all(), events: f.db.prepare('SELECT * FROM events').all() };
+    for (const url of [
+      '/api/v1/operation?projectId='+id, '/api/v1/operation?project_id='+id+'&projectId='+id,
+      '/api/v1/events?operationId='+id, '/api/v1/events?projectId='+id, '/api/v1/events?attemptId='+id,
+      '/api/v1/events/stream?operation_id='+id+'&operationId='+id, '/api/v1/queue?projectIds='+id,
+      '/api/v1/queue?project_id='+id+'&projectId='+id,
+    ]) expect((await f.app.inject({ url, headers: f.headers })).statusCode, url).toBe(400);
+    for (const payload of [
+      { enabled: false, scope: { kind: 'account', projectIds: [] } },
+      { enabled: false, scope: { kind: 'account', project_ids: [], projectIds: [] } },
+      { enabled: false, scope: { kind: 'account', project_ids: [] }, observationId: id },
+      { enabled: false, scope: { kind: 'account', project_ids: [] }, authorizedSummaryHash: 'hash' },
+    ]) expect((await f.app.inject({ method: 'PUT', url: '/api/v1/queue', payload, headers: { ...f.headers, 'if-match': '"fixture"', 'idempotency-key': randomUUID() } })).statusCode).toBe(400);
+    expect(f.db.prepare('SELECT * FROM operation_requests').all()).toEqual(before.operations);
+    expect(f.db.prepare('SELECT * FROM events').all()).toEqual(before.events);
+    expect(f.identity).not.toHaveBeenCalled(); expect(f.preflight).not.toHaveBeenCalled();
+  });
+  it('projects stored diagnostic reports without rewriting their private JSON or receipts, including reopen', async () => {
+    const f = await httpFixture(); const id = randomUUID();
+    const command = { method: 'POST' as const, url: '/api/v1/diagnostics?scope=host', headers: { ...f.headers, 'idempotency-key': id }, payload: { checks: ['github_identity'] } };
+    const accepted = await f.app.inject(command); expect(accepted.statusCode).toBe(202);
+    await vi.waitFor(() => expect(f.storage.getOperation(id)?.state).toBe('succeeded'));
+    const snapshot = () => ({ reports: f.db.prepare('SELECT * FROM diagnostic_runs ORDER BY operation_id').all(), operations: f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all() });
+    const before = snapshot(); const changes = f.db.prepare('SELECT total_changes() AS n').get();
+    const response = await f.app.inject({ url: '/api/v1/diagnostics?scope=host', headers: f.headers });
+    expect(Value.Check(HttpDiagnosticsView, response.json())).toBe(true);
+    const report = response.json<HttpDiagnosticsView>().reports[0]!;
+    expect(report).toMatchObject({ operation_id: id, receipt: accepted.json().receipt, diagnostics: [{ affected_requirements: expect.any(Array), observed_at_ms: expect.any(Number) }] });
+    const replay = await f.app.inject(command); expect(replay.statusCode).toBe(202); expect(replay.json().receipt).toEqual(accepted.json().receipt);
+    expect(f.identity).toHaveBeenCalledTimes(1);
+    expect(snapshot()).toEqual(before); expect(f.db.prepare('SELECT total_changes() AS n').get()).toEqual(changes);
+    await f.app.close();
+    const reopened = openStorage({ dataDirectory: f.directory });
+    try {
+      expect(toHttpDiagnosticsView(reopened.getContextDiagnostics({ scope: 'host' })).reports[0]).toEqual(report);
+      expect(snapshot()).toEqual(before);
+    } finally { reopened.close(); }
+  });

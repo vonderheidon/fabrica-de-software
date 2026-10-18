@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { QueueCommand, QueueObservation } from '#contracts';
+import type { HttpQueueObservation, QueueCommand, QueueObservation } from '#contracts';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
@@ -16,12 +16,12 @@ afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)
 async function fixture(enabled = true) {
   const f = await attemptFixture(); fixtures.push(f); await f.pipeline.close();
   const settings = f.storage.getGlobalConfiguration();
-  if (enabled) f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, body: { changes: { automationEnabled: enabled } }, changes: { automationEnabled: enabled } });
+  if (enabled) f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, body: { changes: { automation_enabled: enabled } }, changes: { automation_enabled: enabled } });
   function automation(projectId: string, value: boolean) {
     const current = f.storage.getConfiguration(projectId);
-    const { id: _id, projectId: _project, revision: _revision, createdAtMs: _created, ...configuration } = current.view.configuration;
+    const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId,
-      body: { projectChanges: { automationEnabled: value } }, configuration: { ...configuration, automationEnabled: value }, globalChanges: {} });
+      body: { project_changes: { automation_enabled: value } }, configuration: { ...configuration, automation_enabled: value }, globalChanges: {} });
   }
   automation(f.projectId, true);
   vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([{ id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true }]));
@@ -50,15 +50,15 @@ describe('authorized queue changes', () => {
     const { f, queue } = await fixture(false); const before = await queue.observe({});
     if (change === 'count') vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([]));
     if (change === 'mode') {
-      const c = f.storage.getConfiguration(f.projectId); const { id: _id, projectId: _project, revision: _revision, createdAtMs: _created, ...configuration } = c.view.configuration;
+      const c = f.storage.getConfiguration(f.projectId); const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = c.view.configuration;
       f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: c.etag, projectId: f.projectId,
-        body: { projectChanges: { defaultDeliveryMode: 'pr' } }, configuration: { ...configuration, defaultDeliveryMode: 'pr' }, globalChanges: {} });
+        body: { project_changes: { default_delivery_mode: 'pr' } }, configuration: { ...configuration, default_delivery_mode: 'pr' }, globalChanges: {} });
     }
     if (change === 'account') vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));
     if (change === 'assignee') f.issue.assignees = [];
     await expect(queue.save(command(before.observation, true), { operationId: randomUUID(), expectedRevision: before.etag }))
       .rejects.toMatchObject({ code: 'QUEUE_SUMMARY_CHANGED', current: { observation: { summaryHash: expect.any(String) } } });
-    expect(f.storage.getSettings().automationEnabled).toBe(false);
+    expect(f.storage.getSettings().automation_enabled).toBe(false);
   });
 
   it('changes several projects atomically, previews disabled candidates, and rolls back every project on event failure', async () => {
@@ -68,13 +68,13 @@ describe('authorized queue changes', () => {
     const body = command(before.observation, true); const context = { operationId: randomUUID(), expectedRevision: before.etag };
     f.db.exec("CREATE TRIGGER fail_queue BEFORE INSERT ON events WHEN NEW.event_type='queue.updated' BEGIN SELECT RAISE(ABORT,'TEST'); END");
     await expect(queue.save(body, context)).rejects.toThrow();
-    expect(ids.map(id => f.storage.getConfiguration(id).view.configuration.automationEnabled)).toEqual([false, false]);
+    expect(ids.map(id => f.storage.getConfiguration(id).view.configuration.automation_enabled)).toEqual([false, false]);
     expect(f.storage.getOperation(context.operationId)).toBeNull();
     f.db.exec('DROP TRIGGER fail_queue'); const saved = await queue.save(body, context);
-    expect(saved.queue.enabled).toBe(true); expect(ids.map(id => f.storage.getConfiguration(id).view.configuration.automationEnabled)).toEqual([true, true]);
+    expect(saved.queue.enabled).toBe(true); expect(ids.map(id => f.storage.getConfiguration(id).view.configuration.automation_enabled)).toEqual([true, true]);
     expect(saved.etag).not.toBe(before.etag);
     const paused = await queue.save(command(saved.queue, false), { operationId: randomUUID(), expectedRevision: saved.etag });
-    expect(paused.queue.enabled).toBe(false); expect(f.storage.getSettings().automationEnabled).toBe(true);
+    expect(paused.queue.enabled).toBe(false); expect(f.storage.getSettings().automation_enabled).toBe(true);
   });
 
   it('returns the current summary and ETag on HTTP conflict and preserves CSRF protection', async () => {
@@ -85,14 +85,14 @@ describe('authorized queue changes', () => {
       const base = { host: '127.0.0.1:4317', origin: 'http://127.0.0.1:4317', 'content-type': 'application/json', 'x-factory-client': 'web' };
       const session = await app.inject({ method: 'POST', url: '/api/v1/session', headers: base, payload: {} });
       const cookie = String(session.headers['set-cookie']).split(';')[0]!;
-      const headers = { ...base, cookie, 'x-csrf-token': session.json<{ csrfToken: string }>().csrfToken };
+      const headers = { ...base, cookie, 'x-csrf-token': session.json<{ csrf_token: string }>().csrf_token };
       const before = await app.inject({ url: '/api/v1/queue', headers });
-      const observed = before.json<QueueObservation>(); const body = command(observed, true);
+      const observed = before.json<HttpQueueObservation>(); const body = { enabled: true, scope: observed.scope, observation_id: observed.observation_id, authorized_summary_hash: observed.summary_hash };
       const denied = await app.inject({ method: 'PUT', url: '/api/v1/queue', headers: { ...headers, 'x-csrf-token': '', 'if-match': String(before.headers.etag), 'idempotency-key': randomUUID() }, payload: body });
       expect(denied.statusCode).toBe(403);
       vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([]));
       const conflict = await app.inject({ method: 'PUT', url: '/api/v1/queue', headers: { ...headers, 'if-match': String(before.headers.etag), 'idempotency-key': randomUUID() }, payload: body });
-      expect(conflict.statusCode).toBe(409); expect(conflict.json()).toMatchObject({ code: 'QUEUE_SUMMARY_CHANGED', queue: { eligibleTotal: 0 } });
+      expect(conflict.statusCode).toBe(409); expect(conflict.json()).toMatchObject({ code: 'QUEUE_SUMMARY_CHANGED', queue: { eligible_total: 0 } });
       expect(conflict.headers.etag).toBeDefined();
     } finally { await app.close(); }
   });
@@ -215,11 +215,11 @@ describe('durable scheduler', () => {
   it('migrates v15 with an actual consumed link and preserves receipts, identity and unknown Ready history', async () => {
     const { f } = await fixture(); await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
     const operationId = f.storage.getAttempt(first.id).operationId;
-    const receipt = f.storage.getOperation(operationId); const identity = f.storage.getSettings().installationId;
+    const receipt = f.storage.getOperation(operationId); const identity = f.storage.getSettings().installation_id;
     await f.pipeline.close(); f.storage.close(); removeQueueSchedulerSchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-      expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getOperation(operationId)?.receipt).toEqual(receipt?.receipt);
       expect(f.db.prepare('SELECT observed_cycle,attempt_id,ready_exit_observed_at_ms,ready_return_observed_at_ms FROM queue_consumptions').get())
         .toEqual({ observed_cycle: 1, attempt_id: first.id, ready_exit_observed_at_ms: null, ready_return_observed_at_ms: null });

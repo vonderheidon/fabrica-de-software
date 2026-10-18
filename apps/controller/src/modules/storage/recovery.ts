@@ -1,3 +1,4 @@
+import { serializeOperationReceipt } from './common-json.js';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { CancelAttempt, RemoveResource, EmptyBody, OperationId, AttemptResource, type Delivery } from '#contracts';
@@ -69,7 +70,7 @@ export function recoverRecovery(db: Database.Database, command: RecoveryCommand)
   const hash = commandHash(command); const s = readSettings(db);
   const old = db.prepare<[string], { installation_id: string; account_id: string | null; request_hash: string }>('SELECT installation_id,account_id,request_hash FROM operation_requests WHERE operation_id=?').get(command.operationId);
   if (!old) return null;
-  if (old.installation_id !== s.installationId || old.account_id !== s.accountId || old.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
+  if (old.installation_id !== s.installation_id || old.account_id !== s.account_id || old.request_hash !== hash) throw new OperationError(409, 'IDEMPOTENCY_CONFLICT', 'The operation conflicts with an accepted command.');
   const operation = readOperation(db, command.operationId);
   if (!operation?.receipt) throw new StorageError('OPERATION_DATA_INVALID'); return operation;
 }
@@ -101,10 +102,10 @@ export function acceptRecovery(db: Database.Database, command: RecoveryCommand, 
     const resourceId = command.kind === 'attempt.cancel' ? attempt.id : command.resourceId;
     const entityType = command.kind === 'attempt.cancel' ? 'attempt' : 'resource';
     const seq = (db.prepare<[], { seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()?.seq ?? 1);
-    const receipt = { revision, eventCursor: String(seq) };
+    const receipt = { revision, event_cursor: String(seq) };
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
-      VALUES (?,?,?,?,?,?,?,?,?)`).run(command.operationId, s.installationId, s.accountId, command.kind, entityType, resourceId, commandHash(command),
-        JSON.stringify({ etag: command.kind === 'attempt.cancel' ? null : command.expectedRevision ?? null }), JSON.stringify(receipt));
+      VALUES (?,?,?,?,?,?,?,?,?)`).run(command.operationId, s.installation_id, s.account_id, command.kind, entityType, resourceId, commandHash(command),
+        JSON.stringify({ etag: command.kind === 'attempt.cancel' ? null : command.expectedRevision ?? null }), serializeOperationReceipt(receipt));
     if (command.kind === 'attempt.cancel') db.prepare('INSERT INTO cancellation_requests VALUES (?,?,?)').run(command.operationId, attempt.id, Date.now());
     else if (command.kind === 'resource.remove') db.prepare("INSERT INTO resource_removals VALUES (?,?,?,'accepted',NULL,?)").run(command.operationId, command.resourceId, command.body.planHash, Date.now());
     else db.prepare("INSERT INTO native_open_requests VALUES (?,?,?,'accepted',?)").run(command.operationId, command.resourceId, command.kind, Date.now());

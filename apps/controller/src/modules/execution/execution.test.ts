@@ -7,6 +7,7 @@ import { createExecution, ExecutionError } from './index.js';
 import { digest, loadRoleResources } from './roles.js';
 import { createMaestriOmp } from './adapters/maestri-omp/adapter.js';
 import { createNative, inheritedAnchor, launchCommand, type CliRunner } from './adapters/maestri-omp/native.js';
+import { buildOmpArguments } from './adapters/maestri-omp/bootstrap.js';
 import { connectWire, executionLimits, JsonLines } from './adapters/maestri-omp/wire.js';
 import type { ChannelCallbacks, Hello } from './adapters/maestri-omp/channel.js';
 
@@ -68,12 +69,12 @@ const host: ExecutionHost = {
 };
 const payload = () => ({ formatVersion: 1 as const, summary: 'Implementação concluída 😀', writesStopped: true as const,
   criteria: [{ criterionId: 'ac-1', verdict: 'passed' as const, evidence: ['Teste observado'] }], checks: [] });
-function fixture(role: 'implementer' | 'reviewer' = 'implementer') {
+function fixture(role: 'implementer' | 'reviewer' = 'implementer', effort: string | null = 'high', ompVersion = '18.11.1') {
   const journal = fixtureStore();
   const resources = loadRoleResources();
   const request: PassageRequest = {
     binding: { attemptId: randomUUID(), passageId: randomUUID(), role, round: 1, deliveryVersion: randomUUID() },
-    profile: { name: 'Exact', executor: 'maestri-omp', provider: 'provider', model: 'model', effort: 'high', guidance: 'Orientação real' },
+    profile: { name: 'Exact', executor: 'maestri-omp', provider: 'provider', model: 'model', effort, guidance: 'Orientação real' },
     cwd: 'C:\\Projetos ç\\tentativa 😀', task: 'Tarefa '.repeat(20000), criterionIds: ['ac-1'], previousFindingKeys: [], gitNexusRequired: true,
     roleResource: resources.get(role)!.reference,
   };
@@ -83,7 +84,9 @@ function fixture(role: 'implementer' | 'reviewer' = 'implementer') {
   const removed = vi.fn(async () => {});
   const openExistingTerminal = vi.fn(async () => {});
   const runtime = {
-    validate: vi.fn(async () => ({ anchor: { terminalId: anchorId, workspaceId }, ompVersion: '18.11.1' })),
+    getCatalog: vi.fn(async () => ({ state: 'unavailable' as const, observed_at_ms: 1,
+      diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Controlled catalog unavailable.', recovery: 'Configure a catalog fixture.' }] })),
+    validate: vi.fn(async () => ({ anchor: { terminalId: anchorId, workspaceId }, ompVersion })),
     recruit: vi.fn(async () => {}), stop: vi.fn(async () => 'uncertain' as const),
   };
   const execution = createMaestriOmp({ dataDirectory: 'C:\\Dados', host: { ...host, openExistingTerminal }, persistence: journal.store, validateReviewerResult: async () => {} }, resources, {
@@ -93,7 +96,7 @@ function fixture(role: 'implementer' | 'reviewer' = 'implementer') {
   });
   const hello: Hello = { type: 'hello', protocolVersion: 1, token: 'x'.repeat(43),
     sessionId: randomUUID(), terminalId: randomUUID(), workspaceId, cwd: request.cwd,
-    provider: 'provider', model: 'model', effort: 'high', tui: true, roleDigest: request.roleResource.sha256, ompVersion: '18.11.1' };
+    provider: 'provider', model: 'model', effort, tui: true, roleDigest: request.roleResource.sha256, ompVersion };
   const waitLaunch = async () => { await vi.waitFor(() => expect(runtime.recruit).toHaveBeenCalledTimes(1)); };
   const start = async () => { const promise = execution.startPassage(request); await waitLaunch(); await callbacks!.hello(hello); await callbacks!.frame({ type: 'task-submitted' }); return promise; };
   const call = async (tool: string, value: unknown, extra = {}) => {
@@ -225,10 +228,60 @@ describe('native Maestri and Windows launch', () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
   it('uses only supported queries and exact argv/cwd/env; validates version without provider', async () => {
-    const run = vi.fn<CliRunner>(async (_exe, args) => ({ exitCode: 0, stdout: args[0] === 'list' ? 'You: Anchor\nConnected agents:' : args[0] === 'recruit' ? '--command --dir' : 'omp/18.11.1\n' }));
-    expect((await createNative(host, 'C:\\Dados ç', run).validate()).ompVersion).toBe('18.11.1');
+    const run = vi.fn<CliRunner>(async (_exe, args) => ({ exitCode: 0, stdout: args[0] === 'list' ? 'You: Anchor\nConnected agents:' : args[0] === 'recruit' ? '--command --dir' : 'omp/19.2.0-beta.1\n' }));
+    expect((await createNative(host, 'C:\\Dados ç', run).validate()).ompVersion).toBe('19.2.0-beta.1');
     expect(run.mock.calls.map(c => c[1])).toEqual([['list'], ['recruit', '--help'], ['--version']]);
     expect(run.mock.calls.every(c => c[2] === 'C:\\Dados ç' && c[3] === host.inheritedEnvironment)).toBe(true);
+  });
+  it.each(['17.10.4', '20.0.0-rc.2'])('accepts OMP %s when the concrete Maestri capabilities are present', async version => {
+    const run = vi.fn<CliRunner>(async (_exe, args) => ({ exitCode: 0,
+      stdout: args[0] === 'list' ? 'You: Anchor\nConnected agents:' : args[0] === 'recruit' ? '--command --dir' : `omp/${version}` }));
+    expect((await createNative(host, 'C:\\Dados ç', run).validate()).ompVersion).toBe(version);
+  });
+  it('reads the exact selectable chat catalog without refresh or terminal recruitment', async () => {
+    const catalog = { models: [
+      { provider: 'provider-a', kind: 'chat', id: 'reasoning', selector: 'provider-a/reasoning', name: 'Reasoning model', thinking: ['low', 'high'] },
+      { provider: 'provider-b', kind: 'chat', id: 'plain', selector: 'provider-b/plain', name: 'Plain model', thinking: null },
+    ] };
+    const run = vi.fn<CliRunner>(async (_exe, args) => args[0] === '--version'
+      ? { exitCode: 0, stdout: 'omp/99.0.0-local' }
+      : { exitCode: 0, stdout: JSON.stringify(catalog) });
+    const result = await createNative(host, 'C:\\Dados ç', run).getCatalog();
+    expect(result).toMatchObject({ state: 'loaded', executor: 'maestri-omp', executor_version: '99.0.0-local', models: [
+      { provider: 'provider-a', provider_name: 'provider-a', model: 'reasoning', model_name: 'Reasoning model', efforts: ['low', 'high'] },
+      { provider: 'provider-b', provider_name: 'provider-b', model: 'plain', model_name: 'Plain model', efforts: [] },
+    ] });
+    expect(run.mock.calls.map(call => call[1])).toEqual([['--version'], ['models', '--json']]);
+  });
+  it.each([
+    ['empty', JSON.stringify({ models: [] }), 'OMP_CATALOG_EMPTY'],
+    ['malformed', '{invalid', 'OMP_CATALOG_INVALID'],
+    ['partial row', JSON.stringify({ models: [{ provider: 'provider', kind: 'chat', id: 'model', selector: 'provider/model', name: 'Model' }] }), 'OMP_CATALOG_INVALID'],
+    ['duplicate row', JSON.stringify({ models: [
+      { provider: 'provider', kind: 'chat', id: 'model', selector: 'provider/model', name: 'Model', thinking: null },
+      { provider: 'provider', kind: 'chat', id: 'model', selector: 'provider/model', name: 'Model', thinking: null },
+    ] }), 'OMP_CATALOG_INVALID'],
+  ])('marks %s catalogs unavailable instead of publishing a partial list', async (_name, stdout, code) => {
+    const run = vi.fn<CliRunner>(async (_exe, args) => args[0] === '--version'
+      ? { exitCode: 0, stdout: 'omp/18.11.2' } : { exitCode: 0, stdout });
+    expect(await createNative(host, 'C:\\Dados ç', run).getCatalog()).toMatchObject({ state: 'unavailable', diagnostics: [{ code }] });
+  });
+  it('does not infer an empty catalog when the installed CLI cannot confirm the JSON surface', async () => {
+    const run = vi.fn<CliRunner>(async (_exe, args) => args[0] === '--version'
+      ? { exitCode: 0, stdout: 'omp/21.0.0' } : { exitCode: 2, stdout: 'Synthetic untrusted runtime output' });
+    const result = await createNative(host, 'C:\\Dados ç', run).getCatalog();
+    expect(result).toMatchObject({ state: 'unavailable', diagnostics: [{ code: 'OMP_CATALOG_UNSUPPORTED' }] });
+    expect(JSON.stringify(result)).not.toContain('Synthetic untrusted runtime output');
+    const missingVersion = vi.fn<CliRunner>(async () => ({ exitCode: 0, stdout: '' }));
+    expect(await createNative(host, 'C:\\Dados ç', missingVersion).getCatalog())
+      .toMatchObject({ state: 'unavailable', diagnostics: [{ code: 'OMP_VERSION_UNAVAILABLE' }] });
+    expect(missingVersion.mock.calls).toHaveLength(1);
+  });
+  it('omits the thinking selector only when the profile has no applicable effort', () => {
+    const f = fixture();
+    expect(buildOmpArguments(f.request, 'extension.js')).toEqual(['--provider', 'provider', '--model', 'model', '--thinking', 'high', '--extension', 'extension.js']);
+    expect(buildOmpArguments({ ...f.request, profile: { ...f.request.profile, effort: null } }, 'extension.js'))
+      .toEqual(['--provider', 'provider', '--model', 'model', '--extension', 'extension.js']);
   });
   it('encodes only a bootstrap path and preserves Unicode, quotes and spaces', () => {
     const own = "C:\\Dados ç 😀\\O'Brien\\launch.json";
@@ -241,6 +294,18 @@ describe('native Maestri and Windows launch', () => {
   });
 });
 describe('passage coordination under controlled native dependencies', () => {
+  it('confirms a version without an effort and retains both facts exactly', async () => {
+    const f = fixture('implementer', null, '19.0.0'); const ready = await f.start();
+    expect(ready.state).toBe('ready'); expect(ready.effectiveProfile?.effort).toBeNull(); expect(ready.executorVersion).toBe('19.0.0');
+    expect(f.hello.effort).toBeNull(); await f.execution.close();
+  });
+  it('rejects an OMP default effort when the captured profile has none', async () => {
+    const f = fixture('implementer', null, '19.0.0'); const pending = f.execution.startPassage(f.request); await f.waitLaunch();
+    await expect(f.callbacks().hello({ ...f.hello, effort: 'low' })).rejects.toThrow();
+    f.callbacks().lost('PROFILE_MISMATCH');
+    expect((await pending).state).toBe('partial'); expect(f.store.getPassage({ passageId: f.request.binding.passageId }).effectiveProfile).toBeNull();
+    await f.execution.close();
+  });
   it('returns ready only after the effective handshake and task submission, deduplicates launch and opens the same session', async () => {
     const f = fixture(); const pending = f.execution.startPassage(f.request); await f.waitLaunch();
     expect(f.store.getPassage({ passageId: f.request.binding.passageId }).state).toBe('starting');

@@ -1,5 +1,6 @@
+import { completePublicationBody, reconcilePublicationBody, authorizeUpgradeBody } from './execution-requests.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DeliveryDetail, DeliveryMode, EffectView, OperationAccepted, OperationView } from '#contracts';
+import type { HttpDeliveryDetail as DeliveryDetail, DeliveryMode, HttpEffectView as EffectView, OperationAccepted, OperationView } from '#contracts';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 import { recordUncertainOperation, resolveUncertainOperation } from '../../api/uncertain-operations.js';
 
@@ -15,7 +16,7 @@ type PublicationAction = { kind: Action; id: string; accepted: OperationAccepted
 
 const modeOrder: readonly DeliveryMode[] = ['icr', 'commit', 'pr'];
 const modeLabel: Record<DeliveryMode, string> = { icr: 'ICR', commit: 'ICR + Commit local', pr: 'ICR + Commit + PR' };
-const effectLabel: Record<EffectView['kind'], string> = {
+const effectLabel: Record<EffectView["kind"], string> = {
   issue_comment: 'Comentário de entrega', project_status: 'Projeção de Status', local_commit: 'Commit local', push: 'Push', pull_request: 'Pull request',
   create_repository: 'Criação do repositório', associate_origin: 'Associação do origin', baseline_push: 'Publicação do baseline',
 };
@@ -27,7 +28,7 @@ function messageFor(error: unknown): string {
 export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, onRefresh }: Props) {
   const deliveryId = delivery.delivery.id;
   const summary = delivery.publication;
-  const authorizedMode = delivery.authorizations.authorizedMode;
+  const authorizedMode = delivery.authorizations.authorized_mode;
   const [action, setAction] = useState<PublicationAction | null>(null);
   const [armedCompletion, setArmedCompletion] = useState<string | null>(null);
   const [armedUpgrade, setArmedUpgrade] = useState<{ mode: DeliveryMode; hash: string } | null>(null);
@@ -36,13 +37,13 @@ export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, o
   const effectFingerprint = useMemo(() => JSON.stringify({
     deliveryId,
     mode: authorizedMode,
-    reviewState: summary.reviewState,
-    confirmedEffects: summary.confirmedEffects,
-    pendingEffects: summary.pendingEffects,
-    unknownEffects: summary.unknownEffects,
+    reviewState: summary.review_state,
+    confirmedEffects: summary.confirmed_effects,
+    pendingEffects: summary.pending_effects,
+    unknownEffects: summary.unknown_effects,
     commit: summary.commit,
     push: summary.push,
-    pullRequest: summary.pullRequest,
+    pullRequest: summary.pull_request,
   }), [authorizedMode, deliveryId, summary]);
   const previousFingerprint = useRef(effectFingerprint);
   useEffect(() => {
@@ -51,11 +52,11 @@ export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, o
     setArmedCompletion(null);
   }, [effectFingerprint]);
 
-  const upgrades = (summary.upgrades ?? []).filter((upgrade) => modeOrder.indexOf(upgrade.targetMode) > modeOrder.indexOf(authorizedMode));
+  const upgrades = (summary.upgrades ?? []).filter((upgrade) => modeOrder.indexOf(upgrade.target_mode) > modeOrder.indexOf(authorizedMode));
   const controls = delivery.capabilities;
   const summaryMatchesAuthorization = summary.mode === authorizedMode;
-  const canComplete = summaryMatchesAuthorization && controls.completePublication.available && armedCompletion === effectFingerprint;
-  const canReconcile = controls.reconcilePublication.available;
+  const canComplete = summaryMatchesAuthorization && controls.complete_publication.available && armedCompletion === effectFingerprint;
+  const canReconcile = controls.reconcile_publication.available;
 
   useEffect(() => {
     let mounted = true;
@@ -102,18 +103,16 @@ export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, o
     const path: `/api/v1/${string}` = kind === 'upgrade'
       ? `/api/v1/attempts/${encodeURIComponent(attemptId)}/publication/authorize-upgrade`
       : `/api/v1/attempts/${encodeURIComponent(attemptId)}/publication/${kind}`;
-    const body = kind === 'reconcile' ? { deliveryId }
-      : kind === 'upgrade' ? {
-        deliveryId, currentMode: authorizedMode, targetMode: targetMode!,
-        authorizedAdditionalEffectsHash: upgrades.find((item) => item.targetMode === targetMode)?.summaryHash,
-        authorized: true,
-      }
-        : { deliveryId, authorizedMode, authorized: true };
+    const upgrade = upgrades.find((item) => item.target_mode === targetMode);
+    if (kind === 'upgrade' && (!targetMode || !upgrade)) { setAction(null); resolveSafely(id); return; }
+    const body = kind === 'reconcile' ? reconcilePublicationBody(deliveryId)
+      : kind === 'upgrade' && targetMode && upgrade ? authorizeUpgradeBody(deliveryId, authorizedMode, targetMode, upgrade.summary_hash)
+        : completePublicationBody(deliveryId, authorizedMode);
     try {
       const headers: Record<string, string> = { 'Idempotency-Key': id };
       if (attemptEtag) headers['If-Match'] = attemptEtag;
       const { data } = await requestJsonWithMetadata<OperationAccepted>(path, { method: 'POST', headers, body: JSON.stringify(body) });
-      if (data.operationId !== id) throw new Error('O recibo não corresponde à operação solicitada.');
+      if (data.operation_id !== id) throw new Error('O recibo não corresponde à operação solicitada.');
       setAction({ kind, id, accepted: data, view: null, uncertain: false, ...(targetMode ? { targetMode } : {}) });
     } catch (reason: unknown) {
       if (reason instanceof HttpError && reason.status < 500) {
@@ -131,30 +130,30 @@ export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, o
     <div className="line"><div><span className="eyebrow">Entrega e publicação</span><h3 id="publication-panel-title">Versão e efeitos autorizados</h3></div><button type="button" onClick={onRefresh}>Atualizar estado</button></div>
     <dl className="preparation-facts">
       <div><dt>Versão selecionada</dt><dd className="mono">{deliveryId}</dd></div>
-      <div><dt>Conteúdo aprovado</dt><dd className="mono">{delivery.delivery.contentIdentity ?? 'Indisponível'}</dd></div>
-      <div><dt>Modo capturado</dt><dd>{modeLabel[delivery.authorizations.capturedMode]}</dd></div>
-      <div><dt>Modo autorizado</dt><dd>{modeLabel[delivery.authorizations.authorizedMode]}</dd></div>
-      <div><dt>Parecer</dt><dd>{summary.reviewState === 'approved' ? 'Aprovado para esta versão' : summary.reviewState === 'rejected' ? 'Reprovado nesta versão' : 'Pendente'}</dd></div>
-      <div><dt>Conclusão do modo</dt><dd>{summary.localState === 'completed' ? 'Concluída' : 'Pendente'}</dd></div>
-      <div><dt>Efeitos confirmados</dt><dd>{summary.confirmedEffects}</dd></div>
-      <div><dt>Efeitos pendentes</dt><dd>{summary.pendingEffects}</dd></div>
-      <div><dt>Efeitos incertos</dt><dd>{summary.unknownEffects}</dd></div>
+      <div><dt>Conteúdo aprovado</dt><dd className="mono">{delivery.delivery.content_identity ?? 'Indisponível'}</dd></div>
+      <div><dt>Modo capturado</dt><dd>{modeLabel[delivery.authorizations.captured_mode]}</dd></div>
+      <div><dt>Modo autorizado</dt><dd>{modeLabel[delivery.authorizations.authorized_mode]}</dd></div>
+      <div><dt>Parecer</dt><dd>{summary.review_state === 'approved' ? 'Aprovado para esta versão' : summary.review_state === 'rejected' ? 'Reprovado nesta versão' : 'Pendente'}</dd></div>
+      <div><dt>Conclusão do modo</dt><dd>{summary.local_state === 'completed' ? 'Concluída' : 'Pendente'}</dd></div>
+      <div><dt>Efeitos confirmados</dt><dd>{summary.confirmed_effects}</dd></div>
+      <div><dt>Efeitos pendentes</dt><dd>{summary.pending_effects}</dd></div>
+      <div><dt>Efeitos incertos</dt><dd>{summary.unknown_effects}</dd></div>
     </dl>
 
     <div className="publication-effects" aria-label="Resultados dos efeitos desta versão">
-      {([['Commit local', summary.commit], ['Push', summary.push], ['Pull request', summary.pullRequest]] as const).map(([label, value]) => value && <article className="attempt-record" key={label}>
+      {([['Commit local', summary.commit], ['Push', summary.push], ['Pull request', summary.pull_request]] as const).map(([label, value]) => value && <article className="attempt-record" key={label}>
         <h4>{label}</h4><p>Estado: <b>{effectStateLabel(value.state)}</b></p>
         {'sha' in value && value.sha && <p>Commit <code>{value.sha}</code></p>}
-        {'receipt' in value && value.receipt && <><p>Recibo <span className="mono">{value.receipt.id}</span></p>{value.receipt.url && <a href={value.receipt.url} target="_blank" rel="noreferrer">Abrir recurso confirmado</a>}{value.receipt.commitSha && <p>SHA confirmado <code>{value.receipt.commitSha}</code></p>}{value.receipt.branchRef && <p>Ref confirmada <code>{value.receipt.branchRef}</code></p>}</>}
+        {'receipt' in value && value.receipt && <><p>Recibo <span className="mono">{value.receipt.id}</span></p>{value.receipt.url && <a href={value.receipt.url} target="_blank" rel="noreferrer">Abrir recurso confirmado</a>}{value.receipt.commit_sha && <p>SHA confirmado <code>{value.receipt.commit_sha}</code></p>}{value.receipt.branch_ref && <p>Ref confirmada <code>{value.receipt.branch_ref}</code></p>}</>}
         {value.reason && <p className="muted">Motivo: {value.reason}</p>}
-        {'operationId' in value && value.operationId && <p className="muted">Operação {value.operationId}</p>}
+        {'operation_id' in value && value.operation_id && <p className="muted">Operação {value.operation_id}</p>}
       </article>)}
-      {effects.map((effect) => <article className="attempt-record" key={effect.operationId}>
-        <h4>{effectLabel[effect.kind]}</h4><p>Estado: <b>{effectStateLabel(effect.state)}</b> · Operação <span className="mono">{effect.operationId}</span></p>
-        <p>Versão <span className="mono">{effect.deliveryId ?? 'não vinculada'}</span> · Tentativa <span className="mono">{effect.attemptId ?? 'não vinculada'}</span></p>
-        {effect.expectedIdentity.branchRef && <p>Ref esperada <code>{effect.expectedIdentity.branchRef}</code></p>}
-        {effect.expectedIdentity.contentIdentity && <p>Conteúdo esperado <code>{effect.expectedIdentity.contentIdentity}</code></p>}
-        {effect.confirmedIdentity && <p>Identidade confirmada <code>{effect.confirmedIdentity.id}</code></p>}
+      {effects.map((effect) => <article className="attempt-record" key={effect.operation_id}>
+        <h4>{effectLabel[effect.kind]}</h4><p>Estado: <b>{effectStateLabel(effect.state)}</b> · Operação <span className="mono">{effect.operation_id}</span></p>
+        <p>Versão <span className="mono">{effect.delivery_id ?? 'não vinculada'}</span> · Tentativa <span className="mono">{effect.attempt_id ?? 'não vinculada'}</span></p>
+        {effect.expected_identity.branch_ref && <p>Ref esperada <code>{effect.expected_identity.branch_ref}</code></p>}
+        {effect.expected_identity.content_identity && <p>Conteúdo esperado <code>{effect.expected_identity.content_identity}</code></p>}
+        {effect.confirmed_identity && <p>Identidade confirmada <code>{effect.confirmed_identity.id}</code></p>}
         {effect.receipt?.url && <p><a href={effect.receipt.url} target="_blank" rel="noreferrer">Abrir recibo confirmado</a></p>}
         {effect.reason && <p>Motivo: {effect.reason}</p>}
       </article>)}
@@ -164,27 +163,27 @@ export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, o
     {!summaryMatchesAuthorization && <div className="queue-error" role="alert"><p>O resumo da publicação e o modo autorizado diferem. Atualize a tentativa e a versão antes de iniciar qualquer efeito.</p><button type="button" onClick={onRefresh}>Atualizar dados selecionados</button></div>}
     {error && <div className="queue-error" role="alert"><p>{error}</p><button type="button" onClick={() => { setError(null); onRefresh(); }}>Atualizar antes de revisar</button></div>}
     {upgrades.map((upgrade) => {
-      const isArmed = armedUpgrade?.mode === upgrade.targetMode && armedUpgrade.hash === upgrade.summaryHash;
-      const stale = armedUpgrade?.mode === upgrade.targetMode && armedUpgrade.hash !== upgrade.summaryHash;
-      return <div className="notice publication-upgrade" key={upgrade.targetMode}>
-        <h4>Aumentar para {modeLabel[upgrade.targetMode]}</h4><p>Os efeitos abaixo ainda não estão autorizados:</p>
-        <ul>{upgrade.additionalEffects.map((kind) => <li key={kind}>{effectLabel[kind]}</li>)}</ul>
+      const isArmed = armedUpgrade?.mode === upgrade.target_mode && armedUpgrade.hash === upgrade.summary_hash;
+      const stale = armedUpgrade?.mode === upgrade.target_mode && armedUpgrade.hash !== upgrade.summary_hash;
+      return <div className="notice publication-upgrade" key={upgrade.target_mode}>
+        <h4>Aumentar para {modeLabel[upgrade.target_mode]}</h4><p>Os efeitos abaixo ainda não estão autorizados:</p>
+        <ul>{upgrade.additional_effects.map((kind) => <li key={kind}>{effectLabel[kind]}</li>)}</ul>
         {!upgrade.capability.available && <p>Indisponível: {upgrade.capability.reason ?? 'pré-requisito não confirmado'}.</p>}
         {stale && <p role="alert">O resumo mudou desde sua revisão. Atualize a versão selecionada e revise novamente.</p>}
-        {upgrade.capability.available && <><label className="check"><input type="checkbox" checked={isArmed} onChange={(event) => setArmedUpgrade(event.currentTarget.checked ? { mode: upgrade.targetMode, hash: upgrade.summaryHash } : null)} />Autorizo os efeitos adicionais deste resumo ({upgrade.summaryHash.slice(0, 12)}…)</label>
-          <button type="button" className="primary" disabled={!summaryMatchesAuthorization || !isArmed || !attemptEtag || actionState === 'accepted' || actionState === 'running' || actionState === 'unknown' || actionState === 'succeeded'} onClick={() => void send('upgrade', upgrade.targetMode)}>Autorizar aumento uma vez</button></>}
+        {upgrade.capability.available && <><label className="check"><input type="checkbox" checked={isArmed} onChange={(event) => setArmedUpgrade(event.currentTarget.checked ? { mode: upgrade.target_mode, hash: upgrade.summary_hash } : null)} />Autorizo os efeitos adicionais deste resumo ({upgrade.summary_hash.slice(0, 12)}…)</label>
+          <button type="button" className="primary" disabled={!summaryMatchesAuthorization || !isArmed || !attemptEtag || actionState === 'accepted' || actionState === 'running' || actionState === 'unknown' || actionState === 'succeeded'} onClick={() => void send('upgrade', upgrade.target_mode)}>Autorizar aumento uma vez</button></>}
       </div>;
     })}
 
-    {controls.completePublication.available && <div className="notice publication-completion">
+    {controls.complete_publication.available && <div className="notice publication-completion">
       <h4>Concluir {modeLabel[authorizedMode]}</h4>
       <ul>{completionEffects(authorizedMode).map((item) => <li key={item}>{item}</li>)}</ul>
       <label className="check"><input type="checkbox" checked={armedCompletion === effectFingerprint} onChange={(event) => setArmedCompletion(event.currentTarget.checked ? effectFingerprint : null)} />Confirmo o início somente dos efeitos pendentes deste modo e versão.</label>
       <button type="button" className="primary" disabled={!canComplete || !attemptEtag || actionState === 'accepted' || actionState === 'running' || actionState === 'unknown'} onClick={() => void send('complete')}>Concluir modo autorizado</button>
     </div>}
-    {!controls.completePublication.available && <p className="muted">Conclusão indisponível: {controls.completePublication.reason ?? 'o gate atual não foi satisfeito'}.</p>}
+    {!controls.complete_publication.available && <p className="muted">Conclusão indisponível: {controls.complete_publication.reason ?? 'o gate atual não foi satisfeito'}.</p>}
     {canReconcile && <button type="button" onClick={() => void send('reconcile')} disabled={actionState === 'accepted' || actionState === 'running' || actionState === 'unknown'}>Reconciliar efeitos desta versão</button>}
-    {!canReconcile && <p className="muted">Reconciliação indisponível: {controls.reconcilePublication.reason ?? 'não há capacidade atual confirmada'}.</p>}
+    {!canReconcile && <p className="muted">Reconciliação indisponível: {controls.reconcile_publication.reason ?? 'não há capacidade atual confirmada'}.</p>}
     {action && <div className={actionState === 'unknown' || actionState === 'failed' ? 'queue-error' : 'notice'} role="status">
       <b>{actionLabel} · {effectStateLabel(actionState ?? 'unknown')}</b>
       <p>Operação <span className="mono">{action.id}</span>{action.accepted ? ' · aceitação recebida.' : ' · resposta não confirmada; consulte a operação original.'}</p>

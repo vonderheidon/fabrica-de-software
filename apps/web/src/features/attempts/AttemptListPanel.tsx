@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { AttemptPage } from '#contracts';
+import type { HttpAttemptPage as AttemptPage } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
+import { setAttemptProjectFilter } from './execution-requests.js';
 
 type Props = {
   projectId: string;
@@ -37,10 +38,10 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
     const onControllerEvent = (event: Event): void => {
       const notice = (event as CustomEvent<ControllerEventNotice>).detail;
       if (!notice) return;
-      const changedAttemptId = notice.attemptId ?? (notice.entity.type === 'attempt' ? notice.entity.id : null);
+      const changedAttemptId = notice.attempt_id ?? (notice.entity.type === 'attempt' ? notice.entity.id : null);
       if (!changedAttemptId) return;
       const currentPageContainsAttempt = state.page?.items.some((attempt) => attempt.id === changedAttemptId) ?? false;
-      const matchesProject = !projectId || notice.projectId === projectId || currentPageContainsAttempt;
+      const matchesProject = !projectId || notice.project_id === projectId || currentPageContainsAttempt;
       if (matchesProject) setReload((current) => current + 1);
     };
     const onResync = (): void => { setReload((current) => current + 1); };
@@ -56,7 +57,7 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
     let active = true;
     const controller = new AbortController();
     const query = new URLSearchParams({ limit: '25' });
-    if (projectId) query.set('projectId', projectId);
+    setAttemptProjectFilter(query, projectId);
     if (result) query.set('result', result);
     if (cursor) query.set('cursor', cursor);
     setState((current) => ({ ...current, error: null, requestId: null, loading: true }));
@@ -70,8 +71,8 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
   }, [projectId, result, cursor, reload, pageIndex]);
 
   function nextPage(): void {
-    const nextCursor = state.page?.nextCursor;
-    if (!state.page?.hasMore || !nextCursor || state.loading) return;
+    const nextCursor = state.page?.next_cursor;
+    if (!state.page?.has_more || !nextCursor || state.loading) return;
     setCursorStack((current) => current[visiblePageIndex + 1] === nextCursor ? current.slice(0, visiblePageIndex + 2) : [...current.slice(0, visiblePageIndex + 1), nextCursor]);
     setPageIndex(visiblePageIndex + 1);
   }
@@ -106,12 +107,12 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
     {page && page.items.length > 0 && <section className="card attempt-history-card">
       {state.loading && <p className="queue-page-status" role="status">Atualizando o histórico; a página atual permanece disponível.</p>}
       <div className="table-wrap"><table className="attempt-history-table"><thead><tr><th>Issue</th><th>Etapa / resultado</th><th>Atualizada</th><th>Ações</th></tr></thead><tbody>{page.items.map((attempt) => <tr key={attempt.id}>
-        <td><b>#{attempt.issueNumber}</b><br /><small className="mono">{attempt.id}</small></td>
+        <td><b>#{attempt.issue_number}</b><br /><small className="mono">{attempt.id}</small></td>
         <td>{attempt.phase}<br /><small>{attempt.result ?? 'Em andamento'}{attempt.suspension ? ` · ${attempt.suspension}` : ''}</small></td>
-        <td><time dateTime={new Date(attempt.updatedAtMs).toISOString()}>{new Date(attempt.updatedAtMs).toLocaleString('pt-BR')}</time></td>
-        <td><div className="row"><button type="button" onClick={() => onDetail(attempt.id, attempt.projectId)}>Consultar</button>{attempt.result && <button type="button" onClick={() => onPrepareRetry(attempt.id, attempt.projectId)}>Nova tentativa</button>}</div></td>
+        <td><time dateTime={new Date(attempt.updated_at_ms).toISOString()}>{new Date(attempt.updated_at_ms).toLocaleString('pt-BR')}</time></td>
+        <td><div className="row"><button type="button" onClick={() => onDetail(attempt.id, attempt.project_id)}>Consultar</button>{attempt.result && <button type="button" onClick={() => onPrepareRetry(attempt.id, attempt.project_id)}>Nova tentativa</button>}</div></td>
       </tr>)}</tbody></table></div>
-      <div className="attempt-pagination" aria-label="Paginação do histórico"><button type="button" onClick={previousPage} disabled={visiblePageIndex === 0 || state.loading}>Anterior</button><span>Página {visiblePageIndex + 1} · {page.hasMore ? 'há mais tentativas' : 'fim do histórico observado'}</span><button type="button" onClick={nextPage} disabled={!page.hasMore || !page.nextCursor || state.loading || state.error !== null}>Próxima</button></div>
+      <div className="attempt-pagination" aria-label="Paginação do histórico"><button type="button" onClick={previousPage} disabled={visiblePageIndex === 0 || state.loading}>Anterior</button><span>Página {visiblePageIndex + 1} · {page.has_more ? 'há mais tentativas' : 'fim do histórico observado'}</span><button type="button" onClick={nextPage} disabled={!page.has_more || !page.next_cursor || state.loading || state.error !== null}>Próxima</button></div>
       {state.loading && <p className="queue-page-status" role="status">Consultando página…</p>}
     </section>}
   </section>;

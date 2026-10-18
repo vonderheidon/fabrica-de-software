@@ -6,7 +6,7 @@ import { readSettings } from './settings.js';
 export function latestIssueAttempt(db: Database.Database, repositoryId: string, issueId: string): { id: string; active: boolean } | null {
   const row = db.prepare<[string | null, string, string], { id: string; result: string | null }>(`SELECT id,result FROM attempts
     WHERE account_id IS ? AND repository_id=? AND issue_id=? ORDER BY (result IS NULL) DESC,created_at_ms DESC,id DESC LIMIT 1`)
-    .get(readSettings(db).accountId, repositoryId, issueId);
+    .get(readSettings(db).account_id, repositoryId, issueId);
   return row ? { id: row.id, active: row.result === null } : null;
 }
 

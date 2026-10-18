@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import { isAbsolute } from 'node:path';
+import { Value } from '@sinclair/typebox/value';
+import { ExecutionCatalog } from '#contracts';
+import type { CatalogModel, ExecutionCatalog as ExecutionCatalogDto } from '#contracts';
 import type { ExecutionHost } from '../../index.js';
 import { ExecutionError } from '../../errors.js';
 import { executionLimits } from './wire.js';
@@ -35,13 +38,83 @@ export function inheritedAnchor(host: ExecutionHost | undefined): Anchor {
     ![host.maestriExecutable, host.ompExecutable, host.powershellExecutable].every(p => isAbsolute(p) && /\.exe$/i.test(p))) throw new ExecutionError('CLI_UNSUPPORTED');
   return { terminalId: env.MAESTRI_TERMINAL_ID.toLowerCase(), workspaceId: env.MAESTRI_WORKSPACE_ID.toLowerCase() };
 }
+const selectorToken = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
+function parseOmpVersion(stdout: string): string | null {
+  const match = /^omp\/([A-Za-z0-9][A-Za-z0-9._+-]{0,127})$/i.exec(stdout.trim());
+  return match?.[1] ?? null;
+}
+function unavailableCatalog(code: string, message: string, recovery: string): ExecutionCatalogDto {
+  return { state: 'unavailable', observed_at_ms: Date.now(), diagnostics: [{ code, message, recovery }] };
+}
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function catalogFromJson(stdout: string, version: string): ExecutionCatalogDto {
+  let decoded: unknown;
+  try { decoded = JSON.parse(stdout) as unknown; }
+  catch { return unavailableCatalog('OMP_CATALOG_INVALID', 'A resposta JSON do catálogo OMP é inválida.', 'Confira a compatibilidade da CLI OMP instalada e consulte novamente.'); }
+  if (!isRecord(decoded) || !Array.isArray(decoded.models)) {
+    return unavailableCatalog('OMP_CATALOG_INVALID', 'A resposta do catálogo OMP não contém a lista completa de modelos.', 'Confira a compatibilidade da CLI OMP instalada e consulte novamente.');
+  }
+  const rawModels: readonly unknown[] = decoded.models;
+  if (rawModels.length === 0) {
+    return unavailableCatalog('OMP_CATALOG_EMPTY', 'O OMP não retornou modelos selecionáveis para a configuração local.', 'Configure os providers no OMP e consulte novamente.');
+  }
+
+  const models: CatalogModel[] = [];
+  const seen = new Set<string>();
+  for (const item of rawModels) {
+    if (!isRecord(item) || item.kind !== 'chat' || typeof item.provider !== 'string' || !selectorToken.test(item.provider) ||
+      typeof item.id !== 'string' || !selectorToken.test(item.id) || item.selector !== `${item.provider}/${item.id}` ||
+      typeof item.name !== 'string' || !item.name.trim() || item.name.length > 512 ||
+      (item.thinking !== null && !Array.isArray(item.thinking))) {
+      return unavailableCatalog('OMP_CATALOG_INVALID', 'O catálogo OMP está parcial ou contém opções incompatíveis.', 'Confira o runtime e a configuração OMP antes de salvar perfis.');
+    }
+    const key = `${item.provider}/${item.id}`;
+    if (seen.has(key)) return unavailableCatalog('OMP_CATALOG_INVALID', 'O catálogo OMP contém modelos duplicados.', 'Confira o runtime OMP antes de salvar perfis.');
+    seen.add(key);
+    const efforts: string[] = [];
+    if (Array.isArray(item.thinking)) {
+      const rawEfforts: readonly unknown[] = item.thinking;
+      for (const effort of rawEfforts) {
+        if (typeof effort !== 'string' || !selectorToken.test(effort) || efforts.includes(effort)) {
+          return unavailableCatalog('OMP_CATALOG_INVALID', 'O catálogo OMP contém níveis de esforço incompatíveis.', 'Confira o runtime OMP antes de salvar perfis.');
+        }
+        efforts.push(effort);
+      }
+    }
+    models.push({
+      provider: item.provider, provider_name: item.provider, model: item.id, model_name: item.name, efforts,
+    });
+  }
+  const result: ExecutionCatalogDto = { state: 'loaded', executor: 'maestri-omp', executor_version: version, observed_at_ms: Date.now(), models };
+  if (!Value.Check(ExecutionCatalog, result)) {
+    return unavailableCatalog('OMP_CATALOG_INVALID', 'O catálogo OMP não atende ao contrato de compatibilidade.', 'Confira o runtime OMP antes de salvar perfis.');
+  }
+  return result;
+}
 export function createNative(host: ExecutionHost, cwd: string, run: CliRunner = runCli) {
   const invoke = async (args: readonly string[]) => {
     const result = await run(host.maestriExecutable, args, cwd, host.inheritedEnvironment);
     if (result.exitCode !== 0) throw new ExecutionError('CONTEXT_STALE');
     return result.stdout;
   };
+  const observeVersion = async (): Promise<string | null> => {
+    const reply = await run(host.ompExecutable, ['--version'], cwd, host.inheritedEnvironment);
+    return reply.exitCode === 0 ? parseOmpVersion(reply.stdout) : null;
+  };
   return {
+    async getCatalog(): Promise<ExecutionCatalogDto> {
+      let version: string | null;
+      try { version = await observeVersion(); }
+      catch { return unavailableCatalog('OMP_VERSION_UNAVAILABLE', 'A versão do OMP não pôde ser observada.', 'Confira o executável OMP da instalação e consulte novamente.'); }
+      if (!version) return unavailableCatalog('OMP_VERSION_UNAVAILABLE', 'A versão do OMP não pôde ser observada.', 'Confira o executável OMP da instalação e consulte novamente.');
+      let catalog;
+      try { catalog = await run(host.ompExecutable, ['models', '--json'], cwd, host.inheritedEnvironment); }
+      catch { return unavailableCatalog('OMP_CATALOG_UNAVAILABLE', 'A consulta local do catálogo OMP falhou.', 'Confira o executável e a configuração local do OMP; consulte novamente.'); }
+      if (catalog.exitCode !== 0) return unavailableCatalog('OMP_CATALOG_UNSUPPORTED', 'A CLI OMP instalada não confirmou a superfície JSON do catálogo.', 'Confira a ajuda e a compatibilidade do runtime OMP instalado.');
+      return catalogFromJson(catalog.stdout, version);
+    },
     async validate(): Promise<{ anchor: Anchor; ompVersion: string }> {
       const anchor = inheritedAnchor(host);
       // A real server query, not PATH, pipe existence or a debug environment echo.
@@ -49,10 +122,9 @@ export function createNative(host: ExecutionHost, cwd: string, run: CliRunner = 
       if (!/^\s*You:/m.test(list)) throw new ExecutionError('CONTEXT_STALE');
       const help = await invoke(['recruit', '--help']);
       if (!['--command', '--dir'].every(flag => help.includes(flag))) throw new ExecutionError('CLI_UNSUPPORTED');
-      const version = await run(host.ompExecutable, ['--version'], cwd, host.inheritedEnvironment);
-      const match = /^omp\/(18\.11\.1)\s*$/.exec(version.stdout.trim());
-      if (version.exitCode !== 0 || !match?.[1]) throw new ExecutionError('CLI_UNSUPPORTED');
-      return { anchor, ompVersion: match[1] };
+      const version = await observeVersion();
+      if (!version) throw new ExecutionError('CLI_UNSUPPORTED');
+      return { anchor, ompVersion: version };
     },
     async recruit(name: string, directory: string, command: string): Promise<void> {
       await invoke(['recruit', name, '--command', command, '--dir', directory]);

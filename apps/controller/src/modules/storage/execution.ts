@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { ExecutionQuestion, ImplementerResult, OperationId, PassageBinding, ReviewerResult, ScopeChange, type ExecutionProfile, type PassageResult } from '#contracts';
+import { ExecutionQuestion, ImplementerResult, OperationId, PassageBinding, ReviewerResult, ScopeChange, type ExecutionProfileValue, type PassageResult } from '#contracts';
 import { ExecutionError, type AnswerRecord, type ExecutionCode, type ExecutionEvent, type ExecutionPersistence, type PassageHandle, type PassageRecord, type QuestionRecord, type ResultRecord } from '../execution/index.js';
 import { attemptEvent, readAttempt, readCapture } from './attempts.js';
 import { digest } from './configuration-reads.js';
@@ -36,7 +36,7 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
     return { handle, binding: { attemptId: p.attempt_id, passageId: p.id, role: p.role, round: p.round_number, deliveryVersion: p.delivery_version },
       requestHash: p.request_hash ?? '', state: p.state, roleResource: JSON.parse(p.role_resource_json) as PassageRecord['roleResource'],
       terminalName: p.terminal_name, diagnostic: p.diagnostic,
-      effectiveProfile: p.effective_profile_json ? JSON.parse(p.effective_profile_json) as ExecutionProfile : null, executorVersion: p.executor_version };
+      effectiveProfile: p.effective_profile_json ? JSON.parse(p.effective_profile_json) as ExecutionProfileValue : null, executorVersion: p.executor_version };
   }
   function assertBinding(binding: PassageBinding): PassageRow {
     if (!Value.Check(PassageBinding, binding)) throw new ExecutionError('RESULT_INVALID');
@@ -110,8 +110,8 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
       capturedInput(row(handle));
       const p = row(handle); active(p);
       if (!p.request_hash || p.state !== 'starting') throw new ExecutionError('TRACKING_LOST');
-      const capture = readCapture(db, p.attempt_id); const expected = p.role === 'implementer' ? capture.configuration.implementerProfile : capture.configuration.reviewerProfile;
-      if (!expected || ['name', 'executor', 'provider', 'model', 'effort', 'guidance'].some(key => profile[key as keyof ExecutionProfile] !== expected[key as keyof ExecutionProfile]) ||
+      const capture = readCapture(db, p.attempt_id); const expected = p.role === 'implementer' ? capture.configuration.implementer_profile : capture.configuration.reviewer_profile;
+      if (!expected || ['name', 'executor', 'provider', 'model', 'effort', 'guidance'].some(key => profile[key as keyof ExecutionProfileValue] !== expected[key as keyof ExecutionProfileValue]) ||
         capture.tools.find(t => t.tool === 'omp')?.version !== executorVersion) throw new ExecutionError('PROFILE_MISMATCH');
       db.prepare("UPDATE passages SET effective_profile_json=?,executor_version=?,state='ready',tracking_state='tracked',diagnostic=NULL WHERE id=?")
         .run(JSON.stringify(profile), executorVersion, p.id);
@@ -176,10 +176,10 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
       if (old) return { ...input, questionId: old.id };
       active(p);
       const id = randomUUID();
-      const ttl = readCapture(db, p.attempt_id).configuration.timeDefaults.questionTtl;
+      const ttl = readCapture(db, p.attempt_id).configuration.time_defaults.question_ttl;
       if (ttl.state === 'configured' && (ttl.unit !== 'ms' || !Number.isSafeInteger(ttl.value))) throw new ExecutionError('INPUT_INVALID');
       db.prepare("INSERT INTO execution_questions(id,passage_id,attempt_id,question_hash,question_json,state,created_at_ms,ttl_ms,scope_json) VALUES (?,?,?,?,?,'pending',?,?,?)")
-        .run(id, p.id, p.attempt_id, input.sha256, JSON.stringify(input.question), Date.now(), ttl.state === 'configured' ? ttl.value : null, input.scopeChange ? JSON.stringify(input.scopeChange) : null);
+        .run(id, p.id, p.attempt_id, input.sha256, JSON.stringify(input.question), Date.now(), ttl.state === 'configured' ? ttl.value : null, input.scopeChange ? serializeScopeChange(input.scopeChange) : null);
       checkpoint(db, p.id, 'human');
       db.prepare("UPDATE attempts SET suspension='HUMAN_DECISION' WHERE id=?").run(p.attempt_id);
       event(p, 'question-raised', null);
@@ -236,3 +236,4 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
     }),
   };
 }
+import { serializeScopeChange } from './configuration-json.js';

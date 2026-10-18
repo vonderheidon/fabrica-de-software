@@ -1,7 +1,8 @@
+import { captureRetryBody, removeResourceBody } from './execution-requests.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Static } from '@sinclair/typebox';
-import { AttemptResources as AttemptResourcesSchema, FolderSurface as FolderSurfaceSchema, PassageInteraction as PassageInteractionSchema } from '#contracts';
-import type { AttemptDetail, AttemptResource, OperationAccepted, OperationView, ProducerResult, RemovalPlan } from '#contracts';
+import { HttpAttemptResources as AttemptResourcesSchema, HttpFolderSurface as FolderSurfaceSchema, HttpPassageInteraction as PassageInteractionSchema } from '#contracts';
+import type { HttpAttemptDetail as AttemptDetail, HttpAttemptResource as AttemptResource, OperationAccepted, OperationView, HttpProducerResult as ProducerResult, HttpRemovalPlan as RemovalPlan } from '#contracts';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 
 type AttemptResources = Static<typeof AttemptResourcesSchema>;
@@ -49,7 +50,7 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
             plans[resource.id] = { value: plan.data, etag: plan.etag };
             folders[resource.id] = folder;
           } else if (resource.kind === 'terminal') {
-            interactions[resource.passageId] = await requestJson<PassageInteraction>(`${base}/passages/${encodeURIComponent(resource.passageId)}/interaction`);
+            interactions[resource.passage_id] = await requestJson<PassageInteraction>(`${base}/passages/${encodeURIComponent(resource.passage_id)}/interaction`);
           }
         } catch (reason: unknown) {
           surfaceErrors[resource.id] = messageFor(reason);
@@ -97,7 +98,7 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
     setState(current => ({ ...current, busy: true, operation: null }));
     try {
       const { data } = await requestJsonWithMetadata<OperationAccepted>(path, { method: 'POST', headers: { ...headers, 'Idempotency-Key': id }, body: JSON.stringify(body) });
-      if (data.operationId !== id) throw new Error('O recibo não corresponde à operação solicitada.');
+      if (data.operation_id !== id) throw new Error('O recibo não corresponde à operação solicitada.');
       setState(current => {
         const actionErrors = { ...current.actionErrors };
         delete actionErrors[key];
@@ -118,22 +119,22 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
 
   const retryCaptureFor = useCallback((producerPassageId: string) => {
     if (!attemptEtag || !deliveryId || !captureEligible) return;
-    void send(`capture:${deliveryId}`, 'capture', `/api/v1/attempts/${encodeURIComponent(attemptId)}/deliveries/${encodeURIComponent(deliveryId)}/capture/retry`, { producerPassageId }, { 'If-Match': attemptEtag });
+    void send(`capture:${deliveryId}`, 'capture', `/api/v1/attempts/${encodeURIComponent(attemptId)}/deliveries/${encodeURIComponent(deliveryId)}/capture/retry`, captureRetryBody(producerPassageId), { 'If-Match': attemptEtag });
   }, [attemptEtag, attemptId, captureEligible, deliveryId, send]);
 
   const requestRemoval = useCallback(async (resourceId: string): Promise<void> => {
     const plan = state.plans[resourceId];
     if (!plan?.value.capability.available || !plan.etag) return;
-    await send(`remove:${resourceId}`, 'remove', `/api/v1/attempts/${encodeURIComponent(attemptId)}/resources/${encodeURIComponent(resourceId)}/remove`, { planHash: plan.value.planHash, confirmed: true }, { 'If-Match': plan.etag });
+    await send(`remove:${resourceId}`, 'remove', `/api/v1/attempts/${encodeURIComponent(attemptId)}/resources/${encodeURIComponent(resourceId)}/remove`, removeResourceBody(plan.value.plan_hash), { 'If-Match': plan.etag });
   }, [attemptId, send, state.plans]);
 
   const openFolder = useCallback((resourceId: string) => {
-    if (!state.folders[resourceId]?.openCapability.available) return;
+    if (!state.folders[resourceId]?.open_capability.available) return;
     void send(`folder:${resourceId}`, 'open-folder', `/api/v1/attempts/${encodeURIComponent(attemptId)}/resources/${encodeURIComponent(resourceId)}/folder/open`, {});
   }, [attemptId, send, state.folders]);
 
   const openTerminal = useCallback((passageId: string) => {
-    if (!state.interactions[passageId]?.openCapability.available) return;
+    if (!state.interactions[passageId]?.open_capability.available) return;
     void send(`terminal:${passageId}`, 'open-terminal', `/api/v1/attempts/${encodeURIComponent(attemptId)}/passages/${encodeURIComponent(passageId)}/interaction/open`, {});
   }, [attemptId, send, state.interactions]);
 
@@ -153,7 +154,7 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
   const cancelStatus = state.operation?.kind === 'cancel'
     ? state.operation.view?.state === 'failed' ? 'failed'
       : state.resources?.cleanup === 'uncertain' ? 'cleanup-uncertain'
-      : state.resources?.entries.filter(resource => resource.kind === 'terminal').every(resource => resource.stopState === 'confirmed') && state.resources.entries.some(resource => resource.kind === 'terminal') ? 'stopped'
+      : state.resources?.entries.filter(resource => resource.kind === 'terminal').every(resource => resource.stop_state === 'confirmed') && state.resources.entries.some(resource => resource.kind === 'terminal') ? 'stopped'
         : state.operation.accepted ? 'accepted' : 'uncertain'
     : null;
 

@@ -18,7 +18,7 @@ it('keeps SSE alive beyond the ordinary handler deadline without sending a secon
     errors.push(error.code ?? 'UNKNOWN');
     reply.raw.end();
   });
-  const security = installSecurity(app, loadConfiguration({}, directory), storage.getSettings().installationId);
+  const security = installSecurity(app, loadConfiguration({}, directory), storage.getSettings().installation_id);
   installEventRoutes(app, storage, security);
   const read = storage.getEvents.bind(storage);
   vi.spyOn(storage, 'getEvents').mockImplementationOnce(query => read(query)).mockImplementation(() => { throw new Error('End stream after the first polling interval'); });

@@ -81,17 +81,17 @@ describe('revocation and explicit retry', () => {
     f.issue.memberships[0]!.statusValues[0]!.optionId = 'PROGRESS';
     f.issue.body = f.issue.body.replace('- Same text', '- Current criterion');
     f.observation.base!.sha = 'd'.repeat(40); f.observation.remote!.branch!.sha = 'd'.repeat(40);
-    const saved = await f.preparations.createPreparation(f.projectId, { issueId: f.issue.id, deliveryMode: 'icr', guidance: 'Revised retry guidance', overrides: {}, previousAttemptId: f.id }, f.context());
+    const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: 'Revised retry guidance', overrides: {}, previous_attempt_id: f.id }, f.context());
     expect(saved.view.preparation.prerequisites.map(r => r.code)).toEqual(['EXECUTOR_REVALIDATION_REQUIRED']);
     const p = saved.view.preparation;
-    const op = await f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summaryHash, authorized: true }, { ...f.context(), expectedRevision: saved.etag });
+    const op = await f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true }, { ...f.context(), expectedRevision: saved.etag });
     await f.pipeline.drain(); const fresh = f.storage.getAttemptCapture(op.resource.id);
     expect(op.resource.id).not.toBe(f.id); expect(fresh.baseSha).toBe('d'.repeat(40)); expect(fresh.criteriaDigest).not.toBe(oldCapture.criteriaDigest);
     expect(fresh.configuration.guidance).toContain('Revised retry guidance'); expect(f.storage.getAttemptCapture(f.id)).toEqual(oldCapture);
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(2); expect(f.execution.startPassage).toHaveBeenCalledTimes(2); expect(f.execution.continuePassage).not.toHaveBeenCalled();
     expect(f.storage.getResources(f.id).cleanup).not.toBe('complete');
     expect(() => f.persistence.confirmReady({ passageId: oldStatus.passageId }, f.profile, '18.11.1')).toThrow();
-    await expect(f.preparations.createPreparation(f.projectId, { issueId: f.issue.id, deliveryMode: 'icr', guidance: '', overrides: {}, previousAttemptId: op.resource.id }, f.context())).rejects.toMatchObject({ code: 'ATTEMPT_ACTIVE' });
+    await expect(f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {}, previous_attempt_id: op.resource.id }, f.context())).rejects.toMatchObject({ code: 'ATTEMPT_ACTIVE' });
   });
   it.each(['assignee','blocked','closed','membership'])('does not waive %s eligibility for explicit retry', async kind => {
     const f = await fixture(); f.persistence.recordCancellation(f.id, randomUUID());
@@ -99,17 +99,17 @@ describe('revocation and explicit retry', () => {
     if (kind === 'blocked') f.issue.blockers = [{ id: 'I_blocker', number: 3, title: 'Blocker', state: 'OPEN', url: 'https://github.com/test-org/repo/issues/3' }];
     if (kind === 'closed') f.issue.state = 'CLOSED';
     if (kind === 'membership') f.issue.memberships = [];
-    const saved = await f.preparations.createPreparation(f.projectId, { issueId: f.issue.id, deliveryMode: 'icr', guidance: '', overrides: {}, previousAttemptId: f.id }, f.context());
+    const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {}, previous_attempt_id: f.id }, f.context());
     const p = saved.view.preparation;
-    await expect(f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summaryHash, authorized: true }, { ...f.context(), expectedRevision: saved.etag })).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
+    await expect(f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true }, { ...f.context(), expectedRevision: saved.etag })).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
   });
   it('migrates v9 without replacing captures/results; restart revokes active coordination and marks native intentions unknown', async () => {
-    const f = await fixture(); const a = f.storage.getAttempt(f.id); const capture = f.storage.getAttemptCapture(f.id); const instance = f.storage.getSettings().installationId;
+    const f = await fixture(); const a = f.storage.getAttempt(f.id); const capture = f.storage.getAttemptCapture(f.id); const instance = f.storage.getSettings().installation_id;
     await f.pipeline.close(); f.storage.close(); removeRecoverySchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-      expect(reopened.getDiagnostics().schemaVersion).toBe(18); expect(reopened.getSettings().installationId).toBe(instance);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(instance);
       expect(reopened.getAttemptCapture(f.id)).toEqual(capture); expect(reopened.getAttempt(f.id).result).toBe('interrupted');
       expect(() => reopened.executionPersistence().confirmReady({ passageId: a.passageId }, f.profile, '18.11.1')).toThrow();
     } finally { reopened.close(); }
@@ -137,8 +137,8 @@ describe('removal and native opening', () => {
       expect(f.storage.getOperation(c.operationId)?.state).toBe('accepted'); gate();
     });
     const op = await f.pipeline.removeResource(f.id, f.resource.id, body, c); await f.pipeline.drain();
-    expect(f.storage.getOperation(op.operationId)?.state).toBe('succeeded'); expect(f.storage.getResources(f.id).entries.find(r => r.id === f.resource.id)?.removed).toBe(true);
-    expect((await f.pipeline.removeResource(f.id, f.resource.id, body, c)).operationId).toBe(op.operationId);
+    expect(f.storage.getOperation(op.operation_id)?.state).toBe('succeeded'); expect(f.storage.getResources(f.id).entries.find(r => r.id === f.resource.id)?.removed).toBe(true);
+    expect((await f.pipeline.removeResource(f.id, f.resource.id, body, c)).operation_id).toBe(op.operation_id);
     expect(f.removeEnvironment).toHaveBeenCalledTimes(1); expect(f.storage.getRounds(f.id)).toEqual(history);
     expect(f.storage.getProducerResult(history.entries[0]!.deliveryId)).toMatchObject({ result: f.result });
     expect((await f.pipeline.getFolder(f.id, f.resource.id)).openCapability).toEqual({ available: false, reason: 'RESOURCE_REMOVED' });
@@ -216,7 +216,7 @@ it('protects recovery endpoints, validates closed bodies, returns durable cancel
   try {
     expect((await app.inject({ method: 'POST', url, headers: { host, origin }, payload: {} })).statusCode).toBe(401);
     const session = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host, origin, 'x-factory-client': 'web', 'content-type': 'application/json' }, payload: {} });
-    const headers = { host, origin, cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrfToken, 'idempotency-key': randomUUID(), 'content-type': 'application/json', 'if-match': '"obsolete"' };
+    const headers = { host, origin, cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrf_token, 'idempotency-key': randomUUID(), 'content-type': 'application/json', 'if-match': '"obsolete"' };
     expect((await app.inject({ method: 'POST', url, headers, payload: { pid: 123 } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'POST', url, headers: { ...headers, 'x-csrf-token': '' }, payload: {} })).statusCode).toBe(403);
     const accepted = await app.inject({ method: 'POST', url, headers, payload: {} }); expect(accepted.statusCode, accepted.body).toBe(202);

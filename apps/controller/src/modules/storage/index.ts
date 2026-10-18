@@ -24,8 +24,8 @@ export type { VerificationPlan, CheckCompletion } from './verification.js';
 import type { CatalogQuery, ConfigurationView, EventPage, EventQuery, FactorySettings, ProjectDetail, ProjectPage, SettingsView } from '#contracts';
 import { StorageError } from './errors.js';
 import { applyMigrations, inspectHistory, loadMigrations } from './migrations.js';
-import { readSettings, seedSettings } from './settings.js';
-import { OperationError, readOperation, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
+import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, seedSettings } from './settings.js';
+import { hasUncertainAccountCleanup, OperationError, readOperation, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
 import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readCapture, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
 import { createExecutionPersistence } from './execution.js';
 import { acceptRecovery, recoverRecovery, finishRecovery, readResources, readOwnedPassage, resourceSnapshot, validatePreviousAttempt, type RecoveryCommand, type ResourceSnapshot } from './recovery.js';
@@ -67,6 +67,7 @@ export interface StorageDiagnostics {
 }
 
 export interface Storage {
+  captureLocalHost(): void;
   getOperationSummary(query: OperationSummaryQuery): ReturnType<typeof readOperationSummary>;
   getContextDiagnostics(context: DiagnosticContext): ReturnType<typeof readContextDiagnostics>;
   getDiagnosticContext(context: DiagnosticContext): ReturnType<typeof diagnosticContext>;
@@ -148,10 +149,13 @@ export interface Storage {
   recoverPreparationCommand(command: PreparationCommand): StoredOperation | null;
   savePreparation(input: SavePreparation): StoredOperation;
   getSettings(): FactorySettings;
+  getGitHubExecutablePath(): string | null;
+  getLinkedGitHubAccount(): { id: string; login: string } | null;
   getDiagnostics(): StorageDiagnostics;
   checkHealth(): void;
   getSettingsETag(): string;
   getOperation(operationId: string): StoredOperation | null;
+  hasUncertainAccountCleanup(operationId: string): boolean;
   saveTimeDefaults(input: SaveTimeDefaults): StoredOperation;
   getEvents(query: EventQuery, through?: string): EventPage;
   getGlobalConfiguration(): Editable<SettingsView>;
@@ -205,7 +209,7 @@ export function openStorage(options: StorageOptions): Storage {
     }
     const connection = db;
     const resultListeners = new Set<(binding: PassageBinding) => void>();
-    applyMigrations(connection, migrations, () => seedSettings(connection, directory));
+    applyMigrations(connection, migrations, () => seedSettings(connection));
     const tables = connection.prepare<[], { name: string; strict: number }>(
       "SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND name NOT LIKE 'sqlite_%'",
     ).all();
@@ -218,6 +222,7 @@ export function openStorage(options: StorageOptions): Storage {
       foreignKeys, journalMode, synchronous, busyTimeoutMs: timeout, schemaVersion: migrations.length,
     });
     return {
+      captureLocalHost: () => guarded(() => captureLocalHost(connection)),
       listAttempts: query => guarded(() => connection.transaction(() => readAttemptPage(connection, query))()),
       getAttemptDetail: (id, query) => guarded(() => connection.transaction(() => readAttemptDetail(connection, id, query))()),
       getDeliveryDetail: (id, query) => guarded(() => connection.transaction(() => readDeliveryDetail(connection, id, query))()),
@@ -235,13 +240,13 @@ export function openStorage(options: StorageOptions): Storage {
       recoverPublication: command => guarded(() => connection.transaction(() => recoverPublication(connection, command))()),
       acceptPublication: command => acceptPublication(connection, command),
       finishPublicationRequest: (id, state, diagnostic) => finishPublicationRequest(connection, id, state, diagnostic),
-      getAuthorityCandidates: () => guarded(() => connection.prepare<[string | null], { id: string }>('SELECT id FROM attempts WHERE account_id IS ? AND result IS NULL ORDER BY created_at_ms,id').all(readSettings(connection).accountId).map(a => a.id)),
+      getAuthorityCandidates: () => guarded(() => connection.prepare<[string | null], { id: string }>('SELECT id FROM attempts WHERE account_id IS ? AND result IS NULL ORDER BY created_at_ms,id').all(readSettings(connection).account_id).map(a => a.id)),
       recordControllerAccount: (expectedRevision, observedAccountId) => guarded(() => connection.transaction(() => {
         const settings = readSettings(connection);
         if (settings.revision !== expectedRevision) throw new OperationError(412,'REVISION_CONFLICT','The configured account changed during observation.');
         connection.prepare(`INSERT INTO controller_authority(id,configured_account_id,observed_account_id,dispatch_paused,observed_at_ms) VALUES ('local',?,?,?,?)
           ON CONFLICT(id) DO UPDATE SET configured_account_id=excluded.configured_account_id,observed_account_id=excluded.observed_account_id,dispatch_paused=excluded.dispatch_paused,observed_at_ms=excluded.observed_at_ms`)
-          .run(settings.accountId,observedAccountId,observedAccountId !== null && observedAccountId === settings.accountId ? 0 : 1,Date.now());
+          .run(settings.account_id,observedAccountId,observedAccountId !== null && observedAccountId === settings.account_id ? 0 : 1,Date.now());
       }).immediate()),
       getPassageForAttempt: (id, passageId) => guarded(() => connection.transaction(() => readOwnedPassage(connection, id, passageId))()),
       getResources: id => guarded(() => connection.transaction(() => readResources(connection, id))()),
@@ -265,7 +270,7 @@ export function openStorage(options: StorageOptions): Storage {
       expireLimits: () => guarded(() => connection.transaction(() => expireLimits(connection)).immediate()),
       getScopeCandidates: () => guarded(() => connection.transaction(() => connection.prepare<[string | null], PassageBinding>(`SELECT p.attempt_id AS attemptId,p.id AS passageId,p.role,p.round_number AS round,p.delivery_version AS deliveryVersion
         FROM passages p JOIN attempts a ON a.id=p.attempt_id WHERE a.account_id IS ? AND a.result IS NULL AND a.suspension IS NULL AND p.state='ready'
-        AND NOT EXISTS (SELECT 1 FROM passage_results r WHERE r.passage_id=p.id)`).all(readSettings(connection).accountId))()),
+        AND NOT EXISTS (SELECT 1 FROM passage_results r WHERE r.passage_id=p.id)`).all(readSettings(connection).account_id))()),
       getRounds: id => guarded(() => connection.transaction(() => readRounds(connection, id))()),
       getProducerResult: id => guarded(() => connection.transaction(() => {
         const delivery = deliveryView(connection, id).delivery;
@@ -311,9 +316,11 @@ export function openStorage(options: StorageOptions): Storage {
       failCreation: (id, diagnostic) => failCreation(connection, id, diagnostic),
       interruptCreations: () => interruptCreations(connection),
       getSettings: () => readSettings(connection),
+      getGitHubExecutablePath: () => guarded(() => readGitHubExecutablePath(connection)),
+      getLinkedGitHubAccount: () => guarded(() => readLinkedGitHubAccount(connection)),
       getSettingsETag: () => {
         const settings = readSettings(connection);
-        return settingsETag(settings.installationId, settings.revision);
+        return settingsETag(settings.installation_id, settings.revision);
       },
       getOperation: (id) => {
         try { return connection.transaction(() => readOperation(connection, id))(); }
@@ -322,6 +329,7 @@ export function openStorage(options: StorageOptions): Storage {
           throw new StorageError('OPERATION_DATA_INVALID', { cause: error });
         }
       },
+      hasUncertainAccountCleanup: (id) => guarded(() => connection.transaction(() => hasUncertainAccountCleanup(connection, id))()),
       saveTimeDefaults: (input) => saveTimeDefaults(connection, input),
       getEvents: (query, through) => readEvents(connection, query, through),
       getOperationSummary: query => guarded(() => connection.transaction(() => readOperationSummary(connection, query))()),
@@ -335,7 +343,7 @@ export function openStorage(options: StorageOptions): Storage {
         const view = readSettingsView(connection); return { view, etag: configurationETag(view) };
       })()),
       getProject: (id) => guarded(() => connection.transaction(() => {
-        const view = readProject(connection, id); return { view, etag: `"${digest([view.project.id, view.project.currentRevisionId, view.project.revision])}"` };
+        const view = readProject(connection, id); return { view, etag: `"${digest([view.project.id, view.project.current_revision_id, view.project.revision])}"` };
       })()),
       listProjects: (query) => guarded(() => connection.transaction(() => readProjects(connection, query))()),
       getConfiguration: (id) => guarded(() => connection.transaction(() => {
