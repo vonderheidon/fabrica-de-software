@@ -19,7 +19,10 @@ export function diagnostic(check: DiagnosticCheck, code: string, cause: string, 
   const requirements: Record<DiagnosticCheck, string[]> = {
     configuration: ['RF-81', 'RF-88'], github_identity: ['RF-38', 'RF-88'], maestri_context: ['INT-01', 'INT-02', 'RF-88'], resources: ['RF-65', 'RF-88'],
   };
-  const value = { check, code, cause, recovery, facts, state, affectedRequirements: requirements[check], observedAtMs: Date.now() };
+  const configurationSetupIssue = check === 'configuration' && (code.startsWith('ONBOARDING_') || code.startsWith('PROJECTS_ROOT_') ||
+    code === 'IMPLEMENTER_PROFILE_REQUIRED' || code === 'REVIEWER_PROFILE_REQUIRED' || code === 'PROFILES_REQUIRED');
+  const value = { check, code, cause, recovery, facts, state,
+    affectedRequirements: configurationSetupIssue ? ['RF-23', 'RF-24', 'RF-25'] : requirements[check], observedAtMs: Date.now() };
   if (!Value.Check(ContextDiagnostic, value)) throw new StorageError('OPERATION_DATA_INVALID');
   return value;
 }
@@ -44,11 +47,24 @@ export function diagnosticContext(db: Database.Database, context: DiagnosticCont
     if (!c) throw new OperationError(404, 'CREATION_NOT_FOUND', 'Creation not found in this account.');
     creationId = context.id; projectId = c.project_id; revision = c.revision; reason = c.diagnostic;
   }
-  const profileCount = db.prepare<[], { n: number }>('SELECT count(*) AS n FROM execution_profiles').get()!.n;
-  const profileRevisions = db.prepare<[], { id: string; revision: number }>('SELECT id,revision FROM execution_profiles ORDER BY id').all();
+  const profileCounts = db.prepare<[], { total: number; implementer: number; reviewer: number }>(`SELECT count(*) AS total,
+    coalesce(sum(CASE WHEN profile_type = 'implementer' THEN 1 ELSE 0 END), 0) AS implementer,
+    coalesce(sum(CASE WHEN profile_type = 'reviewer' THEN 1 ELSE 0 END), 0) AS reviewer
+    FROM execution_profiles WHERE deleted_at_ms IS NULL`).get();
+  if (!profileCounts) throw new StorageError('PROFILE_DATA_INVALID');
+  const profileCount = profileCounts.total;
+  const profileRevisions = db.prepare<[], { id: string; revision: number }>(`SELECT id,revision FROM execution_profiles
+    WHERE deleted_at_ms IS NULL ORDER BY id`).all();
+  const onboardingFacts = db.prepare<[], { completed_at_ms: number | null; projects_root_confirmed_at_ms: number | null }>(
+    "SELECT onboarding_completed_at_ms AS completed_at_ms, projects_root_confirmed_at_ms FROM factory_settings WHERE id='local'",
+  ).get();
+  if (!onboardingFacts) throw new StorageError('SETTINGS_INVALID');
   const projectRevision = projectId ? readProject(db, projectId).project.current_revision_id : null;
   const facts: ContextDiagnostic['facts'] = { expectedAccountId: settings.account_id, expectedHost: settings.designated_host, observedHost: hostname(),
-    profileCount, ...(projectId ? { projectId } : {}), ...(attemptId ? { attemptId } : {}), ...(creationId ? { creationId } : {}) };
+    profileCount, implementerProfileCount: profileCounts.implementer ?? 0, reviewerProfileCount: profileCounts.reviewer ?? 0,
+    onboardingCompletedAtMs: onboardingFacts.completed_at_ms, projectsRootConfigured: settings.projects_root !== null,
+    projectsRootConfirmed: settings.projects_root !== null && onboardingFacts.projects_root_confirmed_at_ms !== null,
+    ...(projectId ? { projectId } : {}), ...(attemptId ? { attemptId } : {}), ...(creationId ? { creationId } : {}) };
   return { context, projectId, attemptId, creationId, revision, tracking, reason, facts, settings,
     stamp: digest([settings.installation_id, settings.account_id, settings.revision, context, revision, projectRevision, profileRevisions]),
     supportedChecks: supportedChecks(context.scope) };
@@ -56,12 +72,32 @@ export function diagnosticContext(db: Database.Database, context: DiagnosticCont
 
 export function configurationDiagnostics(db: Database.Database, context: DiagnosticContext): ContextDiagnostic[] {
   const c = diagnosticContext(db, context); const items: ContextDiagnostic[] = [];
-  if (!c.settings.account_id) items.push(diagnostic('configuration', 'ACCOUNT_UNOBSERVED', 'Conta GitHub ainda não vinculada a uma observação.', 'Vincule a conta observada no host autorizado.', c.facts));
+  const onboardingCompleted = typeof c.facts.onboardingCompletedAtMs === 'number';
+  if (!c.settings.account_id) items.push(diagnostic('configuration', onboardingCompleted ? 'ONBOARDING_ACCOUNT_RELINK_REQUIRED' : 'ACCOUNT_UNOBSERVED',
+    onboardingCompleted ? 'A configuração inicial foi concluída, mas não há uma conta GitHub vinculada no momento.' : 'Conta GitHub ainda não vinculada a uma observação.',
+    'Abra Configuração > GitHub e vincule uma conta elegível observada no host autorizado.', c.facts));
+  if (context.scope === 'host' && c.settings.projects_root === null) items.push(diagnostic('configuration',
+    onboardingCompleted ? 'ONBOARDING_PROJECTS_ROOT_REQUIRED' : 'PROJECTS_ROOT_REQUIRED',
+    onboardingCompleted ? 'A configuração inicial foi concluída, mas a pasta dos projetos não está configurada.' : 'A pasta dos projetos ainda não está configurada.',
+    'Abra Configuração e escolha uma pasta dos projetos com acesso e gravação.', c.facts));
+  else if (context.scope === 'host' && c.facts.projectsRootConfirmed !== true) items.push(diagnostic('configuration',
+    onboardingCompleted ? 'ONBOARDING_PROJECTS_ROOT_CONFIRMATION_REQUIRED' : 'PROJECTS_ROOT_CONFIRMATION_REQUIRED',
+    onboardingCompleted ? 'A pasta dos projetos precisa ser confirmada novamente.' : 'A pasta dos projetos ainda não foi confirmada para acesso e gravação.',
+    'Abra Configuração e confirme novamente a pasta dos projetos.', c.facts));
   if (c.projectId) {
     for (const p of readProject(db, c.projectId).prerequisites.slice(0, 90)) items.push(diagnostic('configuration', p.code, p.message, p.recovery, c.facts,
       p.code === 'LOCAL_CHANGES_EXCLUDED' ? 'passed' : 'blocked'));
-  } else if (context.scope === 'host' && c.facts.profileCount === 0) {
-    items.push(diagnostic('configuration', 'PROFILES_REQUIRED', 'Nenhum perfil de execução configurado.', 'Configure os perfis exatos de Implementador e Revisor.', c.facts));
+  } else if (context.scope === 'host') {
+    const implementers = Number(c.facts.implementerProfileCount ?? 0);
+    const reviewers = Number(c.facts.reviewerProfileCount ?? 0);
+    if (c.facts.profileCount === 0) items.push(diagnostic('configuration', 'PROFILES_REQUIRED', 'Nenhum perfil de execução configurado.',
+      'Abra Configuração > Perfis e crie um perfil Implementador e um perfil Revisor.', c.facts));
+    if (implementers === 0) items.push(diagnostic('configuration', onboardingCompleted ? 'ONBOARDING_IMPLEMENTER_PROFILE_REQUIRED' : 'IMPLEMENTER_PROFILE_REQUIRED',
+      onboardingCompleted ? 'A configuração inicial foi concluída, mas falta um perfil Implementador ativo.' : 'Falta um perfil Implementador ativo.',
+      'Abra Configuração > Perfis e crie um perfil Implementador.', c.facts));
+    if (reviewers === 0) items.push(diagnostic('configuration', onboardingCompleted ? 'ONBOARDING_REVIEWER_PROFILE_REQUIRED' : 'REVIEWER_PROFILE_REQUIRED',
+      onboardingCompleted ? 'A configuração inicial foi concluída, mas falta um perfil Revisor ativo.' : 'Falta um perfil Revisor ativo.',
+      'Abra Configuração > Perfis e crie um perfil Revisor.', c.facts));
   }
   if (c.tracking && c.tracking !== 'tracked') items.push(diagnostic('resources', 'TRACKING_LOST', 'Acompanhamento da tentativa indisponível.', 'Consulte os recursos preservados; use uma nova tentativa para executar novamente.', c.facts));
   if (c.reason) items.push(diagnostic('configuration', /^[A-Z][A-Z0-9_]{0,127}$/.test(c.reason) ? c.reason : 'CONTEXT_BLOCKED', 'O contexto tem um impedimento registrado.', 'Consulte a criação ou tentativa correspondente e sua recuperação.', c.facts));
@@ -121,7 +157,10 @@ export function finishDiagnostic(db: Database.Database, command: DiagnosticComma
     const s = readSettings(db);
     const sameScope = s.installation_id === row.installation_id && s.account_id === row.account_id;
     const unchanged = sameScope && diagnosticContext(db, context).stamp === row.context_stamp;
-    if (results.length !== checks.length || new Set(results.map(r => r.check)).size !== checks.length || results.some(r => !checks.includes(r.check) || !Value.Check(ContextDiagnostic, r))) throw new StorageError('OPERATION_DATA_INVALID');
+    if (results.length > 104 || checks.some(check => {
+      const count = results.filter(result => result.check === check).length;
+      return count < 1 || count > (check === 'configuration' ? 101 : 1);
+    }) || results.some(r => !checks.includes(r.check) || !Value.Check(ContextDiagnostic, r))) throw new StorageError('OPERATION_DATA_INVALID');
     const completed = unchanged ? results : checks.map(check => diagnostic(check, 'DIAGNOSTIC_CONTEXT_CHANGED', 'O contexto mudou durante a verificação.', 'Releia o contexto e solicite nova verificação.', {}, 'unavailable'));
     const now = Math.max(Date.now(), row.created_at_ms);
     db.prepare("UPDATE diagnostic_runs SET state=?,diagnostics_json=?,completed_at_ms=? WHERE operation_id=? AND state='accepted'")

@@ -31,9 +31,52 @@ function profileEffortIsNullable(columns: readonly ProfileColumn[]): boolean {
   return columns.find((column) => column.name === 'effort')?.notnull === 0;
 }
 
+function hasProfileLifecycleObjects(db: Database.Database): boolean {
+  const index = db.prepare<[], { unique: number; partial: number }>(
+    "SELECT \"unique\", partial FROM pragma_index_list('execution_profiles') WHERE name='execution_profiles_live_name'",
+  ).get();
+  if (index?.unique !== 1 || index.partial !== 1) return false;
+  const triggerNames = new Set(db.prepare<[], { name: string }>(`SELECT name FROM sqlite_schema WHERE type='trigger'
+    AND name IN ('execution_profiles_lifecycle_insert_valid', 'execution_profiles_lifecycle_update_valid', 'execution_profiles_physical_delete_forbidden')`).all().map((row) => row.name));
+  return ['execution_profiles_lifecycle_insert_valid', 'execution_profiles_lifecycle_update_valid', 'execution_profiles_physical_delete_forbidden']
+    .every((name) => triggerNames.has(name));
+}
+
+function profileLifecycleConstraints(sql: string): string {
+  const start = sql.indexOf('CREATE UNIQUE INDEX IF NOT EXISTS execution_profiles_live_name');
+  if (start < 0) throw new StorageError('MIGRATION_RESOURCES_INVALID');
+  return sql.slice(start);
+}
+
+function capturedProfileIndexes(sql: string): string {
+  const start = sql.indexOf('CREATE INDEX IF NOT EXISTS attempts_active_implementer_profile');
+  if (start < 0) throw new StorageError('MIGRATION_RESOURCES_INVALID');
+  return sql.slice(start);
+}
+
+function freshProfileLifecycleTable(sql: string): string {
+  return `DROP TABLE execution_profiles;
+    CREATE TABLE execution_profiles (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL CHECK(length(trim(name)) > 0),
+      profile_type TEXT NOT NULL CHECK(profile_type IN ('implementer', 'reviewer')),
+      name_key TEXT NOT NULL CHECK(length(trim(name_key)) > 0),
+      executor TEXT NOT NULL CHECK(executor = 'maestri-omp'),
+      provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+      model TEXT NOT NULL CHECK(length(trim(model)) > 0),
+      effort TEXT CHECK(effort IS NULL OR length(trim(effort)) > 0),
+      guidance TEXT NOT NULL,
+      revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+      created_at_ms INTEGER NOT NULL CHECK(created_at_ms >= 0),
+      updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms >= created_at_ms),
+      deleted_at_ms INTEGER CHECK(deleted_at_ms IS NULL OR deleted_at_ms >= created_at_ms)
+    ) STRICT;
+    ${profileLifecycleConstraints(sql)}`;
+}
+
 export function loadMigrations(): readonly Migration[] {
   const directory = new URL('./migrations/', import.meta.url);
-  const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql', '019_initial_configuration_facts.sql', '020_local_installation.sql', '021_inference_limits.sql', '022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql'];
+  const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql', '019_initial_configuration_facts.sql', '020_local_installation.sql', '021_inference_limits.sql', '022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql', '024_diagnostic_configuration_results.sql'];
   try {
     const actual = readdirSync(directory).filter((name) => name.endsWith('.sql')).sort();
     if (JSON.stringify(files) !== JSON.stringify(actual)) {
@@ -42,7 +85,7 @@ export function loadMigrations(): readonly Migration[] {
     return files.map((name, index) => {
       const sql = readFileSync(new URL(name, directory), 'utf8');
       return { version: index + 1, name, sql, checksum: createHash('sha256').update(sql).digest('hex'),
-        ...(name === '022_nullable_profile_effort.sql' ? { requiresForeignKeysOff: true } : {}) };
+        ...(['022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql'].includes(name) ? { requiresForeignKeysOff: true } : {}) };
     });
   } catch (error) {
     throw new StorageError('MIGRATION_RESOURCES_INVALID', { cause: error });
@@ -152,8 +195,12 @@ export function applyMigrations(
           if (migration.name === '022_nullable_profile_effort.sql' && profileEffortIsNullable(columns)) {
             // The database already has the target column shape; retain its typed profile rows.
           } else if (migration.name === '023_execution_profile_lifecycle.sql' && hasProfileLifecycleColumns(columns)) {
-            db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS execution_profiles_live_name
-              ON execution_profiles(name_key) WHERE deleted_at_ms IS NULL`);
+            if (!hasProfileLifecycleObjects(db)) throw new StorageError('PROFILE_SCHEMA_INCOMPATIBLE');
+            // A complete profile schema can be recognized while repairing its additive capture indexes.
+            db.exec(capturedProfileIndexes(migration.sql));
+          } else if (migration.name === '023_execution_profile_lifecycle.sql' && profileTableExists &&
+            (db.prepare<[], { count: number }>('SELECT count(*) AS count FROM execution_profiles').get()?.count ?? 0) === 0) {
+            db.exec(freshProfileLifecycleTable(migration.sql));
           } else {
             db.exec(migration.sql);
           }

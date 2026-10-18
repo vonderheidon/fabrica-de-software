@@ -28,3 +28,17 @@ WHEN NEW.id <> OLD.id OR NEW.created_at_ms <> OLD.created_at_ms
 BEGIN
   SELECT RAISE(ABORT, 'PROFILE_DATA_INVALID');
 END;
+
+CREATE TRIGGER execution_profiles_physical_delete_forbidden
+BEFORE DELETE ON execution_profiles
+BEGIN
+  SELECT RAISE(ABORT, 'IMMUTABLE_RECORD');
+END;
+
+CREATE INDEX IF NOT EXISTS attempts_active_implementer_profile
+  ON attempts(json_extract(capture_json, '$.configuration.implementerProfile.id'))
+  WHERE result IS NULL AND json_extract(capture_json, '$.formatVersion') = 1;
+
+CREATE INDEX IF NOT EXISTS attempts_active_reviewer_profile
+  ON attempts(json_extract(capture_json, '$.configuration.reviewerProfile.id'))
+  WHERE result IS NULL AND json_extract(capture_json, '$.formatVersion') = 1;

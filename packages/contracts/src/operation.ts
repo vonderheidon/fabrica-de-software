@@ -31,6 +31,11 @@ export const ContextDiagnostic = Type.Object({
     projectId: Type.Optional(OperationId), creationId: Type.Optional(OperationId), attemptId: Type.Optional(OperationId),
     resourceCount: Type.Optional(Type.Integer({ minimum: 0 })), uncertainCount: Type.Optional(Type.Integer({ minimum: 0 })),
     profileCount: Type.Optional(Type.Integer({ minimum: 0 })),
+    implementerProfileCount: Type.Optional(Type.Integer({ minimum: 0 })),
+    reviewerProfileCount: Type.Optional(Type.Integer({ minimum: 0 })),
+    onboardingCompletedAtMs: Type.Optional(Type.Union([time, Type.Null()])),
+    projectsRootConfigured: Type.Optional(Type.Boolean()),
+    projectsRootConfirmed: Type.Optional(Type.Boolean()),
     retryAtMs: Type.Optional(Type.Union([time, Type.Null()])),
   }, closed),
   recovery: text(), observedAtMs: time,
@@ -41,7 +46,7 @@ export const DiagnosticReport = Type.Object({
   operationId: OperationId, state: Type.Union((['accepted', 'succeeded', 'failed', 'unknown'] as const).map(s => Type.Literal(s))),
   createdAtMs: time, completedAtMs: Type.Union([time, Type.Null()]),
   checks: Type.Array(DiagnosticCheck, { minItems: 1, maxItems: 4, uniqueItems: true }),
-  diagnostics: Type.Array(ContextDiagnostic, { maxItems: 4 }),
+  diagnostics: Type.Array(ContextDiagnostic, { maxItems: 104 }),
 }, closed);
 export type DiagnosticReport = Static<typeof DiagnosticReport>;
 export const DiagnosticsView = Type.Object({

@@ -171,7 +171,7 @@ export function readOperation(db: Database.Database, operationId: string): Store
       state: !accepted ? 'unknown' : attempt?.result === 'delivered' ? 'succeeded' : attempt?.result ? 'failed' : attempt?.phase === 'preparing' ? 'accepted' : 'running', ...(receipt ? { receipt } : {}) };
   }
   const eventKind = db.prepare<[string], { event_type: string }>('SELECT event_type FROM events WHERE operation_id = ?').get(operationId)?.event_type;
-  const kinds: Readonly<Record<string, string>> = { 'preparation.create': 'preparation.created', 'preparation.update': 'preparation.updated', 'settings.time-defaults.update': 'settings.time-defaults.updated', 'settings.update': 'settings.updated', 'project.register': 'project.registered', 'project.configuration.update': 'project.configuration.updated' };
+  const kinds: Readonly<Record<string, string>> = { 'preparation.create': 'preparation.created', 'preparation.update': 'preparation.updated', 'settings.time-defaults.update': 'settings.time-defaults.updated', 'settings.update': 'settings.updated', 'settings.onboarding.update': 'settings.onboarding.updated', 'project.register': 'project.registered', 'project.configuration.update': 'project.configuration.updated' };
   const domainExists = row.resource_type === 'project'
     ? Boolean(db.prepare('SELECT id FROM project_revisions WHERE project_id = ? AND revision_number = ?').get(row.resource_id, receipt?.revision ?? 0))
     : row.resource_type === 'preparation'

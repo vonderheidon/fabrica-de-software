@@ -43,10 +43,10 @@ function validateSavedProfile(
     ? value.effort === null
     : value.effort !== null && available.efforts.includes(value.effort));
   if (!effortIsValid) {
-    throw new OperationError(409, 'PROFILE_CATALOG_MISMATCH', 'The saved execution profile is not present in the current OMP catalog.', {
+    throw new OperationError(409, 'PROFILE_CATALOG_MISMATCH', 'O perfil salvo não está disponível no catálogo OMP atual.', {
       facts: { profile_role: role, profile_id: value.id ?? null },
       affected_requirements: ['RF-89', 'RF-90'],
-      recovery: 'Open Configuration > Profiles to edit this profile, or refresh execution options and try again.',
+      recovery: 'Abra Configuração > Perfis para editar este perfil ou atualize as opções de execução e tente novamente.',
     });
   }
 }
@@ -116,10 +116,10 @@ export function createPipeline(deps: PipelineDependencies) {
     const profileCounts = storage.getGlobalConfiguration().view.profile_counts;
     const missingProfileTypes = (['implementer', 'reviewer'] as const).filter((role) => profileCounts[role] === 0);
     if (missingProfileTypes.length > 0) {
-      throw new OperationError(409, 'PROFILE_TYPES_REQUIRED', 'At least one live profile of each role type is required to start an attempt.', {
+      throw new OperationError(409, 'PROFILE_TYPES_REQUIRED', 'É necessário manter ao menos um perfil ativo de cada papel para iniciar uma tentativa.', {
         facts: { missing_profile_types: missingProfileTypes.join(',') },
         affected_requirements: ['RF-88', 'RF-89'],
-        recovery: 'Open Configuration > Profiles, create a live Implementer and Reviewer profile, then retry the start.',
+        recovery: 'Abra Configuração > Perfis, crie um perfil ativo de Implementador e outro de Revisor e tente iniciar novamente.',
       });
     }
     if (publication && !await publication.observeControllerAccount()) throw new OperationError(409, 'ACCOUNT_CHANGED', 'Dispatch is paused until the configured account is observed.');

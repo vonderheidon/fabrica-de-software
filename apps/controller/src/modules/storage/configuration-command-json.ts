@@ -34,6 +34,7 @@ function profileChangesJson(value: ProfileChanges) {
 }
 export function settingsCommandJson(value: SettingsUpdate) {
   return { changes: value.changes,
+    ...(value.onboarding_changes === undefined ? {} : { onboardingChanges: value.onboarding_changes }),
     ...(value.profile_changes === undefined ? {} : { profileChanges: profileChangesJson(value.profile_changes) }),
     ...(value.gh_executable_path === undefined ? {} : { gh_executable_path: value.gh_executable_path }),
     ...(value.account_binding === undefined ? {} : { account_binding: value.account_binding }),

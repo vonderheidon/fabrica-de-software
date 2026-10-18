@@ -243,7 +243,7 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const receipt = saveTimeDefaults(db,{ operationId,expectedRevision: settingsETag(identity,old.revision),timeDefaults: { ...old.time_defaults,polling_interval_ms: 2000 } });
     expect(db.pragma('user_version',{ simple: true })).toBe(12); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(23);
+    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(24);
     expect(reopened.getOperation(operationId)).toEqual(receipt); expect(reopened.listProjects({}).items).toEqual([]);
     const probe = new Database(join(directory,'factory.sqlite')); try { expect(probe.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 }); expect(probe.pragma('foreign_key_check')).toEqual([]); } finally { probe.close(); }
   });

@@ -102,7 +102,7 @@ describe('durable official results', () => {
     f.storage.recordReviewWorkspace(f.binding.deliveryVersion, true, null);
     const binding = { ...f.binding, passageId: id, role: 'reviewer' as const }; const handle = { passageId: id };
     f.persistence.reserve({ handle, binding, requestHash: 'a'.repeat(64), state: 'starting', roleResource: reviewer, terminalName: `factory-${id}`, diagnostic: null, effectiveProfile: null, executorVersion: null });
-    const { id: _id, revision: _revision, created_at_ms: _created, updated_at_ms: _updated, ...profile } = f.profile;
+    const { id: _id, revision: _revision, created_at_ms: _created, updated_at_ms: _updated, ...profile } = f.reviewerProfile;
     f.persistence.confirmReady(handle, profile, '18.11.1');
     f.storage.recordReviewIntegrity(binding, true);
     const result = { formatVersion: 1 as const, summary: 'Review complete', verdict: 'approved' as const, criteria: f.result.criteria,

@@ -101,7 +101,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
       return [...tools, ...await execution!.observeVersions()];
     }, logFailure: code => app.log.error({ code }, 'Pipeline dispatch failed') });
   storage.interruptDiagnostics();
-  const diagnostics = createDiagnostics({ storage, github, ...(diagnosticDependencies?.execution ? { execution: diagnosticDependencies.execution } : execution ? { execution } : {}),
+  const diagnostics = createDiagnostics({ storage, github, projects, ...(diagnosticDependencies?.execution ? { execution: diagnosticDependencies.execution } : execution ? { execution } : {}),
     logFailure: code => app.log.error({ code }, 'Contextual diagnostic failed') });
   installOperationRoutes(app, storage, diagnostics);
   app.addHook('preClose', async () => {

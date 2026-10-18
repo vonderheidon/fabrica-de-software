@@ -163,7 +163,7 @@ describe('controller verification and external evidence', () => {
     f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DELETE FROM schema_migrations WHERE version=7; PRAGMA user_version=6');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(24); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getDelivery(old.id)).toMatchObject({ delivery: old, verification: null });
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(result);
       expect(reopened.getCheckHistory(old.id, {}).entries).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);

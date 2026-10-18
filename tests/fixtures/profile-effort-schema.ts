@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 
 /** Disposable historical fixtures only; production migrations remain forward-only. */
 export function removeProfileEffortSchema(db: Database.Database): void {
-  if (db.pragma('user_version', { simple: true }) !== 23) return;
+  if (db.pragma('user_version', { simple: true }) !== 24) return;
   const nullEffort = db.prepare("SELECT 1 AS found FROM execution_profiles WHERE effort IS NULL LIMIT 1").get();
   if (nullEffort) throw new Error('FIXTURE_NULL_EFFORT');
   const restoreForeignKeys = db.pragma('foreign_keys', { simple: true }) === 1;

@@ -3,19 +3,22 @@ import { ContextDiagnostic, type DiagnosticCheck, type DiagnosticRequest } from 
 import { OperationError, type Storage, type DiagnosticCommand } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import type { Execution } from '../execution/index.js';
+import type { Projects } from '../projects/index.js';
 
 export interface DiagnosticDependencies {
   storage: Storage;
   github: Pick<GitHub, 'getIdentity'>;
+  projects?: Pick<Projects, 'validateProjectsRoot'>;
   execution?: Pick<Execution, 'preflight'>;
   logFailure: (code: string) => void;
 }
 /** Explicit non-paid observations. No dispatch, mutator, resource creator or generic command port. */
-export function createDiagnostics({ storage, github, execution, logFailure }: DiagnosticDependencies) {
+export function createDiagnostics({ storage, github, projects, execution, logFailure }: DiagnosticDependencies) {
   const pending = new Set<Promise<void>>(); let closed = false;
   const make = (check: DiagnosticCheck, code: string, cause: string, recovery: string, facts: ContextDiagnostic['facts'], state: ContextDiagnostic['state']): ContextDiagnostic => ({
     check, code, cause, recovery, facts, state, observedAtMs: Date.now(),
-    affectedRequirements: check === 'maestri_context' ? ['RF-88', 'INT-01', 'INT-02'] : ['RF-88'],
+    affectedRequirements: check === 'maestri_context' ? ['RF-88', 'INT-01', 'INT-02']
+      : check === 'configuration' && (code.startsWith('ONBOARDING_') || code.startsWith('PROJECTS_ROOT_')) ? ['RF-23', 'RF-24', 'RF-25'] : ['RF-88'],
   });
   async function run(command: DiagnosticCommand) {
     const { checks, ...context } = command.body;
@@ -25,7 +28,21 @@ export function createDiagnostics({ storage, github, execution, logFailure }: Di
         const c = storage.getDiagnosticContext(context);
         if (check === 'configuration') {
           const blockers = storage.getContextDiagnostics(context).diagnostics.filter(d => d.check === 'configuration' && d.state !== 'passed' && d.code !== 'EXECUTION_REVALIDATION_REQUIRED');
-          results.push(blockers[0] ? { ...blockers[0], observedAtMs: Date.now() } : make(check, 'CONFIGURATION_RECORDED', 'Configuração persistida e vínculos locais consultados.', 'Revalide a autoridade e o executor no início da tentativa.', c.facts, 'passed'));
+          results.push(...blockers.map(item => ({ ...item, observedAtMs: Date.now() })));
+          let projectRootPending = false;
+          if (projects && c.facts.projectsRootConfigured === true && c.facts.projectsRootConfirmed === true) {
+            try { await projects.validateProjectsRoot(); }
+            catch (error) {
+              if (!(error instanceof OperationError) || !['PROJECTS_ROOT_REQUIRED', 'PROJECTS_ROOT_UNAVAILABLE', 'PROJECTS_ROOT_CHANGED'].includes(error.code)) throw error;
+              projectRootPending = true;
+              results.push(make(check, error.code, 'A pasta dos projetos deixou de corresponder à configuração confirmada.',
+                'Abra Configuração, escolha uma pasta acessível e confirme novamente.', c.facts, 'blocked'));
+            }
+          }
+          if (blockers.length === 0 && !projectRootPending) {
+            results.push(make(check, 'CONFIGURATION_RECORDED', 'Configuração persistida e vínculos locais consultados.',
+              'Revalide a autoridade e o executor no início da tentativa.', c.facts, 'passed'));
+          }
         } else if (check === 'github_identity') {
           const identity = await github.getIdentity();
           const complete = identity.state === 'complete' && identity.data !== null;

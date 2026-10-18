@@ -36,7 +36,56 @@ export function readSettingsView(db: Database.Database): SettingsView {
     implementer: counts.implementer + Number(profile.profile_type === 'implementer'),
     reviewer: counts.reviewer + Number(profile.profile_type === 'reviewer'),
   }), { all: 0, implementer: 0, reviewer: 0 });
-  const view = { settings: readSettings(db), profiles, profile_counts: profileCounts, event_cursor: eventCursor(db) };
+  const settings = readSettings(db);
+  const linkedAccount = settings.account_id === null ? null : db.prepare<[string], { id: string }>(
+    'SELECT github_account_id AS id FROM accounts WHERE github_account_id = ?',
+  ).get(settings.account_id);
+  if (settings.account_id !== null && !linkedAccount) throw new StorageError('SETTINGS_INVALID');
+  const onboardingRow = db.prepare<[], {
+    onboarding_suppressed: unknown;
+    onboarding_completed_at_ms: unknown;
+    projects_root_confirmed_at_ms: unknown;
+  }>(`SELECT onboarding_suppressed, onboarding_completed_at_ms, projects_root_confirmed_at_ms
+    FROM factory_settings WHERE id = 'local'`).get();
+  if (!onboardingRow || (onboardingRow.onboarding_suppressed !== 0 && onboardingRow.onboarding_suppressed !== 1) ||
+    (onboardingRow.onboarding_completed_at_ms !== null && (!Number.isSafeInteger(onboardingRow.onboarding_completed_at_ms) || Number(onboardingRow.onboarding_completed_at_ms) < 0)) ||
+    (onboardingRow.projects_root_confirmed_at_ms !== null && (!Number.isSafeInteger(onboardingRow.projects_root_confirmed_at_ms) || Number(onboardingRow.projects_root_confirmed_at_ms) < 0))) {
+    throw new StorageError('SETTINGS_INVALID');
+  }
+  const completedAt = onboardingRow.onboarding_completed_at_ms as number | null;
+  const rootConfirmedAt = onboardingRow.projects_root_confirmed_at_ms as number | null;
+  const firstIncompleteStep = completedAt !== null ? null
+    : !linkedAccount ? 'github'
+      : settings.projects_root === null || rootConfirmedAt === null ? 'projects_root'
+        : profileCounts.implementer === 0 || profileCounts.reviewer === 0 ? 'profiles' : null;
+  const onboardingPrerequisites: Prerequisite[] = [];
+  if (completedAt === null) {
+    if (!linkedAccount) onboardingPrerequisites.push({ code: 'ACCOUNT_UNOBSERVED',
+      message: 'Uma conta GitHub elegível ainda não foi vinculada.', recovery: 'Verifique o status do GitHub e vincule uma conta elegível.' });
+    if (settings.projects_root === null) onboardingPrerequisites.push({ code: 'PROJECTS_ROOT_REQUIRED',
+      message: 'A pasta dos projetos ainda não foi configurada.', recovery: 'Escolha e confirme uma pasta com acesso e gravação.' });
+    else if (rootConfirmedAt === null) onboardingPrerequisites.push({ code: 'PROJECTS_ROOT_CONFIRMATION_REQUIRED',
+      message: 'A pasta dos projetos ainda não foi confirmada para acesso e gravação.', recovery: 'Confirme novamente a pasta dos projetos.' });
+    if (profileCounts.implementer === 0) onboardingPrerequisites.push({ code: 'IMPLEMENTER_PROFILE_REQUIRED',
+      message: 'Falta um perfil Implementador ativo.', recovery: 'Crie um perfil Implementador em Configuração > Perfis.' });
+    if (profileCounts.reviewer === 0) onboardingPrerequisites.push({ code: 'REVIEWER_PROFILE_REQUIRED',
+      message: 'Falta um perfil Revisor ativo.', recovery: 'Crie um perfil Revisor em Configuração > Perfis.' });
+  }
+  const unavailableSelection = {
+    available: false,
+    reason_code: 'NATIVE_SELECTION_UNAVAILABLE',
+    reason: 'A seleção nativa não está disponível nesta composição do host.',
+    recovery: 'Inicie a fábrica pelo host que oferece a seleção nativa e consulte novamente.',
+  } as const;
+  const view = {
+    settings,
+    profiles,
+    profile_counts: profileCounts,
+    onboarding: { suppressed: onboardingRow.onboarding_suppressed === 1, completed_at_ms: completedAt,
+      first_incomplete_step: firstIncompleteStep, prerequisites: onboardingPrerequisites },
+    selection_capabilities: { projects_root: unavailableSelection, gh_executable: unavailableSelection },
+    event_cursor: eventCursor(db),
+  };
   if (!Value.Check(SettingsView, view)) throw new StorageError('SETTINGS_INVALID');
   return view;
 }

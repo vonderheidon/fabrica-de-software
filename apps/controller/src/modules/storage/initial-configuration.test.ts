@@ -57,7 +57,7 @@ describe('initial configuration persistence foundation', () => {
       '08a177028d9a9eca76b7a67bc943cb1bf47bfade8b483e69bae95cc97bf1d1b7',
     ]);
     const { db, storage } = fixture();
-    expect(storage.getDiagnostics().schemaVersion).toBe(23);
+    expect(storage.getDiagnostics().schemaVersion).toBe(24);
     expect(db.prepare('SELECT version,name,checksum FROM schema_migrations ORDER BY version').all())
       .toEqual(loadMigrations().map(({ version, name, checksum }) => ({ version, name, checksum })));
     expect(db.prepare('SELECT applied_at_ms FROM schema_migrations WHERE version=19').get())
@@ -103,7 +103,7 @@ describe('initial configuration persistence foundation', () => {
     expect(() => insert.run('profile-two', 'Other display name', 'reviewer', 'álpha  beta')).toThrow();
     expect(() => insert.run('profile-invalid-type', 'Invalid', 'operator', 'invalid')).toThrow();
     expect(() => insert.run('profile-invalid-name-key', 'Invalid', 'reviewer', '   ')).toThrow();
-    db.prepare('UPDATE execution_profiles SET deleted_at_ms=0 WHERE id=?').run('profile-one');
+    db.prepare('UPDATE execution_profiles SET deleted_at_ms=0, revision=revision+1 WHERE id=?').run('profile-one');
     expect(() => insert.run('profile-two', 'Other display name', 'reviewer', 'álpha  beta')).not.toThrow();
     expect(() => db.prepare('UPDATE execution_profiles SET created_at_ms=10, updated_at_ms=10, deleted_at_ms=9 WHERE id=?').run('profile-two')).toThrow();
     expect(() => db.prepare('UPDATE execution_profiles SET deleted_at_ms=-1 WHERE id=?').run('profile-two')).toThrow();

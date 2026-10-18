@@ -27,12 +27,20 @@ function profileSnapshot(profile: StoredExecutionProfile) {
 }
 function effective(view: ConfigurationView, choices: PreparationChoices): { configuration: EffectiveConfiguration; reasons: string[] } {
   const overrides = choices.overrides; const reasons: string[] = [];
+  function selectedProfileId(role: 'implementer' | 'reviewer'): string | null {
+    const choice = overrides[`${role}_profile`];
+    if (choice?.kind === 'value') return null;
+    return choice?.kind === 'reference' ? choice.id : view.configuration[`${role}_profile_id`];
+  }
+  const implementerProfileId = selectedProfileId('implementer');
+  const reviewerProfileId = selectedProfileId('reviewer');
+  const sharedProfileId = implementerProfileId !== null && implementerProfileId === reviewerProfileId ? implementerProfileId : null;
   function profile(role: 'implementer' | 'reviewer') {
     const choice = overrides[`${role}_profile`];
     if (choice?.kind === 'value') return structuredClone(choice.profile);
-    const id = choice?.id ?? view.configuration[`${role}_profile_id`];
+    const id = selectedProfileId(role);
     const found = view.profiles.find((candidate) => candidate.id === id);
-    if (found && found.profile_type !== role) {
+    if (found && found.profile_type !== role && id !== sharedProfileId) {
       reasons.push(choice ? 'PROFILE_TYPE_MISMATCH' : 'PROJECT_PROFILE_TYPE_MISMATCH');
       return null;
     }
@@ -149,7 +157,7 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     const resolved = effective(config.view, choices);
     if (resolved.reasons.includes('PROFILE_REFERENCE_CHANGED')) fail(409, 'PROFILE_REFERENCE_CHANGED', 'The exact selected profile revision is unavailable.');
     if (resolved.reasons.includes('PROFILE_TYPE_MISMATCH') || resolved.reasons.includes('PROJECT_PROFILE_TYPE_MISMATCH')) {
-      fail(409, 'PROFILE_TYPE_MISMATCH', 'Each Implementer and Reviewer selection must use a profile with the matching role type.');
+      fail(409, 'PROFILE_TYPE_MISMATCH', 'As escolhas de Implementador e Revisor precisam usar perfis do papel correspondente.');
     }
     const issue = await github.getIssueContextById(choices.issue_id);
     if (issue.state === 'invalid_input') fail(400, 'NOT_AN_ISSUE', 'Select an accessible GitHub issue by its node ID.');

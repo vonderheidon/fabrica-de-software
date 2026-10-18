@@ -100,6 +100,13 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     await vi.waitFor(() => expect(f.storage.getOperation(id)?.state).toBe('succeeded'));
     expect(f.storage.getSettings()).toEqual(settings);
     const report = (await f.app.inject({ url, headers: f.headers })).json<HttpDiagnosticsView>();
+    expect(Value.Check(HttpDiagnosticsView, report)).toBe(true);
+    expect(report.reports[0]?.diagnostics.length).toBeGreaterThan(4);
+    expect(report.reports[0]?.diagnostics.every(item => item.check === 'configuration')).toBe(true);
+    expect(report.reports[0]?.diagnostics[0]?.facts).toMatchObject({
+      implementer_profile_count: 0, reviewer_profile_count: 0, onboarding_completed_at_ms: null,
+      projects_root_configured: false, projects_root_confirmed: false,
+    });
     expect(report.reports[0]?.diagnostics[0]).toMatchObject({ code: 'ACCOUNT_UNOBSERVED', state: 'blocked' });
     expect(report.reports[0]?.receipt).toEqual(response.json().receipt);
     expect((await f.app.inject({ url: '/api/v1/operations/'+id, headers: f.headers })).json()).toMatchObject({ state: 'succeeded' });
@@ -254,9 +261,9 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const db = new Database(join(directory, 'factory.sqlite')); applyMigrations(db, loadMigrations().slice(0, 17), () => seedSettings(db, directory));
     const identity = db.prepare('SELECT installation_id FROM factory_settings').get(); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(24); expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
     expect(reopened.getContextDiagnostics({ scope: 'host' }).reports).toEqual([]); expect(reopened.getOperationSummary({}).integrationStatus.state).toBe('not_checked');
-    expect(f.storage.getDiagnostics().schemaVersion).toBe(23);
+    expect(f.storage.getDiagnostics().schemaVersion).toBe(24);
   });
 });
 

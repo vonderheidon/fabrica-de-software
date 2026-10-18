@@ -354,7 +354,7 @@ it('migrates v10 without changing approved content, receipts or identity, and wi
   removePublicationSchema(f.db);
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(23); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(24); expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getReview(deliveryId)).toEqual(review); expect(reopened.getDelivery(deliveryId).delivery).toEqual(delivery);
     expect(reopened.getOperation(reopened.getAttempt(f.attemptId).operationId)?.receipt).toEqual(receipt);
     expect(reopened.getEffects(f.attemptId)).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);

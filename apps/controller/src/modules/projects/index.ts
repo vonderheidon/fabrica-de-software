@@ -6,7 +6,7 @@ import { Value } from '@sinclair/typebox/value';
 import {
   ConfigurationOptionsQuery, ConfigurationUpdate, NativeSelectionRequest, ProjectConfiguration, ProjectRegistration, SettingsUpdate,
   ExecutionCatalog, GitHubSetupOptions, ProfileChanges, type CatalogQuery, type ConfigurationOptions, type GlobalChanges, type OriginInspection,
-  type StoredExecutionProfile,
+  type OnboardingChanges, type SelectionCapabilities, type StoredExecutionProfile,
   type NativeSelectionResult,
 } from '#contracts';
 import { OperationError, type ConfigurationCommand, type Storage, type StoredOperation } from '../storage/index.js';
@@ -102,6 +102,24 @@ export function validateProjectConfiguration(configuration: ProjectConfiguration
 }
 export function createProjects({ storage, github, githubSetup, execution, workspaces, directoryBase, selectProjectsDirectory, selectGitHubExecutable }: ProjectDependencies) {
   const queue = createQueue({ storage, github });
+  const unavailableSelection = (target: string): SelectionCapabilities['projects_root'] => ({
+    available: false,
+    reason_code: 'NATIVE_SELECTION_UNAVAILABLE',
+    reason: `A seleção nativa de ${target} não está disponível neste host.`,
+    recovery: 'Inicie a fábrica pelo host que oferece a seleção nativa e consulte novamente.',
+  });
+  const selectionCapabilities: SelectionCapabilities = {
+    projects_root: selectProjectsDirectory ? { available: true } : unavailableSelection('pasta'),
+    gh_executable: selectGitHubExecutable ? { available: true } : unavailableSelection('GitHub CLI'),
+  };
+  function settingsView() {
+    const editable = storage.getGlobalConfiguration();
+    return { ...editable, view: { ...editable.view, selection_capabilities: selectionCapabilities } };
+  }
+  function configurationView(projectId: string) {
+    const editable = storage.getConfiguration(projectId);
+    return { ...editable, view: { ...editable.view, selection_capabilities: selectionCapabilities } };
+  }
   let activeSelection: ActiveSelection | null = null;
   async function normalizedGlobals(changes: GlobalChanges): Promise<GlobalChanges> {
     const result = { ...changes };
@@ -189,10 +207,10 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     if (result.data.project.id !== mapping.id || result.data.project.owner.id !== mapping.owner_id || result.data.project.closed) fail(400, 'PROJECT_MAPPING_INVALID', 'The Project owner or state is invalid.');
   }
   function settingsResponse(operation: StoredOperation, warnings?: Array<{ code: string; message: string }>) {
-    return { ...storage.getGlobalConfiguration(), operationId: operation.operation_id, receipt: receipt(operation), ...(warnings?.length ? { warnings } : {}) };
+    return { ...settingsView(), operationId: operation.operation_id, receipt: receipt(operation), ...(warnings?.length ? { warnings } : {}) };
   }
   function configurationResponse(projectId: string, operation: StoredOperation) {
-    return { ...storage.getConfiguration(projectId), operationId: operation.operation_id, receipt: receipt(operation) };
+    return { ...configurationView(projectId), operationId: operation.operation_id, receipt: receipt(operation) };
   }
   async function getGitHubOptions(): Promise<GitHubSetupOptions> {
     const linkedAccount = storage.getLinkedGitHubAccount();
@@ -306,23 +324,31 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       if (!model || !effortValid) fail(400, 'PROFILE_COMBINATION_INVALID', 'Choose an exact provider, model and applicable effort from the current OMP catalog.');
     }
   }
-  function validateProfileSelections(configuration: ProjectConfiguration, profiles: readonly StoredExecutionProfile[]): void {
+  function validateProfileSelections(configuration: ProjectConfiguration, profiles: readonly StoredExecutionProfile[], changes?: ProfileChanges): void {
+    const types = new Map(profiles.map((profile) => [profile.id, profile.profile_type]));
+    for (const change of changes ?? []) {
+      if (change.action === 'update' && change.changes.profile_type !== undefined) types.set(change.id, change.changes.profile_type);
+    }
+    const sharedProfileId = configuration.implementer_profile_id !== null &&
+      configuration.implementer_profile_id === configuration.reviewer_profile_id
+      ? configuration.implementer_profile_id
+      : null;
     for (const role of ['implementer', 'reviewer'] as const) {
       const profileId = configuration[`${role}_profile_id`];
       if (profileId === null) continue;
-      const selected = profiles.find((profile) => profile.id === profileId);
-      if (!selected) {
-        throw new OperationError(404, 'PROFILE_NOT_FOUND', 'The selected execution profile is no longer available.', {
+      const profileType = types.get(profileId);
+      if (!profileType) {
+        throw new OperationError(404, 'PROFILE_NOT_FOUND', 'O perfil de execução selecionado não está mais disponível.', {
           facts: { profile_id: profileId, expected_profile_type: role },
           affected_requirements: ['RF-77', 'RF-88'],
-          recovery: 'Open Configuration > Profiles, choose a live profile for this role, and save again.',
+          recovery: 'Abra Configuração > Perfis, escolha um perfil ativo para este papel e salve novamente.',
         });
       }
-      if (selected.profile_type !== role) {
-        throw new OperationError(409, 'PROFILE_TYPE_MISMATCH', 'The selected profile has a different role type.', {
-          facts: { profile_id: profileId, expected_profile_type: role, actual_profile_type: selected.profile_type },
+      if (profileType !== role && profileId !== sharedProfileId) {
+        throw new OperationError(409, 'PROFILE_TYPE_MISMATCH', 'O tipo do perfil selecionado não corresponde ao papel exigido.', {
+          facts: { profile_id: profileId, expected_profile_type: role, actual_profile_type: profileType },
           affected_requirements: ['RF-77', 'RF-88'],
-          recovery: 'Choose a profile with the required role type and save the project configuration again.',
+          recovery: 'Escolha um perfil do papel exigido e salve a configuração do projeto novamente.',
         });
       }
     }
@@ -330,11 +356,21 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
   return {
     listProjects: (query: CatalogQuery) => storage.listProjects(query),
     getProject: (id: string) => storage.getProject(id),
-    getSettings: () => storage.getGlobalConfiguration(),
+    getSettings: settingsView,
+    async validateProjectsRoot(): Promise<void> {
+      const current = storage.getGlobalConfiguration().view.settings.projects_root;
+      if (current === null) fail(409, 'PROJECTS_ROOT_REQUIRED', 'A pasta dos projetos não está configurada.');
+      let canonical: string;
+      try { canonical = await canonicalProjectsRoot(directoryBase, current); }
+      catch {
+        throw new OperationError(409, 'PROJECTS_ROOT_UNAVAILABLE', 'A pasta dos projetos não está acessível para leitura e gravação.');
+      }
+      if (canonical !== current) fail(409, 'PROJECTS_ROOT_CHANGED', 'A pasta dos projetos mudou desde a confirmação.');
+    },
     getGitHubOptions,
     getExecutionOptions,
     selectSetting,
-    getConfiguration: (id: string) => storage.getConfiguration(id),
+    getConfiguration: configurationView,
     getQueue: queue.observe,
     saveQueue: queue.save,
     async registerProject(body: ProjectRegistration, context: CommandContext) {
@@ -351,9 +387,12 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     async saveSettings(body: SettingsUpdate, context: CommandContext) {
       if (!Value.Check(SettingsUpdate, body)) fail(400, 'SETTINGS_INVALID', 'Settings changes are invalid.');
       const accountBinding = body.account_binding;
+      const onboardingChanges: OnboardingChanges | undefined = body.onboarding_changes;
       const command: ConfigurationCommand = accountBinding
         ? { ...context, kind: accountBinding.action === 'bind' ? 'settings.account.bind' : 'settings.account.switch', body }
-        : { ...context, kind: 'settings.update', body };
+        : onboardingChanges
+          ? { ...context, kind: 'settings.onboarding.update', body }
+          : { ...context, kind: 'settings.update', body };
       const recovered = storage.recoverConfigurationCommand(command);
       if (recovered) {
         const warnings = accountBinding?.action === 'switch' && storage.hasUncertainAccountCleanup(recovered.operation_id)
@@ -362,8 +401,69 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
         return settingsResponse(recovered, warnings);
       }
       precondition(storage.getGlobalConfiguration().etag, context.expectedRevision);
+      if (onboardingChanges) {
+        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.gh_executable_path !== undefined || accountBinding !== undefined) {
+          fail(400, 'SETTINGS_COMMAND_INVALID', 'Onboarding changes must be the only settings command.');
+        }
+        const current = storage.getGlobalConfiguration();
+        precondition(current.etag, context.expectedRevision);
+        let onboardingValidation: { accountId: string; projectsRoot: string } | undefined;
+        if (onboardingChanges.complete === true && current.view.onboarding.completed_at_ms === null) {
+          const { settings, profile_counts: counts, onboarding } = current.view;
+          if (counts.implementer === 0 || counts.reviewer === 0) {
+            throw new OperationError(409, 'ONBOARDING_PROFILES_REQUIRED', 'Crie pelo menos um perfil Implementador e um perfil Revisor antes de concluir.', {
+              facts: { implementer_profiles: counts.implementer, reviewer_profiles: counts.reviewer },
+              affected_requirements: ['RF-23', 'RF-24'],
+              recovery: 'Abra Configuração > Perfis, crie os dois tipos e tente novamente.',
+            });
+          }
+          if (settings.account_id === null) {
+            throw new OperationError(409, 'ONBOARDING_ACCOUNT_REQUIRED', 'Vincule e valide uma conta GitHub antes de concluir.', {
+              affected_requirements: ['RF-23'], recovery: 'Abra Configuração > GitHub, vincule a conta elegível e tente novamente.',
+            });
+          }
+          if (settings.projects_root === null || onboarding.first_incomplete_step === 'projects_root') {
+            throw new OperationError(409, 'ONBOARDING_PROJECTS_ROOT_REQUIRED', 'Confirme uma pasta dos projetos com acesso e gravação antes de concluir.', {
+              affected_requirements: ['RF-23'], recovery: 'Abra Configuração, escolha novamente a pasta dos projetos e salve a confirmação.',
+            });
+          }
+          if (!githubSetup) throw new OperationError(503, 'ACCOUNT_REVALIDATION_UNAVAILABLE', 'A conta GitHub vinculada não pôde ser revalidada no host autorizado.');
+          const options = await getGitHubOptions();
+          const account = options.accounts.find(candidate => candidate.id === settings.account_id && candidate.active && candidate.valid && candidate.eligible);
+          if (options.executable.state !== 'observed' || options.diagnostics.some(item =>
+            ['GITHUB_CONTEXT_UNAVAILABLE', 'GITHUB_AUTH_STATUS_UNAVAILABLE', 'GITHUB_AUTH_RESPONSE_INVALID', 'AUTHENTICATION_INVALID',
+              'CONTEXT_UNAVAILABLE', 'CLI_UNAVAILABLE', 'QUERY_FAILED', 'RESPONSE_INVALID', 'RATE_LIMITED', 'GITHUB_IDENTITY_UNAVAILABLE'].includes(item.code))) {
+            throw new OperationError(503, 'ACCOUNT_REVALIDATION_UNAVAILABLE', 'A conta GitHub vinculada não pôde ser revalidada no host autorizado.');
+          }
+          if (!account || options.observed_account?.id !== settings.account_id) {
+            throw new OperationError(409, 'ONBOARDING_ACCOUNT_MISMATCH', 'A conta observada não corresponde à conta vinculada.', {
+              affected_requirements: ['RF-23'], recovery: 'Confira a conta ativa no GitHub CLI e vincule a conta observada pela fábrica.',
+            });
+          }
+          let verifiedRoot: string;
+          try { verifiedRoot = await canonicalProjectsRoot(directoryBase, settings.projects_root); }
+          catch {
+            throw new OperationError(409, 'ONBOARDING_PROJECTS_ROOT_INVALID', 'A pasta dos projetos não está mais acessível para leitura e gravação.', {
+              affected_requirements: ['RF-23'], recovery: 'Abra Configuração, escolha uma pasta acessível e confirme novamente.',
+            });
+          }
+          if (verifiedRoot !== settings.projects_root) {
+            throw new OperationError(409, 'ONBOARDING_PROJECTS_ROOT_CHANGED', 'A pasta dos projetos mudou desde a última confirmação.', {
+              affected_requirements: ['RF-23'], recovery: 'Confirme novamente a pasta atual antes de concluir.',
+            });
+          }
+          const latest = storage.getGlobalConfiguration();
+          precondition(latest.etag, context.expectedRevision);
+          if (latest.view.settings.account_id !== settings.account_id || latest.view.settings.projects_root !== settings.projects_root ||
+            latest.view.onboarding.completed_at_ms !== null || latest.view.profile_counts.implementer === 0 || latest.view.profile_counts.reviewer === 0) {
+            throw new OperationError(412, 'ONBOARDING_CONTEXT_CHANGED', 'A configuração inicial mudou durante a validação. Releia as definições e tente novamente.');
+          }
+          onboardingValidation = { accountId: settings.account_id, projectsRoot: verifiedRoot };
+        }
+        return settingsResponse(storage.saveSettings({ ...context, body, changes: {}, ...(onboardingValidation ? { onboardingValidation } : {}) }));
+      }
       if (accountBinding) {
-        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.gh_executable_path !== undefined) {
+        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.gh_executable_path !== undefined || body.onboarding_changes !== undefined) {
           fail(400, 'SETTINGS_COMMAND_INVALID', 'Account binding must be the only settings command.');
         }
         if (!githubSetup) throw new OperationError(503, 'GITHUB_CONTEXT_UNAVAILABLE', 'The authorized GitHub host context is unavailable.');
@@ -385,7 +485,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
         return settingsResponse(operation, warnings);
       }
       if (body.gh_executable_path !== undefined) {
-        if (Object.keys(body.changes).length > 0 || (body.profile_changes?.length ?? 0) > 0) {
+        if (Object.keys(body.changes).length > 0 || (body.profile_changes?.length ?? 0) > 0 || body.onboarding_changes !== undefined) {
           fail(400, 'SETTINGS_COMMAND_INVALID', 'Save the GitHub executable as a separate settings command.');
         }
         if (!githubSetup) throw new OperationError(503, 'GITHUB_CONTEXT_UNAVAILABLE', 'The authorized GitHub host context is unavailable.');
@@ -416,7 +516,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       // Remove revision metadata before schema validation and the immutable insert.
       const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...fields } = { ...previous, ...configuration };
       configuration = fields;
-      validateProfileSelections(configuration, current.view.profiles);
+      validateProfileSelections(configuration, current.view.profiles, body.profile_changes);
       let originNotes: readonly string[] | undefined;
       if (body.project_changes.source !== undefined || body.project_changes.base_branch !== undefined) {
         const observed = await inspect(configuration.source, configuration.base_branch);

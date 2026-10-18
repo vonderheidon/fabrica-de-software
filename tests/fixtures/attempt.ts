@@ -30,6 +30,8 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const profile = storage.getGlobalConfiguration().view.profiles.find((item) => item.profile_type === 'implementer');
   const reviewerProfile = storage.getGlobalConfiguration().view.profiles.find((item) => item.profile_type === 'reviewer');
   if (!profile || !reviewerProfile) throw new Error('PROFILE_FIXTURE_INCOMPLETE');
+  const implementerProfileId = profile.id;
+  const reviewerProfileId = reviewerProfile.id;
   const repository = { id: 'R_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true };
   const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_test', status_option_ids: { ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' } };
   function register() {
@@ -38,7 +40,7 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
       source: { kind: 'github', location: repository.url, repository_id: repository.id, repository_url: repository.url }, originNotes: [] }).resource.id;
     const previous = storage.getConfiguration(projectId);
     const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = previous.view.configuration;
-    const changes = { github_project: mapping, implementer_profile_id: profile.id, reviewer_profile_id: reviewerProfile.id };
+    const changes = { github_project: mapping, implementer_profile_id: implementerProfileId, reviewer_profile_id: reviewerProfileId };
     storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: previous.etag, projectId, body: { project_changes: changes },
       configuration: { ...configuration, ...changes }, globalChanges: {} });
     return projectId;

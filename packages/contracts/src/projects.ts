@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { ArtifactPolicy, DeliveryMode, FactorySettings, OperationId, OperationReceipt, OperationWarning, Page, TimeDefaults } from './base.js';
+import { ArtifactPolicy, Capability, DeliveryMode, FactorySettings, OperationId, OperationReceipt, OperationWarning, Page, TimeDefaults } from './base.js';
 import { GitHubDiagnostic, GitHubProject, GitHubProjectOwner, StatusField } from './github.js';
 import { AccountBinding } from './github-setup.js';
 import { OriginSource } from './workspaces.js';
@@ -58,6 +58,27 @@ export const ProfileCounts = Type.Object({
   reviewer: Type.Integer({ minimum: 0, maximum: 100 }),
 }, closed);
 export type ProfileCounts = Static<typeof ProfileCounts>;
+export const Prerequisite = Type.Object({ code: text(128), message: text(), recovery: text() }, closed);
+export type Prerequisite = Static<typeof Prerequisite>;
+export const OnboardingStep = Type.Union([Type.Literal('github'), Type.Literal('projects_root'), Type.Literal('profiles')]);
+export type OnboardingStep = Static<typeof OnboardingStep>;
+export const OnboardingView = Type.Object({
+  suppressed: Type.Boolean(),
+  completed_at_ms: Type.Union([timestamp, Type.Null()]),
+  first_incomplete_step: Type.Union([OnboardingStep, Type.Null()]),
+  prerequisites: Type.Array(Prerequisite, { maxItems: 4 }),
+}, closed);
+export type OnboardingView = Static<typeof OnboardingView>;
+export const OnboardingChanges = Type.Object({
+  suppressed: Type.Optional(Type.Boolean()),
+  complete: Type.Optional(Type.Literal(true)),
+}, { ...closed, minProperties: 1 });
+export type OnboardingChanges = Static<typeof OnboardingChanges>;
+export const SelectionCapabilities = Type.Object({
+  projects_root: Capability,
+  gh_executable: Capability,
+}, closed);
+export type SelectionCapabilities = Static<typeof SelectionCapabilities>;
 export const GlobalConfiguration = Type.Object({
   ...Type.Pick(FactorySettings, ['projects_root', 'automation_enabled', 'time_defaults', 'artifact_policy']).properties,
   profiles: Type.Array(StoredExecutionProfile, { maxItems: 100 }),
@@ -71,6 +92,7 @@ export const GlobalChanges = Type.Partial(Type.Object({
 export type GlobalChanges = Static<typeof GlobalChanges>;
 export const SettingsUpdate = Type.Object({
   changes: GlobalChanges,
+  onboarding_changes: Type.Optional(OnboardingChanges),
   profile_changes: Type.Optional(ProfileChanges),
   // Persisting a GitHub CLI executable is an isolated settings command.
   gh_executable_path: Type.Optional(text(4096)),
@@ -110,8 +132,6 @@ export const ConfigurationUpdate = Type.Object({ project_changes: ProjectChanges
 export type ConfigurationUpdate = Static<typeof ConfigurationUpdate>;
 export const ProjectRevision = Type.Object({ ...ProjectConfiguration.properties, id: OperationId, project_id: OperationId, revision, created_at_ms: timestamp }, closed);
 export type ProjectRevision = Static<typeof ProjectRevision>;
-export const Prerequisite = Type.Object({ code: text(128), message: text(), recovery: text() }, closed);
-export type Prerequisite = Static<typeof Prerequisite>;
 export const CatalogModel = Type.Object({
   provider: text(256), provider_name: text(256), model: text(256), model_name: text(512),
   efforts: Type.Array(text(128), { maxItems: 64 }),
@@ -146,7 +166,14 @@ export const ProjectDetail = Type.Object({ project: ProjectSummary, prerequisite
 export type ProjectDetail = Static<typeof ProjectDetail>;
 export const ProjectRegistered = Type.Object({ ...ProjectDetail.properties, operation_id: OperationId }, closed);
 export type ProjectRegistered = Static<typeof ProjectRegistered>;
-export const SettingsView = Type.Object({ settings: FactorySettings, profiles: Type.Array(StoredExecutionProfile, { maxItems: 100 }), profile_counts: ProfileCounts, event_cursor: cursor }, closed);
+export const SettingsView = Type.Object({
+  settings: FactorySettings,
+  profiles: Type.Array(StoredExecutionProfile, { maxItems: 100 }),
+  profile_counts: ProfileCounts,
+  onboarding: OnboardingView,
+  selection_capabilities: SelectionCapabilities,
+  event_cursor: cursor,
+}, closed);
 export type SettingsView = Static<typeof SettingsView>;
 export const SettingsSaved = Type.Object({
   ...SettingsView.properties, operation_id: OperationId, receipt: OperationReceipt,

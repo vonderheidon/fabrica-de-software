@@ -174,7 +174,7 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     const before = readOperation(f.db,originalId); const instance = f.db.prepare('SELECT installation_id FROM factory_settings').get();
     f.storage.close(); removeRemoteScaffoldSchema(f.db);
     const storage = openStorage({ dataDirectory: f.directory }); cleanup.push(() => storage.close());
-    expect(storage.getDiagnostics().schemaVersion).toBe(23); const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
+    expect(storage.getDiagnostics().schemaVersion).toBe(24); const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
     expect(probe.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(instance); expect(probe.pragma('foreign_key_check')).toEqual([]);
     expect(storage.getOperation(originalId)).toEqual(before);
     expect(storage.getCreation(accepted.operation.resource.id).creation).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });

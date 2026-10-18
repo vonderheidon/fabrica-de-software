@@ -8,8 +8,8 @@ import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ConfigurationOptions, ConfigurationSaved, ConfigurationView, ExecutionCatalog, GitHubSetupOptions, NativeSelectionResult, ProjectRegistered, SettingsSaved, HttpQueueObservation as QueueObservation,
-  type ConfigurationUpdate, type ExecutionProfile, type ProfileChanges, type GitHubProjectDetails, type GitHubProjectSelection, type GitHubQueryResult,
-  type IssueContext, type OriginInspection, type ProjectDetail, type ProjectItem, type ProjectPage, type SessionResponse, type SettingsUpdate, type SettingsView,
+  SettingsView, type ConfigurationUpdate, type ExecutionProfile, type ProfileChanges, type GitHubProjectDetails, type GitHubProjectSelection, type GitHubQueryResult,
+  type IssueContext, type OriginInspection, type ProjectDetail, type ProjectItem, type ProjectPage, type SessionResponse, type SettingsUpdate,
 } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
@@ -924,7 +924,7 @@ describe('global and aggregate configuration', () => {
       const accepted = saveTimeDefaults(db, { operationId: randomUUID(), expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
       const identity = db.prepare('SELECT installation_id FROM factory_settings').get();
       applyMigrations(db, loadMigrations(), () => { throw new Error('Must not reseed'); });
-      expect(db.pragma('user_version', { simple: true })).toBe(23); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
+      expect(db.pragma('user_version', { simple: true })).toBe(24); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
       expect(db.prepare('SELECT * FROM projects').all()).toEqual([]); expect(db.prepare('SELECT * FROM execution_profiles').all()).toEqual([]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect(readOperation(db, accepted.operation_id)).toEqual(accepted);
@@ -1142,22 +1142,251 @@ describe('OMP execution catalog observation', () => {
     expect(f.storage.getGlobalConfiguration().view.profiles.map((item) => item.name)).toEqual(expect.arrayContaining(['Revisão  avançada', 'revisao  avancada']));
   });
 
-  it('refuses profile type changes and deletion in settings and aggregate configuration saves', async () => {
+  it('blocks profile type changes and deletion while a current project default still references the profile', async () => {
     const f = fixture(); const headers = await session(f); expect((await putSettings(f, headers, { changes: {}, profile_changes: [profile] })).statusCode).toBe(200);
     const saved = f.storage.getGlobalConfiguration(); const profileId = saved.view.profiles[0]?.id;
     if (!profileId) throw new Error('PROFILE_NOT_FOUND');
-    const typeChange: ProfileChanges = [{ action: 'update', id: profileId, changes: { profile_type: 'reviewer' } }];
-    expect((await putSettings(f, headers, { changes: {}, profile_changes: typeChange }, saved.etag)).statusCode).toBe(409);
-    const afterTypeRejection = f.storage.getGlobalConfiguration();
-    expect((await putSettings(f, headers, { changes: {}, profile_changes: [{ action: 'delete', id: profileId }] }, afterTypeRejection.etag)).statusCode).toBe(409);
-    const afterDeleteRejection = f.storage.getGlobalConfiguration();
-    expect(afterDeleteRejection).toEqual(afterTypeRejection);
     const projectId = (await register(f, headers)).json<ProjectDetail>().project.id;
+    const unconfigured = f.storage.getConfiguration(projectId);
+    const assigned = await putConfiguration(f, headers, projectId, { project_changes: { implementer_profile_id: profileId } }, unconfigured.etag);
+    expect(assigned.statusCode).toBe(200);
+
+    const currentSettings = f.storage.getGlobalConfiguration();
+    const typeChange: ProfileChanges = [{ action: 'update', id: profileId, changes: { profile_type: 'reviewer' } }];
+    const typeResponse = await putSettings(f, headers, { changes: {}, profile_changes: typeChange }, currentSettings.etag);
+    expect(typeResponse.statusCode).toBe(409);
+    expect(typeResponse.json()).toMatchObject({ code: 'PROFILE_TYPE_CHANGE_BLOCKED', facts: { blocking_project_ids: projectId } });
+    const afterTypeRejection = f.storage.getGlobalConfiguration();
+    const deletion = await putSettings(f, headers, { changes: {}, profile_changes: [{ action: 'delete', id: profileId }] }, afterTypeRejection.etag);
+    expect(deletion.statusCode).toBe(409);
+    expect(deletion.json()).toMatchObject({ code: 'PROFILE_DELETE_BLOCKED', facts: { blocking_project_ids: projectId } });
     const project = f.storage.getConfiguration(projectId);
     const beforeAggregateRejection = f.storage.getGlobalConfiguration();
     const aggregateDelete = await putConfiguration(f, headers, projectId, { project_changes: { correction_limit: 3 }, profile_changes: [{ action: 'delete', id: profileId }] }, project.etag);
     expect(aggregateDelete.statusCode).toBe(409);
     expect(f.storage.getConfiguration(projectId)).toEqual(project);
     expect(f.storage.getGlobalConfiguration()).toEqual(beforeAggregateRejection);
+  });
+});
+
+describe('onboarding facts and durable completion', () => {
+  function observeEligibleAccount(f: Fixture): void {
+    vi.mocked(f.githubSetup.resolveExecutable).mockResolvedValue({ state: 'observed', path: 'C:\\Tools\\GitHub CLI\\gh.exe', version: '2.70.0', diagnostics: [] });
+    vi.mocked(f.githubSetup.getAuthenticationAccounts).mockResolvedValue({ state: 'observed', diagnostics: [],
+      accounts: [{ login: 'test-user', active: true, valid: true }] });
+  }
+
+  async function prepareCompletion(f: Fixture, headers: Record<string, string>): Promise<void> {
+    observeEligibleAccount(f);
+    const binding = await putSettings(f, headers, { changes: {}, account_binding: { action: 'bind', account_id: 'ACCOUNT_test' } });
+    expect(binding.statusCode).toBe(200);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.first_incomplete_step).toBe('projects_root');
+    const directory = await putSettings(f, headers, { changes: { projects_root: f.directory } });
+    expect(directory.statusCode).toBe(200);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.first_incomplete_step).toBe('profiles');
+    const reviewer: ExecutionProfile = { ...profile, name: 'Test exact reviewer', profile_type: 'reviewer' };
+    const profiles = await putSettings(f, headers, { changes: {}, profile_changes: [profile, reviewer] });
+    expect(profiles.statusCode).toBe(200);
+    expect(f.storage.getGlobalConfiguration().view).toMatchObject({
+      profile_counts: { all: 2, implementer: 1, reviewer: 1 }, onboarding: { first_incomplete_step: null },
+    });
+    expect(f.storage.getGlobalConfiguration().view.onboarding.prerequisites).toEqual([]);
+  }
+
+  it('derives the first incomplete step and host selection capabilities without GitHub or OMP reads', async () => {
+    const selectProjectsDirectory = vi.fn(async () => null);
+    const selectGitHubExecutable = vi.fn(async () => null);
+    const f = fixture(false, { selectProjectsDirectory, selectGitHubExecutable }); const headers = await session(f);
+    const before = f.db.pragma('data_version', { simple: true });
+    const response = await f.app.inject({ url: '/api/v1/settings', headers });
+    expect(response.statusCode).toBe(200);
+    expect(Value.Check(SettingsView, response.json())).toBe(true);
+    expect(response.json<SettingsView>()).toMatchObject({
+      profile_counts: { all: 0, implementer: 0, reviewer: 0 },
+      onboarding: { suppressed: false, completed_at_ms: null, first_incomplete_step: 'github' },
+      selection_capabilities: { projects_root: { available: true }, gh_executable: { available: true } },
+      event_cursor: expect.any(String),
+    });
+    expect(response.json<SettingsView>().onboarding.prerequisites.map(({ code }) => code)).toEqual([
+      'ACCOUNT_UNOBSERVED', 'PROJECTS_ROOT_REQUIRED', 'IMPLEMENTER_PROFILE_REQUIRED', 'REVIEWER_PROFILE_REQUIRED',
+    ]);
+    expect(f.github.getIdentity).not.toHaveBeenCalled();
+    expect(f.githubSetup.resolveExecutable).not.toHaveBeenCalled();
+    expect(f.githubSetup.getAuthenticationAccounts).not.toHaveBeenCalled();
+    expect(f.execution?.getCatalog).not.toHaveBeenCalled();
+    expect(f.db.pragma('data_version', { simple: true })).toBe(before);
+
+    const project = await register(f, headers);
+    const projectId = project.json<ProjectDetail>().project.id;
+    const configuration = await f.app.inject({ url: `/api/v1/projects/${projectId}/configuration`, headers });
+    expect(configuration.statusCode).toBe(200);
+    expect(Value.Check(ConfigurationView, configuration.json())).toBe(true);
+    expect(configuration.json<ConfigurationView>()).toMatchObject({ onboarding: { first_incomplete_step: 'github' },
+      selection_capabilities: { projects_root: { available: true }, gh_executable: { available: true } } });
+  });
+
+  it('persists suppression independently and rejects client supplied completion facts', async () => {
+    const f = fixture(); const headers = await session(f);
+    const suppressed = await putSettings(f, headers, { changes: {}, onboarding_changes: { suppressed: true } });
+    expect(suppressed.statusCode).toBe(200);
+    expect(suppressed.json<SettingsSaved>().onboarding).toMatchObject({ suppressed: true, completed_at_ms: null, first_incomplete_step: 'github' });
+    expect(suppressed.json<SettingsSaved>().onboarding.prerequisites.map(({ code }) => code)).toEqual([
+      'ACCOUNT_UNOBSERVED', 'PROJECTS_ROOT_REQUIRED', 'IMPLEMENTER_PROFILE_REQUIRED', 'REVIEWER_PROFILE_REQUIRED',
+    ]);
+    const operationCount = f.db.prepare('SELECT count(*) AS count FROM operation_requests').get() as { count: number };
+    const eventCount = f.db.prepare('SELECT count(*) AS count FROM events').get() as { count: number };
+    for (const onboarding_changes of [
+      { completed_at_ms: 0 }, { first_incomplete_step: 'profiles' }, { ready: true }, { complete: false }, {},
+    ]) {
+      const invalid = await f.app.inject({ method: 'PUT', url: '/api/v1/settings', headers: { ...headers,
+        'if-match': f.storage.getGlobalConfiguration().etag, 'idempotency-key': randomUUID() }, payload: { changes: {}, onboarding_changes } });
+      expect(invalid.statusCode).toBe(400);
+    }
+    expect(f.db.prepare('SELECT count(*) AS count FROM operation_requests').get()).toEqual(operationCount);
+    expect(f.db.prepare('SELECT count(*) AS count FROM events').get()).toEqual(eventCount);
+    const reopenedView = await f.app.inject({ url: '/api/v1/settings', headers });
+    expect(reopenedView.json<SettingsView>().onboarding).toMatchObject({ suppressed: true, completed_at_ms: null, first_incomplete_step: 'github' });
+  });
+
+  it('revalidates account and writable root, completes atomically, and recovers the original receipt without another validation', async () => {
+    const f = fixture(); const headers = await session(f); await prepareCompletion(f, headers);
+    if (!f.execution) throw new Error('EXECUTION_FIXTURE_INCOMPLETE');
+    const catalogCalls = vi.mocked(f.execution.getCatalog).mock.calls.length;
+    vi.mocked(f.execution.getCatalog).mockResolvedValue({ state: 'unavailable', observed_at_ms: 50,
+      diagnostics: [{ code: 'OMP_OFFLINE', message: 'Unavailable after profile save.', recovery: 'Retry catalog observation.' }] });
+    const before = {
+      projects: (f.db.prepare('SELECT count(*) AS count FROM projects').get() as { count: number }).count,
+      projectCreations: (f.db.prepare('SELECT count(*) AS count FROM project_creations').get() as { count: number }).count,
+      attempts: (f.db.prepare('SELECT count(*) AS count FROM attempts').get() as { count: number }).count,
+      queueConsumptions: (f.db.prepare('SELECT count(*) AS count FROM queue_consumptions').get() as { count: number }).count,
+      passages: (f.db.prepare('SELECT count(*) AS count FROM passages').get() as { count: number }).count,
+      resources: (f.db.prepare('SELECT count(*) AS count FROM resources').get() as { count: number }).count,
+      publicationRequests: (f.db.prepare('SELECT count(*) AS count FROM publication_requests').get() as { count: number }).count,
+      publicationUpgrades: (f.db.prepare('SELECT count(*) AS count FROM publication_upgrades').get() as { count: number }).count,
+      effects: (f.db.prepare('SELECT count(*) AS count FROM effects').get() as { count: number }).count,
+      operations: (f.db.prepare('SELECT count(*) AS count FROM operation_requests').get() as { count: number }).count,
+      automationEnabled: f.storage.getSettings().automation_enabled,
+    };
+    expect(before).toMatchObject({ projects: 0, projectCreations: 0, attempts: 0, queueConsumptions: 0,
+      passages: 0, resources: 0, publicationRequests: 0, publicationUpgrades: 0, effects: 0, automationEnabled: false });
+    const etag = f.storage.getGlobalConfiguration().etag;
+    const key = randomUUID(); const command: SettingsUpdate = { changes: {}, onboarding_changes: { complete: true } };
+    const completed = await putSettings(f, headers, command, etag, key);
+    expect(completed.statusCode).toBe(200);
+    expect(Value.Check(SettingsSaved, completed.json())).toBe(true);
+    const saved = completed.json<SettingsSaved>();
+    expect(saved.onboarding).toMatchObject({ suppressed: false, first_incomplete_step: null, completed_at_ms: expect.any(Number), prerequisites: [] });
+    expect(saved.operation_id).toBe(key);
+    expect(f.execution.getCatalog).toHaveBeenCalledTimes(catalogCalls);
+    expect(f.githubSetup.getAuthenticationAccounts).toHaveBeenCalled();
+    expect(f.github.getIdentity).toHaveBeenCalled();
+    expect(f.storage.getSettings().automation_enabled).toBe(false);
+    expect((f.db.prepare('SELECT count(*) AS count FROM projects').get() as { count: number }).count).toBe(before.projects);
+    expect((f.db.prepare('SELECT count(*) AS count FROM project_creations').get() as { count: number }).count).toBe(before.projectCreations);
+    expect((f.db.prepare('SELECT count(*) AS count FROM attempts').get() as { count: number }).count).toBe(before.attempts);
+    expect((f.db.prepare('SELECT count(*) AS count FROM queue_consumptions').get() as { count: number }).count).toBe(before.queueConsumptions);
+    expect((f.db.prepare('SELECT count(*) AS count FROM passages').get() as { count: number }).count).toBe(before.passages);
+    expect((f.db.prepare('SELECT count(*) AS count FROM resources').get() as { count: number }).count).toBe(before.resources);
+    expect((f.db.prepare('SELECT count(*) AS count FROM publication_requests').get() as { count: number }).count).toBe(before.publicationRequests);
+    expect((f.db.prepare('SELECT count(*) AS count FROM publication_upgrades').get() as { count: number }).count).toBe(before.publicationUpgrades);
+    expect((f.db.prepare('SELECT count(*) AS count FROM effects').get() as { count: number }).count).toBe(before.effects);
+    expect((f.db.prepare('SELECT count(*) AS count FROM operation_requests').get() as { count: number }).count).toBe(before.operations + 1);
+
+    const authCalls = vi.mocked(f.githubSetup.getAuthenticationAccounts).mock.calls.length;
+    const identityCalls = vi.mocked(f.github.getIdentity).mock.calls.length;
+    const replay = await putSettings(f, headers, command, etag, key);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json<SettingsSaved>().receipt).toEqual(saved.receipt);
+    expect(replay.json<SettingsSaved>().operation_id).toBe(saved.operation_id);
+    expect(vi.mocked(f.githubSetup.getAuthenticationAccounts)).toHaveBeenCalledTimes(authCalls);
+    expect(vi.mocked(f.github.getIdentity)).toHaveBeenCalledTimes(identityCalls);
+    expect(f.execution.getCatalog).toHaveBeenCalledTimes(catalogCalls);
+  });
+
+  it('keeps a failed completion uncommitted when account or folder validation fails', async () => {
+    const f = fixture(); const headers = await session(f); await prepareCompletion(f, headers);
+    const etag = f.storage.getGlobalConfiguration().etag;
+    vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER_ACCOUNT', login: 'other-user' }));
+    const accountFailure = await putSettings(f, headers, { changes: {}, onboarding_changes: { complete: true } }, etag);
+    expect(accountFailure.statusCode).toBe(409);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.completed_at_ms).toBeNull();
+    expect(f.db.prepare("SELECT count(*) AS count FROM operation_requests WHERE operation_kind='settings.onboarding.update'").get()).toEqual({ count: 0 });
+
+    vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'ACCOUNT_test', login: 'test-user' }));
+    vi.mocked(directoryFs.realpath).mockRejectedValueOnce(Object.assign(new Error('path unavailable'), { code: 'ENOENT' }));
+    const folderFailure = await putSettings(f, headers, { changes: {}, onboarding_changes: { complete: true } }, etag);
+    expect(folderFailure.statusCode).toBe(409);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.completed_at_ms).toBeNull();
+    expect(f.db.prepare("SELECT count(*) AS count FROM operation_requests WHERE operation_kind='settings.onboarding.update'").get()).toEqual({ count: 0 });
+  });
+
+  it('rejects completion when the shared settings revision changes during external validation', async () => {
+    const f = fixture(); const headers = await session(f); await prepareCompletion(f, headers);
+    const etag = f.storage.getGlobalConfiguration().etag;
+    vi.mocked(f.github.getIdentity).mockImplementationOnce(async () => {
+      const concurrentSave = await putSettings(f, headers, { changes: { projects_root: f.directory } });
+      expect(concurrentSave.statusCode).toBe(200);
+      return complete({ id: 'ACCOUNT_test', login: 'test-user' });
+    });
+    const completion = await putSettings(f, headers, { changes: {}, onboarding_changes: { complete: true } }, etag);
+    expect(completion.statusCode).toBe(412);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.completed_at_ms).toBeNull();
+    expect(f.db.prepare("SELECT count(*) AS count FROM operation_requests WHERE operation_kind='settings.onboarding.update'").get()).toEqual({ count: 0 });
+  });
+
+  it('rolls back the completion marker and receipt when the event cannot be committed', async () => {
+    const f = fixture(); const headers = await session(f); await prepareCompletion(f, headers);
+    f.db.exec(`CREATE TRIGGER fail_onboarding_event BEFORE INSERT ON events WHEN NEW.event_type='settings.onboarding.updated'
+      BEGIN SELECT RAISE(ABORT, 'fixture event failure'); END`);
+    const beforeRevision = f.storage.getSettings().revision;
+    const beforeOperations = f.db.prepare('SELECT count(*) AS count FROM operation_requests').get();
+    const beforeEvents = f.db.prepare('SELECT count(*) AS count FROM events').get();
+    const response = await putSettings(f, headers, { changes: {}, onboarding_changes: { complete: true } });
+    expect(response.statusCode).toBe(503);
+    expect(f.storage.getSettings().revision).toBe(beforeRevision);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.completed_at_ms).toBeNull();
+    expect(f.db.prepare('SELECT count(*) AS count FROM operation_requests').get()).toEqual(beforeOperations);
+    expect(f.db.prepare('SELECT count(*) AS count FROM events').get()).toEqual(beforeEvents);
+  });
+
+  it('keeps completion historical and reports later account, folder, and profile pendencies', async () => {
+    const f = fixture(); const headers = await session(f); await prepareCompletion(f, headers);
+    const completed = await putSettings(f, headers, { changes: {}, onboarding_changes: { complete: true } });
+    expect(completed.statusCode).toBe(200);
+    const completionTime = completed.json<SettingsSaved>().onboarding.completed_at_ms;
+    vi.mocked(directoryFs.realpath).mockRejectedValueOnce(Object.assign(new Error('path unavailable'), { code: 'ENOENT' }));
+    const folderCheck = await f.app.inject({ method: 'POST', url: '/api/v1/diagnostics?scope=host',
+      headers: { ...headers, 'idempotency-key': randomUUID() }, payload: { checks: ['configuration'] } });
+    expect(folderCheck.statusCode).toBe(202);
+    const folderOperation = folderCheck.json<{ operation_id: string }>();
+    await vi.waitFor(() => expect(f.storage.getOperation(folderOperation.operation_id)?.state).toBe('succeeded'));
+    const folderReport = await f.app.inject({ url: '/api/v1/diagnostics?scope=host', headers });
+    expect(folderReport.json<{ reports: Array<{ diagnostics: Array<{ code: string; state: string }> }> }>().reports[0]?.diagnostics)
+      .toMatchObject([{ code: 'PROJECTS_ROOT_UNAVAILABLE', state: 'blocked' }]);
+    const profiles = f.storage.getGlobalConfiguration().view.profiles;
+    const profileDeletion = await putSettings(f, headers, { changes: {}, profile_changes: profiles.map(({ id }) => ({ action: 'delete' as const, id })) });
+    expect(profileDeletion.statusCode).toBe(200);
+    const rootRemoval = await putSettings(f, headers, { changes: { projects_root: null } });
+    expect(rootRemoval.statusCode).toBe(200);
+    const current = await f.app.inject({ url: '/api/v1/settings', headers });
+    expect(current.json<SettingsView>().onboarding).toEqual({ suppressed: false, completed_at_ms: completionTime, first_incomplete_step: null, prerequisites: [] });
+    expect(current.json<SettingsView>().profile_counts).toEqual({ all: 0, implementer: 0, reviewer: 0 });
+
+    const diagnostics = await f.app.inject({ url: '/api/v1/diagnostics?scope=host', headers });
+    expect(diagnostics.statusCode).toBe(200);
+    const diagnosticView = diagnostics.json<{ diagnostics: Array<{ code: string }> }>();
+    expect(diagnosticView.diagnostics.map((item) => item.code)).toEqual(expect.arrayContaining([
+      'ONBOARDING_PROJECTS_ROOT_REQUIRED', 'ONBOARDING_IMPLEMENTER_PROFILE_REQUIRED', 'ONBOARDING_REVIEWER_PROFILE_REQUIRED',
+    ]));
+    vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER_ACCOUNT', login: 'other-user' }));
+    const identity = await f.app.inject({ method: 'POST', url: '/api/v1/diagnostics?scope=host',
+      headers: { ...headers, 'idempotency-key': randomUUID() }, payload: { checks: ['github_identity'] } });
+    expect(identity.statusCode).toBe(202);
+    const accepted = identity.json<{ operation_id: string }>();
+    await vi.waitFor(() => expect(f.storage.getOperation(accepted.operation_id)?.state).toBe('succeeded'));
+    const report = await f.app.inject({ url: '/api/v1/diagnostics?scope=host', headers });
+    expect(report.json().reports[0]?.diagnostics).toMatchObject([{ code: 'ACCOUNT_MISMATCH', state: 'blocked' }]);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.completed_at_ms).toBe(completionTime);
+    expect(f.storage.getGlobalConfiguration().view.onboarding.first_incomplete_step).toBeNull();
   });
 });
