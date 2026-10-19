@@ -6,6 +6,7 @@ import { inspectPullRequest, pullRequestMutation } from './pull-requests.js';
 
 /** Granted only by trusted host composition for known real targets. Never sourced from HTTP or environment. */
 export interface GitHubMutationAuthorization { accountId: string; repositoryIds: readonly string[]; projectIds: readonly string[] }
+export interface AttemptEffectAuthorization { kind: 'confirmed_attempt' }
 export interface GitHubEffectRequest { effect: EffectView; accountId: string; body?: string; authorize?: () => Promise<void> }
 const commentMutation = `mutation FactoryComment($input:AddCommentInput!) {
   addComment(input:$input) { clientMutationId commentEdge { node { id url body issue { id } repository { id } } } }
@@ -13,14 +14,16 @@ const commentMutation = `mutation FactoryComment($input:AddCommentInput!) {
 const statusMutation = `mutation FactoryStatus($input:UpdateProjectV2ItemFieldValueInput!) {
   updateProjectV2ItemFieldValue(input:$input) { clientMutationId projectV2Item { id } }
 }`;
-export function createEffectWriter(reader: GraphQLReader, authorization?: GitHubMutationAuthorization) {
+export function createEffectWriter(reader: GraphQLReader, authorization?: GitHubMutationAuthorization, attemptEffectAuthorization?: AttemptEffectAuthorization) {
   return async ({ effect, accountId, body, authorize }: GitHubEffectRequest): Promise<GitHubMutationResult> => {
     const denied = (reason: string): GitHubMutationResult => ({ state: 'failed_known', receipt: null, reason, retryAtMs: null });
     if (!Value.Check(EffectView, effect) || !Value.Check(OperationId, effect.operationId) || !Value.Check(GitHubId, accountId) || effect.state !== 'running') return denied('EFFECT_INPUT_INVALID');
     if (!['issue_comment','project_status','pull_request'].includes(effect.kind) || !effect.attemptId || effect.creationId) return denied('EFFECT_INPUT_INVALID');
     const identity = effect.expectedIdentity;
-    if (!identity.repositoryId || !authorization || authorization.accountId !== accountId || !authorization.repositoryIds.includes(identity.repositoryId) ||
-      (effect.kind === 'project_status' && (!identity.projectId || !authorization.projectIds.includes(identity.projectId)))) return denied('MUTATION_NOT_AUTHORIZED');
+    const confirmedEffect = attemptEffectAuthorization?.kind === 'confirmed_attempt' && (effect.kind === 'project_status' || effect.kind === 'issue_comment') && effect.authorized && !!authorize;
+    const trustedTarget = authorization?.accountId === accountId && authorization.repositoryIds.includes(identity.repositoryId ?? '') &&
+      (effect.kind !== 'project_status' || authorization.projectIds.includes(identity.projectId ?? ''));
+    if (!identity.repositoryId || (!confirmedEffect && !trustedTarget)) return denied('MUTATION_NOT_AUTHORIZED');
     if ((effect.kind === 'issue_comment' || effect.kind === 'pull_request') && (typeof body !== 'string' || body.length > 60_000 || !identity.marker || !body.startsWith(identity.marker+'\n') || createHash('sha256').update(body).digest('hex') !== identity.bodyHash)) return denied('EFFECT_INPUT_INVALID');
     if (effect.kind === 'pull_request') {
       if (!identity.baseBranch || !identity.branchRef?.startsWith('refs/heads/') || !identity.commitSha || !identity.title || /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:#[0-9]|https:\/\/github\.com\/)/i.test(body!)) return denied('EFFECT_INPUT_INVALID');

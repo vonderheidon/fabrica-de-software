@@ -1,6 +1,7 @@
 import { createClient } from './client.js';
-import { createEffectWriter, type GitHubMutationAuthorization } from './effects.js';
+import { createEffectWriter, type GitHubMutationAuthorization, type AttemptEffectAuthorization } from './effects.js';
 export type { GitHubMutationAuthorization, GitHubEffectRequest } from './effects.js';
+export type { AttemptEffectAuthorization } from './effects.js';
 import { GraphQLReader, createGhRunner, GitHubRunnerError, queryGhAuthentication, type GhRunner, type GitHubContext, type GitHubHostAccess } from './transport.js';
 import { GitHubExecutableResolver } from './executable.js';
 import { inspectPullRequest } from './pull-requests.js';
@@ -19,6 +20,7 @@ export interface GitHubOptions {
   resolver?: GitHubExecutableResolver;
   runnerFactory?: (context: GitHubContext) => GhRunner;
   mutationAuthorization?: GitHubMutationAuthorization;
+  attemptEffectAuthorization?: AttemptEffectAuthorization;
   scaffoldAuthorization?: ScaffoldAuthorization;
 }
 /** No keyring access is inferred from PATH, environment flags or the presence of a CLI binary. */
@@ -34,7 +36,7 @@ export function createGitHub(options: GitHubOptions = {}) {
   const reader = new GraphQLReader(runner);
   return {
     ...createClient(reader), ...createRemoteScaffolder(reader, options.scaffoldAuthorization),
-    mutateEffect: createEffectWriter(reader, options.mutationAuthorization),
+    mutateEffect: createEffectWriter(reader, options.mutationAuthorization, options.attemptEffectAuthorization),
     reconcilePullRequest: (effect: import('#contracts').EffectView, accountId: string) => inspectPullRequest(reader, effect, accountId),
     resolveExecutable: async (path: string | null) => (await resolver.resolve(path)).observation,
     validateExecutable: async (path: string) => (await resolver.validate(path)).observation,
