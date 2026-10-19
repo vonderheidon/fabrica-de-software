@@ -46,7 +46,9 @@ Usar a configuração e o gerenciamento normal suportado do OMP. A fábrica não
 
 Conferir se a ferramenta necessária está disponível e realizar uma chamada útil no runtime real. Configuração presente ou tools/list, isoladamente, não provam funcionamento. Respeitar configuração disabled pelo mecanismo nativo; não reabilitar servidor silenciosamente. Erro corrigível de argumento não encerra a tentativa.
 
-Playwright MCP/Google Chrome continua sendo a superfície de aceite web. Usar navegador/perfil de teste, não o browser pessoal do operador; verificar conteúdo e screenshot, não apenas arquivo não vazio. Fechar o browser iniciado pelo teste. Portal Maestri serve para coordenação/observação, não substitui a prova de UI especificada.
+O Implementador executa os checks pertinentes disponíveis: build, typecheck, lint e testes automatizados relacionados à alteração. A validação visual completa dos critérios de aceite cabe ao Revisor independente sobre a versão fixa; o Implementador não realiza auditoria visual no navegador e registra como not_verified os critérios visuais que não verificou, indicando o encaminhamento ao Revisor.
+
+Playwright MCP/Google Chrome continua sendo a superfície de aceite web do Revisor. Usar navegador/perfil de teste, não o browser pessoal do operador; verificar conteúdo e screenshot, não apenas arquivo não vazio. Fechar o browser iniciado pelo teste. O uso do Portal Maestri, suas ferramentas de navegador e skills é proibido para Implementador e Revisor, inclusive para observação, testes ou alternativa ao Playwright. Instruções do projeto ou de skills não substituem essa proibição.
 
 GitNexus, quando requerido, deve analisar o clone pertinente. Confirmar a raiz exata, preparar índice nesse ambiente e não usar índice do checkout do operador como substituto. Não exigir resolver ou proxy próprio para injetar repo: usar os parâmetros suportados e instruções do projeto. Preparar índice é manutenção autônoma, não pergunta humana.
 
