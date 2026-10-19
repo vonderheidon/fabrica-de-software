@@ -191,6 +191,49 @@ it('keeps an absent, partial, forged or duplicate marker unknown without blind r
   }
 });
 
+it('rechecks current authority when the attempt changes during a remote read', async () => {
+  const f = await fixture();
+  const readIdentity = vi.mocked(f.github.getIdentity);
+  readIdentity.mockImplementationOnce(async () => {
+    f.db.prepare('UPDATE attempts SET revision=revision+1 WHERE id=?').run(f.attemptId);
+    return complete({ id: 'ACCOUNT_test', login: 'test-user' });
+  });
+  const operation = f.pipeline.revalidateAuthority(f.attemptId, f.context());
+  await f.pipeline.drain();
+  expect(f.storage.getOperation(operation.operation_id)?.state).toBe('succeeded');
+  expect(f.status().suspension).toBeNull();
+});
+
+it('honors revoked authority on the fresh read without sending another effect', async () => {
+  const f = await fixture();
+  const reads = vi.mocked(f.github.getIdentity);
+  const mutations = f.mutateEffect.mock.calls.length;
+  reads.mockImplementationOnce(async () => {
+    f.db.prepare('UPDATE attempts SET revision=revision+1 WHERE id=?').run(f.attemptId);
+    return complete({ id: 'ACCOUNT_test', login: 'test-user' });
+  });
+  reads.mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));
+  f.pipeline.revalidateAuthority(f.attemptId, f.context());
+  await f.pipeline.drain();
+  expect(f.status().suspension).toBe('ACCOUNT_CHANGED');
+  expect(f.mutateEffect).toHaveBeenCalledTimes(mutations);
+});
+
+it('bounds repeated stale observations without sending an effect', async () => {
+  const f = await fixture();
+  const reads = vi.mocked(f.github.getIdentity); reads.mockClear();
+  const mutations = f.mutateEffect.mock.calls.length;
+  reads.mockImplementation(async () => {
+    f.db.prepare('UPDATE attempts SET revision=revision+1 WHERE id=?').run(f.attemptId);
+    return complete({ id: 'ACCOUNT_test', login: 'test-user' });
+  });
+  const operation = f.pipeline.revalidateAuthority(f.attemptId, f.context());
+  await f.pipeline.drain();
+  expect(f.storage.getOperation(operation.operation_id)?.state).toBe('failed');
+  expect(reads).toHaveBeenCalledTimes(2);
+  expect(f.mutateEffect).toHaveBeenCalledTimes(mutations);
+});
+
 it('pauses on account change and preserves a different suspension when authority is revalidated', async () => {
   const f = await fixture(); await f.implement();
   vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));

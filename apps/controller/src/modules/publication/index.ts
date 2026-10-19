@@ -28,6 +28,14 @@ export function createPublication(deps: PublicationDependencies) {
   const active = new Set<string>();
   function supported() { if (deps.isClosed()) throw new OperationError(503, 'PUBLICATION_CLOSED', 'The controller is shutting down.'); }
   async function observeAuthority(id: string, desired?: Stage): Promise<boolean> {
+    try { return await observeCurrentAuthority(id, desired); }
+    catch (error) {
+      if (!(error instanceof OperationError) || error.code !== 'AUTHORITY_OBSERVATION_STALE') throw error;
+      // Only repeat reads: the discarded observation must never authorize a remote effect.
+      return observeCurrentAuthority(id, desired);
+    }
+  }
+  async function observeCurrentAuthority(id: string, desired?: Stage): Promise<boolean> {
     supported(); const snapshot = storage.getPublicationSnapshot(id); const capture = snapshot.capture;
     const mapping = capture.configuration.configuration.github_project;
     const currentMapping = snapshot.configuration.configuration.github_project;
