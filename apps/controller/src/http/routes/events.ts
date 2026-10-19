@@ -9,7 +9,34 @@ import type { Storage } from '../../modules/storage/index.js';
 import { httpLimits, type installSecurity } from '../security/index.js';
 import { HttpError } from '../errors.js';
 
-export function installEventRoutes(base: FastifyInstance, storage: Storage, security: ReturnType<typeof installSecurity>) {
+type EventStreamLimits = Readonly<{
+  handlerTimeoutMs: number;
+  streamLifetimeMs: number;
+  streamPollMs: number;
+  streamBufferBytes: number;
+}>;
+
+function errorContext(error: unknown): { error_name: string; error_code?: string; cause_code?: string } {
+  if (!(error instanceof Error)) return { error_name: 'UnknownError' };
+  const errorName = /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(error.name) ? error.name : 'Error';
+  const candidate = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+  const errorCode = candidate && /^[A-Z0-9_]{1,64}$/.test(candidate) ? candidate : undefined;
+  const cause = 'cause' in error ? error.cause : undefined;
+  const causeCandidate = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string' ? cause.code : undefined;
+  const causeCode = causeCandidate && /^[A-Z0-9_]{1,64}$/.test(causeCandidate) ? causeCandidate : undefined;
+  return {
+    error_name: errorName,
+    ...(errorCode ? { error_code: errorCode } : {}),
+    ...(causeCode ? { cause_code: causeCode } : {}),
+  };
+}
+
+export function installEventRoutes(
+  base: FastifyInstance,
+  storage: Storage,
+  security: ReturnType<typeof installSecurity>,
+  limits: EventStreamLimits = httpLimits,
+) {
   const app = base.withTypeProvider<TypeBoxTypeProvider>();
   app.get('/api/v1/events', { schema: { querystring: HttpEventListQuery, response: { 200: HttpEventPage, 400: ErrorResponse, 401: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse } } }, async (request) => {
     const settings = storage.getSettings();
@@ -32,16 +59,19 @@ export function installEventRoutes(base: FastifyInstance, storage: Storage, secu
     return { ...toHttpEventPage(page), next_cursor: page.next_cursor ? Buffer.from(`${page.next_cursor}:${scope}:${page.event_cursor}`).toString('base64url') : null };
   });
   // Fastify's handler deadline includes streaming; allow the bounded SSE lifetime to finish first.
-  app.get('/api/v1/events/stream', { handlerTimeout: httpLimits.streamLifetimeMs + httpLimits.handlerTimeoutMs, schema: { querystring: HttpEventStreamQuery } }, async (request, reply) => {
+  app.get('/api/v1/events/stream', { handlerTimeout: limits.streamLifetimeMs + limits.handlerTimeoutMs, schema: { querystring: HttpEventStreamQuery } }, async (request, reply) => {
     const header = request.headers['last-event-id'];
     const initialCursor = header ?? request.query.cursor ?? '0';
     let cursor = typeof initialCursor === 'string' ? initialCursor : '';
     const controller = new AbortController();
     const release = security.trackStream(request, controller);
-    const deadline = globalThis.setTimeout(() => controller.abort(), httpLimits.streamLifetimeMs);
+    const deadline = globalThis.setTimeout(() => controller.abort(), limits.streamLifetimeMs);
     const disconnect = () => controller.abort();
     reply.raw.once('close', disconnect);
+    let cleaned = false;
     const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       clearTimeout(deadline);
       release();
       reply.raw.off('close', disconnect);
@@ -64,19 +94,21 @@ export function installEventRoutes(base: FastifyInstance, storage: Storage, secu
           if (page.has_more) continue;
           cursor = page.event_cursor;
           yield ': heartbeat\n\n';
-          await setTimeout(httpLimits.streamPollMs, undefined, { signal: controller.signal });
+          await setTimeout(limits.streamPollMs, undefined, { signal: controller.signal });
         }
       } catch (error) {
         if (!controller.signal.aborted) {
-          request.log.warn({ code: 'EVENT_RESYNC_REQUIRED' }, 'Event stream closed');
+          request.log.warn({ code: 'EVENT_RESYNC_REQUIRED', ...errorContext(error) }, 'Event stream requires resynchronization');
           yield 'event: resync\ndata: {"code":"EVENT_RESYNC_REQUIRED"}\n\n';
         } else if (!(error instanceof Error && error.name === 'AbortError')) {
-          request.log.warn({ code: 'EVENT_STREAM_CLOSED' }, 'Event stream stopped');
+          request.log.warn({ code: 'EVENT_STREAM_CLOSED', ...errorContext(error) }, 'Event stream stopped after cancellation');
         }
       } finally {
         cleanup();
       }
-    })(), { objectMode: false, highWaterMark: httpLimits.streamBufferBytes, signal: controller.signal });
+    // The generator observes the signal through the bounded polling wait and exits normally.
+    // Passing it to Readable.from would destroy the HTTP body immediately on deadline, before EOF.
+    })(), { objectMode: false, highWaterMark: limits.streamBufferBytes });
     body.once('close', cleanup);
     return reply.type('text/event-stream').header('X-Accel-Buffering', 'no').send(body);
   });

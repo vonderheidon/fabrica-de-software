@@ -30,6 +30,24 @@ const previousCwd = process.cwd();
 const signals = { SIGINT: process.listenerCount('SIGINT'), SIGTERM: process.listenerCount('SIGTERM') };
 let app;
 let child;
+let smokeStep = 'controller-startup';
+const completedSteps = [];
+function markSmokeStep(name) {
+  smokeStep = name;
+}
+function completeSmokeStep() {
+  completedSteps.push(smokeStep);
+}
+function summarizeSmokeError(error) {
+  const cause = error && typeof error === 'object' && 'cause' in error ? error.cause : null;
+  const causeCode = cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
+    && /^[A-Z0-9_]{1,64}$/.test(cause.code) ? cause.code : null;
+  return {
+    name: error instanceof Error ? error.name : 'UnknownError',
+    message: error instanceof Error ? error.message.slice(0, 240) : 'The smoke failed with an unknown error.',
+    cause_code: causeCode,
+  };
+}
 const main = fileURLToPath(new URL('../tests/native/controller-fixture.mjs', import.meta.url));
 async function waitForExit(processHandle) {
   if (processHandle.exitCode !== null || processHandle.signalCode !== null) return processHandle.exitCode;
@@ -45,7 +63,10 @@ function startChild(environment) {
 try {
   Object.assign(process.env, changes);
   process.chdir(directory);
+  markSmokeStep('controller-startup');
   app = await startController({}, { ...controlledDependencies, dataDirectory: directory });
+  completeSmokeStep();
+  markSmokeStep('health-and-session');
   const response = await fetch(changes.FACTORY_BROWSER_ORIGIN + '/api/v1/health');
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { status: 'ok' });
@@ -67,8 +88,10 @@ try {
   assert.equal(scaffoldOptions.projects_root, null);
   assert(scaffoldOptions.prerequisites.some(p => p.code === 'PROJECTS_ROOT_REQUIRED'));
   assert(scaffoldOptions.creation_modes.every(m => !m.capability.available));
+  completeSmokeStep();
   const storage = openStorage({ dataDirectory: directory });
   const operationId = randomUUID();
+  markSmokeStep('settings-idempotency');
   try {
     storage.saveTimeDefaults({ operationId, expectedRevision: storage.getSettingsETag(), timeDefaults: storage.getSettings().time_defaults });
   } finally { storage.close(); }
@@ -111,6 +134,8 @@ try {
   assert.equal(snapshot.integration_status.proves_provider_execution, false);
   const priorDiagnosis = await fetch(origin + '/api/v1/diagnostics?scope=host', { headers: { cookie } });
   assert.equal(priorDiagnosis.status, 200); assert.deepEqual((await priorDiagnosis.json()).reports, []);
+  completeSmokeStep();
+  markSmokeStep('diagnostic-and-event-replay');
   const diagnosticId = randomUUID();
   const diagnosticResponse = await fetch(origin + '/api/v1/diagnostics?scope=host', { method: 'POST',
     headers: { ...settingsHeaders, 'idempotency-key': diagnosticId }, body: JSON.stringify({ checks: ['configuration', 'github_identity', 'maestri_context'] }) });
@@ -127,11 +152,19 @@ try {
   } while (Date.now() < diagnosisDeadline);
   assert.equal(diagnosis.reports[0]?.state, 'succeeded');
   assert.equal(diagnosis.reports[0]?.operation_id, diagnosticId);
-  assert.equal(diagnosis.reports[0]?.diagnostics.length, 3);
+  const completedChecks = new Set(diagnosis.reports[0]?.diagnostics.map(item => item.check) ?? []);
+  for (const check of ['configuration', 'github_identity', 'maestri_context']) {
+    assert(completedChecks.has(check), `Missing diagnostic result for ${check}`);
+  }
+  assert((diagnosis.reports[0]?.diagnostics.length ?? 0) >= 3);
   assert(Number(diagnosis.event_cursor) > Number(snapshot.event_cursor));
+  completeSmokeStep();
+  markSmokeStep('sse-replay-response');
   const replay = await fetch(origin + '/api/v1/events/stream?cursor=invalid', { headers: { cookie, 'last-event-id': snapshot.event_cursor }, signal: AbortSignal.timeout(5000) });
   assert.equal(replay.status, 200);
+  completeSmokeStep();
   const replayReader = replay.body?.getReader(); assert(replayReader);
+  markSmokeStep('sse-replay-reader');
   let replayText = '';
   while (!replayText.includes('"event_type":"diagnostic.completed"')) {
     const chunk = await replayReader.read(); assert(!chunk.done);
@@ -144,6 +177,8 @@ try {
   assert(replayIds.every(id => Number(id) > Number(snapshot.event_cursor)));
   await replayReader.cancel();
   await new Promise(resolve => setTimeout(resolve, 10));
+  completeSmokeStep();
+  markSmokeStep('sse-stream-limits');
   const malformedHeaders = await fetch(origin + '/api/v1/health', { headers: { 'x-large': 'S'.repeat(9000) } });
   assert.equal(malformedHeaders.status, 431);
   assert.equal(typeof (await malformedHeaders.json()).request_id, 'string');
@@ -153,6 +188,7 @@ try {
   await excessiveHeaders.arrayBuffer();
   const streams = [];
   for (let index = 0; index < 2; index += 1) {
+    markSmokeStep(`sse-live-reader-${index + 1}`);
     const stream = await fetch(origin + '/api/v1/events/stream?cursor=99', { headers: { cookie, 'last-event-id': '0' } });
     assert.equal(stream.status, 200);
     assert.equal(stream.headers.get('content-type'), 'text/event-stream');
@@ -167,34 +203,52 @@ try {
     assert(text.includes(operationId));
     assert(!text.includes(bootstrap.csrf_token));
     assert(!text.includes(cookie.split('=')[1]));
-    streams.push(reader);
+    streams.push({ index: index + 1, reader });
+    completeSmokeStep();
   }
+  markSmokeStep('sse-stream-limit-rejection');
   const excessStream = await fetch(origin + '/api/v1/events/stream', { headers: { cookie } });
   assert.equal(excessStream.status, 429);
   await excessStream.arrayBuffer();
+  completeSmokeStep();
   const secondPort = address.port === 65535 ? 4311 : address.port + 1;
+  markSmokeStep('process-lock-check');
   child = startChild({ FACTORY_PORT: String(secondPort), FACTORY_BROWSER_ORIGIN: `http://127.0.0.1:${secondPort}` });
   let rejectedOutput = '';
   child.stderr?.on('data', (data) => { rejectedOutput += data.toString(); });
   assert.equal(await waitForExit(child), 1);
   assert(rejectedOutput.includes('CONTROLLER_LOCK_UNAVAILABLE'));
   child = undefined;
+  completeSmokeStep();
+  markSmokeStep('sse-shutdown');
   // Keep SSE connections open through shutdown to exercise preClose cancellation.
   // Exercise the registered shutdown path without sending a signal to the test runner.
   const closed = new Promise((resolve) => app.server.once('close', resolve));
   process.emit('SIGTERM', 'SIGTERM');
   await closed;
   await app.close();
-  await Promise.all(streams.map(async (reader) => {
+  for (const { index, reader } of streams) {
+    markSmokeStep(`sse-shutdown-reader-${index}`);
+    let termination = 'eof';
+    let closeError;
     try { while (!(await reader.read()).done) { /* Drain final buffered frames. */ } }
     catch (error) {
       // Revocation may close the HTTP transport after SSE headers were already sent.
       assert(error instanceof TypeError && error.cause?.code === 'UND_ERR_SOCKET');
-    }
-    finally { reader.releaseLock(); }
-  }));
+      termination = 'expected-transport-close';
+      closeError = summarizeSmokeError(error);
+    } finally { reader.releaseLock(); }
+    console.log(JSON.stringify({
+      smoke: 'compiled-controller', event: 'sse-reader-ended', stage: smokeStep,
+      reader: index, termination, ...(closeError ? { error: closeError } : {}),
+    }));
+    completeSmokeStep();
+  }
+  markSmokeStep('signal-handler-cleanup');
   assert.equal(process.listenerCount('SIGINT'), signals.SIGINT);
   assert.equal(process.listenerCount('SIGTERM'), signals.SIGTERM);
+  completeSmokeStep();
+  markSmokeStep('restart-and-session-revocation');
   child = startChild({ FACTORY_LOG_LEVEL: 'info' });
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Child readiness timed out')), 5000);
@@ -214,7 +268,15 @@ try {
   const revoked = await fetch(origin + '/api/v1/operations/'+operationId, { headers: { cookie } });
   assert.equal(revoked.status, 401);
   await revoked.arrayBuffer();
-  console.log('Compiled controller: real HTTP/SSE/SQLite, settings/CAS/idempotency, distributed scaffold catalog, context diagnostics, shutdown and process lock OK; anchor preflight controlled, Maestri/OMP not executed');
+  completeSmokeStep();
+  console.log(JSON.stringify({
+    smoke: 'compiled-controller', state: 'passed', exit_code: 0, completed_steps: completedSteps,
+    evidence: ['real-http', 'real-sse', 'real-sqlite', 'settings-cas-idempotency', 'shutdown', 'process-lock'],
+    anchor_preflight: 'controlled', maestri_omp: 'not_executed',
+  }));
+} catch (error) {
+  console.error(JSON.stringify({ smoke: 'compiled-controller', state: 'failed', exit_code: 1, step: smokeStep, completed_steps: completedSteps, error: summarizeSmokeError(error) }));
+  process.exitCode = 1;
 } finally {
   if (child && child.exitCode === null && child.signalCode === null) {
     const exited = waitForExit(child);
