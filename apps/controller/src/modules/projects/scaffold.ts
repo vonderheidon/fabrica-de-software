@@ -130,7 +130,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       }
       const observed = await account();
       return { catalog: { id: catalog.id, version: catalog.version, digest: catalog.digest },
-        templates: catalog.templates.map(t => ({ id: t.id, digest: t.digest, label: t.label, engineeringSummary: 'GitHub tracker, domain consumer rules, AGENTS.md pointers and optional triage vocabulary. No skills or labels are installed.' })),
+        templates: catalog.templates.map(t => ({ id: t.id, digest: t.digest, label: t.label, engineeringSummary: 'Tracker GitHub, regras de domínio, instruções AGENTS.md e vocabulário opcional de triagem. Nenhuma skill ou label será instalada.' })),
         projectsRoot, creationModes: (['local', 'remote_no_push', 'remote_push'] as const).map(mode => ({ mode, capability: mode === 'local'
           ? { ...workspaces.scaffoldCapability(), ...(pending.length ? { available: false, reason_code: pending[0]!.code, reason: pending[0]!.message, recovery: pending[0]!.recovery } : {}) }
           : { available: pending.length === 0 && observed.state === 'complete' && observed.id === configuration.view.settings.account_id && Boolean(workspaces.executeScaffoldGit && github.scaffoldRemoteCapability?.(undefined,observed.id!,mode === 'remote_push').available), reason_code: 'CREATION_TARGET_NOT_AUTHORIZED', reason: 'Remote creation requires an exact target authorization from the trusted host.', recovery: 'Configure the host authorization for the selected owner, name, visibility and push.' } })),

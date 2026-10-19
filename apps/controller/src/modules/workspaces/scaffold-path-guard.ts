@@ -13,7 +13,7 @@ export interface ScaffoldPathGuard {
 export type ScaffoldPathGuardFactory = (parent: string) => Promise<ScaffoldPathGuard>;
 
 // Node's mkdir/open APIs do not expose Windows directory sharing modes. Keep
-// every ancestor open without write/delete sharing, from the volume root down.
+// every ancestor open without delete sharing, from the volume root down.
 // OPEN_REPARSE_POINT inspects the directory itself instead of following a link.
 // The same process owns the handles AND performs mkdir: losing the helper cannot
 // turn a successful JS precheck into an unprotected directory creation.
@@ -52,11 +52,13 @@ public sealed class ScaffoldDirectories : IDisposable {
     if (handles.ContainsKey(path)) return;
     string parent = Path.GetDirectoryName(path);
     if (!String.IsNullOrEmpty(parent)) Pin(parent);
-    // FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES; FILE_SHARE_READ only;
+    // FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES; FILE_SHARE_READ | FILE_SHARE_WRITE;
+    // Git needs write sharing to replace index.lock with index inside .git.
+    // Withholding FILE_SHARE_DELETE still prevents replacing the pinned directory.
     // Attribute-only access does not enforce sharing restrictions on rename.
     // OPEN_EXISTING;
     // FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT.
-    SafeFileHandle handle = CreateFileW(@"\\?\" + path, 0x81, 1, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+    SafeFileHandle handle = CreateFileW(@"\\?\" + path, 0x81, 3, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
     if (handle.IsInvalid) { handle.Dispose(); throw new IOException("SCAFFOLD_PATH_GUARD_UNAVAILABLE"); }
     Information information;
     if (!GetFileInformationByHandle(handle, out information)) {

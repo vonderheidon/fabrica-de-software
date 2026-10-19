@@ -105,11 +105,11 @@ const summaryColumns = `p.id, p.name, p.account_id, p.revision, p.current_revisi
 export function prerequisites(config: Pick<ProjectConfiguration, 'source' | 'implementer_profile_id' | 'reviewer_profile_id'> & { github_project: { id: string } | null }, notes: readonly string[] = []): Prerequisite[] {
   const result: Prerequisite[] = [];
   const add = (code: string, message: string, recovery: string) => result.push({ code, message, recovery });
-  if (!config.source.repository_id) add('REMOTE_UNCONFIRMED', 'A confirmed GitHub repository is missing.', 'Confirm a GitHub remote before preparing an attempt.');
-  if (!config.github_project) add('PROJECT_REQUIRED', 'GitHub Project and Status mapping are missing.', 'Configure the exact Project, field and option IDs.');
-  if (!config.implementer_profile_id || !config.reviewer_profile_id) add('PROFILES_REQUIRED', 'Both execution roles require profiles.', 'Configure and select complete execution profiles.');
-  for (const code of notes) add(code, code === 'LOCAL_CHANGES_EXCLUDED' ? 'Uncommitted origin changes are excluded from attempts.' : 'Origin inspection reported a prerequisite.', 'Inspect the origin before preparing an attempt.');
-  add('EXECUTION_REVALIDATION_REQUIRED', 'Registration and configuration do not authorize execution.', 'Preparation must revalidate account, origin, issue membership and executor.');
+  if (!config.source.repository_id) add('REMOTE_UNCONFIRMED', 'O repositório GitHub ainda não foi confirmado.', 'Confirme a origem GitHub na configuração do projeto.');
+  if (!config.github_project) add('PROJECT_REQUIRED', 'O quadro GitHub e o mapeamento de Status ainda não foram configurados.', 'Selecione o quadro pelo nome e mapeie os valores de Status na configuração do projeto.');
+  if (!config.implementer_profile_id || !config.reviewer_profile_id) add('PROFILES_REQUIRED', 'Falta associar perfis aos papéis de Implementador e Revisor.', 'Selecione um perfil ativo para cada papel na configuração do projeto.');
+  for (const code of notes) add(code, code === 'LOCAL_CHANGES_EXCLUDED' ? 'Alterações locais sem commit não entram nas tentativas.' : 'A consulta da origem encontrou um pré-requisito pendente.', 'Confira a origem antes de preparar uma issue.');
+  add('EXECUTION_REVALIDATION_REQUIRED', 'Revise os pré-requisitos na preparação antes de iniciar.', 'A preparação confere conta, origem, vínculo da issue ao quadro e executor novamente.');
   return result;
 }
 function source(row: ProjectRow): ProjectConfiguration['source'] {

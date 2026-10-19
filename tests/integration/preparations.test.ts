@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PreparationCreated, type GitHubProjectDetails, type GitHubQueryResult, type IssueContext, type OriginInspection, type PreparationChoices, type PreparationUpdate, type SessionResponse } from '#contracts';
+import { OriginRequest, PreparationCreated, type GitHubProjectDetails, type GitHubQueryResult, type IssueContext, type OriginInspection, type PreparationChoices, type PreparationUpdate, type SessionResponse } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createPreparations, type PreparationDependencies } from '../../apps/controller/src/modules/projects/index.js';
@@ -52,7 +52,7 @@ function fixture() {
       { id: 'ITEM_pr', kind: 'pull_request' as const, archived: false, contentId: 'PR_test', title: 'Pull request', url: `${repository.url}/pull/20`, executable: false },
     ])),
   };
-  const workspaces = { inspectOrigin: vi.fn(async () => structuredClone(observation)) };
+  const workspaces = { inspectOrigin: vi.fn<PreparationDependencies['workspaces']['inspectOrigin']>(async () => structuredClone(observation)) };
   const dependencies = { storage, github, workspaces };
   const app = createApp(loadConfiguration({ FACTORY_DATA_DIR: directory, FACTORY_LOG_LEVEL: 'silent' }, directory), storage, undefined, undefined, dependencies); resources.push(app);
   return { directory, storage, db, projectId, issue, project, profile, observation, github, workspaces, app, preparations: createPreparations(dependencies) };
@@ -78,6 +78,14 @@ afterEach(async () => {
 });
 
 describe('persistent preparation HTTP contracts', () => {
+  it('passes the closed origin inspection contract for a configured repository', async () => {
+    const f = fixture();
+    const response = await create(f);
+    expect(response.statusCode).toBe(201);
+    const inspection = vi.mocked(f.workspaces.inspectOrigin).mock.calls[0];
+    expect(inspection).toBeDefined();
+    expect(Value.Check(OriginRequest, inspection?.[0])).toBe(true);
+  });
   it('captures typed choices, effective values, occurrence criteria, effects and origins without changing defaults', async () => {
     const f = fixture(); const before = f.storage.getConfiguration(f.projectId);
     const response = await create(f, { ...choices, delivery_mode: 'pr', overrides: { correction_limit: 0, checks: [], time_defaults: { ...before.view.settings.time_defaults, polling_interval_ms: 2000 } } });

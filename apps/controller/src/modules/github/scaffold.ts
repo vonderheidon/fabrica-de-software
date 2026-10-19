@@ -2,11 +2,11 @@ import { Value } from '@sinclair/typebox/value';
 import { EffectView, GitHubId, type GitHubMutationResult, type ScaffoldInput } from '#contracts';
 import { GraphQLReader, object, result } from './transport.js';
 
-/** Supplied by the trusted host for exact targets; never inferred from a plan. */
-export interface ScaffoldAuthorization {
+/** The interactive host uses the persisted operator confirmation; restricted hosts may pin targets. */
+export type ScaffoldAuthorization = { kind: 'confirmed_plan' } | {
   accountId: string;
   targets: readonly { ownerId: string; name: string; visibility: 'private' | 'public'; allowPush: boolean }[];
-}
+};
 type Remote = NonNullable<ScaffoldInput['remote']>;
 const listing = `query FactoryCreationOwner($id:ID!,$after:String) {
   viewer { id } node(id:$id) { __typename
@@ -21,8 +21,9 @@ const mutation = `mutation FactoryCreateRepository($input:CreateRepositoryInput!
   createRepository(input:$input) { clientMutationId repository { id } }
 }`;
 export function createRemoteScaffolder(reader: GraphQLReader, authorization?: ScaffoldAuthorization) {
-  const allowed = (remote: Remote, accountId: string) => authorization?.accountId === accountId &&
-    authorization.targets.some(t => t.ownerId === remote.ownerId && t.name === remote.name && t.visibility === remote.visibility);
+  const allowed = (remote: Remote | undefined, accountId: string, push = false) => Boolean(authorization &&
+    (('kind' in authorization && authorization.kind === 'confirmed_plan') || ('accountId' in authorization && authorization.accountId === accountId &&
+      authorization.targets.some(t => (!remote || (t.ownerId === remote.ownerId && t.name === remote.name && t.visibility === remote.visibility)) && (!push || t.allowPush)))));
   async function inspect(remote: Remote, accountId: string): Promise<import('#contracts').GitHubQueryResult<{ ownerLogin: string; repositoryId: string | null }>> {
     if (!Value.Check(GitHubId,remote.ownerId) || !Value.Check(GitHubId,accountId) || !/^[A-Za-z0-9_.-]{1,100}$/.test(remote.name) || /^\.+$/.test(remote.name)) return result('invalid_input',null,['INPUT_INVALID']);
     const scope = reader.scope(); let after: string | null = null; const cursors = new Set<string>(); const ids = new Set<string>();
@@ -78,13 +79,12 @@ export function createRemoteScaffolder(reader: GraphQLReader, authorization?: Sc
     } catch { return denied('CREATION_REMOTE_RESPONSE_INVALID','unknown'); }
   }
   return {
-    scaffoldRemoteCapability(remote: Remote | undefined, accountId: string, push = false) { return { available: Boolean(authorization?.accountId === accountId && authorization.targets.some(t =>
-      (!remote || (t.ownerId === remote.ownerId && t.name === remote.name && t.visibility === remote.visibility)) && (!push || t.allowPush))), reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' }; },
+    scaffoldRemoteCapability(remote: Remote | undefined, accountId: string, push = false) { return { available: allowed(remote, accountId, push), reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' }; },
     inspectScaffoldRemote: inspect,
     reconcileScaffoldRepository: confirm,
     async createScaffoldRepository(effect: EffectView, accountId: string, authorize: () => Promise<void>): Promise<GitHubMutationResult> {
       const remote = remoteOf(effect);
-      if (!remote || effect.state !== 'running' || !allowed(remote,accountId)) return denied('CREATION_TARGET_NOT_AUTHORIZED');
+      if (!remote || effect.state !== 'running' || !effect.authorized || !allowed(remote,accountId)) return denied('CREATION_TARGET_NOT_AUTHORIZED');
       const prior = await inspect(remote,accountId);
       if (prior.state !== 'complete' || !prior.data || prior.data.ownerLogin !== effect.expectedIdentity.repositoryOwner) return denied('CREATION_REMOTE_READ_INCOMPLETE');
       if (prior.data.repositoryId) return denied('SCAFFOLD_REMOTE_EXISTS');

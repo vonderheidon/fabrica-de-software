@@ -48,7 +48,7 @@ export function installErrors(app: FastifyInstance): void {
     if (fieldErrors.length === 0) fieldErrors.push(...operationFieldErrors(error));
     return reply.code(status).send({
       code, message: error instanceof HttpError || error instanceof OperationError ? error.message
-        : status >= 500 ? 'The request could not be completed.' : 'The request format is invalid.',
+        : status >= 500 ? 'O controlador não conseguiu concluir a solicitação.' : 'O formato da solicitação é inválido.',
       request_id: request.id,
       ...(error instanceof AttemptConflict ? { resource: error.resource } : {}),
       ...(error instanceof OperationError && error.details?.facts ? { facts: error.details.facts } : {}),
@@ -59,6 +59,6 @@ export function installErrors(app: FastifyInstance): void {
     } satisfies ErrorResponse);
   });
   app.setNotFoundHandler((request, reply) => reply.code(404).send({
-    code: 'NOT_FOUND', message: 'Resource not found.', request_id: request.id,
+    code: 'NOT_FOUND', message: 'O recurso solicitado não foi encontrado.', request_id: request.id,
   } satisfies ErrorResponse));
 }

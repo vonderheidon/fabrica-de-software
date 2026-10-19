@@ -23,6 +23,7 @@ export function hostContext(args) {
   return {
     git: { kind: /** @type {const} */ ('windows_keyring'), executable: resolve(git), cwd },
     githubAccess: { kind: /** @type {const} */ ('windows_keyring'), cwd },
+    scaffoldAuthorization: { kind: /** @type {const} */ ('confirmed_plan') },
     execution: { maestriExecutable: resolve(maestri), ompExecutable: resolve(omp), powershellExecutable: resolve(powershell), inheritedEnvironment: process.env },
     ...selection,
   };

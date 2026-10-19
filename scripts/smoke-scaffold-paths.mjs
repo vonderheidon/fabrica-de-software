@@ -3,9 +3,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { createLocalScaffolder, inspectScaffoldDestination } from '../dist/apps/controller/src/modules/workspaces/scaffold.js';
+import { createGitReader } from '../dist/apps/controller/src/modules/workspaces/git.js';
 
-// Explicit Windows filesystem regression. Git is a controlled seam: no Git command,
-// provider, remote or agent is started by this smoke.
+// Explicit Windows filesystem regression, with optional real local Git coverage.
+// No provider, remote or agent is started by this smoke.
 assert.equal(process.platform, 'win32', 'This regression requires Windows directory sharing semantics.');
 const cache = resolve('.cache');
 mkdirSync(cache, { recursive: true });
@@ -53,6 +54,25 @@ try {
   const releasedRoot = join(directory, 'released-projects');
   renameSync(projectsRoot, releasedRoot);
   renameSync(releasedRoot, projectsRoot);
+
+  if (process.argv[2]) {
+    const realGit = createGitReader({ kind: 'windows_keyring', executable: resolve(process.argv[2]) });
+    const realDestination = await inspectScaffoldDestination(projectsRoot, 'real-git');
+    let protectedGitDirectory = false;
+    const baseline = await createLocalScaffolder(realGit).createLocalScaffold({
+      plan: { ...plan, ...realDestination, input: { ...plan.input, destinationRelative: 'real-git' } }, files,
+      record(step, state) {
+        if (step !== 'baseline' || state !== 'running') return;
+        assert.throws(() => renameSync(join(realDestination.destination, '.git'), join(realDestination.destination, 'moved-git')),
+          error => ['EPERM', 'EACCES', 'EBUSY'].includes(error.code));
+        protectedGitDirectory = true;
+      },
+    });
+    assert(protectedGitDirectory);
+    assert.match(baseline.baselineSha, /^[a-f0-9]{40,64}$/);
+    assert.equal((await realGit(realDestination.destination, ['status', '--porcelain'])).stdout, '');
+    console.log('Windows scaffold: real Git baseline confirmed while .git replacement remains blocked');
+  }
 
   const failedDestination = await inspectScaffoldDestination(projectsRoot, 'partial-project');
   const partialPlan = { ...plan, ...failedDestination, input: { ...plan.input, destinationRelative: 'partial-project' } };

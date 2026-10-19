@@ -33,7 +33,6 @@ export interface CommandContext { operationId: string; expectedRevision: string 
 export { createQueue, QueueSummaryChanged } from './queue.js';
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const selectionTimeoutMs = 120_000;
 const selectionCloseConfirmationMs = 5_000;
 const selectionConflictMessage = 'Já existe uma seleção em andamento. Conclua ou cancele a janela aberta e tente novamente.';
 interface ActiveSelection { diagnostic: string | null }
@@ -159,8 +158,6 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     const onCallerAbort = () => abortSelection('NATIVE_SELECTION_CANCELLED');
     callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
     if (callerSignal?.aborted) onCallerAbort();
-    const selectionTimer = setTimeout(() => abortSelection('NATIVE_SELECTION_TIMEOUT'), selectionTimeoutMs);
-    selectionTimer.unref?.();
     try {
       const candidate = await Promise.resolve().then(() => select(controller.signal));
       if (controller.signal.aborted) return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_CANCELLED' };
@@ -178,7 +175,6 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     } catch {
       return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_FAILED' };
     } finally {
-      clearTimeout(selectionTimer);
       if (closeConfirmationTimer) clearTimeout(closeConfirmationTimer);
       callerSignal?.removeEventListener('abort', onCallerAbort);
       if (activeSelection === current) activeSelection = null;

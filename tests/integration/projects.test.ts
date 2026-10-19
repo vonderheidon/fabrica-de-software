@@ -793,7 +793,20 @@ describe('global and aggregate configuration', () => {
     expect((await first).json()).toMatchObject({ state: 'cancelled', path: null });
   });
 
-  it('keeps exclusivity through timeout and ignores a late native result until the selector closes', async () => {
+  it('removes the handler deadline only from native selection', async () => {
+    const f = fixture(false, { selectProjectsDirectory: async () => null });
+    const limits = new Map<string, number>();
+    f.app.addHook('onRequest', async (request) => {
+      limits.set(request.routeOptions.url ?? '', request.routeOptions.handlerTimeout);
+    });
+    const headers = await session(f);
+    const response = await f.app.inject({ method: 'POST', url: '/api/v1/settings/selections', headers, payload: { kind: 'projects_root' } });
+    expect(response.statusCode).toBe(200);
+    expect(limits.get('/api/v1/settings/selections')).toBe(0);
+    expect(limits.get('/api/v1/session')).toBe(15_000);
+  });
+
+  it('keeps the picker open without a deadline and preserves exclusivity until user cancellation', async () => {
     let completeSelection: ((value: string | null) => void) | undefined;
     let receivedSignal: AbortSignal | undefined;
     let markStarted: (() => void) | undefined;
@@ -808,13 +821,11 @@ describe('global and aggregate configuration', () => {
     try {
       const first = selections.selectSetting({ kind: 'projects_root' });
       await started;
-      await vi.advanceTimersByTimeAsync(120_000);
-      expect(receivedSignal?.aborted).toBe(true);
-      await expect(selections.selectSetting({ kind: 'projects_root' })).rejects.toMatchObject({ statusCode: 409, code: 'NATIVE_SELECTION_TIMEOUT' });
-      await vi.advanceTimersByTimeAsync(5_000);
-      await expect(selections.selectSetting({ kind: 'gh_executable' })).rejects.toMatchObject({ statusCode: 409, code: 'NATIVE_SELECTION_CLOSE_UNCONFIRMED' });
-      completeSelection?.(f.directory);
-      expect(await first).toMatchObject({ state: 'unavailable', kind: 'projects_root', path: null, diagnostic: 'NATIVE_SELECTION_TIMEOUT' });
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(receivedSignal?.aborted).toBe(false);
+      await expect(selections.selectSetting({ kind: 'gh_executable' })).rejects.toMatchObject({ statusCode: 409, code: 'NATIVE_SELECTION_IN_PROGRESS' });
+      completeSelection?.(null);
+      expect(await first).toMatchObject({ state: 'cancelled', kind: 'projects_root', path: null });
       expect(f.storage.getSettings().projects_root).toBeNull();
     } finally { vi.useRealTimers(); }
   });

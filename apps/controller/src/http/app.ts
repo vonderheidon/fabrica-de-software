@@ -55,12 +55,16 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
     http: { maxHeaderSize: httpLimits.headerBytes },
     connectionTimeout: httpLimits.connectionTimeoutMs,
     requestTimeout: httpLimits.requestTimeoutMs,
-    handlerTimeout: httpLimits.handlerTimeoutMs,
     keepAliveTimeout: httpLimits.keepAliveTimeoutMs,
     maxRequestsPerSocket: httpLimits.requestsPerSocket,
     forceCloseConnections: 'idle',
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false, useDefaults: false } },
   }).withTypeProvider<TypeBoxTypeProvider>();
+
+  // Human interaction with the native picker has no deadline. Other routes retain their limits.
+  app.addHook('onRoute', (route) => {
+    if (route.url !== '/api/v1/settings/selections') route.handlerTimeout ??= httpLimits.handlerTimeoutMs;
+  });
 
   app.addHook('onClose', async () => { storage.close(); });
   const webRoot = resolve(import.meta.dirname, '../../../../web');

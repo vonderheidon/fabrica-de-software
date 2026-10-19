@@ -38,21 +38,23 @@ export function installProjectRoutes(instance: FastifyInstance, projects: Projec
       ...(result.warnings ? { warnings: result.warnings } : {}) });
   });
   app.post('/api/v1/settings/selections', {
-    handlerTimeout: 125_000,
     schema: { querystring: EmptyQuery, body: NativeSelectionRequest, response: { 200: NativeSelectionResult, ...errors } },
   }, async (request, reply) => {
     const disconnected = new AbortController();
+    const socketTimeout = request.raw.socket.timeout;
+    request.raw.socket.setTimeout?.(0);
     const onDisconnect = () => disconnected.abort();
     const onClose = () => { if (!reply.raw.writableEnded) onDisconnect(); };
     request.raw.once('aborted', onDisconnect);
     reply.raw.once('close', onClose);
-    request.signal.addEventListener('abort', onDisconnect, { once: true });
-    if (request.signal.aborted) onDisconnect();
+    // Fastify 5.12 also aborts request.signal on normal IncomingMessage completion.
+    // Response closure detects disconnects after the complete POST body has arrived.
+    if (request.raw.aborted || reply.raw.destroyed) onDisconnect();
     try { return await projects.selectSetting(request.body, disconnected.signal); }
     finally {
+      request.raw.socket.setTimeout?.(socketTimeout ?? 0);
       request.raw.removeListener('aborted', onDisconnect);
       reply.raw.removeListener('close', onClose);
-      request.signal.removeEventListener('abort', onDisconnect);
     }
   });
   app.get('/api/v1/projects/:projectId/configuration', { schema: { params: ProjectParams, querystring: EmptyQuery, response: { 200: ConfigurationView, ...errors } } }, async (request, reply) => {

@@ -34,6 +34,21 @@ function fixture(mode = '',grant: ScaffoldAuthorization | undefined = authorizat
     change: (key: string,value: unknown) => { if (repository) repository[key] = value; } };
 }
 describe('remote scaffold GitHub adapter (controlled GraphQL)',() => {
+  it('accepts the operator-confirmed plan policy without a preconfigured repository list', async () => {
+    const f = fixture('', { kind: 'confirmed_plan' });
+    expect(f.api.scaffoldRemoteCapability(undefined, 'ACCOUNT_test', true).available).toBe(true);
+    const authorize = vi.fn(async () => {});
+    expect((await f.api.createScaffoldRepository(effect(), 'ACCOUNT_test', authorize)).state).toBe('confirmed');
+    expect(authorize).toHaveBeenCalledTimes(1);
+    expect(f.mutations()).toBe(1);
+  });
+  it('refuses unconfirmed or revoked plans under the operator confirmation policy', async () => {
+    const f = fixture('', { kind: 'confirmed_plan' });
+    expect((await f.api.createScaffoldRepository({ ...effect(), authorized: false }, 'ACCOUNT_test', async () => {})).state).toBe('failed_known');
+    expect(f.mutations()).toBe(0);
+    expect((await f.api.createScaffoldRepository(effect(), 'ACCOUNT_test', async () => { throw new Error('Revoked'); })).state).toBe('failed_known');
+    expect(f.mutations()).toBe(0);
+  });
   it('creates only the planned repository and confirms its immutable identity before returning',async () => {
     const f = fixture(); const e = effect(); const authorize = vi.fn(async () => {});
     const result = await f.api.createScaffoldRepository(e,'ACCOUNT_test',authorize);

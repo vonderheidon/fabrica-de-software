@@ -44,9 +44,9 @@ export function readCreation(db: Database.Database, id: string): CreationView {
   if (!Value.Check(CreationView, view) || digest(view.creation.plan) !== r.plan_hash) throw new StorageError('OPERATION_DATA_INVALID');
   return view;
 }
-function creationEvent(db: Database.Database, id: string, type: string): void {
+function creationEvent(db: Database.Database, id: string, type: string): number | bigint {
   const r = db.prepare<[string], { operation_id: string; revision: number }>('SELECT operation_id,revision FROM project_creations WHERE id=?').get(id)!;
-  db.prepare("INSERT INTO events(entity_type,entity_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms) VALUES ('creation',?,?,?,?, '{}',?)").run(id,r.operation_id,type,r.revision,Date.now());
+  return db.prepare("INSERT INTO events(entity_type,entity_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms) VALUES ('creation',?,?,?,?, '{}',?)").run(id,r.operation_id,type,r.revision,Date.now()).lastInsertRowid;
 }
 export function acceptCreation(db: Database.Database, command: CreationCommand): { created: boolean; operation: StoredOperation } {
   return guarded(() => db.transaction(() => {
@@ -55,13 +55,14 @@ export function acceptCreation(db: Database.Database, command: CreationCommand):
     if (plan.installationId !== s.installation_id || plan.settingsETag !== configurationETag(readSettingsView(db)) ||
       (plan.input.creationMode !== 'local' && (!s.account_id || plan.account.id !== s.account_id || plan.account.state !== 'complete' || !plan.input.remote || plan.ownerId !== plan.input.remote.ownerId || !plan.ownerLogin))) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration or account changed. Review a new creation plan.');
     if (db.prepare('SELECT id FROM project_creations WHERE destination=? COLLATE NOCASE').get(plan.destination)) throw new OperationError(409, 'SCAFFOLD_DESTINATION_RESERVED', 'A creation already identifies this destination. Inspect that creation.');
-    const id = randomUUID(); const next = db.prepare<[], { seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()!.seq;
-    const receipt = { revision: 1, event_cursor: String(next) };
-    db.prepare("INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json) VALUES (?,?,?,'scaffold.create','creation',?,?,'{}',?)")
-      .run(command.operationId,s.installation_id,s.account_id,id,hashCommand(command),serializeOperationReceipt(receipt));
+    const id = randomUUID();
+    db.prepare("INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json) VALUES (?,?,?,'scaffold.create','creation',?,?,'{}',NULL)")
+      .run(command.operationId,s.installation_id,s.account_id,id,hashCommand(command));
     db.prepare("INSERT INTO project_creations(id,operation_id,installation_id,account_id,plan_hash,plan_json,destination,state,created_at_ms) VALUES (?,?,?,?,?,?,?,'pending',?)")
       .run(id,command.operationId,s.installation_id,s.account_id,command.body.planHash,JSON.stringify(plan),plan.destination,Date.now());
-    creationEvent(db,id,'creation.accepted');
+    const seq = creationEvent(db,id,'creation.accepted');
+    db.prepare('UPDATE operation_requests SET receipt_json=? WHERE operation_id=?')
+      .run(serializeOperationReceipt({ revision: 1, event_cursor: String(seq) }),command.operationId);
     return { created: true, operation: readOperation(db,command.operationId)! };
   }).immediate());
 }

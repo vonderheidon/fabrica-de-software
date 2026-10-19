@@ -62,7 +62,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       modesByProject.push({ projectId: projectSummary.id, mode: configuration.default_delivery_mode });
       if (!configuration.github_project || !configuration.source.repository_id) {
         complete = false;
-        diagnostics.push({ code: 'PROJECT_NOT_READY', message: `${projectSummary.name}: GitHub Project ou repositório não está configurado.`, recovery: 'Configure os IDs do Project e do repositório antes de habilitar a fila.' });
+        diagnostics.push({ code: 'PROJECT_NOT_READY', message: `${projectSummary.name}: quadro GitHub ou repositório não está configurado.`, recovery: 'Abra a configuração do projeto, confirme a origem e selecione o quadro pelo nome antes de habilitar a fila.' });
         continue;
       }
       if (deferred || identity.state !== 'complete' || !identity.data) continue;

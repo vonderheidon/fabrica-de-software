@@ -83,7 +83,7 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     const resolved = effective(view, record); const config = resolved.configuration.configuration;
     const [identity, issueResult, origin, project] = await Promise.all([
       github.getIdentity(), github.getIssueContextById(record.issue_id),
-      workspaces.inspectOrigin({ source: config.source, baseBranch: config.base_branch }),
+      workspaces.inspectOrigin({ source: { kind: config.source.kind, location: config.source.location }, baseBranch: config.base_branch }),
       config.github_project ? github.getProject(config.github_project.id) : Promise.resolve(null),
     ]);
     const issue = issueResult.state === 'complete' && issueResult.data && 'repository' in issueResult.data ? issueResult.data : null;

@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { OperationView, SettingsSaved, type SessionResponse } from '#contracts';
+import { OperationView, SettingsSaved, SettingsView, type ExecutionCatalog, type SessionResponse, type SettingsUpdate } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import type { ControllerConfiguration } from '../../apps/controller/src/config.js';
 import type { ProjectDependencies } from '../../apps/controller/src/modules/projects/index.js';
@@ -58,7 +58,11 @@ function setupDependencies(directory: string, accountId: string, login: string, 
     activateExecutable: () => undefined,
     getAuthenticationAccounts: async () => ({ state: 'observed', accounts: [{ login, active, valid }], diagnostics: [] }),
   };
-  return { github, githubSetup };
+  const execution: NonNullable<ProjectDependencies['execution']> = {
+    getCatalog: async (): Promise<ExecutionCatalog> => ({ state: 'loaded', executor: 'maestri-omp', executor_version: 'fixture', observed_at_ms: 1,
+      models: [{ provider: 'provider', provider_name: 'Provider', model: 'model', model_name: 'Model', efforts: ['high'] }] }),
+  };
+  return { github, githubSetup, execution };
 }
 
 function controllerConfiguration(dataDirectory: string): ControllerConfiguration {
@@ -301,5 +305,121 @@ describe('explicit GitHub account binding', () => {
     expect(operationRead.json<OperationView>().warnings).toEqual(response.json<SettingsSaved>().warnings);
     expect(fixture.storage.getSettings().account_id).toBe('ACCOUNT_next');
     expect(() => fixture.storage.getAttempt(operation.resource.id)).toThrow();
+  });
+
+  it('resumes the first setup from an unbound installation and keeps later maintenance separate from completion', async () => {
+    const storage = freshStorage();
+    const directory = directories.at(-1)!;
+    const projectsRoot = join(directory, 'projects-root');
+    mkdirSync(projectsRoot);
+    const dependencies = setupDependencies(directory, 'ACCOUNT_setup', 'setup-user');
+    let app = createApp(controllerConfiguration(directory), storage, undefined, dependencies);
+    apps.push(app);
+    let session = await bootstrap(app);
+
+    const readSettings = async () => {
+      const response = await app.inject({ url: '/api/v1/settings', headers: { host: session.host, cookie: session.cookie } });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(Value.Check(SettingsView, response.json())).toBe(true);
+      return { view: response.json<SettingsView>(), etag: String(response.headers.etag) };
+    };
+    const saveSettings = (body: SettingsUpdate, operationId: string, etag: string, targetSession = session) => app.inject({
+      method: 'PUT', url: '/api/v1/settings',
+      headers: { host: targetSession.host, origin: targetSession.origin, cookie: targetSession.cookie, 'x-csrf-token': targetSession.csrf,
+        'content-type': 'application/json', 'if-match': etag, 'idempotency-key': operationId },
+      payload: body,
+    });
+    const starting = await readSettings();
+    expect(starting.view.settings.account_id).toBeNull();
+    expect(starting.view.onboarding.first_incomplete_step).toBe('github');
+    expect(starting.view.settings.automation_enabled).toBe(false);
+
+    const bindOperationId = randomUUID();
+    const bound = await saveSettings(bindingBody('bind', 'ACCOUNT_setup'), bindOperationId, starting.etag);
+    expect(bound.statusCode, bound.body).toBe(200);
+    expect(bound.json<SettingsSaved>().onboarding.first_incomplete_step).toBe('projects_root');
+
+    const rootSession = await bootstrap(app);
+    const beforeRoot = await readSettings();
+    const rootBody = { changes: { projects_root: projectsRoot } };
+    const rootEtag = beforeRoot.etag;
+    const concurrentRootWrites = await Promise.all([
+      saveSettings(rootBody, randomUUID(), rootEtag, session),
+      saveSettings(rootBody, randomUUID(), rootEtag, rootSession),
+    ]);
+    expect(concurrentRootWrites.map(response => response.statusCode).sort()).toEqual([200, 412]);
+    expect((await readSettings()).view.onboarding.first_incomplete_step).toBe('profiles');
+
+    const createProfile = (name: string, profileType: 'implementer' | 'reviewer'): SettingsUpdate => ({ changes: {}, profile_changes: [{ action: 'create' as const,
+      profile: { name, profile_type: profileType, executor: 'maestri-omp', provider: 'provider', model: 'model', effort: 'high', guidance: '' } }] });
+    const implementerOperationId = randomUUID();
+    const beforeImplementer = await readSettings();
+    const implementer = await saveSettings(createProfile('Setup Implementer', 'implementer'), implementerOperationId, beforeImplementer.etag);
+    expect(implementer.statusCode, implementer.body).toBe(200);
+    expect(implementer.json<SettingsSaved>().onboarding.first_incomplete_step).toBe('profiles');
+    expect(implementer.json<SettingsSaved>().profile_counts).toMatchObject({ all: 1, implementer: 1, reviewer: 0 });
+
+    const oldApp = app;
+    apps.splice(apps.indexOf(oldApp), 1);
+    await oldApp.close();
+    storage.close();
+    const reopened = openStorage({ dataDirectory: directory });
+    stores.push(reopened);
+    app = createApp(controllerConfiguration(directory), reopened, undefined, dependencies);
+    apps.push(app);
+    session = await bootstrap(app);
+    const resumed = await readSettings();
+    expect(resumed.view.settings.account_id).toBe('ACCOUNT_setup');
+    expect(resumed.view.settings.projects_root).toBe(projectsRoot);
+    expect(resumed.view.onboarding.first_incomplete_step).toBe('profiles');
+    expect(resumed.view.profile_counts).toMatchObject({ all: 1, implementer: 1, reviewer: 0 });
+
+    const reviewer = await saveSettings(createProfile('Setup Reviewer', 'reviewer'), randomUUID(), resumed.etag);
+    expect(reviewer.statusCode, reviewer.body).toBe(200);
+    expect(reviewer.json<SettingsSaved>().onboarding.first_incomplete_step).toBeNull();
+    expect(reviewer.json<SettingsSaved>().profile_counts).toMatchObject({ all: 2, implementer: 1, reviewer: 1 });
+
+    const beforeCompletion = await readSettings();
+    const completionOperationId = randomUUID();
+    const completionBody: SettingsUpdate = { changes: {}, onboarding_changes: { complete: true } };
+    const completed = await saveSettings(completionBody, completionOperationId, beforeCompletion.etag);
+    expect(completed.statusCode, completed.body).toBe(200);
+    const completion = completed.json<SettingsSaved>();
+    expect(completion.onboarding).toMatchObject({ first_incomplete_step: null, prerequisites: [], completed_at_ms: expect.any(Number) });
+    const completionEtag = String(completed.headers.etag);
+    const completedAt = completion.onboarding.completed_at_ms;
+
+    dependencies.githubSetup!.resolveExecutable = async () => { throw new Error('Receipt recovery must precede external validation.'); };
+    dependencies.githubSetup!.getAuthenticationAccounts = async () => { throw new Error('Receipt recovery must precede external validation.'); };
+    dependencies.github.getIdentity = async () => { throw new Error('Receipt recovery must precede external validation.'); };
+    const completedApp = app;
+    apps.splice(apps.indexOf(completedApp), 1);
+    await completedApp.close();
+    reopened.close();
+    const afterCompletionRestart = openStorage({ dataDirectory: directory });
+    stores.push(afterCompletionRestart);
+    app = createApp(controllerConfiguration(directory), afterCompletionRestart, undefined, dependencies);
+    apps.push(app);
+    session = await bootstrap(app);
+    const replay = await saveSettings(completionBody, completionOperationId, beforeCompletion.etag);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json<SettingsSaved>().receipt).toEqual(completion.receipt);
+    expect(replay.headers.etag).toBe(completionEtag);
+    const receiptRead = await app.inject({ url: `/api/v1/operations/${completionOperationId}`, headers: { host: session.host, cookie: session.cookie } });
+    expect(receiptRead.statusCode, receiptRead.body).toBe(200);
+    expect(receiptRead.json<OperationView>().receipt).toEqual(completion.receipt);
+
+    const current = await readSettings();
+    const implementerProfile = current.view.profiles.find(profile => profile.profile_type === 'implementer');
+    if (!implementerProfile) throw new Error('SETUP_IMPLEMENTER_MISSING');
+    const maintained = await saveSettings({ changes: {}, profile_changes: [{ action: 'update', id: implementerProfile.id,
+      changes: { name: 'Maintained Implementer' } }] }, randomUUID(), current.etag);
+    expect(maintained.statusCode, maintained.body).toBe(200);
+    expect(maintained.json<SettingsSaved>().onboarding.completed_at_ms).toBe(completedAt);
+    expect((await readSettings()).view.profiles.find(profile => profile.id === implementerProfile.id)?.name).toBe('Maintained Implementer');
+
+    expect(afterCompletionRestart.listProjects({}).items).toHaveLength(0);
+    expect(afterCompletionRestart.listAttempts({}).items).toHaveLength(0);
+    expect(afterCompletionRestart.getSettings()).toMatchObject({ account_id: 'ACCOUNT_setup', automation_enabled: false, projects_root: projectsRoot });
   });
 });

@@ -42,6 +42,19 @@ function fixture(mode = '') {
   return { api,plan,effect,calls,guard,git,grant,setOrigin: (url = 'https://github.com/test-org/repo.git') => { origin = url; },changeBranch: () => { branchSha = 'b'.repeat(40); } };
 }
 describe('scaffold Git origin and baseline push with controlled Git/canonicalization/guard',() => {
+  it('uses the confirmed plan for origin and push while checking account and revocation', async () => {
+    const f = fixture();
+    const api = createScaffoldRemoteGit(f.git, { kind: 'confirmed_plan' }, async () => f.guard);
+    const authorize = vi.fn(async () => {});
+    expect((await api.executeScaffoldGit(f.plan, f.effect('associate_origin'), 'OTHER', authorize)).state).toBe('failed_known');
+    expect((await api.executeScaffoldGit(f.plan, { ...f.effect('associate_origin'), authorized: false }, 'ACCOUNT_test', authorize)).state).toBe('failed_known');
+    expect(f.calls).toEqual([]);
+    expect((await api.executeScaffoldGit(f.plan, f.effect('associate_origin'), 'ACCOUNT_test', async () => { throw new Error('Revoked'); })).state).toBe('failed_known');
+    expect(f.calls.some(args => args.includes('remote'))).toBe(false);
+    expect((await api.executeScaffoldGit(f.plan, f.effect('associate_origin'), 'ACCOUNT_test', authorize)).state).toBe('confirmed');
+    expect((await api.executeScaffoldGit(f.plan, f.effect('baseline_push'), 'ACCOUNT_test', authorize)).state).toBe('confirmed');
+    expect(authorize).toHaveBeenCalledTimes(2);
+  });
   it('associates only the confirmed repository and publishes exactly baseline SHA to the same base branch',async () => {
     const f = fixture(); const authorize = vi.fn(async () => {});
     expect((await f.api.executeScaffoldGit(f.plan,f.effect('associate_origin'),'ACCOUNT_test',authorize)).state).toBe('confirmed');

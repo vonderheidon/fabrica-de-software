@@ -12,6 +12,8 @@ import { readOperation } from '../../apps/controller/src/modules/storage/operati
 import { removeRemoteScaffoldSchema } from '../fixtures/scaffold-schema.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
+import { createRemoteScaffolder } from '../../apps/controller/src/modules/github/scaffold.js';
+import { GraphQLReader } from '../../apps/controller/src/modules/github/transport.js';
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -31,7 +33,7 @@ async function fixture(failure = '') {
   const unknown = (): GitHubMutationResult => ({ state: 'unknown',receipt: null,reason: 'RESPONSE_LOST',retryAtMs: null });
   const github = {
     getIdentity: vi.fn(async () => complete({ id: accountId,login: 'test-user' })),
-    scaffoldRemoteCapability: vi.fn(() => ({ available: true,reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' })),
+    scaffoldRemoteCapability: vi.fn<NonNullable<ScaffoldDependencies['github']['scaffoldRemoteCapability']>>(() => ({ available: true,reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' })),
     inspectScaffoldRemote: vi.fn(async () => complete({ ownerLogin: 'test-org',repositoryId: remote?.id ?? null })),
     createScaffoldRepository: vi.fn<NonNullable<ScaffoldDependencies['github']['createScaffoldRepository']>>(async (e,_account,authorize) => {
       expect(storage.getEffect(e.operationId).state).toBe('running'); expect(storage.getOperation(e.operationId)?.receipt).toBeDefined();
@@ -80,6 +82,29 @@ async function fixture(failure = '') {
 const etag = (f: Awaited<ReturnType<typeof fixture>>,id: string) => { const c = f.storage.getCreation(id).creation; return `"creation:${id}:${c.revision}"`; };
 
 describe('remote scaffold journal and reconciliation with controlled adapters',() => {
+  it('accepts creation when the event sequence exceeds retained events', async () => {
+    const f = await fixture();
+    const body = await f.authorize();
+    f.db.prepare("UPDATE sqlite_sequence SET seq=seq+20 WHERE name='events'").run();
+    const operationId = randomUUID();
+    const accepted = acceptCreation(f.db, { operationId, body });
+    const event = f.db.prepare<[string], { seq: number }>('SELECT seq FROM events WHERE operation_id=?').get(operationId)!;
+    expect(accepted.operation.receipt?.event_cursor).toBe(String(event.seq));
+    expect(readOperation(f.db, operationId)?.resource.id).toBe(accepted.operation.resource.id);
+  });
+  it('offers remote modes for the configured account and plans without sending effects', async () => {
+    const f = await fixture();
+    const runner = vi.fn(async () => { throw new Error('Capability checks must not send requests'); });
+    const adapter = createRemoteScaffolder(new GraphQLReader(runner), { kind: 'confirmed_plan' });
+    f.github.scaffoldRemoteCapability.mockImplementation(adapter.scaffoldRemoteCapability);
+    expect((await f.scaffold.getOptions()).creationModes.every(mode => mode.capability.available)).toBe(true);
+    await f.authorize();
+    expect(f.sends).toEqual([]);
+    expect(existsSync(join(f.directory, 'project'))).toBe(false);
+    expect(runner).not.toHaveBeenCalled();
+    f.changeAccount();
+    expect((await f.scaffold.getOptions()).creationModes.filter(mode => mode.mode !== 'local').every(mode => !mode.capability.available)).toBe(true);
+  });
   it.each(['remote_no_push','remote_push'] as const)('completes only the effects authorized by %s and registers the same branch',async mode => {
     const f = await fixture(); const body = await f.authorize(mode); const operationId = randomUUID();
     const op = await f.scaffold.create(body,operationId); await f.scaffold.drain();
