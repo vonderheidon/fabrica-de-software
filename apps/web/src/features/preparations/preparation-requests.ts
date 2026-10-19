@@ -8,3 +8,8 @@ export function changedChoices(before: PreparationChoices, after: PreparationCho
   if (JSON.stringify(before.overrides) !== JSON.stringify(after.overrides)) changes.overrides = after.overrides;
   return changes;
 }
+export function hasBlockingPrerequisites(prerequisites: readonly { code: string }[]): boolean {
+  // The start command revalidates the executor; this observation never authorizes execution.
+  return prerequisites.some((item) => item.code !== 'EXECUTOR_REVALIDATION_REQUIRED');
+}
+

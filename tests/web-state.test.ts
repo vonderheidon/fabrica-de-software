@@ -40,7 +40,11 @@ describe('web local state', () => {
     expect(readUncertainOperations()).toEqual([{ operationId: '00000000-0000-4000-8000-000000000001', kind: 'attempt-start', recordedAt: 10 }]);
     expect(setItem.mock.calls[0]?.[1]).not.toContain('body');
     expect(setItem.mock.calls[0]?.[1]).not.toContain('token');
+    recordUncertainOperation({ operationId: '00000000-0000-4000-8000-000000000002', kind: 'profile-delete', recordedAt: 11 });
+    expect(readUncertainOperations()).toContainEqual({ operationId: '00000000-0000-4000-8000-000000000002', kind: 'profile-delete', recordedAt: 11 });
     resolveUncertainOperation('00000000-0000-4000-8000-000000000001');
+    resolveUncertainOperation('00000000-0000-4000-8000-000000000002');
     expect(readUncertainOperations()).toEqual([]);
   });
+
 });

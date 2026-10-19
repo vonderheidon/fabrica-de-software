@@ -1,5 +1,6 @@
 import type { ErrorResponse, SessionResponse } from '#contracts';
 import { assertConfigurationBody, configurationBodyLimitMessage } from './configuration-body.js';
+import { operatorErrorMessage } from '../app/operator-language.js';
 
 export class HttpError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly requestId: string | null, readonly fieldErrors: readonly { field: string; message: string }[], readonly resource: { type: string; id: string } | null, readonly operationId: string | null, readonly facts: Readonly<Record<string, string | number | boolean | null>> | null, readonly affectedRequirements: readonly string[] = [], readonly recovery: string | null = null) {
@@ -43,7 +44,9 @@ async function createSession(): Promise<void> {
 async function toHttpError(response: Response): Promise<HttpError> {
   let body: ErrorResponse | null = null;
   try { body = (await response.json()) as ErrorResponse; } catch { /* Keep the transport error generic. */ }
-  return new HttpError(response.status, body?.code ?? 'HTTP_ERROR', body?.message ?? 'A solicitação não foi concluída.', body?.request_id ?? null, body?.field_errors ?? [], body?.resource ?? null, body?.operation_id ?? null, body?.facts ?? null, body?.affected_requirements ?? [], body?.recovery ?? null);
+  const code = body?.code ?? 'HTTP_ERROR';
+  const message = operatorErrorMessage(code, body?.message ?? '', response.status);
+  return new HttpError(response.status, code, message, body?.request_id ?? null, body?.field_errors ?? [], body?.resource ?? null, body?.operation_id ?? null, body?.facts ?? null, body?.affected_requirements ?? [], body?.recovery ?? null);
 }
 
 async function rejectExpiredMutation(response: Response): Promise<never> {

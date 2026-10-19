@@ -39,6 +39,12 @@ describe('profile editor selections', () => {
       action: 'create', profile: { ...noEffort, effort: null },
     }]);
   });
+
+  it('rejects null when the selected model currently offers effort choices', () => {
+    const missingEffort = { ...profile, effort: null };
+    expect(profileCombinationValid(catalog, missingEffort)).toBe(false);
+    expect(profileChangesForSave('profile-1', profile, missingEffort, catalog)).toEqual([]);
+  });
 });
 
 describe('profile editor save patches', () => {
@@ -51,6 +57,28 @@ describe('profile editor save patches', () => {
     const draft = { ...profile, name: 'Novo nome', guidance: 'Orientação', model: 'removed-model', effort: 'removed-effort' };
     expect(profileChangesForSave('profile-1', profile, draft, catalog)).toEqual([{
       action: 'update', id: 'profile-1', changes: { name: 'Novo nome', guidance: 'Orientação' },
+    }]);
+  });
+
+  it('sends only the changed, catalog-valid fields in one update command', () => {
+    const next = { ...profile, provider: 'provider-b', model: 'no-effort', effort: null, guidance: 'Orientação nova' };
+    expect(profileChangesForSave('profile-1', profile, next, catalog)).toEqual([{
+      action: 'update', id: 'profile-1', changes: {
+        provider: 'provider-b', model: 'no-effort', effort: null, guidance: 'Orientação nova',
+      },
+    }]);
+  });
+
+  it('preserves a saved choice missing from a refreshed catalog while saving metadata', () => {
+    const refreshed: ExecutionCatalog = { ...catalog, models: catalog.models.filter((model) => model.provider !== profile.provider) };
+    expect(profileChangesForSave('profile-1', profile, { ...profile, name: 'Nome atualizado' }, refreshed)).toEqual([{
+      action: 'update', id: 'profile-1', changes: { name: 'Nome atualizado' },
+    }]);
+  });
+
+  it('saves a role change as part of the existing profile update command', () => {
+    expect(profileChangesForSave('profile-1', profile, { ...profile, profile_type: 'reviewer' }, catalog)).toEqual([{
+      action: 'update', id: 'profile-1', changes: { profile_type: 'reviewer' },
     }]);
   });
 

@@ -42,9 +42,9 @@ export function profileChangesForSave(
   if (!baseline) return [];
 
   const changes: ProfilePatch = {};
-  for (const key of ['name', 'guidance'] as const) {
-    if (baseline[key] !== draft[key]) Object.assign(changes, { [key]: key === 'name' ? draft.name.trim() : draft.guidance });
-  }
+  if (baseline.name !== draft.name) changes.name = draft.name.trim();
+  if (baseline.profile_type !== draft.profile_type) changes.profile_type = draft.profile_type;
+  if (baseline.guidance !== draft.guidance) changes.guidance = draft.guidance;
 
   const selectionChanged = (['provider', 'model', 'effort'] as const).some((key) => baseline[key] !== draft[key]);
   if (selectionChanged && profileCombinationValid(catalog, draft)) {

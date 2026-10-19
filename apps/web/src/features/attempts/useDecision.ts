@@ -7,10 +7,12 @@ type DecisionState = {
   question: Question | null;
   etag: string | null;
   operation: OperationView | null;
+  correlationId: string | null;
   loading: boolean;
   submitting: boolean;
   submissionLocked: boolean;
   error: string | null;
+  errorDetails: { code: string; requestId: string | null; facts: Readonly<Record<string, string | number | boolean | null>> | null; affectedRequirements: readonly string[] } | null;
   notice: string | null;
 };
 
@@ -24,7 +26,7 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
   submit: () => Promise<void>;
   refresh: () => Promise<void>;
 } {
-  const [state, setState] = useState<DecisionState>({ question: null, etag: null, operation: null, loading: true, submitting: false, submissionLocked: false, error: null, notice: null });
+  const [state, setState] = useState<DecisionState>({ question: null, etag: null, operation: null, correlationId: null, loading: true, submitting: false, submissionLocked: false, error: null, errorDetails: null, notice: null });
   const [draft, setDraft] = useState('');
   const [scopeChoice, setScopeChoice] = useState<'keep_captured' | 'adopt_new' | null>(null);
   const operationId = useRef<string | null>(null);
@@ -34,11 +36,12 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
   const refresh = useCallback(async (): Promise<void> => {
     try {
       const result = await requestJsonWithMetadata<Question>(`/api/v1/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}`);
-      setState((current) => ({ ...current, question: result.data, etag: result.etag, loading: false, error: null,
+      setState((current) => ({ ...current, question: result.data, etag: result.etag, loading: false, error: null, errorDetails: null,
         submissionLocked: current.submissionLocked || result.data.answer_operation_id !== null }));
       const currentOperationId = result.data.answer_operation_id ?? operationId.current;
       if (currentOperationId) {
         operationId.current = currentOperationId;
+        setState((current) => ({ ...current, correlationId: currentOperationId }));
         try {
           const operation = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(currentOperationId)}`);
           if (operation.operation_id === currentOperationId) setState((current) => ({ ...current, operation, notice: null }));
@@ -47,7 +50,7 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
         }
       }
     } catch (reason: unknown) {
-      setState((current) => ({ ...current, loading: false, error: messageFor(reason) }));
+      setState((current) => ({ ...current, loading: false, error: messageFor(reason), errorDetails: reason instanceof HttpError ? { code: reason.code, requestId: reason.requestId, facts: reason.facts, affectedRequirements: reason.affectedRequirements } : null }));
     }
   }, [attemptId, questionId]);
 
@@ -66,7 +69,7 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
     if (current.question.scope_change && scopeChoice !== 'keep_captured') return;
     const id = operationId.current ?? crypto.randomUUID();
     operationId.current = id;
-    setState((value) => ({ ...value, submitting: true, submissionLocked: true, error: null, notice: null }));
+    setState((value) => ({ ...value, submitting: true, submissionLocked: true, error: null, errorDetails: null, correlationId: id, notice: null }));
     try {
       const headers = new Headers({ 'Idempotency-Key': id, 'If-Match': current.etag });
       const result = await requestJsonWithMetadata<OperationAccepted>(
@@ -87,7 +90,7 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
             : reason instanceof Error && !(reason instanceof HttpError)
               ? reason.message
               : 'Não foi possível confirmar o envio. Consulte o recibo; a resposta não será reenviada automaticamente.';
-      setState((value) => ({ ...value, error: message, notice: 'Seu texto permanece neste diálogo.',
+      setState((value) => ({ ...value, error: message, errorDetails: reason instanceof HttpError ? { code: reason.code, requestId: reason.requestId, facts: reason.facts, affectedRequirements: reason.affectedRequirements } : null, notice: 'Seu texto permanece neste diálogo.',
         submissionLocked: !(reason instanceof HttpError && reason.status < 500) }));
       if (!(reason instanceof HttpError && reason.status < 500)) await refresh();
     } finally {

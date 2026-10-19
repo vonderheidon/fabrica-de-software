@@ -1,0 +1,35 @@
+.event-connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  border: 1px solid #cbd5d0;
+  background: #f3f7f4;
+  color: #234b35;
+}
+
+.event-connection-indicator {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.event-connection-status-connecting {
+  border-color: #cbd5d0;
+  background: #f3f7f4;
+  color: #475569;
+}
+
+.event-connection-status-reconnecting {
+  border-color: #e8c99e;
+  background: #fff6e8;
+  color: #754400;
+}
+
+.event-connection-status-unavailable {
+  border-color: #e7b8b8;
+  background: #fff0f0;
+  color: #8d2525;
+}

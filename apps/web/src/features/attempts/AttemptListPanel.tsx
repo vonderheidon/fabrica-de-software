@@ -3,6 +3,7 @@ import type { HttpAttemptPage as AttemptPage } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptProjectFilter } from './execution-requests.js';
+import { ProjectPicker } from '../projects/ProjectPicker.js';
 
 type Props = {
   projectId: string;
@@ -24,7 +25,6 @@ const resultOptions = [
 ] as const;
 
 export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareRetry, onDetail }: Props) {
-  const [projectDraft, setProjectDraft] = useState(projectId);
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([null]);
   const [pageIndex, setPageIndex] = useState(0);
   const [visiblePageIndex, setVisiblePageIndex] = useState(0);
@@ -32,7 +32,6 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
   const [state, setState] = useState<ListState>({ page: null, error: null, requestId: null, loading: true });
   const cursor = cursorStack[pageIndex] ?? null;
 
-  useEffect(() => { setProjectDraft(projectId); }, [projectId]);
 
   useEffect(() => {
     const onControllerEvent = (event: Event): void => {
@@ -82,23 +81,16 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
     setPageIndex(visiblePageIndex - 1);
   }
 
-  function applyProjectFilter(): void {
-    const normalized = projectDraft.trim();
-    if (normalized !== projectId) onFilterChange(normalized, result);
-  }
-
   const page = state.page;
   return <section className="attempt-list-panel" aria-label="Histórico de tentativas">
     <div className="attempt-filters card">
-      <label htmlFor="attempt-project-filter">Projeto <span className="muted">ID</span>
-        <input id="attempt-project-filter" value={projectDraft} maxLength={256} onChange={(event) => setProjectDraft(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === 'Enter') applyProjectFilter(); }} placeholder="Todos os projetos" />
-      </label>
+      <ProjectPicker id="attempt-project-filter" value={projectId} onChange={(value) => onFilterChange(value, result)} />
       <label htmlFor="attempt-result-filter">Resultado
         <select id="attempt-result-filter" value={result} onChange={(event) => onFilterChange(projectId, event.currentTarget.value)}>
           {resultOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       </label>
-      <div className="attempt-filter-actions"><button type="button" onClick={applyProjectFilter} disabled={projectDraft.trim() === projectId}>Aplicar projeto</button><button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Atualizar</button></div>
+      <div className="attempt-filter-actions"><button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Atualizar</button></div>
     </div>
 
     {state.error && <div className="queue-error" role="alert"><h2>{page ? 'Não foi possível abrir a próxima página' : 'Falha ao consultar o histórico'}</h2><p>{state.error}</p>{state.requestId && <p className="mono muted">Solicitação {state.requestId}</p>}<button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Tentar novamente</button></div>}

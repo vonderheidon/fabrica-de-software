@@ -14,16 +14,17 @@ export type ConfigurationSaveRequest = Readonly<{
   instanceId: string;
   installationId: string;
 }>;
+type ConfigurationSaveKind = 'settings-save' | 'profile-delete' | 'github-account-binding' | 'github-executable-save' | 'onboarding-root-save' | 'onboarding-complete' | 'onboarding-suppress';
 const requests = new Map<string, ConfigurationSaveRequest>();
 const missing = new Set<string>();
 
-export function retainConfigurationSave(request: ConfigurationSaveRequest): void {
+export function retainConfigurationSave(request: ConfigurationSaveRequest, kind: ConfigurationSaveKind = 'settings-save'): void {
   if (request.path !== '/api/v1/settings' && !/^\/api\/v1\/projects\/[^/]+\/configuration$/.test(request.path)) throw new TypeError('Rota de configuração inválida.');
   assertConfigurationBody(request.body);
   const prior = requests.get(request.operationId);
   if (prior && JSON.stringify(prior) !== JSON.stringify(request)) throw new Error('A identidade da operação já possui outro conteúdo.');
   requests.set(request.operationId, Object.freeze({ ...request }));
-  recordUncertainOperation({ operationId: request.operationId, kind: 'settings-save', recordedAt: Date.now() });
+  recordUncertainOperation({ operationId: request.operationId, kind, recordedAt: Date.now() });
 }
 
 export async function consultConfigurationSave(operationId: string): Promise<OperationView | null> {

@@ -5,12 +5,12 @@ import { HttpError, requestJson } from '../../api/http.js';
 
 export type RecordFilters = { projectId: string; attemptId: string; operationId: string };
 type PageRequest = { cursor: string | null; index: number; stack: Array<string | null>; serial: number };
-type RecordState = { page: EventPage | null; loading: boolean; refreshing: boolean; stale: boolean; error: string | null; requestId: string | null; emptyKind: 'none' | 'no-events' | 'no-matches' | 'unknown' };
+type RecordState = { page: EventPage | null; loading: boolean; refreshing: boolean; stale: boolean; error: string | null; requestId: string | null; errorCode: string | null; affectedRequirements: readonly string[]; facts: Readonly<Record<string, string | number | boolean | null>> | null; emptyKind: 'none' | 'no-events' | 'no-matches' | 'unknown' };
 
 export function useRecords(filters: RecordFilters) {
   const [request, setRequest] = useState<PageRequest>({ cursor: null, index: 0, stack: [null], serial: 0 });
   const committed = useRef<PageRequest>({ cursor: null, index: 0, stack: [null], serial: 0 });
-  const [state, setState] = useState<RecordState>({ page: null, loading: true, refreshing: false, stale: false, error: null, requestId: null, emptyKind: 'none' });
+  const [state, setState] = useState<RecordState>({ page: null, loading: true, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, affectedRequirements: [], facts: null, emptyKind: 'none' });
   const filterKey = JSON.stringify([filters.projectId, filters.attemptId, filters.operationId]);
   const stableFilters = useMemo(() => filters, [filterKey]);
 
@@ -39,12 +39,15 @@ export function useRecords(filters: RecordFilters) {
       }
       if (!active) return;
       committed.current = request;
-      setState({ page, loading: false, refreshing: false, stale: false, error: null, requestId: null, emptyKind });
+      setState({ page, loading: false, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, affectedRequirements: [], facts: null, emptyKind });
     }).catch((error: unknown) => {
       if (!active || (error instanceof DOMException && error.name === 'AbortError')) return;
       setState((current) => ({ ...current, loading: false, refreshing: false, stale: current.page !== null,
         error: error instanceof HttpError ? error.message : 'Não foi possível consultar os registros.',
-        requestId: error instanceof HttpError ? error.requestId : null }));
+        requestId: error instanceof HttpError ? error.requestId : null,
+        errorCode: error instanceof HttpError ? error.code : null,
+        affectedRequirements: error instanceof HttpError ? error.affectedRequirements : [],
+        facts: error instanceof HttpError ? error.facts : null }));
     });
     return () => { active = false; controller.abort(); };
   }, [filterKey, stableFilters, request]);

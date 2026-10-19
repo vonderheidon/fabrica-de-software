@@ -1,0 +1,355 @@
+export type StateLabel = { label: string; known: boolean };
+
+const stateLabels: Readonly<Record<string, string>> = {
+  accepted: 'Aceita', running: 'Em andamento', succeeded: 'Concluída', failed: 'Falhou', failed_known: 'Falha confirmada', unknown: 'Sem confirmação',
+  uncertain: 'Incerta', unavailable: 'Indisponível', pending: 'Pendente', ready: 'Pronta', blocked: 'Impedida',
+  passed: 'Aprovada', approved: 'Aprovado', rejected: 'Reprovada', delivered: 'Entregue', not_applicable: 'Não se aplica', not_requested: 'Não solicitado',
+  observed: 'Observada', complete: 'Completa', partial: 'Parcial', active: 'Ativa', inactive: 'Inativa',
+  draft: 'Rascunho', preparing: 'Preparando ambiente', implementation: 'Implementação', implementing: 'Implementação', implementer: 'Implementador', reviewer: 'Revisor',
+  in_progress: 'Em andamento', in_review: 'Em revisão', verifying: 'Verificação', reviewing: 'Revisão', correcting: 'Correção',
+  publishing: 'Publicação', finished: 'Encerrada', interrupted: 'Interrompida', open: 'Aberta', closed: 'Fechada',
+  tracked: 'Acompanhada', lost: 'Acompanhamento perdido', stopped: 'Parada confirmada', requested: 'Parada solicitada',
+  confirmed: 'Confirmada', removed: 'Removida', not_started: 'Ainda não iniciada', queued: 'Na fila',
+  cleanup_uncertain: 'Limpeza sem confirmação', not_configured: 'Não configurado', configured: 'Configurado',
+  idle: 'Aguardando ação', saving: 'Salvando', submitting: 'Enviando', expired: 'Expirada', cancelled: 'Cancelada',
+  canceled: 'Cancelada', enabled: 'Habilitada', disabled: 'Desabilitada', completed: 'Concluída',
+};
+
+const codeLabels: Readonly<Record<string, string>> = {
+  ACCOUNT_UNOBSERVED: 'Conta GitHub sem vínculo', ACCOUNT_REQUIRED: 'Conta GitHub necessária', ACCOUNT_NOT_CONFIGURED: 'Conta GitHub sem vínculo',
+  ACCOUNT_MISMATCH: 'Conta ativa diferente da conta vinculada', GITHUB_IDENTITY_CONFIRMED: 'Conta GitHub confirmada',
+  PROJECTS_ROOT_REQUIRED: 'Pasta dos projetos necessária', PROJECTS_ROOT_UNAVAILABLE: 'Pasta dos projetos indisponível',
+  PROJECTS_ROOT_CHANGED: 'A pasta dos projetos mudou', PROJECTS_ROOT_NOT_CONFIRMED: 'Pasta dos projetos não confirmada',
+  CONFIGURATION_RECORDED: 'Configuração consultada', EXECUTION_REVALIDATION_REQUIRED: 'Nova validação necessária antes de iniciar',
+  IMPLEMENTER_PROFILE_REQUIRED: 'Perfil de Implementador necessário', REVIEWER_PROFILE_REQUIRED: 'Perfil de Revisor necessário',
+  PROFILE_REQUIRED: 'Perfil de execução necessário', PROFILE_TYPE_CHANGE_BLOCKED: 'Perfil ainda usado por projetos',
+  PROFILE_DELETE_BLOCKED: 'Perfil ainda usado por projetos', PROFILE_ACTIVE_ATTEMPT_BLOCKED: 'Tentativa ativa usa este perfil',
+  ACCOUNT_SWITCH_ATTEMPT_ACTIVE: 'Tentativa ativa impede a troca de conta', KANBAN_DIVERGENCE: 'Status do quadro divergente',
+  ASSIGNEE_MISMATCH: 'Responsável da issue divergente', DELIVERY_INTEGRITY_FAILED: 'Integridade da versão não confirmada',
+  CAPTURE_CONTINUITY_REVOKED: 'Continuidade da captura revogada', CAPTURE_REF_CONFLICT: 'Referência da captura divergente',
+  HUMAN_DECISION: 'Aguardando decisão do operador', QUESTION_EXPIRED: 'Pergunta expirada',
+  CAPTURE_FAILED: 'Captura da versão falhou', CHECKS_NOT_CONFIGURED: 'Nenhum check configurado',
+  EXECUTOR_COST_NOT_OBSERVED: 'Custo não fornecido pelo executor', NATIVE_OPEN_UNAVAILABLE: 'Abertura nativa indisponível',
+  DECLARED_NEW_FILE_IGNORED: 'Arquivo novo ignorado', KNOWN_SECRET_EXCLUDED: 'Arquivo excluído pela regra de segurança',
+  RESULT_INVALID: 'Resultado precisa de correção', RESULT_CONFLICT: 'Resultado conflita com um resultado anterior',
+  MAESTRI_CONTEXT_CONFIRMED: 'Contexto Maestri/OMP disponível', CONTEXT_UNAVAILABLE: 'Contexto local indisponível',
+  TRACKING_LOST: 'Acompanhamento da tentativa perdido', RESOURCE_STATE_UNCERTAIN: 'Estado dos recursos sem confirmação',
+  RESOURCE_OWNERSHIP_UNCONFIRMED: 'Vínculo dos recursos sem confirmação', RESOURCES_NOT_OBSERVED: 'Recursos ainda não observados',
+  RESOURCES_RECORDED: 'Recursos registrados', CREATION_EFFECT_UNKNOWN: 'Efeito da criação sem confirmação',
+  CREATION_RESOURCES_RECORDED: 'Recursos da criação registrados', DIAGNOSTIC_CHECK_UNAVAILABLE: 'Verificação indisponível',
+  VALIDATION_FAILED: 'Dados precisam de revisão', PAYLOAD_TOO_LARGE: 'Conteúdo acima do limite permitido',
+  SESSION_REQUIRED: 'Sessão técnica necessária', CSRF_INVALID: 'Sessão técnica desatualizada',
+  STORAGE_UNAVAILABLE: 'Persistência local indisponível', REQUEST_TIMEOUT: 'A solicitação excedeu o prazo',
+  INTERNAL_ERROR: 'Falha interna', NOT_FOUND: 'Item não encontrado',
+};
+
+const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; nextAction: string }>> = {
+  ORIGIN_INVALID: { title: 'Origem não confirmada', cause: 'Não foi possível confirmar a pasta Git ou a URL do repositório informada.', nextAction: 'Confira o tipo e a localização da origem na configuração do projeto e consulte novamente.' },
+  BASE_BRANCH_INVALID: { title: 'Branch-base não confirmada', cause: 'A consulta da origem não confirmou a branch-base escolhida.', nextAction: 'Confirme a origem e selecione uma branch existente no projeto.' },
+  BASE_UNCONFIRMED: { title: 'Base remota não confirmada', cause: 'O commit da branch-base no GitHub ainda não foi confirmado.', nextAction: 'Confira o remoto e a branch-base antes de consultar a preparação novamente.' },
+  EXECUTOR_REVALIDATION_REQUIRED: { title: 'Executor será conferido no início', cause: 'A preparação ainda não inicia agentes. O contexto Maestri/OMP será validado ao solicitar o início.', nextAction: 'Resolva os demais impedimentos e revise o resumo. O início continuará condicionado à validação do executor.' },
+  ISSUE_REVALIDATION_REQUIRED: { title: 'Issue será conferida na preparação', cause: 'A lista de issues é uma consulta inicial, sem autorização de execução.', nextAction: 'Selecione a issue para conferir responsável, quadro, critérios e base atual.' },
+  PROJECT_REQUIRED: {
+    title: 'Selecione o quadro do projeto',
+    cause: 'O quadro GitHub e o mapeamento de Status ainda não foram configurados.',
+    nextAction: 'Abra a configuração do projeto, selecione o quadro e mapeie os quatro valores de Status. Depois, consulte as issues novamente.',
+  },
+  REMOTE_UNCONFIRMED: {
+    title: 'Confirme o repositório GitHub',
+    cause: 'O projeto ainda não tem um repositório GitHub confirmado.',
+    nextAction: 'Abra a configuração do projeto e confirme a origem GitHub antes de preparar uma issue.',
+  },
+  PROFILES_REQUIRED: {
+    title: 'Selecione os perfis do projeto',
+    cause: 'Falta associar um perfil de Implementador e um de Revisor ao projeto.',
+    nextAction: 'Abra a configuração do projeto e selecione um perfil ativo para cada papel. Se necessário, crie-os em Perfis.',
+  },
+  LOCAL_CHANGES_EXCLUDED: {
+    title: 'Alterações locais ficam preservadas',
+    cause: 'A tentativa usa somente o histórico commitado da origem.',
+    nextAction: 'Confira se as alterações necessárias já estão commitadas antes de preparar uma issue.',
+  },
+  PROJECT_NOT_READY: {
+    title: 'Configure o projeto para a fila',
+    cause: 'Um projeto ainda precisa do quadro GitHub ou do repositório confirmado.',
+    nextAction: 'Abra Projetos, selecione o projeto indicado e configure a origem e o quadro pelo nome.',
+  },
+  ACCOUNT_UNOBSERVED: {
+    title: 'Vincule uma conta GitHub',
+    cause: 'Nenhuma conta GitHub foi vinculada a esta instalação.',
+    nextAction: 'Abra Configuração, verifique o status do GitHub e vincule uma conta ativa.',
+  },
+  ACCOUNT_REQUIRED: {
+    title: 'Vincule uma conta GitHub',
+    cause: 'A configuração ainda não tem uma conta vinculada.',
+    nextAction: 'Abra Configuração, verifique o status do GitHub e vincule uma conta ativa.',
+  },
+  ACCOUNT_NOT_CONFIGURED: {
+    title: 'Vincule uma conta GitHub',
+    cause: 'A configuração ainda não tem uma conta vinculada.',
+    nextAction: 'Abra Configuração, verifique o status do GitHub e vincule uma conta ativa.',
+  },
+  ACCOUNT_MISMATCH: {
+    title: 'Confira a conta GitHub ativa',
+    cause: 'A identidade ativa observada difere da conta vinculada à fábrica.',
+    nextAction: 'Confirme a conta ativa no GitHub CLI e use a ação explícita de troca em Configuração.',
+  },
+  ACCOUNT_SWITCH_ATTEMPT_ACTIVE: {
+    title: 'Aguarde a tentativa ativa',
+    cause: 'A conta atual ainda tem uma tentativa sem resultado final.',
+    nextAction: 'Consulte a tentativa e aguarde o encerramento antes de trocar a conta vinculada.',
+  },
+  KANBAN_DIVERGENCE: {
+    title: 'Revise o Status do quadro',
+    cause: 'O Status observado no GitHub não corresponde ao mapeamento configurado para este projeto.',
+    nextAction: 'Confira o campo e as opções em Configuração e corrija o Status no GitHub quando necessário.',
+  },
+  ASSIGNEE_MISMATCH: {
+    title: 'Confira o responsável da issue',
+    cause: 'O responsável observado não corresponde à conta vinculada à esteira.',
+    nextAction: 'Revise a atribuição no GitHub e revalide a autoridade antes de continuar.',
+  },
+  DELIVERY_INTEGRITY_FAILED: {
+    title: 'Versão não íntegra',
+    cause: 'A integridade da versão selecionada não foi confirmada.',
+    nextAction: 'Consulte os detalhes da versão e não autorize publicação até que a integridade seja confirmada.',
+  },
+  PROJECTS_ROOT_REQUIRED: {
+    title: 'Confirme a pasta dos projetos',
+    cause: 'A pasta necessária para novos projetos ainda não foi confirmada.',
+    nextAction: 'Abra Configuração, escolha uma pasta acessível e valide o acesso de gravação.',
+  },
+  PROJECTS_ROOT_UNAVAILABLE: {
+    title: 'Revise a pasta dos projetos',
+    cause: 'A pasta salva não está acessível para leitura e gravação neste momento.',
+    nextAction: 'Abra Configuração e selecione uma pasta acessível para confirmar novamente.',
+  },
+  PROJECTS_ROOT_CHANGED: {
+    title: 'Confirme novamente a pasta',
+    cause: 'A pasta observada difere daquela que foi confirmada anteriormente.',
+    nextAction: 'Abra Configuração e valide a pasta atual antes de continuar.',
+  },
+  PROJECTS_ROOT_NOT_CONFIRMED: {
+    title: 'Confirme a pasta dos projetos',
+    cause: 'A pasta informada ainda não tem uma confirmação válida.',
+    nextAction: 'Abra Configuração, escolha a pasta e conclua a validação.',
+  },
+  IMPLEMENTER_PROFILE_REQUIRED: {
+    title: 'Configure um perfil de Implementador',
+    cause: 'Não há um perfil vivo de Implementador disponível para esta configuração.',
+    nextAction: 'Abra Perfis, crie ou ajuste um perfil de Implementador e selecione-o no projeto.',
+  },
+  REVIEWER_PROFILE_REQUIRED: {
+    title: 'Configure um perfil de Revisor',
+    cause: 'Não há um perfil vivo de Revisor disponível para esta configuração.',
+    nextAction: 'Abra Perfis, crie ou ajuste um perfil de Revisor e selecione-o no projeto.',
+  },
+  PROFILE_REQUIRED: {
+    title: 'Configure os perfis do projeto',
+    cause: 'A configuração precisa de um perfil para cada papel do ciclo.',
+    nextAction: 'Abra Perfis e selecione um Implementador e um Revisor para o projeto.',
+  },
+  EXECUTION_REVALIDATION_REQUIRED: {
+    title: 'Valide os pré-requisitos antes de iniciar',
+    cause: 'As escolhas salvas precisam ser conferidas com o contexto atual antes de iniciar.',
+    nextAction: 'Revise os pré-requisitos na preparação e consulte novamente o resumo atual.',
+  },
+  CONFIGURATION_RECORDED: {
+    title: 'Configuração consultada',
+    cause: 'Os dados salvos e os vínculos locais foram consultados.',
+    nextAction: 'Revalide a conta e o executor ao preparar a próxima tentativa.',
+  },
+  MAESTRI_CONTEXT_CONFIRMED: {
+    title: 'Contexto local disponível',
+    cause: 'O terminal âncora confirmou o contexto Maestri/OMP nesta consulta.',
+    nextAction: 'A confirmação vale para este instante; a execução ainda exige validação no início.',
+  },
+  TRACKING_LOST: {
+    title: 'Acompanhamento interrompido',
+    cause: 'O controlador perdeu o acompanhamento necessário para continuar a tentativa.',
+    nextAction: 'Consulte os recursos e resultados registrados e avalie a ação de recuperação disponível.',
+  },
+  RESOURCE_STATE_UNCERTAIN: {
+    title: 'Confirme o estado dos recursos',
+    cause: 'Um ou mais recursos não têm confirmação atual de inicialização ou parada.',
+    nextAction: 'Consulte os recursos da tentativa e a confirmação de parada no host executor.',
+  },
+  RESOURCE_OWNERSHIP_UNCONFIRMED: {
+    title: 'Confirme os recursos registrados',
+    cause: 'O vínculo de ownership de um recurso não foi confirmado.',
+    nextAction: 'Atualize os recursos da tentativa e consulte o host executor.',
+  },
+  RESOURCES_NOT_OBSERVED: {
+    title: 'Recursos ainda não observados',
+    cause: 'Esta consulta não encontrou recursos registrados para o contexto.',
+    nextAction: 'Atualize os fatos e consulte novamente após o início da operação correspondente.',
+  },
+  CREATION_EFFECT_UNKNOWN: {
+    title: 'Confirme a criação parcial',
+    cause: 'Um efeito da criação ainda não tem resultado confirmado.',
+    nextAction: 'Abra o detalhe da criação e reconcilie somente o efeito indicado pelo controlador.',
+  },
+  DIAGNOSTIC_CHECK_UNAVAILABLE: {
+    title: 'A verificação não terminou',
+    cause: 'A consulta não terminou com uma observação válida.',
+    nextAction: 'Confira o contexto e solicite outra verificação; nenhum efeito será repetido automaticamente.',
+  },
+};
+
+const errorCopy: Readonly<Record<string, string>> = {
+  VALIDATION_FAILED: 'Revise os campos destacados e corrija os valores informados.',
+  REQUEST_REJECTED: 'A solicitação não pôde ser aceita com os dados e o contexto atuais.',
+  PAYLOAD_TOO_LARGE: 'O conteúdo enviado excede o limite permitido. Reduza o texto e tente novamente.',
+  SESSION_REQUIRED: 'A sessão técnica expirou. Atualize os dados antes de tentar novamente.',
+  CSRF_INVALID: 'A sessão técnica mudou. Atualize os dados antes de continuar.',
+  STORAGE_UNAVAILABLE: 'O armazenamento local não está disponível. Tente novamente após consultar o estado atual.',
+  REQUEST_TIMEOUT: 'A solicitação excedeu o prazo. Consulte o estado atual antes de repetir qualquer ação.',
+  INTERNAL_ERROR: 'O controlador não conseguiu concluir a solicitação. Consulte o suporte técnico.',
+  ACCOUNT_UNOBSERVED: 'Vincule uma conta GitHub ativa em Configuração antes de continuar.',
+  ACCOUNT_REQUIRED: 'Vincule uma conta GitHub ativa em Configuração antes de continuar.',
+  ACCOUNT_NOT_CONFIGURED: 'Vincule uma conta GitHub ativa em Configuração antes de continuar.',
+  ACCOUNT_MISMATCH: 'A conta ativa do GitHub difere da conta vinculada. Confira a conta em Configuração.',
+  ACCOUNT_SWITCH_ATTEMPT_ACTIVE: 'A conta atual tem uma tentativa ativa. Consulte-a e aguarde o resultado antes de trocar a conta.',
+  KANBAN_DIVERGENCE: 'O Status observado do quadro difere do mapeamento configurado. Revise Configuração e atualize o Status no GitHub.',
+  SUMMARY_CHANGED: 'O resumo mudou. Revise os dados atuais antes de autorizar novamente.',
+  ATTEMPT_ACTIVE: 'Esta issue já tem uma tentativa em andamento. Consulte-a antes de preparar outra.',
+  PROJECTS_ROOT_REQUIRED: 'Confirme a pasta dos projetos em Configuração antes de continuar.',
+  PROJECTS_ROOT_UNAVAILABLE: 'A pasta dos projetos não está acessível. Escolha outra pasta e valide novamente.',
+  PROFILE_ACTIVE_ATTEMPT_BLOCKED: 'Uma tentativa ativa usa este perfil. Aguarde o resultado antes de alterá-lo.',
+  PROFILE_DELETE_BLOCKED: 'Um ou mais projetos ainda usam este perfil. Substitua-o nas configurações indicadas.',
+  PROFILE_TYPE_CHANGE_BLOCKED: 'Um ou mais projetos usam este perfil neste papel. Substitua a seleção antes de mudar o tipo.',
+  QUEUE_SUMMARY_CHANGED: 'A observação da fila mudou. Revise os candidatos atuais antes de confirmar.',
+  ARTIFACT_INTEGRITY_FAILED: 'A integridade da evidência não foi confirmada; o conteúdo foi recusado.',
+  ARTIFACT_MISSING: 'A evidência não está disponível nesta versão.',
+};
+
+const factLabels: Readonly<Record<string, string>> = {
+  expected_account_id: 'Conta esperada', observed_account_id: 'Conta observada', account_id: 'Conta vinculada',
+  observed_host: 'Host observado', expected_host: 'Host esperado', expected_status_id: 'Status esperado', observed_status_id: 'Status observado', observed_at_ms: 'Observado em', profile_count: 'Perfis disponíveis',
+  profile_counts: 'Perfis disponíveis por papel', implementer_profile_count: 'Perfis de Implementador',
+  reviewer_profile_count: 'Perfis de Revisor', project_count: 'Projetos encontrados', eligible_count: 'Issues elegíveis',
+  attempt_id: 'Tentativa (referência de suporte)', project_id: 'Projeto (referência de suporte)',
+  operation_id: 'Operação (referência de suporte)', request_id: 'Solicitação (referência de suporte)',
+  blocking_project_count: 'Projetos relacionados', blocking_project_ids: 'Projetos relacionados (referências de suporte)',
+  resource_count: 'Recursos registrados', uncertain_count: 'Recursos sem confirmação', retry_at_ms: 'Próxima consulta permitida',
+  revision: 'Revisão técnica', expected_revision: 'Revisão esperada', current_revision: 'Revisão atual',
+  state: 'Estado técnico', phase: 'Etapa registrada', result: 'Resultado registrado', tracking: 'Acompanhamento registrado',
+  status: 'Estado técnico', reason: 'Motivo registrado', code: 'Código técnico',
+  id: 'Identificador técnico', round: 'Rodada', role: 'Papel', verdict: 'Parecer', declared_verdict: 'Parecer declarado',
+  blocking: 'Impeditivo', category: 'Categoria', exit_code: 'Código de saída', duration_ms: 'Duração em milissegundos',
+  passed: 'Aprovado', kind: 'Tipo de recurso', started_at_ms: 'Início', completed_at_ms: 'Conclusão', finished_at_ms: 'Término',
+  check_definition_id: 'Check configurado', producer_passage_id: 'Passagem do Implementador', delivery_id: 'Versão',
+  criterion_id: 'Critério', finding_id: 'Achado', old_path: 'Caminho anterior', new_path: 'Caminho atual',
+  content_identity: 'Identidade do conteúdo', base_sha: 'Referência da base', sha256: 'Verificação SHA-256',
+  pendencias_de_medicao: 'Pendências de medição', requisitos_afetados: 'Requisitos associados', authorized_summary_hash: 'Hash do resumo autorizado',
+};
+
+export function operatorState(value: string | null | undefined): StateLabel {
+  if (!value) return { label: 'Não informado', known: true };
+  const label = stateLabels[value.toLocaleLowerCase('en').replace(/[.\s-]+/g, '_')];
+  return label ? { label, known: true } : { label: 'Estado desconhecido', known: false };
+}
+
+const eventLabels: Readonly<Record<string, string>> = {
+  'attempt.created': 'Tentativa criada', 'attempt.started': 'Tentativa iniciada', 'attempt.interrupted': 'Tentativa interrompida',
+  'attempt.cancel_requested': 'Cancelamento solicitado', 'attempt.cancelled': 'Tentativa cancelada', 'attempt.completed': 'Tentativa concluída',
+  'attempt.result_accepted': 'Resultado registrado', 'attempt.delivery_captured': 'Versão capturada', 'attempt.reviewed': 'Revisão registrada',
+  'attempt.published': 'Entrega concluída', 'attempt.retried': 'Nova tentativa criada',
+  'settings.saved': 'Configuração geral atualizada', 'configuration.saved': 'Configuração do projeto atualizada',
+  'profile.created': 'Perfil criado', 'profile.updated': 'Perfil atualizado', 'profile.deleted': 'Perfil removido',
+  'queue.updated': 'Configuração da fila atualizada', 'queue.paused': 'Fila pausada', 'queue.enabled': 'Fila habilitada',
+  'question.created': 'Pergunta do agente registrada', 'question.answered': 'Resposta registrada', 'question.expired': 'Pergunta expirada',
+  'diagnostic.accepted': 'Verificação aceita', 'diagnostic.completed': 'Verificação concluída',
+  'scaffold.created': 'Criação de projeto iniciada', 'scaffold.reconciled': 'Criação de projeto reconciliada',
+  'creation.accepted': 'Criação de projeto aceita', 'creation.completed': 'Criação de projeto concluída',
+  'creation.stopped': 'Criação de projeto interrompida', 'creation.reconcile.accepted': 'Conferência da criação aceita',
+  'creation.reconciled': 'Efeitos da criação conferidos',
+  'publication.completed': 'Efeitos de entrega concluídos', 'publication.reconciled': 'Efeitos de entrega reconciliados',
+};
+
+export function operatorEventLabel(eventType: string): string {
+  const normalized = eventType.toLocaleLowerCase('en');
+  const step = /^creation\.(directory|files|git|baseline|registration)\.(not_started|running|confirmed|unknown)$/.exec(normalized);
+  if (step) {
+    const labels: Record<string, string> = { directory: 'Pasta do projeto', files: 'Arquivos do projeto', git: 'Repositório Git local', baseline: 'Commit inicial', registration: 'Cadastro do projeto' };
+    return `${labels[step[1]!]}: ${operatorState(step[2]).label}`;
+  }
+  return eventLabels[normalized] ?? 'Atualização técnica registrada';
+}
+
+export function isKnownOperatorEvent(eventType: string): boolean {
+  return operatorEventLabel(eventType) !== 'Atualização técnica registrada';
+}
+
+export function operatorCodeLabel(code: string): string {
+  return codeLabels[code] ?? 'Situação técnica identificada';
+}
+
+export function operatorFactLabel(key: string): string {
+  const normalized = key.replace(/([A-Z])/g, '_$1').replace(/[\s.-]+/g, '_').toLocaleLowerCase('en').replace(/^_/, '');
+  return factLabels[normalized] ?? factLabels[key] ?? 'Dado de suporte';
+}
+
+export function operatorFactValue(value: unknown): string {
+  if (value === null || value === undefined) return 'Não observado';
+  if (typeof value === 'boolean') return value ? 'Sim' : 'Não';
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'Não observado';
+  if (typeof value === 'string') {
+    if (codeLabels[value]) return codeLabels[value]!;
+    const state = operatorState(value);
+    return state.known ? state.label : value;
+  }
+  if (Array.isArray(value)) return value.map(operatorFactValue).join(', ');
+  return 'Consulte o suporte técnico';
+}
+
+export function operatorVisibleFactValue(key: string, value: unknown): string {
+  const normalized = key.replace(/([A-Z])/g, '_$1').replace(/[\s.-]+/g, '_').toLocaleLowerCase('en').replace(/^_/, '');
+  if (['state', 'status', 'phase', 'result', 'tracking', 'verdict', 'declared_verdict', 'capture_state', 'active_limit_state'].includes(normalized)) {
+    return operatorState(typeof value === 'string' ? value : null).label;
+  }
+  return operatorFactValue(value);
+}
+
+export function operatorErrorMessage(code: string, message: string, status?: number): string {
+  const translated = errorCopy[code];
+  if (translated) return translated;
+  if (isPortugueseOperatorText(message)) return message;
+  if (code.startsWith('PROFILE_')) return 'Revise o perfil e as referências de projeto antes de continuar.';
+  if (code.startsWith('PROJECTS_ROOT_')) return 'Revise e confirme novamente a pasta dos projetos em Configuração.';
+  if (status === 409 || code.includes('CONFLICT') || code.endsWith('_CHANGED')) return 'Os dados mudaram durante esta ação. Consulte o estado atual antes de continuar.';
+  if (status === 412) return 'A configuração mudou desde a leitura. Consulte os dados atuais e revise sua edição.';
+  if (status === 413) return 'O conteúdo enviado excede o limite permitido. Reduza o texto e tente novamente.';
+  if (status === 404) return 'O item solicitado não está disponível no contexto atual.';
+  if (status === 503 || code.endsWith('_UNAVAILABLE')) return 'O serviço local está indisponível. Consulte o estado atual e tente novamente.';
+  if (status !== undefined && status >= 500) return 'O controlador não conseguiu concluir a solicitação. Consulte Suporte técnico para ver os detalhes disponíveis.';
+  return 'A solicitação não pôde ser concluída. Consulte Suporte técnico para ver os detalhes disponíveis.';
+}
+
+export function diagnosticCopyFor(code: string, state: string, cause?: string | null, recovery?: string | null) {
+  const known = diagnosticCopy[code];
+  if (known) return code === 'PROJECT_NOT_READY' && cause && isPortugueseOperatorText(cause) ? { ...known, cause } : known;
+  const status = operatorState(state);
+  return {
+    title: status.known && state.toLocaleLowerCase('en') === 'passed' ? 'Verificação concluída' : 'Atenção necessária',
+    cause: cause && isPortugueseOperatorText(cause) ? cause : 'O controlador registrou uma situação que precisa de consulta.',
+    nextAction: recovery && isPortugueseOperatorText(recovery) ? recovery : 'Atualize os fatos deste contexto. Se a situação persistir, consulte os detalhes em Suporte técnico.',
+  };
+}
+
+export function isPortugueseOperatorText(value: string): boolean {
+  return /[áàâãéêíóôõúüç]|\b(não|nao|esta|está|foram|foi|consulte|verifique|abra|salve|escolha|configuração|tentativa|conta|pasta|perfil|solicitação)\b/i.test(value);
+}
+
+export function operatorFieldLabel(path: string): string {
+  const field = path.split('.').filter(Boolean).at(-1)?.toLocaleLowerCase('en') ?? '';
+  const labels: Readonly<Record<string, string>> = {
+    name: 'Nome', source: 'Origem', location: 'Localização', base_branch: 'Branch-base', basebranch: 'Branch-base',
+    project_id: 'Projeto', account_id: 'Conta vinculada', projects_root: 'Raiz dos projetos', polling_interval_ms: 'Intervalo de consulta',
+    passage_active_time_ms: 'Tempo ativo por passagem', question_ttl: 'TTL da pergunta', implementer_profile_id: 'Perfil de Implementador',
+    reviewer_profile_id: 'Perfil de Revisor', correction_limit: 'Limite de correções', delivery_mode: 'Modo de entrega',
+    guidance: 'Orientações', command: 'Comando do check', cwd_relative: 'Pasta relativa do check', timeout_ms: 'Prazo do check',
+    profile_type: 'Tipo do perfil', provider: 'Provider', model: 'Modelo', effort: 'Esforço',
+  };
+  return labels[field] ?? 'Campo informado';
+}

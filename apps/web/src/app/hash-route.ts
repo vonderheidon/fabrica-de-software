@@ -1,9 +1,10 @@
-export const tabs = ['dashboard', 'projetos', 'fila', 'tentativas', 'registros', 'configuracao'] as const;
+export const tabs = ['dashboard', 'projetos', 'perfis', 'fila', 'tentativas', 'registros', 'configuracao'] as const;
 export type PrincipalTab = (typeof tabs)[number];
 
 const tabLabels: Record<PrincipalTab, string> = {
   dashboard: 'Principal',
   projetos: 'Projetos',
+  perfis: 'Perfis Globais',
   fila: 'Fila Ready',
   tentativas: 'Tentativas',
   registros: 'Registros',
@@ -13,7 +14,7 @@ const tabLabels: Record<PrincipalTab, string> = {
 export const dialogIds = [
   'register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation',
   'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication',
-  'diagnostic', 'interaction', 'profile',
+  'diagnostic', 'interaction', 'profile', 'initial-setup',
 ] as const;
 export type DialogId = (typeof dialogIds)[number];
 
@@ -23,7 +24,7 @@ export type HashRoute = {
   error: string | null;
 };
 
-const contextIds = ['projectId', 'attemptId', 'deliveryId', 'roundId', 'creationId', 'questionId', 'operationId'] as const;
+const contextIds = ['projectId', 'issueId', 'attemptId', 'deliveryId', 'roundId', 'creationId', 'questionId', 'operationId'] as const;
 
 export function routeIdentity(route: HashRoute): string {
   return JSON.stringify([route.tab, ...contextIds.map((key) => route.params.get(key) ?? ''), route.params.get('filter') ?? '']);

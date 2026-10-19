@@ -1,0 +1,71 @@
+const guidance: Readonly<Record<string, string>> = {
+  'nome': 'Identifica o perfil ou recurso no catálogo. Obrigatório ao criar e usado também para localizar depois. Informe texto simples, por exemplo “Implementador principal”. Renomear altera somente a identificação exibida.',
+  'nome do projeto': 'Identifica o projeto na lista da fábrica. Obrigatório no cadastro. Informe um nome curto, por exemplo “Portal de vendas”. Renomear muda a identificação exibida, sem trocar a origem cadastrada.',
+  'tipo de origem': 'Define de onde o projeto será lido. Obrigatório no cadastro. Escolha uma pasta local existente ou um repositório GitHub. Alterar a opção muda como o controlador valida a origem.',
+  'tipo da origem': 'Define de onde o projeto será lido. Obrigatório na configuração do projeto. Escolha Local ou GitHub conforme a origem cadastrada; alterar o tipo muda como o controlador consulta e valida a localização nas próximas preparações.',
+  'origem': 'Indica o repositório usado pelo projeto. Obrigatória no cadastro. Informe um caminho local ou uma URL HTTPS/SSH do GitHub sem credenciais. Alterar a origem muda o conteúdo consultado para novas preparações.',
+  'pasta local existente': 'Indica a pasta local já existente que contém o projeto. Obrigatória no cadastro de uma origem local. Informe um caminho acessível, por exemplo “C:\\Projetos\\portal”. Alterar o caminho muda o conteúdo consultado nas próximas preparações; os arquivos da pasta não são modificados pelo cadastro.',
+  'url do repositorio github': 'Indica o repositório GitHub que contém o projeto. Obrigatória no cadastro de uma origem GitHub. Informe uma URL HTTPS ou SSH sem credenciais, por exemplo “https://github.com/equipe/portal”. Alterar a URL muda o conteúdo consultado nas próximas preparações.',
+  'localizacao': 'Aponta para o repositório de origem. Obrigatória no cadastro. Use um caminho local ou uma URL GitHub sem credenciais; exemplo: “C:\\Projetos\\portal”. Alterar o valor muda a origem consultada.',
+  'localizacao da origem': 'Aponta para o repositório deste projeto. Obrigatória no cadastro. Use uma pasta local ou uma URL GitHub sem credenciais, conforme o tipo escolhido. Alterar a origem muda o conteúdo consultado nas próximas preparações.',
+  'raiz dos projetos': 'Define onde novos projetos poderão ser criados. Necessária para cadastrar projetos; informe e valide antes do primeiro cadastro. Use um caminho local acessível, por exemplo “C:\\Projetos”. Alterar a raiz vale para novos projetos e não move os existentes.',
+  'branch-base': 'Escolhe a branch de referência para preparar o projeto. Obrigatória para iniciar uma tentativa. Use um nome de branch, por exemplo “main”. Alterá-la muda a base consultada nas próximas preparações.',
+  'intervalo de consulta': 'Define a frequência das consultas de acompanhamento. Pode permanecer no padrão. Informe minutos como número decimal exato, por exemplo “0,25”. Alterar o valor muda a cadência das próximas observações.',
+  'tempo ativo por passagem': 'Define por quanto tempo uma passagem pode permanecer em atividade acompanhada. Pode permanecer no padrão. Informe minutos decimais, por exemplo “30”. Alterar o valor afeta as próximas tentativas; a espera por resposta humana é medida separadamente.',
+  'ttl da pergunta configurado': 'Ativa ou desativa o prazo de uma pergunta do agente. Pode ficar desativado. Ao ativar, preencha valor e unidade. A alteração vale para as próximas perguntas e não muda os dois tempos informados em minutos.',
+  'ttl da pergunta valor': 'Define a duração após a qual uma pergunta sem resposta expira. Opcional; preencha quando o prazo estiver configurado. Informe um número, por exemplo “15”. Alterar o valor modifica o prazo das próximas perguntas.',
+  'ttl da pergunta unidade': 'Indica a unidade do prazo de espera de uma pergunta. Opcional; preencha junto com o valor do TTL, por exemplo “min”. Alterar a unidade muda a duração efetiva sem alterar intervalo de consulta ou tempo ativo.',
+  'ttl de pergunta configurado': 'Ativa ou desativa o prazo durante o qual uma pergunta do agente aguarda resposta antes de expirar. Opcional; deixe desativado para manter o padrão ou ative e informe valor e unidade, por exemplo “15 minutos”. A alteração vale para as próximas perguntas e permanece separada do intervalo de consulta e do tempo ativo, ambos informados em minutos.',
+  'ttl de pergunta valor': 'Define por quanto tempo uma pergunta do agente aguarda resposta antes de expirar. Opcional; preencha quando o TTL estiver configurado. Informe um número, por exemplo “15”, junto com a unidade escolhida. Alterar o valor muda o prazo das próximas perguntas e não muda o intervalo de consulta nem o tempo ativo.',
+  'ttl de pergunta unidade': 'Indica a unidade do tempo que uma pergunta do agente aguarda resposta antes de expirar. Opcional; preencha junto com o valor do TTL, por exemplo “minutos”. Alterar a unidade muda o prazo efetivo das próximas perguntas e não muda o intervalo de consulta nem o tempo ativo.',
+  'perfil implementador': 'Escolhe o perfil que implementa a issue. Necessário para iniciar uma tentativa. Selecione um perfil vivo de Implementador; sem seleção específica, usa-se o perfil efetivo do projeto. Alterar a escolha afeta a próxima tentativa.',
+  'perfil revisor': 'Escolhe o perfil que revisa a entrega de forma independente. Necessário para iniciar uma tentativa. Selecione um perfil vivo de Revisor; sem seleção específica, usa-se o perfil efetivo do projeto. Alterar a escolha afeta a próxima tentativa.',
+  'limite de correcoes': 'Define quantas rodadas de correção podem ocorrer após a primeira revisão. Pode permanecer no padrão. Informe um inteiro de 0 a 5, por exemplo “2”. Alterar o valor limita as próximas tentativas sem apagar rodadas anteriores.',
+  'modo de entrega': 'Define o percurso de entrega desta preparação. Obrigatório escolher um modo antes de autorizar o início; selecione ICR, Commit local ou Pull request. A mudança altera os efeitos previstos e invalida a autorização anterior do resumo.',
+  'modo de entrega padrao': 'Define o percurso padrão para novas preparações. Pode permanecer no valor atual. Escolha ICR, Commit local ou Pull request. Alterar o padrão muda as novas preparações e não reescreve tentativas existentes.',
+  'modo': 'Escolhe o percurso de entrega usado nas próximas tentativas. Pode permanecer no modo padrão do projeto. Selecione ICR, Commit local ou Pull request. Alterar o modo modifica os efeitos previstos e exige revisar novamente o resumo.',
+  'issue': 'Seleciona a issue que será preparada. Obrigatória para iniciar. Escolha uma issue elegível da lista consultada; o conteúdo e a responsabilidade serão revalidados. Alterar a issue cria outra preparação e outro resumo.',
+  'projeto': 'Mostra o projeto de origem desta preparação. É definido pelo contexto de navegação e não pode ser alterado aqui. Abra a preparação a partir de outro projeto para mudar a origem.',
+  'orientacao': 'Acrescenta instruções para esta preparação. Opcional; limite de 8.192 caracteres. Escreva em texto simples e não inclua credenciais. Alterar a orientação afeta a próxima tentativa e exige revisar o resumo novamente.',
+  'orientacoes opcionais': 'Acrescenta instruções para este perfil. Opcional; limite de 8.192 caracteres. Use texto simples sem credenciais. Alterar o texto afeta as passagens futuras que usarem o perfil.',
+  'orientacoes do projeto': 'Acrescenta contexto permanente do projeto aos papéis. Opcional; use texto claro e sem credenciais. Alterar as instruções afeta novas preparações e tentativas, sem reescrever capturas anteriores.',
+  'executor': 'Informa qual executor este perfil usa. Fixo como Maestri/OMP nesta entrega e não editável. O valor determina a sessão usada por novas passagens.',
+  'provider': 'Escolhe o provider disponível no catálogo OMP. Necessário para criar um perfil; selecione pelo nome exibido na lista, por exemplo uma opção do catálogo atual. Alterar o provider atualiza as opções de modelo e pode limpar escolhas incompatíveis.',
+  'conta elegivel': 'Escolhe a conta ativa e confirmada que ficará vinculada à fábrica. Necessária antes de preparar e iniciar tentativas. Selecione pelo login mostrado, por exemplo “@ana”. Alterar a escolha só troca o vínculo após o comando explícito e sua confirmação.',
+  'modelo': 'Escolhe o modelo dentro do provider selecionado. Necessário para criar um perfil; selecione o nome de modelo mostrado no catálogo OMP. Alterar o modelo atualiza os esforços disponíveis e pode limpar uma escolha incompatível.',
+  'esforco': 'Escolhe o nível de esforço oferecido pelo modelo. Necessário quando o catálogo lista níveis; selecione um dos valores apresentados. Use “Não se aplica” somente quando o modelo não oferece esforço. Alterar essa opção afeta novas passagens.',
+  'github project': 'Associa o projeto a um quadro GitHub para consultar issues e acompanhar Status. Necessário para iniciar em todos os modos, inclusive manualmente, com a issue vinculada ao quadro. Escolha pelo título e proprietário, por exemplo “Roadmap · equipe”. Trocar o quadro exige mapear Status novamente.',
+  'campo status': 'Escolhe qual campo do quadro contém o Status. Necessário quando o quadro é usado. Selecione o nome observado; trocar o campo limpa os quatro valores de Status e muda o mapeamento das próximas consultas.',
+  'status ready': 'Associa o valor do quadro ao estado Ready da fila. Necessário para consumir issues desse estado. Selecione o valor exato listado, por exemplo “Ready”. Alterar a opção muda a elegibilidade observada.',
+  'status em andamento': 'Associa o valor do quadro ao trabalho em andamento. Necessário para projetar essa etapa quando o fluxo usa o quadro. Selecione o valor exato listado, por exemplo “In progress”. Alterar a opção muda a projeção futura de Status.',
+  'status em revisao': 'Associa o valor do quadro à revisão. Necessário para projetar essa etapa quando o fluxo usa o quadro. Selecione o valor exato listado, por exemplo “In review”. Alterar a opção muda a projeção futura de Status.',
+  'status entregue': 'Associa o valor do quadro à entrega concluída. Necessário para projetar essa etapa quando o fluxo usa o quadro. Selecione o valor exato listado, por exemplo “Done”. Alterar a opção muda a projeção futura de Status.',
+  'prioridade (id)': 'Escolhe o campo numérico usado para ordenar candidatos da fila. Opcional; deixe vazio para usar os critérios padrão. Selecione um campo observado. Alterar a prioridade muda a ordem dos próximos candidatos.',
+  'campo de prioridade (id)': 'Escolhe o campo numérico usado para ordenar candidatos da fila. Opcional; deixe vazio para usar os critérios padrão. Selecione um campo observado, por exemplo “Priority”. Alterar a prioridade muda a ordem dos próximos candidatos.',
+  'ordem de prioridade': 'Define a direção em que o campo de prioridade numérico ordena os candidatos da fila. Pode permanecer no padrão atual; escolha Crescente ou Decrescente quando um campo de prioridade estiver configurado. Alterar a direção muda a ordem dos próximos candidatos consultados.',
+  'direcao de prioridade': 'Define se os valores do campo de prioridade são ordenados de forma crescente ou decrescente. Pode permanecer no padrão atual; escolha Crescente ou Decrescente conforme a fila desejada. Alterar a direção muda a ordem dos próximos candidatos consultados.',
+  'usar posicao do quadro': 'Usa a posição observada no quadro como critério de ordenação da fila. Opcional; pode permanecer desativado. Ao ativar, a posição participa do desempate conforme a configuração. Alterar esta opção muda a ordem de candidatos futuros.',
+  'comando do check #': 'Define o comando de validação executado pelo controlador sobre a versão capturada. Opcional; adicione somente checks necessários. Informe uma linha de comando, por exemplo “npm test”. Alterar o comando afeta novas verificações.',
+  'cwd relativo do check #': 'Define a pasta de trabalho do check dentro do projeto. Opcional; use um caminho relativo, por exemplo “.” ou “apps/web”. Alterar a pasta muda onde o comando será executado.',
+  'timeout do check #': 'Define o tempo máximo do check em milissegundos. Opcional; pode permanecer no padrão. Informe um inteiro positivo, por exemplo “60000”. Alterar o prazo muda novas verificações.',
+  'automation enabled': 'Controla se a fila pode iniciar tentativas automaticamente. Opcional; mantenha desativada até revisar os candidatos e a autorização da fila. Alterar a opção habilita ou pausa novos despachos automáticos.',
+  'automacao global habilitada': 'Controla se a fila global pode iniciar tentativas automaticamente. Opcional; pode permanecer desativada e ser marcada somente após revisar os candidatos e a autorização da fila. Marcar ou desmarcar habilita ou pausa os próximos despachos automáticos.',
+  'automacao deste projeto habilitada': 'Controla se este projeto participa dos inícios automáticos da fila. Opcional; pode permanecer desativada até que a configuração e os candidatos do projeto sejam revisados. Marcar ou desmarcar habilita ou pausa futuros despachos automáticos deste projeto.',
+  'habilitar automacao': 'Controla se a fila pode iniciar tentativas automaticamente. Opcional; mantenha desativada até revisar os candidatos e a autorização da fila. Alterar a opção habilita ou pausa novos despachos automáticos.',
+  'exclusao automatica': 'Define se artefatos podem ser removidos automaticamente. Pode permanecer desativada, que preserva evidências. Alterar a opção muda a política de retenção aplicada às próximas entregas.',
+};
+
+function normalizeLabel(label: string): string {
+  return label.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').replace(/\d+/g, '#').replace(/\s+/g, ' ').trim();
+}
+
+export function fieldGuidanceFor(label: string): string {
+  const normalized = normalizeLabel(label);
+  const exact = guidance[normalized];
+  if (exact) return exact;
+  throw new Error(`Ajuda de campo ausente para: ${label}`);
+}
+
+export function FieldHelp({ id, label, className = 'muted' }: { id: string; label: string; className?: string }) {
+  return <small id={id} className={`field-guidance ${className}`}>{fieldGuidanceFor(label)}</small>;
+}

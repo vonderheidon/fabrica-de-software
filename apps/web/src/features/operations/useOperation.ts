@@ -9,11 +9,14 @@ export type OperationLoad = {
   stale: boolean;
   error: string | null;
   requestId: string | null;
+  errorCode: string | null;
+  errorFacts: Readonly<Record<string, string | number | boolean | null>> | null;
+  affectedRequirements: readonly string[];
 };
 
 export function useOperation(enabled: boolean) {
   const [reloadKey, setReloadKey] = useState(0);
-  const [load, setLoad] = useState<OperationLoad>({ data: null, loading: true, refreshing: false, stale: false, error: null, requestId: null });
+  const [load, setLoad] = useState<OperationLoad>({ data: null, loading: true, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, errorFacts: null, affectedRequirements: [] });
   const refresh = useCallback(() => setReloadKey((value) => value + 1), []);
 
   useEffect(() => {
@@ -22,12 +25,15 @@ export function useOperation(enabled: boolean) {
     const controller = new AbortController();
     setLoad((current) => ({ ...current, loading: current.data === null, refreshing: current.data !== null, stale: current.data !== null }));
     void requestJson<OperationSummary>('/api/v1/operation', { signal: controller.signal }).then((data) => {
-      if (active) setLoad({ data, loading: false, refreshing: false, stale: false, error: null, requestId: null });
+      if (active) setLoad({ data, loading: false, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, errorFacts: null, affectedRequirements: [] });
     }).catch((error: unknown) => {
       if (!active || (error instanceof DOMException && error.name === 'AbortError')) return;
       setLoad((current) => ({ ...current, loading: false, refreshing: false, stale: current.data !== null,
         error: error instanceof HttpError ? error.message : 'Não foi possível consultar o resumo da operação.',
-        requestId: error instanceof HttpError ? error.requestId : null }));
+        requestId: error instanceof HttpError ? error.requestId : null,
+        errorCode: error instanceof HttpError ? error.code : null,
+        errorFacts: error instanceof HttpError ? error.facts : null,
+        affectedRequirements: error instanceof HttpError ? error.affectedRequirements : [] }));
     });
     return () => { active = false; controller.abort(); };
   }, [enabled, reloadKey]);
