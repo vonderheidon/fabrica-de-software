@@ -145,7 +145,8 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     if (saveLoopRef.current) return saveLoopRef.current;
     const current = draftRef.current;
     if (!current) return;
-    const task = (async () => {
+    // Install the pending promise before even an empty save can clear it.
+    const task = Promise.resolve().then(async () => {
       setSaving(true); setSaveError(null);
       try {
         while (draftRef.current && latestChoicesRef.current && !sameChoices(latestChoicesRef.current, draftRef.current.savedChoices)) {
@@ -171,7 +172,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
           setSaveError('A preparação mudou no controlador. Os dados atuais foram carregados separadamente; seu rascunho continua preservado.');
         } else setSaveError(errorMessage(error));
       } finally { saveLoopRef.current = null; setSaving(false); }
-    })();
+    });
     saveLoopRef.current = task;
     return task;
   }, [installDraft]);
@@ -252,6 +253,14 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   async function inspectStart(operationId: string): Promise<void> {
     try {
       const operation = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(operationId)}`);
+      setSaveError(null);
+      if (operation.state !== 'unknown' && operation.state !== 'failed' && operation.resource.type === 'attempt') {
+        safelyResolveOperation(operationId);
+        startCommandRef.current = null;
+        setStartState({ status: 'observed', operation });
+        onOpenAttempt(operation.resource.id);
+        return;
+      }
       if (operation.state === 'unknown' || operation.state === 'accepted' || operation.state === 'running') setStartState({ status: 'observed', operation });
       else {
         safelyResolveOperation(operationId);
@@ -269,6 +278,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const pendingStartId = startState.status === 'uncertain' ? startState.operationId : startState.status === 'observed' && ['unknown', 'accepted', 'running'].includes(startState.operation.state) ? startState.operation.operation_id : null;
   if (!projectId) return <div className="preparation-dialog"><div className="notice"><b>Selecione um projeto</b><p>Abra a preparação a partir de um projeto configurado para consultar issues e pré-requisitos atuais.</p></div>{pendingStartId && <div className="notice"><b>Início sem confirmação</b><p>Consulte a operação original antes de qualquer outra ação. O cliente não enviará outro início automaticamente.</p><button type="button" onClick={() => void inspectStart(pendingStartId)}>Consultar operação original</button>{startState.status === 'observed' && <><p>Estado: {operatorState(startState.operation.state).label}</p><TechnicalDetails operationId={startState.operation.operation_id} state={startState.operation.state} entityType={startState.operation.resource.type} entityId={startState.operation.resource.id} /></>}</div>}</div>;
   const selectedIssue = issues?.items.find((item) => item.content_id === issueId);
+  const issueBlockers = selectedIssue?.reasons.filter((reason) => reason !== 'ISSUE_REVALIDATION_REQUIRED') ?? [];
   const implementerProfiles = profilesForRole(profiles, 'implementer');
   const reviewerProfiles = profilesForRole(profiles, 'reviewer');
   const implementerChoiceId = draft ? profileChoiceId(draft.choices.overrides.implementer_profile, draft.current.effective_configuration.implementer_profile) : '';
@@ -304,7 +314,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     </div>}
     {issuesError && <div className="queue-error" role="alert"><b>Não foi possível consultar as issues</b><p>{issuesError}</p><p><strong>Próxima ação:</strong> atualize a consulta e confirme que a issue continua elegível.</p><button type="button" onClick={() => { setIssues(null); setIssuesError(null); setIssueReload((value) => value + 1); }}>Consultar novamente</button></div>}
     {issues && issues.completeness !== 'complete' && <div className="notice"><b>Opções {issues.completeness === 'partial' ? 'parciais' : 'indisponíveis'}</b>{[...issues.prerequisites, ...issues.diagnostics].map((item, index) => <OperatorDiagnosticCard key={`${item.code}-${index}`} code={item.code} state="unavailable" cause={item.message} recovery={item.recovery} projectId={projectId} />)}<button type="button" onClick={() => setIssueReload((value) => value + 1)}>Consultar issues novamente</button></div>}
-    {selectedIssue && selectedIssue.reasons.length > 0 && <div className="notice"><b>Impedimentos desta issue</b><ul>{selectedIssue.reasons.map((reason) => <li key={reason}>{operatorCodeLabel(reason)}</li>)}</ul><TechnicalDetails facts={{ issue_id: selectedIssue.content_id, reasons: selectedIssue.reasons }} /></div>}
+    {selectedIssue && issueBlockers.length > 0 && <div className="notice"><b>Impedimentos desta issue</b><ul>{issueBlockers.map((reason) => <li key={reason}>{operatorCodeLabel(reason)}</li>)}</ul><TechnicalDetails facts={{ issue_id: selectedIssue.content_id, reasons: issueBlockers }} /></div>}
     </section>
 
     {draft && <>
@@ -333,7 +343,9 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   </div>;
 }
 
-function sameChoices(left: PreparationChoices, right: PreparationChoices): boolean { return JSON.stringify(left) === JSON.stringify(right); }
+function sameChoices(left: PreparationChoices, right: PreparationChoices): boolean {
+  return Object.keys(changedChoices(left, right)).length === 0 && left.previous_attempt_id === right.previous_attempt_id;
+}
 function effectLabel(kind: string): string {
   const labels: Record<string, string> = {
     clone: 'Criar um ambiente de implementação separado a partir do commit-base confirmado.',

@@ -23,10 +23,11 @@ async (page) => {
   let failCreationRead = false, unknownEffect = false, creationSends = 0, reconcileSends = 0, optionsReads = 0;
   const unexpected = [], errors = [], warnings = [], passed = [];
   let issueSelectionScenario = false;
+  let recoverStartScenario = false;
   let hideSecondIssue = false;
   const preparedIssues = [];
   const prepared = new Map();
-  const issueChoices = [1, 2].map(number => ({ id: `ITEM_${number}`, content_id: `ISSUE_${number}`, kind: 'issue', executable: true, title: `Trabalho ${number}`, archived: false, url: null, reasons: [] }));
+  const issueChoices = [1, 2].map(number => ({ id: `ITEM_${number}`, content_id: `ISSUE_${number}`, kind: 'issue', executable: true, title: `Trabalho ${number}`, archived: false, url: null, reasons: ['ISSUE_REVALIDATION_REQUIRED'] }));
   const pageError = error => errors.push(error.message);
   const consoleMessage = message => { if (message.type() === 'warning' || message.type() === 'error') warnings.push(message.text()); };
   page.on('pageerror', pageError); page.on('console', consoleMessage);
@@ -48,9 +49,16 @@ async (page) => {
       const preparation = { ...choices, id: id(50 + preparedIssues.length), project_id: projectId, project_revision_id: id(4), revision: 1, prerequisites: [],
         effective_configuration: { configuration: configuration.configuration, implementer_profile: profiles[0], reviewer_profile: profiles[1], time_defaults: settings.settings.time_defaults, artifact_policy: settings.settings.artifact_policy, origins: {} },
         issue: { id: choices.issue_id, number: choices.issue_id === 'ISSUE_1' ? 1 : 2, title: choices.issue_id === 'ISSUE_1' ? 'Trabalho 1' : 'Trabalho 2', state: 'OPEN', assignees: [] },
-        criteria_preview: { executable: false, criteria: [], reasons: ['Prévia controlada'] }, effects_preview: [], base_sha: 'b'.repeat(40), summary_hash: hash, can_start: false };
+        criteria_preview: { executable: true, criteria: [], reasons: [] }, effects_preview: [], base_sha: 'b'.repeat(40), summary_hash: hash, can_start: false };
       prepared.set(preparation.id, preparation);
       return reply({ preparation, event_cursor: '10' }, 201);
+    }
+    if (issueSelectionScenario && method === 'PUT' && path.startsWith('/api/v1/preparations/')) {
+      const preparationId = path.split('/').at(-1);
+      const current = prepared.get(preparationId);
+      const preparation = { ...current, ...request.postDataJSON().changes, revision: current.revision + 1, summary_hash: 'd'.repeat(64) };
+      prepared.set(preparationId, preparation);
+      return reply({ preparation, event_cursor: '10' });
     }
     if (method === 'POST' && path === '/api/v1/scaffold/plans') { const input = request.postDataJSON(); creationMode = input.creation_mode; currentPlan = planFor(input); return reply({ plan_hash: hash, plan: currentPlan, prerequisites: [] }); }
     if (method === 'POST' && path === '/api/v1/scaffold/creations') { creationSends++; return reply({ operation_id: request.headers()['idempotency-key'], resource: { type: 'creation', id: creationId }, status_url: '/fixture', request_id: 'fixture' }, 202); }
@@ -67,7 +75,7 @@ async (page) => {
     if (path.endsWith('/issues')) return reply({ items: [], has_more: false, next_cursor: null, event_cursor: '10', completeness: 'unavailable', diagnostics: [], retry_at_ms: null, prerequisites: [prerequisites[0]] });
     if (path === '/api/v1/scaffold/options') return reply(scaffoldOptions);
     if (path === `/api/v1/scaffold/creations/${creationId}`) return failCreationRead ? reply({ code: 'STORAGE_UNAVAILABLE', message: 'Storage unavailable' }, 503) : reply(creationView());
-    if (path.startsWith('/api/v1/operations/')) return reply({ operation_id: path.split('/').at(-1), state: 'succeeded', resource: { type: 'creation', id: creationId }, error: null, receipt: { revision: 1, event_cursor: '10' } });
+    if (path.startsWith('/api/v1/operations/')) return reply({ operation_id: path.split('/').at(-1), state: recoverStartScenario ? 'accepted' : 'succeeded', resource: recoverStartScenario ? { type: 'attempt', id: attemptId } : { type: 'creation', id: creationId }, error: null, receipt: { revision: 1, event_cursor: '10' } });
     if (path === '/api/v1/events') return reply({ items: events, has_more: false, next_cursor: null, event_cursor: '10' });
     if (path === '/api/v1/attempts') return reply({ items: [{ id: attemptId, project_id: projectId, issue_id: 'ISSUE_fixture', issue_number: 7, phase: 'finished', result: 'delivered', suspension: null, revision: 1, created_at_ms: now, updated_at_ms: now }], has_more: false, next_cursor: null, event_cursor: '10' });
     if (path === '/api/v1/diagnostics') return reply({ context: url.searchParams.get('scope') === 'project' ? { scope: 'project', id: projectId } : { scope: 'host' }, facts: {}, diagnostics: prerequisites.slice(0, 2).map(item => ({ check: 'configuration', code: item.code, state: 'blocked', cause: item.message, recovery: item.recovery, facts: {}, affected_requirements: [], observed_at_ms: now })), reports: [], supported_checks: ['configuration'], event_cursor: '10' });
@@ -188,6 +196,15 @@ async (page) => {
     await dialog.locator('#preparation-issue').selectOption('ISSUE_1');
     await dialog.getByRole('heading', { name: 'Escolhas efetivas', exact: true }).waitFor();
     assert(preparedIssues.at(-1) === 'ISSUE_1', 'Generic preparation must still allow manual selection');
+    await dialog.getByRole('button', { name: 'Revisar e autorizar resumo atual', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Iniciar tentativa', exact: true }).waitFor({ timeout: 3000 });
+    assert(!(await dialog.innerText()).includes('Impedimentos desta issue'), 'A prepared issue must not retain the catalog revalidation notice as a blocker');
+    await dialog.locator('#preparation-guidance').fill('Orientação revisada');
+    await page.waitForFunction(() => document.querySelector('.preparation-actions button')?.textContent === 'Revisar e autorizar resumo atual' && !document.querySelector('.preparation-actions button')?.disabled);
+    await dialog.getByRole('button', { name: 'Revisar e autorizar resumo atual', exact: true }).click();
+    await dialog.getByRole('button', { name: 'Iniciar tentativa', exact: true }).waitFor({ timeout: 3000 });
+    assert([...prepared.values()].some(item => item.guidance === 'Orientação revisada' && item.revision === 2), 'Editing must save, invalidate authorization and allow the new summary to be authorized');
+    passed.push('Resumo sem alterações pode ser autorizado e não exibe a revalidação inicial como impedimento');
     await dialog.getByRole('button', { name: 'Fechar diálogo', exact: true }).click();
     for (const number of [2, 1]) {
       const candidate = page.locator('.dashboard-candidates li').filter({ hasText: `Trabalho ${number}` });
@@ -210,6 +227,12 @@ async (page) => {
     assert(await dialog.locator('#preparation-issue option:checked').textContent() === 'Trabalho 2', 'The preparation response must supply the selected issue title outside the first page');
     await screenshot('clicked-issue');
     passed.push('Preparar leva a issue clicada ao diálogo, isola rascunhos por issue e preserva seleção após recarga');
+    recoverStartScenario = true;
+    await page.evaluate(operationId => sessionStorage.setItem('factory.uncertain-operations.v1', JSON.stringify([{ operationId, kind: 'attempt-start', recordedAt: Date.now() }])), id(90));
+    await page.reload();
+    await page.waitForURL(url => url.hash.includes(attemptId));
+    assert(await page.evaluate(() => sessionStorage.getItem('factory.uncertain-operations.v1')) === null, 'A confirmed start must clear the uncertain operation and open the existing attempt');
+    passed.push('Início com resposta perdida abre a tentativa confirmada sem reenviar o comando');
     assert(errors.length === 0, `Browser errors: ${errors.join('; ')}`);
     assert(!warnings.some(message => /same key|unique.*key/i.test(message)), 'V2-04: no duplicate React keys');
     assert(unexpected.length === 0, `Unexpected mutations: ${unexpected.join('; ')}`);
