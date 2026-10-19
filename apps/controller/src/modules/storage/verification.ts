@@ -93,7 +93,7 @@ export function finishVerification(db: Database.Database, id: string, diagnostic
     const code = diagnostic ?? (checks.length === 0 ? 'CHECKS_NOT_CONFIGURED' : state === 'passed' ? null : state === 'failed' ? 'CHECKS_FAILED' : state === 'not_applicable' ? 'CHECK_NOT_APPLICABLE' : 'CHECK_EXECUTION_FAILED');
     db.prepare('UPDATE verification_runs SET state=?,diagnostic=?,ended_at_ms=? WHERE id=?').run(state, code, now, id);
     if (allowed) db.prepare('UPDATE attempts SET suspension=?,diagnostic=?,revision=revision+1,updated_at_ms=? WHERE id=?')
-      .run(state === 'passed' ? null : 'VERIFICATION_FAILED', code, now, row.attempt_id);
+      .run(state === 'failed' || state === 'error' ? 'VERIFICATION_FAILED' : null, code, now, row.attempt_id);
     else db.prepare('UPDATE attempts SET revision=revision+1,updated_at_ms=? WHERE id=?').run(now, row.attempt_id);
     attemptEvent(db, row.attempt_id, `verification.${state}`);
   }).immediate());

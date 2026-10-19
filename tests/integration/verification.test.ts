@@ -90,6 +90,7 @@ describe('controller verification and external evidence', () => {
   it('does not turn absence of checks into passed', async () => {
     const f = await fixture(false, []); f.accept(); await f.pipeline.drain(); await f.run();
     expect(f.runner).not.toHaveBeenCalled(); expect(f.storage.getDelivery(f.binding.deliveryVersion).verification).toMatchObject({ state: 'not_applicable', diagnostic: 'CHECKS_NOT_CONFIGURED' });
+    expect(f.storage.getAttempt(f.a.id)).toMatchObject({ suspension: null, result: null });
   });
   it('keeps a technical failure when artifact IO fails even after process exit zero', async () => {
     const f = await fixture(false, definitions.slice(0, 1)); f.accept(); await f.pipeline.drain();
