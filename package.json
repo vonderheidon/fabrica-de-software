@@ -13,11 +13,12 @@
     }
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-resources.mjs && vite build",
+    "build": "tsc -p tsconfig.json && vite build && node scripts/copy-resources.mjs",
     "typecheck": "tsc -p tsconfig.check.json --noEmit",
     "lint": "node scripts/check-boundaries.mjs",
     "test": "vitest run",
     "test:compiled": "node scripts/smoke-compiled.mjs",
+    "test:http": "vitest run --config vitest.http.config.ts",
     "test:execution-compiled": "node scripts/smoke-execution.mjs",
     "test:verification-compiled": "node scripts/smoke-verification.mjs",
     "test:acceptance": "vitest run tests/acceptance",

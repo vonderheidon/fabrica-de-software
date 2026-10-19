@@ -12,6 +12,7 @@ export function installAssets(app: FastifyInstance, webRoot: string) {
     assets.addHook('onSend', async (request, reply) => {
       if ((reply.statusCode >= 200 && reply.statusCode < 300) || reply.statusCode === 304) {
         const route = request.routeOptions.url;
+        if (route === '/favicon.ico') reply.header('Content-Type', 'image/vnd.microsoft.icon');
         reply.header('Cache-Control', route === '/' || route?.endsWith('/index.html') ? 'no-store' : 'public, max-age=31536000, immutable');
       }
     });

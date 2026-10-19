@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 export function createDistribution() {
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
   const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
-  for (const file of ['dist/apps/controller/src/main.js', 'dist/web/index.html',
+  for (const file of ['dist/apps/controller/src/main.js', 'dist/web/index.html', 'dist/web/favicon.ico',
     'dist/packages/contracts/src/index.js', 'dist/resources/roles/implementer.v1.json',
     'dist/resources/roles/reviewer.v1.json', 'dist/resources/templates/catalog.v1.json']) {
     if (!existsSync(join(root, file))) throw new Error('DISTRIBUTION_BUILD_REQUIRED');
