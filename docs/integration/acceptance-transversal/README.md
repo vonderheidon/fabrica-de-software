@@ -1,5 +1,7 @@
 # Aceite transversal e revisão da versão entregue
 
+Preparação atual da Etapa B: [roteiro S34](../acceptance-b/20261018-01/runbook-transversal-ui.md), [revisão imutável US-24](../acceptance-b/20261018-01/runbook-immutable-review.md) e [registro de resultados separados](../acceptance-b/20261018-01/record.md). As avaliações anteriores abaixo permanecem históricas.
+
 Data da avaliação: 2026-10-17. Fonte normativa: `SPEC.md`, `INTEGRACAO-MAESTRI-OMP.md`, `GLOSSARY.md`, `docs/Docs20261016_073031/SPEC20261016_073031.md`, `docs/Docs20261016_073031/stories-requisitos20261016_073031.md` e o artefato obrigatório `docs/Docs20261016_073031/design/artifact.html`.
 
 Esta avaliação separa implementação, prova local e aceite externo. `COMPROVADO LOCALMENTE` significa que a superfície indicada teve prova técnica local nesta rodada; não transfere essa prova para Git/GitHub, Maestri/OMP, navegador ou host real. `PARCIAL` significa código e/ou testes locais cobrem parte do requisito, mas há prova obrigatória ausente. `PENDENTE` significa que a prova prescrita não foi executada ou a versão não tem referência imutável independente. `FALHOU` é reservado a falha observada; uma execução bloqueada não é falha do produto.

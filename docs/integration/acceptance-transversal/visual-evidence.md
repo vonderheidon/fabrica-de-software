@@ -1,5 +1,7 @@
 # Registro de aceite visual
 
+O roteiro novo da Etapa B está em [`acceptance-b/20261018-01/runbook-transversal-ui.md`](../acceptance-b/20261018-01/runbook-transversal-ui.md). Ele exige capturas atuais de desktop/celular, zoom nativo Chrome, jornadas com dados e o inventário completo de cada cartão de perfil da US-16 CA3; as seções históricas abaixo não são reutilizadas como evidência da versão nova.
+
 Data: 2026-10-17. Referência examinada antes da avaliação: `docs/Docs20261016_073031/design/artifact.html`. Escopo de telas/componentes: Principal, `app-shell`, `attempt-detail` e `project-form`; conciliação C-02 mantém entrada direta na Principal e remove a interface Login/Sair.
 
 ## Execução
@@ -45,3 +47,16 @@ Playwright MCP executou em Chrome 155 no Windows, usando o navegador de teste. O
 A instalação não contém projetos nem tentativas; a conta permanece sem vínculo, a automação está desabilitada e o despacho pausado. Por isso, esta rodada não comprova os três modos de entrega, detalhe de tentativa existente, pergunta, conflito entre abas, capacidades mudando com diálogo aberto ou paginação com múltiplas páginas. Não foram injetadas fixtures no navegador para apresentar esses estados como reais.
 
 O impedimento de acesso ao Playwright foi resolvido. AC-27/INT-11 têm agora evidência parcial atual, mas o aceite completo da S34 continua pendente dos cenários acima, do zoom nativo e da revisão independente vinculada à referência Git imutável. As medições de contraste e os eventos do console ficam registrados para tratamento; não se declara conformidade integral.
+
+## Medição local de contraste — contraste e favicon protegidos
+
+Data: 2026-10-18. Esta medição combina os valores de CSS da versão em edição e o cálculo local de luminância relativa sRGB. Ela registra as duas combinações solicitadas; não substitui a observação Chrome da versão final.
+
+| Combinação | Antes | Depois | Texto |
+| --- | --- | --- | --- |
+| Link em superfície branca | `#fb6b00` (`rgb(251, 107, 0)`) sobre `#ffffff`: **2,91:1** | `#b94e00` (`rgb(185, 78, 0)`) sobre `#ffffff`: **5,06:1** | 14 px, herdado de `body` |
+| Navegação ativa | Branco `#ffffff` sobre `#fb6b00` (`rgb(251, 107, 0)`): **2,91:1** | Branco `#ffffff` sobre `#b94e00` (`rgb(185, 78, 0)`): **5,06:1** | 13 px, `.nav-link` |
+
+O valor `--accent` passou a `#b94e00`; o item ativo e a marca lateral usam o mesmo token. As medições mostram melhora nas duas combinações e mantêm o acento laranja e as geometrias aprovadas. Não se estabelece limiar WCAG, SLA visual ou nível de conformidade.
+
+Inspeção de código registra a intenção de foco, guarda de edição, um diálogo do shell, confirmação nativa da coleção, semântica, rolagem, distribuição do ICO e proteção das rotas anônimas. Testes locais foram acrescentados para a navegação de foco e os assets; seus comandos ainda não foram executados. Essas provas não medem foco/Tab, aparência ou corte renderizados. Screenshots e conteúdo da versão atual, teclado, viewports e zoom nativo ainda precisam ser registrados no Chrome; screenshots históricos não contam para essa prova.

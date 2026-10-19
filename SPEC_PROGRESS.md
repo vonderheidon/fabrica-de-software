@@ -2535,3 +2535,222 @@ Typecheck, lint, testes e build não foram executados. A regra de terminal desta
 - Rascunhos e contexto de edição preservados: Separar leitura, erro de leitura, save, conflito e incerteza por contexto.
 - Consulta e reapresentação da mesma operação: Recuperar resultados perdidos preservando a identidade original e as restrições de contexto.
 - Limite conjunto de save e rebootstrap seguro: Preservar atomicidade dos saves e recuperar a sessão técnica sem repetir efeitos.
+
+## Sprint — Formulário compartilhado de perfis [IMPLEMENTADA; VALIDAÇÃO TÉCNICA PENDENTE]
+
+Data: 2026-10-18. Editor reutilizável conectado ao diálogo existente da aplicação. Sem dependências novas ou operações Git de escrita.
+
+### Implementação
+
+- `ProfileForm` atende criação e edição no mesmo formulário, dentro do único modal do `AppShell`; título, ação principal, fundo, X, foco e rodapé seguem o shell/modal existente. Campos acessíveis aparecem em ordem: Nome, Tipo, Executor, Provider, Modelo, Esforço e Orientações. A grade mantém Provider/Modelo lado a lado e empilha os campos em telas estreitas.
+- Provider, modelo e esforço são derivados do catálogo OMP. Esforço sem opções usa `null` e “Não se aplica”. A opção “Não se aplica” fica indisponível quando o modelo oferece esforços; a combinação inválida continua visível até o operador escolher um valor compatível.
+- Mudanças explícitas preservam modelo e esforço compatíveis; dependências incompatíveis são limpas. Valores removidos por atualização do catálogo permanecem no rascunho com aviso e não são enviados como escolha válida.
+- Cada gravação usa um único comando `profile_changes`, construído apenas com a intenção deste formulário. Combinações inválidas ou catálogo indisponível permitem salvar somente nome/orientação, sem transmitir a seleção do rascunho. Conflito, duplicidade, 413, falha e operação incerta mantêm o editor aberto e os valores; consulta/reapresentação conserva a identidade original do comando.
+- Respostas de catálogo são protegidas por número de solicitação e cancelamento. A atualização do catálogo não limpa erro de gravação. O desmontar do formulário agora libera o bloqueio de save do shell para evitar modal preso após troca de contexto enquanto há request em voo.
+- `profile-editor.test.ts` acrescenta regressões para `null` inválido quando o modelo oferece esforço, patch único com somente campos alterados e preservação da combinação persistida quando o catálogo atualizado remove o provider.
+
+### Validação e limites
+
+- Typecheck, lint, testes e build não foram executados nesta rodada. A regra de terminal da solicitação permite somente comandos `git`; ela conflita com os comandos necessários que a tarefa também pede para validação. Nenhum executor alternativo foi usado.
+- `git diff --check` passou. Sem execução de navegador; o código e os padrões visuais aprovados foram conferidos estaticamente, sem declarar aceite Chrome.
+
+## Sprint 017 - Formulário compartilhado de perfis [CONCLUIDA]
+- Editor único com campos e ações aprovados: Criar ProfileForm/ProfileDialog reutilizáveis no host modal existente.
+- Escolhas dependentes e refresh sem perda: Aplicar as regras de catálogo ao rascunho sem substituição silenciosa.
+- Save isolado e preservação da combinação: Enviar somente a intenção do modal e permitir manutenção de texto sem persistir escolhas inválidas.
+
+## Sprint — Tela Perfis Globais e manutenção contextual [IMPLEMENTADA; VALIDAÇÃO TÉCNICA PENDENTE]
+
+Data: 2026-10-18. Implementação da coleção global e manutenção contextual dos perfis na Principal, reutilizando ProfileForm, a API de settings e os gates de integridade existentes. Nenhuma dependência nova ou operação Git de escrita.
+
+### Implementação
+
+- `hash-route.ts`, `AppShell.tsx` e `PrincipalScreen.tsx`: adicionam a rota `#principal/perfis`, item Perfis acessível imediatamente abaixo de Vincular existente, `aria-current`, título, descrição e ação Novo perfil dentro da coleção.
+- Novo `ProfilesPanel.tsx`: lê somente perfis vivos e `profile_counts` de settings; apresenta cartões com ícones distintos da navegação, provider/modelo/orientação/tipo/esforço, busca por substring sem caixa/acentos e par provider/modelo derivado exclusivamente da coleção. Busca, modelo e papel combinam; contagens permanecem da resposta do servidor. Save confirmado espera o cursor do evento observado antes de declarar lista/contagens atualizadas. Sem resultado, Limpar filtros restaura os três filtros sem consultar OMP.
+- Exclusão pede o nome exato, mostra o aviso quando é o último perfil vivo do papel e continua habilitada. Comandos usam ETag e Idempotency-Key; recibo/resultado incerto são consultados sem replay cego. `PROFILE_ACTIVE_ATTEMPT_BLOCKED` apresenta a quantidade e espera do resultado; `PROFILE_DELETE_BLOCKED` fornece links para configurações dos projetos relacionados e a orientação de substituição.
+- `ProfileForm.tsx` permite mudança de tipo. `profile-editor.ts` envia somente o campo alterado no comando existente; ao mover o último perfil de um papel, o formulário mostra antes do save o aviso de que novos inícios podem ficar bloqueados. Não adiciona confirmação extra ou bloqueio por tentativa ativa. Se o servidor recusar a mudança por referências atuais, o formulário apresenta links de substituição para os projetos informados.
+- `ProjectForm.tsx` remove o CRUD duplicado da configuração global; as seleções de projeto mostram exclusivamente perfis do papel correspondente e oferecem acesso a Perfis Globais quando uma seleção está ausente/incompatível. `PreparationDialog.tsx` aplica o mesmo filtro por papel, preserva a escolha histórica não compatível como diagnóstico e liga à coleção quando falta um papel.
+- `profile-collection.ts` e seus testes cobrem busca com acentos, espaços internos preservados, combinações de filtros, pares homônimos por provider, tipos de papel, último perfil e confirmação digitada. `web-state.test.ts` cobre a rota. CSS segue os tokens/shell existentes e empilha filtros/cartões em telas estreitas.
+
+### Validação e limites
+
+- A sessão permite somente comandos Git de leitura e proíbe comandos de terminal não Git; por isso typecheck, lint, testes e build não foram executados. `git diff --check` passou após a inspeção final.
+- Skills de design pedidas não aparecem no catálogo acessível e não há ferramenta `load_skill` nesta sessão. A composição segue o shell e os tokens existentes. O inventário CUA retornou `apps: []` e `browsers: []`; aceite visual Playwright/Chrome continua sem prova.
+
+## Sprint 018 - Tela Perfis Globais e manutenção contextual [CONCLUIDA]
+- Navegação e coleção real de perfis: Criar a área Perfis Globais no shell existente.
+- Busca, pares de modelo e abas combinados: Filtrar a coleção cadastrada conforme a semântica exata da SPEC.
+- Confirmações e acesso aos perfis corretos: Expor exclusão, impedimentos e alertas do último perfil sem alterar as regras do servidor.
+
+## Sprint — Configuração guiada de GitHub e pasta [IMPLEMENTADA; VALIDAÇÃO PENDENTE]
+
+Data: 2026-10-18. Componentes e hooks reutilizáveis adicionados à Configuração global, preparados para uso posterior no wizard. Contratos e endpoints E03/E05 existentes foram reutilizados; nenhum efeito GitHub, login, troca global ou IO nativo foi executado nesta implementação.
+
+### Componentes e hooks
+
+- `GitHubSetupPanel.tsx` recebe `SettingsView`, ETag, observação e seleção nativa compartilhadas. Exibe logins vinculados/observados, distinção de contas ativas, inválidas e elegíveis, e ações separadas para verificar status e vincular/trocar. A UI não solicita IDs nem dispara login/troca do GitHub CLI.
+- `useGitHubSetup.ts` consulta `GET /settings/github-options` somente por ação explícita; salva `account_binding` isolado com ETag/Idempotency-Key e exige recibo antes de mostrar confirmação. Divergência de conta não altera o vínculo. Resposta incerta conserva a operação original e oferece somente consulta; falha da consulta não apaga erro ou recibo do save. Um bloqueio `ACCOUNT_SWITCH_ATTEMPT_ACTIVE` consulta tentativas ativas no contexto de origem para abrir a tentativa pertinente. Avisos de limpeza residual aparecem como informação, sem confirmação adicional.
+- `ProjectsFolderField.tsx` distingue pasta persistida, edição e candidato do seletor. Cancelamento não altera a edição; usar candidato somente a coloca no rascunho. O save existente revalida acesso/gravação e exige recibo; a ação explícita de revalidação envia somente `projects_root`, inclusive quando o valor coincide com a raiz já persistida. Falha mantém rascunho e valor persistido, oferecendo nova tentativa de validação ou outra pasta. A explicação informa que a raiz nova vale somente para novos projetos.
+- `useNativeSelection.ts` centraliza `POST /settings/selections` para pasta e `gh.exe`, aplicando timeout de 125 segundos à seleção, distinguindo espera, cancelamento, concorrência, expiração e fechamento não confirmado. O hook não reabre seletor automaticamente. O seletor de `gh.exe` só aparece após a observação indicar ausência de executável válido; caminho selecionado permanece candidato até save isolado, validação do controlador e recibo.
+- `ProjectConfigurationForm` fornece a mesma observação de settings/ETag e uma instância compartilhada do seletor aos dois módulos. A rota global mostra GitHub; a raiz continua disponível na configuração global e por projeto. CSS segue os tokens e breakpoints existentes.
+- `github-setup-model.test.ts` cobre seleção de contas elegíveis, vínculo/troca e revisão de contexto; `native-selection.test.ts` cobre prazo e mensagens de cancelamento, candidato, expiração e capacidade ausente.
+
+### Validação e limites
+
+- Typecheck, lint, testes e build não foram executados: a restrição de terminal desta solicitação permite somente comandos `git` de leitura. Os testes foram escritos, mas não são apresentados como aprovados.
+- Não houve aceite visual Playwright/Chrome nem acesso GitHub/host real. A verificação real do CLI, as janelas nativas e a revalidação da pasta só ocorrem mediante ação do operador no host configurado.
+
+## Sprint 019 - Configuração guiada de GitHub e pasta [CONCLUIDA]
+- Painel GitHub por login: Apresentar descoberta, contas e vínculo com ações distintas e recuperáveis.
+- Seleção assistida de pasta e executável: Conectar a UI às capacidades nativas sem tratar candidato como configuração salva.
+- Configuração posterior sem efeitos retroativos: Reutilizar os componentes na gestão posterior e explicar os limites de cada alteração.
+
+## Sprint — Wizard inicial com retomada e conclusão [IMPLEMENTADA; VALIDAÇÃO TÉCNICA PENDENTE]
+
+Data: 2026-10-18. Composição do fluxo inicial no modal compartilhado, usando os componentes existentes de GitHub, seleção da pasta e perfil. Nenhuma dependência, operação Git/GH, login, alteração externa, recrutamento ou início de trabalho foi executado.
+
+### Implementação
+
+- `features/onboarding/useOnboarding.ts` consulta a visão persistida de settings, atualiza por eventos/polling e salva a pasta, a supressão e a conclusão por comandos settings separados com ETag, Idempotency-Key, recibo e consulta/reapresentação segura da mesma operação.
+- `InitialSetupDialog.tsx` deriva a primeira etapa incompleta dos fatos do servidor, permite voltar e abrir etapas já confirmadas e bloqueia avanço até que o estado reconsultado confirme conta, pasta e ambos os tipos de perfil. O formulário de perfil reutilizado fixa o papel solicitado e mantém o retry do catálogo OMP.
+- `AppShell.tsx` abre o wizard uma vez por entrada na Principal somente quando pendente e não suprimido; polling não substitui outros diálogos nem reabre o fluxo na mesma entrada. X, Escape, fundo, navegação entre etapas e volta do navegador preservam a edição ou oferecem continuar/descartar. O conteúdo permanece montado durante a confirmação; descarte limpa somente candidatos e formulário não salvos.
+- `DashboardPanel.tsx` mostra o acesso ao wizard enquanto pendente e encaminha pendências posteriores à Configuração ou Perfis após conclusão. A ação de reabertura some quando o marco persistido é confirmado.
+- `hash-route.test.ts` cobre o identificador do diálogo inicial. CSS novo conserva tokens, shell e modal únicos, com composição responsiva para etapas, progresso, confirmação e estados de erro.
+
+### Validação e limites
+
+- Typecheck, lint, testes, build e navegador não foram executados. A restrição desta tarefa permite somente comandos Git e proíbe comandos de terminal não Git, em conflito com os checks solicitados. Nenhum executor alternativo foi usado.
+- `git diff --check` passou. A leitura estática não comprova compilação, comportamento HTTP/browser, foco renderizado ou integração externa. A validação técnica e visual permanecem pendentes.
+
+## Sprint - Wizard inicial com retomada e conclusão [IMPLEMENTADA]
+- Etapas confirmadas por recibo: Conduzir GitHub, pasta e dois perfis com retomada derivada dos fatos persistidos.
+- Fechamento seguro e supressão: Preservar ou descartar somente rascunhos locais e salvar a preferência de não reabrir separadamente.
+- Conclusão e pendências atuais: Mostrar sucesso após confirmação do servidor e manter problemas posteriores nas telas correspondentes.
+
+## Sprint 020 - Wizard inicial com retomada e conclusão [CONCLUIDA]
+- Etapas com avanço confirmado: Conduzir GitHub, pasta e perfis sem permitir saltar saves pendentes.
+- Fechamento, descarte e supressão: Permitir interromper a configuração sem perder fatos persistidos ou fechar edição silenciosamente.
+- Conclusão e pendências posteriores: Apresentar a conclusão confirmada e encaminhar problemas futuros às telas pertinentes.
+
+## Sprint 021 - Minutos exatos e preservação do valor salvo [CONCLUIDA]
+- Entrada decimal exata em minutos: Editar intervalo de consulta e tempo ativo em minutos sem arredondamento silencioso.
+- Round-trip da apresentação aproximada: Conservar os inteiros originais quando a exibição limitada não representa o valor exatamente.
+
+## Sprint — Orientação dos campos e linguagem do operador [IMPLEMENTADA; VALIDAÇÃO TÉCNICA PENDENTE]
+
+Data: 2026-10-18. Continuidade no repositório canônico, preservando as alterações de configuração inicial e sprints anteriores. Cobertura transferida integralmente de feat-059/060, US-01/02 e RF-01–08/RF-59; fontes consultadas: `AGENTS.md`, `SPEC.md`, `GLOSSARY.md`, contratos comuns da sprint-025, edição em minutos da sprint-021, ciclo de save da sprint-016 e os componentes indicados nesta tarefa.
+
+### Implementação
+
+- Ajuda associada aos campos: `FieldHelp` fornece textos por campo com propósito, obrigatoriedade, momento de uso, formato/exemplo e consequência. Os formulários de cadastro/configuração, perfis, preparação e onboarding reaproveitam as mesmas descrições. A configuração separa dados necessários para começar de controles que podem permanecer no padrão. O TTL explica a expiração de perguntas e sua independência dos dois tempos em minutos.
+- Estados e suporte: `operator-language.ts` traduz estados, erros, eventos e fatos; `OperatorSupport.tsx` reúne códigos, referências de operação/solicitação, ETags, cursores e fatos em detalhes técnicos recolhidos. A camada mantém valores de recibos/CAS no cliente e não altera os contratos ou os comandos enviados.
+- Superfícies: Dashboard e Registros usam rótulos humanos e projetam diagnósticos com título, causa e próxima ação; o detalhe da tentativa, perguntas e publicação oculta IDs e estados internos na visão comum. Campos técnicos de eventos e filtros ficam recolhidos. A conta sem vínculo aparece como pendência de vínculo, sem expor `ACCOUNT_UNOBSERVED` como explicação principal.
+- Segurança e privacidade da apresentação: códigos de estado não reconhecidos mostram explicação e acesso a suporte; fatos como `expected_account_id`, `observed_host` e `profile_count` têm rótulos em português. O leitor de suporte filtra nomes de chaves indicativos de segredo e o detalhe genérico do registro limita-se a fatos técnicos allowlisted.
+- Arquivos novos: `apps/web/src/app/operator-language.ts`, `OperatorSupport.tsx`, `operator-language.test.ts` e `apps/web/src/features/projects/FieldHelp.tsx`. Componentes afetados incluem `ProjectForm.tsx`, `PreparationDialog.tsx`, `ProfileForm.tsx`, `DashboardPanel.tsx`, `RecordsPanel.tsx`, `AttemptDetailDialog.tsx`, `QuestionDecisionCard.tsx`, `PublicationDialog.tsx`, `GitHubSetupPanel.tsx` e `ProjectsFolderField.tsx`. `artifact.css` contém os estilos de ajuda e detalhes recolhidos; `http/errors.ts` traduz as mensagens genéricas de erro do controlador.
+
+### Validação e limites
+
+- `git diff --check` passou. A suíte de validação solicitada ainda não foi executada. A mesma instrução desta tarefa permite somente comandos `git` de leitura e proíbe comandos de terminal que não comecem com `git`; isso impede executar typecheck, lint, testes e build sem uma exceção. Nenhum executor alternativo foi usado.
+- Foram acrescentados testes unitários de localização de erros/estados/fatos e de cobertura da ajuda de TTL e dos campos em minutos. A presença dos testes não representa aprovação.
+- As skills de design nomeadas no pedido e a ferramenta `load_skill` não estavam disponíveis no catálogo desta sessão. A composição existente e os tokens aprovados foram preservados; esta implementação não declara aceite visual Playwright/Chrome.
+- Nenhum provider, GitHub, Maestri/OMP, alteração de credenciais, publicação, commit, push, aprovação ou mudança de fase foi executado.
+
+## Sprint 022 - Orientação dos campos e linguagem do operador [CONCLUIDA]
+- Orientação associada aos campos: Explicar o preenchimento e distinguir requisitos iniciais dos padrões mantidos.
+- Mensagens humanas e suporte recolhido: Apresentar estados, bloqueios e fatos em português sem perder metadados de operação.
+
+## Sprint — Diagnóstico e recuperação HTTP/SSE [CORREÇÃO IMPLEMENTADA; VALIDAÇÃO PARCIAL]
+
+Data: 2026-10-18. Registro detalhado em `docs/integration/http-sse-recovery/report.md`. A falha histórica conhecida é `TypeError: terminated` com causa `UND_ERR_SOCKET` após uma conexão local; o artefato não identifica request/etapa nem preserva stack. `EACCES` pertence a uma execução anterior e não explica o erro posterior.
+
+- `events.ts` separa o abort do polling da destruição de `Readable.from`, para permitir EOF normal no prazo delimitado. A documentação Node 24 confirma que o signal associado ao Readable o destrói com AbortError; o relatório registra esse mecanismo concreto no handler, mas deixa a reprodução local e a atribuição do incidente histórico pendentes.
+- `event-stream-timeout.test.ts` acrescenta regressões de EOF no transporte HTTP real, erro de leitura com `resync` e precedência de `Last-Event-ID`. `controller-events.ts` concentra reconexão/resync, deduplicação, retry terminal e descarte de resposta após cleanup. Testes web cobrem UTF-8 fragmentado e comprovam o contrato GET-only da seam; contadores dos quatro fluxos de negócio ainda não foram instrumentados diretamente.
+- `EventConnectionStatus` apresenta conectando, conectado, reconectando e falha com nomes acessíveis em português. O smoke compilado relata etapa, sequência concluída e causa sanitizada sem converter erro em sucesso.
+- Typecheck executado pela TypeScript Compiler API com `tsconfig.check.json`: exit 0 e zero diagnósticos. Lint e testes não foram executados. O emissor TypeScript e a cópia de recursos concluíram; Vite foi bloqueado pelo executor Node da sessão ao importar `node:process`. `npm.cmd run test:compiled` também não foi executado: o terminal está restrito a comandos Git de leitura e o executor alternativo bloqueia o Vite e HTTP loopback. A validação restante está registrada para o orquestrador; nenhum bloqueio foi convertido em aprovação.
+- Playwright MCP/Chrome não foi executado. O `ERR_INCOMPLETE_CHUNKED_ENCODING` do browser continua sem associação causal ao fechamento do handler e seu aceite permanece separado.
+
+## Sprint 023 - Diagnóstico e recuperação HTTP/SSE [CONCLUIDA]
+- Reprodução e causa comprovada: Localizar a etapa do fechamento antes de decidir se a correção pertence ao produto ou ao smoke.
+- Fechamento, cursor e resync sem comandos repetidos: Concluir esperas de transporte e retomar somente observações do contexto pertinente.
+- Smoke compilado integral e estados legíveis: Concluir test:compiled e apresentar estados de conexão em português.
+
+## Sprint — Contraste, diálogo acessível e favicon protegido [IMPLEMENTADA; VALIDAÇÃO TÉCNICA E VISUAL PENDENTES]
+
+Data: 2026-10-18. Alterações no repositório canônico, preservando o trabalho existente. Cobertura US-20/21, RF-101/102 e RNF-04/09/10. Nenhuma dependência nova ou operação Git de escrita.
+
+### Implementação
+
+- `tokens.css` altera o acento para `#b94e00`; links, navegação ativa e marca lateral usam esse mesmo tom. A espessura e composição de foco receberam contorno opaco visível para botões, links, campos, seletores e elementos programaticamente focados. Geometria, escala e composição do design permanecem.
+- `docs/integration/acceptance-transversal/visual-evidence.md` registra cores, tamanhos de 14 px/13 px e cálculo de 2,91:1 para 5,06:1 nas duas combinações. A medição é local e não declara limiar ou conformidade WCAG; a coleta Chrome da versão atual continua separada.
+- `AppShell` conserva um modal React por vez, filtra controles ocultos/inertes, contém Tab/Shift+Tab e recupera foco para o acionador ou navegação ativa. Fechar editor com rascunho pede confirmação; Escape retorna à edição se a confirmação estiver aberta. Etapas, formulário de perfil e confirmações do wizard atualizam o título acessível e o foco sem criar outro diálogo. `dialog-focus.ts` e o teste focado cobrem os limites de foco por teclado.
+- A confirmação de exclusão de `ProfilesPanel` usa o elemento `<dialog>` modal, com nome/título e descrição associados, foco no campo, fechamento por Escape sem enviar a mutação, retorno ao acionador ou cabeçalho da coleção e confirmação por nome. Mensagens de erro mantêm associação/role e texto além da cor; o diálogo preserva rolagem em viewports estreitas.
+- `resources/favicon.v1.json` define a marca. `copy-resources.mjs`, executado após Vite, gera `dist/web/favicon.ico` como ICO binário 32×32. `index.html` referencia o mesmo caminho; o empacotador exige e copia o arquivo distribuído.
+- `installAssets` marca somente rotas estáticas existentes como `publicAsset`; o ICO recebe `image/vnd.microsoft.icon`. A política de `Host`, `Origin`, contexto Fetch, `nosniff`, cache e a sessão/CSRF das APIs permanece. Testes de asset e o smoke do pacote cobrem GET/HEAD, bytes/Content-Type, rotas operacionais anônimas e mutação sem CSRF.
+
+### Validação e limites
+
+- Typecheck, lint, testes, build e smoke do pacote não foram executados nesta rodada. A restrição explícita de terminal permite apenas comandos Git de leitura; por isso não rodei os comandos Node/npm pedidos nem usei outro executor para contornar a regra. Os testes adicionados não são apresentados como aprovados.
+- `git diff --check`: exit 0. Inspeção de código e medições calculadas não comprovam o comportamento renderizado. Playwright/Chrome com screenshots atuais, conteúdo, teclado, viewports estreitos e zoom nativo permanecem pendentes e separados das evidências históricas.
+- As skills de design solicitadas e `load_skill` não estavam disponíveis entre as ferramentas carregadas. A alteração seguiu tokens e composição aprovados; nenhuma inspeção Chrome ou aceite visual foi presumido.
+
+## Sprint 024 - Contraste, diálogo acessível e favicon protegido [CONCLUIDA]
+- Correção medida das combinações de contraste: Corrigir os links e a navegação observados sem redesenhar a aplicação.
+- Operação do diálogo único e responsividade: Concluir foco, teclado e acesso às ações nos novos diálogos e na tela Perfis.
+- Favicon público específico: Servir o ícone distribuído sem sessão técnica sem ampliar acesso aos dados operacionais.
+
+## Sprint — Consolidação local, segurança e persistência leve [VALIDAÇÃO LOCAL CONCLUÍDA; INTEGRAÇÕES EXTERNAS PENDENTES]
+
+Data: 2026-10-18 (execuções locais concluídas em 2026-10-18, horário de Brasília). Fontes consultadas: `AGENTS.md`, `SPEC.md` §§8/10.2–10.3, `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md`, a SPEC do pacote Configuração inicial e as superfícies listadas abaixo. Os seams exercitados foram endpoints Fastify, persistência SQLite, processo compilado, loopback HTTP/SSE, distribuição e recuperação Git em fixture exclusiva.
+
+### Alteração desta rodada
+
+- `tests/integration/account-binding.test.ts` cobre vínculo desde `account_id` nulo, concorrência CAS entre duas sessões ao salvar pasta, criação separada dos perfis, restart/retomada, conclusão e replay do mesmo recibo sem nova validação externa, manutenção posterior e ausência de projetos/tentativas ou automação implícita. Os corpos passados a `saveSettings` foram anotados como `SettingsUpdate`, corrigindo o widening de `executor` e `complete` que fazia o typecheck falhar.
+- Instrumentos controlados: Fastify inject, SQLite e diretórios temporários reais; identidade/autenticação GitHub e catálogo OMP são fixtures. A suíte completa também percorre regressões de segurança HTTP, CAS, isolamento, segredos, operações incertas, histórico, fila e persistência. `test:http` exercita loopback HTTP/SSE; os smokes compilados/distribuídos exercitam processos locais e fixtures, sem provider.
+- `npm run typecheck`: exit 0. `npm run lint`: exit 0, “Module boundaries and TypeScript conventions: OK”. `npm test`: exit 0, 91 arquivos e 1.235 testes passaram. `npx vitest run tests/integration/account-binding.test.ts`: exit 0, 8 testes passaram; `npm run test:http`: exit 0, 1 arquivo e 2 testes passaram.
+- `npm run build`: exit 0, 356 módulos Vite compilados. Aviso observado: chunk JS de 958,77 kB após minificação excede o limite configurado de 500 kB. `npm run test:compiled`: exit 0; controller, health/session, idempotência/CAS, replay SSE, limite de streams, lock, shutdown, cleanup e restart passaram; HTTP/SSE/SQLite reais no smoke, Maestri/OMP não executado.
+- `npm run test:execution-compiled`: exit 0; UTF-8, EOF e diagnósticos de frames passaram com fixture Node, sem Maestri/OMP. `npm run test:verification-compiled`: exit 0; checks nativo aprovado/reprovado, cwd Unicode, rename/sync/checksum e canonicalização passaram; Git materialization e Maestri/OMP não executados.
+- `npm run package:local`: exit 0; distribuição criada em `build/Fábrica distribuição-Noc4rW`. `npm run test:distribution`: exit 0; banco fixo `var/factory/factory.sqlite`, duas instâncias em cwd distintos, recusa do segundo controlador, restart e revogação de sessões passaram; Maestri/OMP não executado.
+- `npm run test:maintenance-native`: exit 0, 2 arquivos e 2 provas passaram. A saída `AC28_NATIVE_REPORT` registrou dois checks Node aprovados no lifecycle existente, sem mudança de lifecycle/SQL/UI; `AC29_RECOVERY_REPORT` registrou três processos distintos do controlador, paradas físicas observadas, recuperação de ref/tree/base e diff após remoção, com Git CLI somente de leitura na fixture.
+- `npm run proof:persistence`: exit 0, `local_persistence_and_process_recovery_passed`. Relatório: `.cache/persistence-proof-5Hgrrr/report.json`. A medição comparou caches de 0, 16 e 64 MiB: tamanhos dos payloads de listagens (335 B), histórico (6.872 B) e polling (3.137 B) permaneceram constantes; database/WAL, evidências e auxiliares também ficaram estáveis durante a fase de cache. O relatório traz latências p95, tamanho do banco/artefatos, recuperação, diff sob demanda e diagnósticos `ARTIFACT_MISSING`, `ARTIFACT_INTEGRITY_FAILED` e `DELIVERY_GIT_UNAVAILABLE`; após remoção elegível, o conteúdo operacional de trabalho ficou em 0 B. Não estabelece SLA de latência.
+
+### Validação e pendências
+
+- `git diff --check`: exit 0 após as alterações desta rodada.
+- Permanecem fora da validação: GitHub/keyring real, Maestri/OMP/provider real, aceite visual Playwright/Chrome e publicação externa. Fixtures, `inject`, Git controlado e smokes locais não comprovam essas integrações nem substituem evidência de ambiente real.
+
+O resultado acima comprova os checks locais executados nesta revisão de trabalho. Não representa revisão independente de uma referência Git imutável, aceite externo, aprovação ou mudança de fase.
+
+## Sprint 025 - Consolidação local, segurança e persistência leve [CONCLUIDA]
+- Regressões locais dos percursos completos: Verificar os fluxos combinados e suas corridas após todas as fatias funcionais.
+- Isolamento, segredos e limites preservados: Consolidar a verificação das fronteiras HTTP, nativas, de conta e persistência.
+- Persistência leve e evidência final local: Medir o efeito de caches volumosos e registrar os checks reais da implementação.
+
+## Etapa B — Preparação e encaminhamento do aceite real [ARTEFATOS PREPARADOS; PROVAS B PENDENTES]
+
+Data: 2026-10-18. Escopo US-22–24, RF-103–109 e RNF-19. Esta entrega documental prepara a execução futura; não inicia o pipeline nem autoriza provider, Git/GitHub, Maestri/OMP, navegador ou publicação.
+
+### Fontes e limites
+
+- Consultados `AGENTS.md`, `SPEC.md`, `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md`, a SPEC de configuração inicial e os roteiros/relatórios existentes de primeira fatia, aceite transversal e manutenção.
+- Reutilizada como referência, sem reexecução ou reclassificação, a validação local consolidada em `SPEC_PROGRESS.md`, seção “Consolidação local, segurança e persistência leve”. Seus checks locais e a medição 0/16/64 MiB não comprovam integração externa, browser ou revisão imutável desta versão.
+- O workspace tem alterações locais; não foi identificada uma ref imutável desta entrega. `HEAD` anterior, inventário ou hashes avulsos não substituem a referência exigida por US-24. Nenhuma operação Git de escrita ou chamada externa ocorreu.
+- Conflito documental registrado: o roteiro histórico S20 menciona GitNexus útil; o `AGENTS.md` vigente proíbe GitNexus e orienta `repo-graph`/`graph-search`. Esta preparação segue o AGENTS e mantém o ponto pendente sem alterar a SPEC. As ferramentas de grafo não estavam no inventário desta sessão.
+
+### Artefatos entregues
+
+- `docs/integration/acceptance-b/README.md` e `20261018-01/record.md`: índice, identidade documental, estado local/visual/integração/revisão separado, pré-requisitos, autorização por efeito/provider, classificação de ferramentas e pendências atuais.
+- Roteiros `runbook-first-slice.md`, `runbook-publication-ui.md`, `runbook-queue.md`, `runbook-transversal-ui.md` e `runbook-immutable-review.md`: versão, runtime, responsável, raiz/cwd, ferramentas, chamadas seguras, alvo, autorização, horários, resultado, limites e evidências a preencher antes de executar.
+- `first-slice/README.md`, `acceptance-transversal/README.md`, `coverage-matrix.md`, `independent-review.md` e `visual-evidence.md` apontam para a preparação nova. Relatórios históricos não foram substituídos; o roteiro visual inclui expressamente o ícone e todos os campos/ações exigidos por US-16 CA3.
+- Os roteiros cobrem cadastro desde origem dirty, clone/resultado/checks/revisão/ICR, TUI/MCP/Grafo, pergunta/entrega incerta, cancelamentos/restart/retry; os três modos na mesma versão e reconciliação; consumo/autoridade/pausa da fila; e UI desktop/celular, zoom nativo, teclado/foco, dados/paginação, falhas isoladas, conflito entre abas, capacidade mutável, perguntas concorrentes e reconexão/resync.
+
+### Validação e estado
+
+- `git diff --check`: exit 0 para os arquivos rastreados modificados; os arquivos novos foram verificados com `git diff --no-index --check` sem apontamentos de whitespace (exit 1 esperado porque o conteúdo difere de `NUL`).
+- Typecheck, lint, testes e build não foram executados: a restrição desta tarefa permite somente comandos Git de leitura. Nenhum executor alternativo foi usado.
+- Nenhum screenshot novo, acesso Wire, preflight Maestri/OMP, chamada GH, provider, efeito Git gerenciado ou mutação remota foi executado. Ausências permanecem `pending`; ferramentas listadas, fixtures e acesso Wire não são declarados integração nativa.
+- Esta sprint prepara a revisão e o aceite; não declara resultado integral, aprovação, Design Lock ou mudança de fase.
+
+## Sprint 026 - Etapa B: preparação e encaminhamento do aceite real [CONCLUIDA]
+- Roteiros por versão, contexto e autorização: Preparar a execução responsável das provas sem dispará-las pelo harness ou pela suíte padrão.
+- Cobertura dos percursos reais e da UI: Preparar os quatro roteiros históricos com os cenários ainda exigidos para a versão entregue.
+- Entrega imutável e fechamento sem aprovação implícita: Preparar a revisão independente por referência Git e manter os resultados de cada superfície separados.

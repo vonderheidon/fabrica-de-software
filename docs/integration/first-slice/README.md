@@ -1,5 +1,7 @@
 # Prova integrada da primeira fatia
 
+Preparação atual da Etapa B (sem executar cenários): [roteiro S20 da rodada 20261018-01](../acceptance-b/20261018-01/runbook-first-slice.md) e [registro separado de resultados/pendências](../acceptance-b/20261018-01/record.md). Os relatórios 20261017-01 a 20261017-04 permanecem históricos e não são substituídos.
+
 Fonte: `SPEC.md` §§5–8/10.2–10.3, `INTEGRACAO-MAESTRI-OMP.md` e plano aprovado em `docs/Docs20261016_073031/sprints20261016_073031.json`, sprint-018. S1–S4 são achados do relatório `sprint-validation20261016_073031.md`. O histórico de progresso usa também numerações sequenciais diferentes; este roteiro usa os IDs do plano para evitar confundir a prova com a UI de decisão.
 
 **Estado atual: preparada; execução e aceite reais pendentes.** Revalidação atual: [20261017-02/report.md](20261017-02/report.md). A [preparação anterior](20261017-01/report.md) foi preservada. Este roteiro não inicia providers, Git/GH, terminais ou mutações. Não há autorização de execução inferida do pedido de implementação.

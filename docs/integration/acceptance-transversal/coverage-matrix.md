@@ -1,5 +1,17 @@
 # Matriz de cobertura transversal
 
+## Encaminhamento da Etapa B — preparado em 2026-10-18
+
+Os registros executáveis por versão/contexto estão em [`acceptance-b/20261018-01`](../acceptance-b/20261018-01/record.md). A preparação cobre US-22/RF-103–104, os quatro percursos de US-23/RF-105–106 e a revisão US-24/RF-107–109/RNF-19. Os estados desta matriz são históricos; a nova rodada mantém execução externa, aceite visual atual e revisão imutável pendentes até evidência própria.
+
+| Identificação | Roteiro preparado | Estado da prova desta versão |
+| --- | --- | --- |
+| S20 / sprint-018 — Primeira fatia | [`runbook-first-slice.md`](../acceptance-b/20261018-01/runbook-first-slice.md) | Pendente: versão, alvo, perfis, contexto e autorizações |
+| S23 / sprint-021 — Publicação na interface | [`runbook-publication-ui.md`](../acceptance-b/20261018-01/runbook-publication-ui.md) | Pendente: mesma versão aprovada em ICR/Commit/PR e reconciliações |
+| S26 / sprint-024 — Fila | [`runbook-queue.md`](../acceptance-b/20261018-01/runbook-queue.md) | Pendente: alvo Ready e autorização de consumo/projeção |
+| S34 / sprint-032 — Aceite transversal | [`runbook-transversal-ui.md`](../acceptance-b/20261018-01/runbook-transversal-ui.md) | Pendente: browser atual, conteúdo, teclado, screenshots e zoom nativo |
+| US-24 — Revisão imutável | [`runbook-immutable-review.md`](../acceptance-b/20261018-01/runbook-immutable-review.md) | Pendente: ref autorizada e checks/revisão independentes na mesma tree |
+
 Data de corte: 2026-10-17. A matriz cobre todos os IDs US-01–US-20, RF-01–RF-88, RNF-01–RNF-25, AC-01–AC-29 e INT-01–INT-18. As famílias US/RF/RNF estão agrupadas por áreas contíguas; os critérios AC/INT têm linhas próprias ou intervalos contíguos explícitos. A matriz aponta as fontes de implementação e evidência encontradas no workspace e executadas nesta rodada. A tabela normativa integral dos textos e relações entre IDs permanece em `docs/Docs20261016_073031/stories-requisitos20261016_073031.md` (seções 2–7) e os cenários AC/INT permanecem em `SPEC.md` §10.3 e `INTEGRACAO-MAESTRI-OMP.md` §8. Um estado local nunca equivale à execução real prescrita.
 
 | IDs cobertos | Implementação principal | Provas locais pertinentes | Estado / limite |

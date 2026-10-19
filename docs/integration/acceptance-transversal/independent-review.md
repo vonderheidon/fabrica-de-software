@@ -1,5 +1,7 @@
 # Revisão independente da versão
 
+Encaminhamento da Etapa B, preparado em 2026-10-18: [roteiro de revisão por referência imutável](../acceptance-b/20261018-01/runbook-immutable-review.md) e [registro atual](../acceptance-b/20261018-01/record.md). Nenhuma referência foi criada; os resultados históricos abaixo permanecem intactos.
+
 Data: 2026-10-17.
 
 O critério de revisão exige que o revisor identifique a referência Git imutável da versão avaliada e mantenha os achados/resultados anteriores. As instruções do repositório determinam que `git`/`gh` usem o contexto elevado com keyring do Windows. Esse contexto não está disponível nesta sessão; por isso não foi feita leitura Git fora do contexto autorizado. A restrição de não alterar o estado Git foi mantida.
