@@ -102,8 +102,8 @@ try {
     writeFileSync(bootstrapPath, JSON.stringify({ cwd, ompExecutable: process.execPath, args: argv }), { encoding: 'utf8', mode: 0o600 });
     const powershell = resolve(process.env.SystemRoot ?? 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
     const command = launchCommand(powershell, bootstrapPath);
-    const encoded = command.match(/ -EncodedCommand ([A-Za-z0-9+/=]+)$/)?.[1]; assert(encoded);
-    child = spawn(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], { cwd: directory, windowsHide: true, shell: false, stdio: ['ignore', 'ignore', 'ignore'] });
+    // Execute the complete terminal command so quoting and invocation are exercised too.
+    child = spawn(powershell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], { cwd: directory, windowsHide: true, shell: false, stdio: ['ignore', 'ignore', 'ignore'] });
     const exit = await deadline(new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => resolve(code)); }), 15_000);
     assert.equal(exit, 0);
     const observed = JSON.parse(readFileSync(output, 'utf8'));

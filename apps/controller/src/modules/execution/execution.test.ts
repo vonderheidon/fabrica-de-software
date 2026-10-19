@@ -106,6 +106,15 @@ function fixture(role: 'implementer' | 'reviewer' = 'implementer', effort: strin
 }
 
 describe('distributed role contracts', () => {
+  it('observes a Maestri build hash as its version without recruiting a terminal', async () => {
+    const runCli = vi.fn(async () => ({ exitCode: 0, stdout: '97e32e94\n', stderr: '' }));
+    const execution = createMaestriOmp({ dataDirectory: 'C:\\Dados', host, persistence: fixtureStore().store }, loadRoleResources(), {
+      native: fixture().runtime, runCli,
+    });
+    expect(await execution.observeVersions()).toContainEqual(expect.objectContaining({ tool: 'maestri', state: 'observed', version: '97e32e94', cause: null }));
+    expect(runCli).toHaveBeenCalledOnce();
+    await execution.close();
+  });
   it('loads both exact schemas and stable file digests without personal skills', () => {
     const roles = loadRoleResources();
     expect([...roles.keys()]).toEqual(['implementer', 'reviewer']);
@@ -286,6 +295,8 @@ describe('native Maestri and Windows launch', () => {
   it('encodes only a bootstrap path and preserves Unicode, quotes and spaces', () => {
     const own = "C:\\Dados ç 😀\\O'Brien\\launch.json";
     const command = launchCommand(host.powershellExecutable, own);
+    expect(command).toMatch(/^& '/);
+    expect(launchCommand("C:\\O'Brien\\pwsh.exe", own)).toMatch(/^& 'C:\\O''Brien\\pwsh.exe' -NoLogo /);
     const script = Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le');
     expect(script).toContain("C:\\Dados ç 😀\\O''Brien\\launch.json");
     expect(script).toContain('[System.Text.Encoding]::UTF8');

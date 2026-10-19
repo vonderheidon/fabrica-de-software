@@ -19,7 +19,7 @@ const Submitted = Type.Object({ type: Type.Literal('task-submitted') }, { additi
 const Lost = Type.Object({ type: Type.Literal('tracking-lost') }, { additionalProperties: false });
 type Native = ReturnType<typeof createNative>;
 const profileValue = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
-export interface AdapterDependencies { native?: Native; channel?: ChannelFactory; bootstrap?: BootstrapWriter }
+export interface AdapterDependencies { native?: Native; channel?: ChannelFactory; bootstrap?: BootstrapWriter; runCli?: typeof runCli }
 interface LivePassage {
   continuation: { resolve: (record: PassageRecord) => void; reject: () => void } | undefined;
   request: PassageRequest; channel: PassageChannel | undefined; bootstrap: Bootstrap | undefined;
@@ -275,8 +275,8 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       let maestriCause = omp ? 'MAESTRI_VERSION_UNOBSERVABLE' : cause;
       if (omp && options.host) {
         try {
-          const reply = await runCli(options.host.maestriExecutable, ['--version'], options.dataDirectory, options.host.inheritedEnvironment);
-          if (reply.exitCode === 0) maestri = /^(?:maestri[ /])?(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)\s*$/i.exec(reply.stdout.trim())?.[1] ?? null;
+          const reply = await (dependencies.runCli ?? runCli)(options.host.maestriExecutable, ['--version'], options.dataDirectory, options.host.inheritedEnvironment);
+          if (reply.exitCode === 0) maestri = /^(?:maestri[ /])?(\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?|[a-f0-9]{8,40})\s*$/i.exec(reply.stdout.trim())?.[1] ?? null;
         } catch { maestriCause = 'MAESTRI_VERSION_QUERY_FAILED'; }
       }
       tools.push(observation('maestri', maestri, maestri ? null : maestriCause));

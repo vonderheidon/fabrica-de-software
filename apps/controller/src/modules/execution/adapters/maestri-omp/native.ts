@@ -154,5 +154,5 @@ export function launchCommand(powershell: string, bootstrapPath: string): string
     `$launch=[System.IO.File]::ReadAllText($launchPath,[System.Text.Encoding]::UTF8)|ConvertFrom-Json; ` +
     `$env:FACTORY_PASSAGE_BOOTSTRAP=$launchPath; Set-Location -LiteralPath $launch.cwd; ` +
     `& $launch.ompExecutable @($launch.args); exit $LASTEXITCODE`;
-  return `"${powershell}" -NoLogo -NoProfile -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;
+  return `& ${quote(powershell)} -NoLogo -NoProfile -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;
 }
