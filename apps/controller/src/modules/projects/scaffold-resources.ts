@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { ScaffoldEngineering } from '#contracts';
+import { ScaffoldEngineering, type ScaffoldInput } from '#contracts';
 import { OperationError } from '../storage/index.js';
 
 export function scaffoldDigest(value: unknown): string {
@@ -14,6 +14,17 @@ export function scaffoldDigest(value: unknown): string {
 }
 export const fileDigest = (content: string) => createHash('sha256').update(content, 'utf8').digest('hex');
 export interface TemplateFile { path: string; content: string }
+export function renderScaffoldReadme(files: readonly TemplateFile[], input: ScaffoldInput): TemplateFile[] {
+  const name = input.name.trim().replace(/[\r\n]+/g, ' ');
+  const remote = input.remote;
+  const status = input.creationMode === 'local'
+    ? 'Repositório Git local com commit inicial. Para executar issues pela fábrica, associe um remoto GitHub.'
+    : input.creationMode === 'remote_no_push'
+      ? `Remoto GitHub \`${remote!.name}\` associado como \`origin\`. O commit inicial permanece somente no computador; publique a branch \`${input.baseBranch}\` quando desejar.`
+      : `Remoto GitHub \`${remote!.name}\` associado como \`origin\`, com o commit inicial publicado na branch \`${input.baseBranch}\`.`;
+  const content = `# ${name}\n\nProjeto ${name}, preparado com configuração de engenharia para desenvolvimento pela Nova Fábrica.\n\n## Estado inicial\n\n${status}\n\n## Próximos passos\n\n1. Defina o escopo do projeto e implemente a aplicação. Este scaffold fornece configuração de engenharia.\n2. Configure um GitHub Project e seu mapeamento de Status na fábrica, e vincule a issue ao quadro antes de iniciar uma tentativa.\n3. Consulte \`AGENTS.md\` e \`docs/agents/\` para as orientações de trabalho.\n`;
+  return files.map(file => file.path === 'README.md' ? { ...file, content } : { ...file });
+}
 const closed = { additionalProperties: false } as const;
 const manifest = Type.Object({ formatVersion: Type.Literal(1), id: Type.Literal('factory.engineering'), templates: Type.Array(Type.Object({
   id: Type.String({ pattern: '^[a-z0-9.-]{1,128}$' }), label: Type.String({ minLength: 1, maxLength: 256 }),
@@ -115,7 +126,7 @@ export function renderEngineering(files: readonly TemplateFile[], resources: rea
   content = content.slice(0, start) + section + content.slice(end);
   if (original) original.content = content; else result.push({ path: 'AGENTS.md', content });
   const ignore = result.find(f => f.path === '.gitignore');
-  const exclusions = ['.env', '.env.*', '!.env.example', '!.env.*.example', 'credentials', 'credentials.*', 'id_rsa', 'node_modules/', 'dist/', 'build/', 'coverage/', '.cache/', '*.log', '*.pem', '*.key'].join('\n');
+  const exclusions = ['.env', '.env.*', '!.env.example', '!.env.*.example', 'credentials', 'credentials.*', 'id_rsa', 'node_modules/', 'dist/', 'build/', 'coverage/', '.cache/', '.playwright-mcp/', '*.log', '*.pem', '*.key'].join('\n');
   const previousIgnore = ignore?.content ?? '';
   const ignoreContent = previousIgnore.replace(/\r\n/g, '\n').trimEnd().endsWith(exclusions) ? previousIgnore
     : `${previousIgnore}${previousIgnore && !previousIgnore.endsWith('\n') ? '\n' : ''}\n${exclusions}\n`;

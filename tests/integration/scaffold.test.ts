@@ -8,7 +8,7 @@ import { Value } from '@sinclair/typebox/value';
 import { HttpScaffoldPlanned, HttpCreationView, HttpScaffoldOptions, CreationView, ScaffoldOptions, ScaffoldPlanned, type CreateScaffold, type ScaffoldInput, type SessionResponse } from '#contracts';
 import { toHttpScaffoldInput, toHttpCreateScaffold, toHttpCreationView } from '../../apps/controller/src/http/observation-views.js';
 import { createScaffold } from '../../apps/controller/src/modules/projects/index.js';
-import { loadScaffoldCatalog, renderEngineering } from '../../apps/controller/src/modules/projects/scaffold-resources.js';
+import { loadScaffoldCatalog, renderEngineering, renderScaffoldReadme } from '../../apps/controller/src/modules/projects/scaffold-resources.js';
 import { createLocalScaffolder } from '../../apps/controller/src/modules/workspaces/scaffold.js';
 import { ScaffoldWorkspaceError } from '../../apps/controller/src/modules/workspaces/scaffold-path-guard.js';
 import type { GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
@@ -37,9 +37,10 @@ function fixture() {
   const projectsRoot = join(directory,'projects'); mkdirSync(projectsRoot);
   const storage = openStorage({ dataDirectory: join(directory,'data'), busyTimeoutMs: 20 }); cleanup.push(() => storage.close());
   storage.saveSettings({ operationId: randomUUID(), expectedRevision: storage.getGlobalConfiguration().etag, body: { changes: { projects_root: projectsRoot } }, changes: { projects_root: projectsRoot } });
-  let login = 'fixture-user'; let branch = 'main'; let failGit = false;
+  let login = 'fixture-user'; let branch = 'main'; let failGit = false; let missingIdentity = false;
   const calls: string[][] = [];
   const git: GitReader = async (cwd, args) => {
+    if (args[0] === 'config') return missingIdentity ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: args.at(-1) === 'user.name' ? 'Pessoa operadora' : 'operator@example.test' };
     calls.push([...args]);
     expect(storage.getEvents({}).items.some(e => e.eventType === 'creation.accepted')).toBe(true);
     if (args[0] === 'init') { mkdirSync(join(cwd,'.git')); branch = args.find(a => a.startsWith('--initial-branch='))!.split('=')[1]!; }
@@ -61,7 +62,7 @@ function fixture() {
   const github = { getIdentity: vi.fn(async () => ({ state: 'complete' as const, data: { id: login, login }, diagnostics: [], retryAtMs: null })) };
   const logFailure = vi.fn(); const scaffold = createScaffold({ storage, github, workspaces, logFailure }); cleanup.push(() => scaffold.close());
   const db = new Database(join(directory,'data','factory.sqlite')); cleanup.push(() => { db.close(); });
-  return { directory, projectsRoot, storage, scaffold, workspaces, github, calls, db, logFailure, guard, acquireGuard, changeAccount: () => { login = 'other-user'; }, failGit: () => { failGit = true; } };
+  return { directory, projectsRoot, storage, scaffold, workspaces, github, calls, db, logFailure, guard, acquireGuard, changeAccount: () => { login = 'other-user'; }, failGit: () => { failGit = true; }, clearIdentity: () => { missingIdentity = true; } };
 }
 async function choices(f: ReturnType<typeof fixture>, destinationRelative = 'new-project'): Promise<ScaffoldInput> {
   const options = await f.scaffold.getOptions(); const template = options.templates[0]!;
@@ -80,6 +81,22 @@ async function customTemplate(f: ReturnType<typeof fixture>, files: { path: stri
 }
 
 describe('local scaffold planning and durable creation (controlled Git and canonicalization)', () => {
+  it('requires a configured Git identity before creating any files', async () => {
+    const f = fixture(); const body = await authorized(f); f.clearIdentity();
+    const operation = await f.scaffold.create(body,randomUUID()); await f.scaffold.drain();
+    expect(existsSync(body.plan.destination)).toBe(false);
+    expect(f.scaffold.getCreation(operation.resource.id).creation.diagnostic).toBe('SCAFFOLD_GIT_IDENTITY_REQUIRED');
+    expect(f.calls).toEqual([]);
+  });
+  it.each(['local','remote_no_push','remote_push'] as const)('renders a Portuguese README consistent with %s', async creationMode => {
+    const f = fixture(); const input = { ...await choices(f), creationMode, ...(creationMode === 'local' ? {} : { remote: { ownerId: 'OWNER_test', name: 'repositorio', visibility: 'private' as const } }) };
+    const readme = renderScaffoldReadme([{ path: 'README.md', content: '' }],input)[0]!.content;
+    expect(readme).toContain('# Projeto á'); expect(readme).toContain('GitHub Project');
+    if (creationMode === 'local') expect(readme).toContain('associe um remoto GitHub');
+    else { expect(readme).not.toContain('associe um remoto GitHub'); expect(readme).toContain('associado como `origin`'); }
+    if (creationMode === 'remote_no_push') expect(readme).toContain('somente no computador');
+    if (creationMode === 'remote_push') expect(readme).toContain('commit inicial publicado');
+  });
   it('returns versioned options and a deterministic plan with no destination or Git effects', async () => {
     const f = fixture(); const before = f.storage.getEvents({}); const options = await f.scaffold.getOptions(); expect(Value.Check(ScaffoldOptions,options)).toBe(true);
     expect(options.creationModes.map(m => m.capability.available)).toEqual([true,false,false]);
@@ -101,6 +118,10 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     expect(project.prerequisites.map(p => p.code)).toEqual(expect.arrayContaining(['REMOTE_UNCONFIRMED','PROJECT_REQUIRED']));
     expect(f.storage.getOperation(operationId)?.state).toBe('succeeded');
     expect(readFileSync(join(body.plan.destination,'AGENTS.md'),'utf8')).toContain('docs/agents/domain.md');
+    expect(readFileSync(join(body.plan.destination,'README.md'),'utf8')).toContain('# Projeto á');
+    const commit = f.calls.find(args => args.includes('commit'))!;
+    expect(commit).toContain('user.name=Pessoa operadora'); expect(commit).toContain('user.email=operator@example.test');
+    expect(commit).toContain('chore: configura engenharia inicial do projeto');
     expect(f.acquireGuard).toHaveBeenCalledExactlyOnceWith(dirname(body.plan.destination));
     expect(f.guard.createDirectory).toHaveBeenCalledWith(body.plan.destination, true);
     expect(f.guard.createDirectory).toHaveBeenCalledWith(join(body.plan.destination, 'docs', 'agents'), false);

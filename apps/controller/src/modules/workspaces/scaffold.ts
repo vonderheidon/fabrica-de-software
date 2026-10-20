@@ -63,6 +63,9 @@ export function createLocalScaffolder(git?: GitReader, acquireGuard: ScaffoldPat
         pathParts(file.path); const expected = plan.files.find(f => f.path === file.path);
         return !expected || expected.bytes !== Buffer.byteLength(file.content) || expected.sha256 !== createHash('sha256').update(file.content).digest('hex');
       })) throw new ScaffoldWorkspaceError('SCAFFOLD_PLAN_CHANGED');
+      const identity = await Promise.all(['user.name', 'user.email'].map(key => git(plan.projectsRoot, ['config', '--get', key])));
+      if (identity.some(value => value.exitCode !== 0 || !value.stdout.trim() || /[\r\n\x00<>]/.test(value.stdout.trim()))) throw new ScaffoldWorkspaceError('SCAFFOLD_GIT_IDENTITY_REQUIRED');
+      const [authorName, authorEmail] = identity.map(value => value.stdout.trim());
       // Pin before revalidation and keep the same guard through every write.
       // Directory creation also runs in the helper that owns the pinned handles.
       const guard = await acquireGuard(dirname(plan.destination));
@@ -119,9 +122,9 @@ export function createLocalScaffolder(git?: GitReader, acquireGuard: ScaffoldPat
         const empty = await open(attributes, 'wx'); await empty.close();
         record('git', 'confirmed');
         record('baseline', 'running');
-        const flags = ['-c', `core.hooksPath=${hooks}`, '-c', `core.attributesFile=${attributes}`, '-c', 'core.autocrlf=false', '-c', 'commit.gpgsign=false', '-c', 'user.name=Factory', '-c', 'user.email=factory@localhost'];
+        const flags = ['-c', `core.hooksPath=${hooks}`, '-c', `core.attributesFile=${attributes}`, '-c', 'core.autocrlf=false', '-c', 'commit.gpgsign=false', '-c', `user.name=${authorName}`, '-c', `user.email=${authorEmail}`];
         await run([...flags, 'add', '--', ...files.map(f => f.path)]);
-        await run([...flags, 'commit', '-m', 'chore: initialize project']);
+        await run([...flags, 'commit', '-m', 'chore: configura engenharia inicial do projeto']);
         const baselineSha = await run(['rev-parse', '--verify', 'HEAD']);
         const baselineRef = await run(['symbolic-ref', 'HEAD']);
         if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(baselineSha) || baselineRef !== `refs/heads/${plan.input.baseBranch}` ||

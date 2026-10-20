@@ -45,6 +45,10 @@ async function fixture(failure = '') {
       return failure === 'repository' ? unknown() : confirmed(e);
     }),
     reconcileScaffoldRepository: vi.fn<NonNullable<ScaffoldDependencies['github']['reconcileScaffoldRepository']>>(async e => remote ? confirmed(e) : unknown()),
+    describeScaffoldRepository: vi.fn<NonNullable<ScaffoldDependencies['github']['describeScaffoldRepository']>>(async (e,_account,authorize) => {
+      await authorize();
+      return failure === 'description' ? unknown() : confirmed(e);
+    }),
   };
   const workspaces: ScaffoldDependencies['workspaces'] = {
     scaffoldCapability: () => ({ available: true }),
@@ -82,6 +86,16 @@ async function fixture(failure = '') {
 const etag = (f: Awaited<ReturnType<typeof fixture>>,id: string) => { const c = f.storage.getCreation(id).creation; return `"creation:${id}:${c.revision}"`; };
 
 describe('remote scaffold journal and reconciliation with controlled adapters',() => {
+  it.each(['remote_no_push','remote_push'] as const)('preserves all %s effects when description confirmation is lost and finishes by reconciliation', async mode => {
+    const f = await fixture('description'); const body = await f.authorize(mode);
+    const operation = await f.scaffold.create(body,randomUUID()); await f.scaffold.drain();
+    const partial = f.scaffold.getCreation(operation.resource.id);
+    expect(partial.creation.state).toBe('partial'); expect(partial.effects.every(effect => effect.state === 'confirmed')).toBe(true);
+    const sends = [...f.sends];
+    f.github.describeScaffoldRepository.mockImplementation(async e => ({ state: 'confirmed', receipt: e.receipt, reason: null, retryAtMs: null }));
+    await f.scaffold.reconcile(operation.resource.id,randomUUID(),etag(f,operation.resource.id)); await f.scaffold.drain();
+    expect(f.scaffold.getCreation(operation.resource.id).creation.state).toBe('completed'); expect(f.sends).toEqual(sends);
+  });
   it('accepts creation when the event sequence exceeds retained events', async () => {
     const f = await fixture();
     const body = await f.authorize();

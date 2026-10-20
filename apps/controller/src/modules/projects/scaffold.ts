@@ -4,11 +4,11 @@ import { CreateScaffold, ScaffoldInput, type EffectIdentity, type EffectView, ty
 import { OperationError, type Storage } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import { ScaffoldWorkspaceError, validateScaffoldBranch, type Workspaces } from '../workspaces/index.js';
-import { engineeringSummary, fileDigest, loadScaffoldCatalog, renderEngineering, scaffoldDigest } from './scaffold-resources.js';
+import { engineeringSummary, fileDigest, loadScaffoldCatalog, renderEngineering, renderScaffoldReadme, scaffoldDigest } from './scaffold-resources.js';
 
 export interface ScaffoldDependencies {
   storage: Storage;
-  github: Pick<GitHub, 'getIdentity'> & Partial<Pick<GitHub, 'scaffoldRemoteCapability' | 'inspectScaffoldRemote' | 'createScaffoldRepository' | 'reconcileScaffoldRepository'>>;
+  github: Pick<GitHub, 'getIdentity'> & Partial<Pick<GitHub, 'scaffoldRemoteCapability' | 'inspectScaffoldRemote' | 'createScaffoldRepository' | 'reconcileScaffoldRepository' | 'describeScaffoldRepository'>>;
   workspaces: Pick<Workspaces, 'scaffoldCapability' | 'inspectScaffoldDestination' | 'createLocalScaffold'> & Partial<Pick<Workspaces, 'executeScaffoldGit' | 'reconcileScaffoldGit'>>;
   logFailure: (code: string) => void;
   resourcesDirectory?: string;
@@ -39,7 +39,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
     const destination = await workspaces.inspectScaffoldDestination(s.projects_root, input.destinationRelative).catch(error => {
       throw new OperationError(409, error instanceof ScaffoldWorkspaceError ? error.code : 'SCAFFOLD_DESTINATION_UNAVAILABLE', 'The new destination is unavailable, exists or redirects outside the configured root.');
     });
-    const files = renderEngineering(template.files, catalog.engineering, input.triageEnabled);
+    const files = renderEngineering(template.id === 'engineering.v1' ? renderScaffoldReadme(template.files, input) : template.files, catalog.engineering, input.triageEnabled);
     const observed = await account();
     let ownerLogin: string | undefined;
     if (input.remote) {
@@ -70,7 +70,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       if (closing) throw new OperationError(409, 'CREATION_INTERRUPTED', 'Controller is closing.');
       const catalog = await loadScaffoldCatalog(resourcesDirectory); const template = catalog.templates.find(t => t.id === current.plan.input.templateId);
       if (!template || template.digest !== current.plan.templateDigest) throw new OperationError(409, 'SCAFFOLD_TEMPLATE_CHANGED', 'Scaffold resources changed.');
-      const files = renderEngineering(template.files, catalog.engineering, current.plan.input.triageEnabled);
+      const files = renderEngineering(template.id === 'engineering.v1' ? renderScaffoldReadme(template.files, current.plan.input) : template.files, catalog.engineering, current.plan.input.triageEnabled);
       await workspaces.createLocalScaffold({ plan: current.plan, files, record: (step, state, sha) => {
         if (closing && state === 'running') throw new OperationError(409, 'CREATION_INTERRUPTED', 'Controller is closing.');
         storage.recordCreationStep(id,step,state,sha);
@@ -118,6 +118,13 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       if (kind === 'create_repository') repository = storage.getEffect(effect.operationId);
     }
     await currentAuthority(id,plan);
+    const described = await github.describeScaffoldRepository?.(repository!,plan.account.id!,async () => {
+      await currentAuthority(id,plan);
+      const confirmed = await github.reconcileScaffoldRepository!(repository!,plan.account.id!);
+      if (confirmed.state !== 'confirmed' || confirmed.receipt?.id !== repository!.receipt!.id) throw new OperationError(409,'CREATION_REMOTE_IDENTITY_CONFLICT','The confirmed remote identity changed.');
+      await currentAuthority(id,plan);
+    });
+    if (described && described.state !== 'confirmed') throw new OperationError(409,described.reason ?? 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED','The repository description could not be confirmed.');
   }
   function schedule(job: () => Promise<void>) { const promise = Promise.resolve().then(job); jobs.add(promise); void promise.finally(() => jobs.delete(promise)); }
   return {
@@ -173,6 +180,14 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
             else diagnostic = result.reason ?? 'CREATION_EFFECT_UNRESOLVED';
           }
           const current = storage.getCreation(id);
+          const repository = current.effects.find(e => e.kind === 'create_repository' && e.state === 'confirmed');
+          if (repository && github.describeScaffoldRepository) {
+            const described = await github.describeScaffoldRepository(repository,observed.id!,async () => {
+              const account = await github.getIdentity();
+              if (closing || account.state !== 'complete' || account.data?.id !== observed.id || storage.getSettings().account_id !== observed.id) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The creation account changed.');
+            });
+            if (described.state !== 'confirmed') throw new OperationError(409,described.reason ?? 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED','The repository description could not be confirmed.');
+          }
           const required = current.creation.plan.input.creationMode === 'local' ? [] : current.creation.plan.input.creationMode === 'remote_push' ? ['create_repository','associate_origin','baseline_push'] : ['create_repository','associate_origin'];
           if (current.creation.state !== 'completed' && current.confirmedEffects.filter(s => s.step !== 'registration').length === 4 && required.every(k => current.effects.some(e => e.kind === k && e.state === 'confirmed'))) storage.completeCreation(id);
           if (storage.getCreation(id).creation.state !== 'completed') diagnostic ??= 'CREATION_INCOMPLETE';

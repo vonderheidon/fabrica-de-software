@@ -19,6 +19,7 @@ mkdirSync(outside);
 const files = [{ path: 'README.md', content: '# Scaffold\n' }, { path: 'docs/agents/domain.md', content: '# Domain\n' }];
 const calls = [];
 const git = async (cwd, args) => {
+  if (args[0] === 'config') return { exitCode: 0, stdout: args.at(-1) === 'user.name' ? 'Scaffold test' : 'scaffold@example.test' };
   calls.push([...args]);
   if (args[0] === 'init') mkdirSync(join(cwd, '.git'));
   return { exitCode: 0, stdout: ['rev-parse', 'rev-list'].includes(args[0]) ? 'a'.repeat(40)

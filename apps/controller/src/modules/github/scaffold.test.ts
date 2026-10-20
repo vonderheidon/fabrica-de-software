@@ -16,6 +16,12 @@ function fixture(mode = '',grant: ScaffoldAuthorization | undefined = authorizat
   let mutations = 0; let viewer = 'ACCOUNT_test';
   const runner = vi.fn<GhRunner>(async (text, onSend) => {
     const request = JSON.parse(text) as { query: string; variables: Record<string,unknown> };
+    if (request.query.includes('mutation FactoryDescribeRepository')) {
+      const input = request.variables.input as Record<string,unknown>;
+      if (repository) repository.description = input.description;
+      if (mode === 'description-lost') throw new Error('Response lost');
+      return response({ updateRepository: { clientMutationId: input.clientMutationId, repository: { id: repository?.id } } });
+    }
     if (request.query.includes('mutation FactoryCreateRepository')) {
       onSend?.();
       mutations++; const input = request.variables.input as Record<string,unknown>;
@@ -34,6 +40,24 @@ function fixture(mode = '',grant: ScaffoldAuthorization | undefined = authorizat
     change: (key: string,value: unknown) => { if (repository) repository[key] = value; } };
 }
 describe('remote scaffold GitHub adapter (controlled GraphQL)',() => {
+  it.each(['','description-lost'])('cleans the description only after a durable identity receipt and reconciles %s without recreating', async mode => {
+    const f = fixture(mode); const e = effect();
+    const created = await f.api.createScaffoldRepository(e,'ACCOUNT_test',async () => {});
+    const confirmed: EffectView = { ...e, state: 'confirmed', receipt: created.receipt, confirmedIdentity: created.receipt };
+    const first = await f.api.describeScaffoldRepository(confirmed,'ACCOUNT_test',async () => {});
+    expect(first.state).toBe(mode ? 'unknown' : 'confirmed');
+    expect((await f.api.describeScaffoldRepository(confirmed,'ACCOUNT_test',async () => {})).state).toBe('confirmed');
+    expect((await f.api.reconcileScaffoldRepository(confirmed,'ACCOUNT_test')).state).toBe('confirmed');
+    expect(f.mutations()).toBe(1);
+    const update = f.runner.mock.calls.map(([text]) => JSON.parse(text) as { query: string; variables: { input?: { description?: string } } }).find(call => call.query.includes('mutation FactoryDescribeRepository'));
+    expect(update?.variables.input?.description).toBe('Projeto new-repo, preparado com configuração de engenharia pela Nova Fábrica.');
+  });
+  it('preserves a description changed by the operator after confirmation', async () => {
+    const f = fixture(); const e = effect(); const result = await f.api.createScaffoldRepository(e,'ACCOUNT_test',async () => {});
+    f.change('description','Descrição do operador');
+    expect((await f.api.describeScaffoldRepository({ ...e, state: 'confirmed', receipt: result.receipt },'ACCOUNT_test',async () => {})).reason).toBe('CREATION_REMOTE_DESCRIPTION_CHANGED');
+    expect(f.runner.mock.calls.some(([text]) => text.includes('mutation FactoryDescribeRepository'))).toBe(false);
+  });
   it('accepts the operator-confirmed plan policy without a preconfigured repository list', async () => {
     const f = fixture('', { kind: 'confirmed_plan' });
     expect(f.api.scaffoldRemoteCapability(undefined, 'ACCOUNT_test', true).available).toBe(true);
