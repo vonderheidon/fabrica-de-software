@@ -16,6 +16,9 @@ const stateLabels: Readonly<Record<string, string>> = {
 };
 
 const codeLabels: Readonly<Record<string, string>> = {
+  SCAFFOLD_GIT_IDENTITY_REQUIRED: 'Configure seu nome e e-mail no Git antes de criar o projeto',
+  CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: 'Descrição do repositório sem confirmação; consulte novamente a criação',
+  CREATION_REMOTE_DESCRIPTION_CHANGED: 'Descrição alterada no GitHub; preserve o texto e confira a criação',
   ACCOUNT_UNOBSERVED: 'Conta GitHub sem vínculo', ACCOUNT_REQUIRED: 'Conta GitHub necessária', ACCOUNT_NOT_CONFIGURED: 'Conta GitHub sem vínculo',
   ACCOUNT_MISMATCH: 'Conta ativa diferente da conta vinculada', GITHUB_IDENTITY_CONFIRMED: 'Conta GitHub confirmada',
   PROJECTS_ROOT_REQUIRED: 'Pasta dos projetos necessária', PROJECTS_ROOT_UNAVAILABLE: 'Pasta dos projetos indisponível',
@@ -44,6 +47,9 @@ const codeLabels: Readonly<Record<string, string>> = {
 };
 
 const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; nextAction: string }>> = {
+  SCAFFOLD_GIT_IDENTITY_REQUIRED: { title: 'Autoria do commit inicial ausente', cause: 'O Git deste computador não tem nome e e-mail configurados para o commit inicial.', nextAction: 'Configure seu nome e e-mail no Git e crie novamente o projeto. Nenhum arquivo foi criado.' },
+  CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: { title: 'Descrição sem confirmação', cause: 'O repositório foi criado, mas a atualização da descrição não foi confirmada.', nextAction: 'Consulte os efeitos preservados para conferir a descrição, sem recriar o repositório.' },
+  CREATION_REMOTE_DESCRIPTION_CHANGED: { title: 'Descrição alterada no GitHub', cause: 'A descrição foi editada após a criação e foi preservada.', nextAction: 'Confira a descrição no GitHub antes de prosseguir com a criação.' },
   ORIGIN_INVALID: { title: 'Origem não confirmada', cause: 'Não foi possível confirmar a pasta Git ou a URL do repositório informada.', nextAction: 'Confira o tipo e a localização da origem na configuração do projeto e consulte novamente.' },
   BASE_BRANCH_INVALID: { title: 'Branch-base não confirmada', cause: 'A consulta da origem não confirmou a branch-base escolhida.', nextAction: 'Confirme a origem e selecione uma branch existente no projeto.' },
   BASE_UNCONFIRMED: { title: 'Base remota não confirmada', cause: 'O commit da branch-base no GitHub ainda não foi confirmado.', nextAction: 'Confira o remoto e a branch-base antes de consultar a preparação novamente.' },
@@ -73,6 +79,16 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
     title: 'Configure o projeto para a fila',
     cause: 'Um projeto ainda precisa do quadro GitHub ou do repositório confirmado.',
     nextAction: 'Abra Projetos, selecione o projeto indicado e configure a origem e o quadro pelo nome.',
+  },
+  PROJECT_QUEUE_BLOCKED: {
+    title: 'Fila bloqueada neste projeto',
+    cause: 'A consulta deste projeto não foi confirmada. Os demais projetos disponíveis podem continuar.',
+    nextAction: 'Abra a configuração do projeto indicado e confira o quadro, o acesso e os perfis. A consulta será repetida automaticamente.',
+  },
+  GLOBAL_AUTOMATION_PAUSED: {
+    title: 'Fila global pausada',
+    cause: 'A automação pode estar habilitada no projeto, mas a fila global está pausada.',
+    nextAction: 'Abra a fila global e use Habilitar fila para autorizar novos inícios automáticos.',
   },
   ACCOUNT_UNOBSERVED: {
     title: 'Vincule uma conta GitHub',
@@ -197,14 +213,16 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
 };
 
 const errorCopy: Readonly<Record<string, string>> = {
+  PUSH_NOT_AUTHORIZED: 'O controlador não reconheceu a autorização para enviar a versão aprovada. Verifique se o controlador está atualizado e consulte novamente a tentativa.',
+  MUTATION_NOT_AUTHORIZED: 'O controlador não reconheceu a autorização para publicar no GitHub. Verifique se o controlador está atualizado e consulte novamente a tentativa.',
   VALIDATION_FAILED: 'Revise os campos destacados e corrija os valores informados.',
   REQUEST_REJECTED: 'A solicitação não pôde ser aceita com os dados e o contexto atuais.',
   PAYLOAD_TOO_LARGE: 'O conteúdo enviado excede o limite permitido. Reduza o texto e tente novamente.',
-  SESSION_REQUIRED: 'A sessão técnica expirou. Atualize os dados antes de tentar novamente.',
-  CSRF_INVALID: 'A sessão técnica mudou. Atualize os dados antes de continuar.',
+  SESSION_REQUIRED: 'A sessão expirou. Atualize os dados antes de tentar novamente.',
+  CSRF_INVALID: 'A sessão mudou. Atualize os dados antes de continuar.',
   STORAGE_UNAVAILABLE: 'O armazenamento local não está disponível. Tente novamente após consultar o estado atual.',
   REQUEST_TIMEOUT: 'A solicitação excedeu o prazo. Consulte o estado atual antes de repetir qualquer ação.',
-  INTERNAL_ERROR: 'O controlador não conseguiu concluir a solicitação. Consulte o suporte técnico.',
+  INTERNAL_ERROR: 'O controlador não conseguiu concluir a solicitação. Consulte o estado atual antes de tentar novamente.',
   ACCOUNT_UNOBSERVED: 'Vincule uma conta GitHub ativa em Configuração antes de continuar.',
   ACCOUNT_REQUIRED: 'Vincule uma conta GitHub ativa em Configuração antes de continuar.',
   ACCOUNT_NOT_CONFIGURED: 'Vincule uma conta GitHub ativa em Configuração antes de continuar.',
@@ -228,9 +246,9 @@ const factLabels: Readonly<Record<string, string>> = {
   observed_host: 'Host observado', expected_host: 'Host esperado', expected_status_id: 'Status esperado', observed_status_id: 'Status observado', observed_at_ms: 'Observado em', profile_count: 'Perfis disponíveis',
   profile_counts: 'Perfis disponíveis por papel', implementer_profile_count: 'Perfis de Implementador',
   reviewer_profile_count: 'Perfis de Revisor', project_count: 'Projetos encontrados', eligible_count: 'Issues elegíveis',
-  attempt_id: 'Tentativa (referência de suporte)', project_id: 'Projeto (referência de suporte)',
-  operation_id: 'Operação (referência de suporte)', request_id: 'Solicitação (referência de suporte)',
-  blocking_project_count: 'Projetos relacionados', blocking_project_ids: 'Projetos relacionados (referências de suporte)',
+  attempt_id: 'Tentativa', project_id: 'Projeto',
+  operation_id: 'Operação', request_id: 'Solicitação',
+  blocking_project_count: 'Projetos relacionados', blocking_project_ids: 'Projetos relacionados',
   resource_count: 'Recursos registrados', uncertain_count: 'Recursos sem confirmação', retry_at_ms: 'Próxima consulta permitida',
   revision: 'Revisão técnica', expected_revision: 'Revisão esperada', current_revision: 'Revisão atual',
   state: 'Estado técnico', phase: 'Etapa registrada', result: 'Resultado registrado', tracking: 'Acompanhamento registrado',
@@ -274,20 +292,20 @@ export function operatorEventLabel(eventType: string): string {
     const labels: Record<string, string> = { directory: 'Pasta do projeto', files: 'Arquivos do projeto', git: 'Repositório Git local', baseline: 'Commit inicial', registration: 'Cadastro do projeto' };
     return `${labels[step[1]!]}: ${operatorState(step[2]).label}`;
   }
-  return eventLabels[normalized] ?? 'Atualização técnica registrada';
+  return eventLabels[normalized] ?? 'Atualização registrada';
 }
 
 export function isKnownOperatorEvent(eventType: string): boolean {
-  return operatorEventLabel(eventType) !== 'Atualização técnica registrada';
+  return operatorEventLabel(eventType) !== 'Atualização registrada';
 }
 
 export function operatorCodeLabel(code: string): string {
-  return codeLabels[code] ?? 'Situação técnica identificada';
+  return codeLabels[code] ?? errorCopy[code] ?? 'Situação que precisa de atenção';
 }
 
 export function operatorFactLabel(key: string): string {
   const normalized = key.replace(/([A-Z])/g, '_$1').replace(/[\s.-]+/g, '_').toLocaleLowerCase('en').replace(/^_/, '');
-  return factLabels[normalized] ?? factLabels[key] ?? 'Dado de suporte';
+  return factLabels[normalized] ?? factLabels[key] ?? 'Informação adicional';
 }
 
 export function operatorFactValue(value: unknown): string {
@@ -300,7 +318,7 @@ export function operatorFactValue(value: unknown): string {
     return state.known ? state.label : value;
   }
   if (Array.isArray(value)) return value.map(operatorFactValue).join(', ');
-  return 'Consulte o suporte técnico';
+  return 'Informação indisponível';
 }
 
 export function operatorVisibleFactValue(key: string, value: unknown): string {
@@ -322,18 +340,18 @@ export function operatorErrorMessage(code: string, message: string, status?: num
   if (status === 413) return 'O conteúdo enviado excede o limite permitido. Reduza o texto e tente novamente.';
   if (status === 404) return 'O item solicitado não está disponível no contexto atual.';
   if (status === 503 || code.endsWith('_UNAVAILABLE')) return 'O serviço local está indisponível. Consulte o estado atual e tente novamente.';
-  if (status !== undefined && status >= 500) return 'O controlador não conseguiu concluir a solicitação. Consulte Suporte técnico para ver os detalhes disponíveis.';
-  return 'A solicitação não pôde ser concluída. Consulte Suporte técnico para ver os detalhes disponíveis.';
+  if (status !== undefined && status >= 500) return 'O controlador não conseguiu concluir a solicitação. Consulte o estado atual antes de tentar novamente.';
+  return 'A solicitação não pôde ser concluída. Consulte o estado atual antes de tentar novamente.';
 }
 
 export function diagnosticCopyFor(code: string, state: string, cause?: string | null, recovery?: string | null) {
   const known = diagnosticCopy[code];
-  if (known) return code === 'PROJECT_NOT_READY' && cause && isPortugueseOperatorText(cause) ? { ...known, cause } : known;
+  if (known) return ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED'].includes(code) && cause && isPortugueseOperatorText(cause) ? { ...known, cause, ...(recovery && isPortugueseOperatorText(recovery) ? { nextAction: recovery } : {}) } : known;
   const status = operatorState(state);
   return {
     title: status.known && state.toLocaleLowerCase('en') === 'passed' ? 'Verificação concluída' : 'Atenção necessária',
     cause: cause && isPortugueseOperatorText(cause) ? cause : 'O controlador registrou uma situação que precisa de consulta.',
-    nextAction: recovery && isPortugueseOperatorText(recovery) ? recovery : 'Atualize os fatos deste contexto. Se a situação persistir, consulte os detalhes em Suporte técnico.',
+    nextAction: recovery && isPortugueseOperatorText(recovery) ? recovery : 'Atualize os dados deste contexto e tente novamente.',
   };
 }
 

@@ -76,11 +76,11 @@ export function QueueAuthorityDialog({ attemptId, onClose, onChanged }: { attemp
           return;
         }
       } catch {
-        setMessage(`A operação ${operationId} foi aceita; o recibo ainda não está disponível. Não envie outra ação até consultar a operação.`);
+        setMessage('A alteração foi aceita, mas ainda não foi confirmada. Consulte o estado atual antes de enviar outra ação.');
         return;
       }
     }
-    setMessage(`A operação ${operationId} continua em acompanhamento. Consulte a operação antes de repetir.`);
+    setMessage('A alteração continua em acompanhamento. Consulte o estado atual antes de repetir.');
   }
 
   const authority = state.status === 'ready' ? state.detail.authority : null;
@@ -94,7 +94,7 @@ export function QueueAuthorityDialog({ attemptId, onClose, onChanged }: { attemp
       <dl className="queue-authority-values">
         <div><dt>Motivo observado</dt><dd>{authority?.reason ?? 'Nenhuma divergência registrada'}</dd></div>
         <div><dt>Responsável esperado</dt><dd className="mono">{state.detail.expected_account_id}</dd></div>
-        <div><dt>Responsáveis observados</dt><dd>{currentIssue.status === 'loading' ? 'Consultando leitura atual…' : currentIssue.status === 'error' ? `Não confirmado · ${currentIssue.message}` : currentIssue.item ? currentIssue.item.assignees.length ? currentIssue.item.assignees.map((assignee) => `@${assignee.login} · ${assignee.id}`).join(', ') : 'Nenhum responsável observado' : 'Issue não localizada na consulta completa do Project'}</dd></div>
+        <div><dt>Responsáveis observados</dt><dd>{currentIssue.status === 'loading' ? 'Consultando leitura atual…' : currentIssue.status === 'error' ? `Não confirmado · ${currentIssue.message}` : currentIssue.item ? currentIssue.item.assignees.length ? currentIssue.item.assignees.map((assignee) => `@${assignee.login}`).join(', ') : 'Nenhum responsável observado' : 'Issue não localizada na consulta completa do Project'}</dd></div>
         <div><dt>Status esperado</dt><dd className="mono">{authority?.expected_status_id ?? 'Não aplicável'}</dd></div>
         <div><dt>Status observado</dt><dd>{currentIssue.status === 'ready' && currentIssue.item ? currentIssue.item.status ?? 'Sem valor de Status observado' : authority?.observed_status_id ?? (currentIssue.status === 'error' ? `Não confirmado · ${currentIssue.message}` : 'Não confirmado')}{authority?.observed_status_id ? ` · ${authority.observed_status_id}` : ''}</dd></div>
         <div><dt>Observado em</dt><dd>{authority ? new Date(authority.observed_at_ms).toLocaleString('pt-BR') : 'Ainda não observado'}</dd></div>

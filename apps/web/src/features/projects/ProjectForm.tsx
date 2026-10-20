@@ -18,7 +18,7 @@ import { MinutesField } from './MinutesField.js';
 import { useGitHubSetup } from './useGitHubSetup.js';
 import { useNativeSelection } from './useNativeSelection.js';
 import { FieldHelp, fieldGuidanceFor } from './FieldHelp.js';
-import { OperatorDiagnosticCard, TechnicalDetails } from '../../app/OperatorSupport.js';
+import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 
 type EditableView = EditableConfigurationView;
 type EditableProfile = ExecutionProfile & { id?: string };
@@ -210,11 +210,11 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
     } finally { setBusy(false); }
   }
 
-  if (result) return <section className="project-form-success" aria-live="polite"><span className="pill">Cadastro confirmado</span><h3>{result.project.name}</h3><p>{result.project.source.kind === 'local' ? 'Origem local registrada. Somente o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.' : 'Origem GitHub registrada.'}</p>{result.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos de execução</b>{result.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}</div>}<TechnicalDetails operationId={result.operation_id} entityType="Projeto" entityId={result.project.id} /><button type="button" className="primary" onClick={() => onRegistered(result.project.id)}>Abrir configuração do projeto</button></section>;
+  if (result) return <section className="project-form-success" aria-live="polite"><span className="pill">Cadastro confirmado</span><h3>{result.project.name}</h3><p>{result.project.source.kind === 'local' ? 'Origem local registrada. Somente o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.' : 'Origem GitHub registrada.'}</p>{result.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos de execução</b>{result.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}</div>}<button type="button" className="primary" onClick={() => onRegistered(result.project.id)}>Abrir configuração do projeto</button></section>;
 
   return <form className="feature-form" onSubmit={(event) => void submit(event)} noValidate>
     <p className="muted">Cadastre uma origem existente para consultar e configurar. O cadastro não clona nem inicia trabalho.</p>
-    {failure && <div className="read-state" role="alert"><b>Cadastro não confirmado</b><p>{failure.message}</p><p><strong>Próxima ação:</strong> revise os campos destacados e consulte o estado atual antes de repetir.</p><TechnicalDetails requestId={failure.requestId} /></div>}
+    {failure && <div className="read-state" role="alert"><b>Cadastro não confirmado</b><p>{failure.message}</p><p><strong>Próxima ação:</strong> revise os campos destacados e consulte o estado atual antes de repetir.</p></div>}
     <div className="form-grid">
       <TextField label="Nome do projeto" value={form.name} onChange={(value) => updateForm({ name: value, commandId: null })} required error={fieldMessage('name')} />
       <SelectField label="Tipo de origem" value={form.kind} onChange={(value) => updateForm({ kind: value as 'local' | 'github', commandId: null })} options={[{ value: 'local', label: 'Pasta local existente' }, { value: 'github', label: 'Repositório GitHub' }]} error={fieldMessage('source.kind')} />
@@ -531,7 +531,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
           }
           return;
         }
-        if (result.state !== 'succeeded' || !result.receipt) { setRecoveryMessage('A operação continua sem confirmação de sucesso. Mantenha a consulta ou procure suporte.'); return; }
+        if (result.state !== 'succeeded' || !result.receipt) { setRecoveryMessage('A operação continua sem confirmação de sucesso. Mantenha a consulta aberta e atualize novamente mais tarde.'); return; }
         finishConfigurationSave(uncertainId);
       }
       if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
@@ -545,7 +545,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   }
 
   if (load.status === 'loading' || load.identity !== identity) return <section className="card read-state" role="status"><p>Consultando configuração persistida…</p></section>;
-  if (load.status === 'error') return <section className="card read-state" role="alert"><h2>Configuração indisponível</h2><p>{load.message}</p>{load.requestId && <p className="mono muted">Solicitação {load.requestId}</p>}<button type="button" onClick={retryConfiguration}>Tentar novamente</button></section>;
+  if (load.status === 'error') return <section className="card read-state" role="alert"><h2>Configuração indisponível</h2><p>{load.message}</p><button type="button" onClick={retryConfiguration}>Tentar novamente</button></section>;
   if (!draft) return <section className="card read-state" role="status"><p>Preparando edição…</p></section>;
   const implementerProfiles = profilesForRole(draft.profiles, 'implementer');
   const reviewerProfiles = profilesForRole(draft.profiles, 'reviewer');
@@ -557,9 +557,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   ));
 
   return <div className="configuration-editor">
-    {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p>{refreshError.requestId && <small className="mono">Solicitação {refreshError.requestId}</small>}<div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
+    {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p><div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
     <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><a href={projectId ? `#principal/registros?projectId=${encodeURIComponent(projectId)}` : '#principal/registros'}>Abrir registros e diagnóstico deste contexto</a></div><p className="muted">Os dados operacionais ficam em var/factory na raiz da instalação. A execução usa o contexto Maestri herdado neste computador. Nenhum campo de credencial ou Wire é solicitado.</p></div>
-    {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Revisão global {conflictView.settings.revision}{'configuration' in conflictView ? ` · revisão do projeto ${conflictView.configuration.revision}` : ''}. Seu rascunho continua aberto. Os valores abaixo vêm da revisão atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
+    {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Seu rascunho continua aberto. Os valores abaixo vêm da configuração atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
     <section className="card form-section"><div className="panel-title"><span className="eyebrow">Operação local</span><h2>Configuração global</h2></div><div className="form-grid">
       {!projectId && <div className="field-full configuration-guidance" role="note" aria-label="Dados necessários e controles opcionais">
         <div><h3>Para começar</h3><p>Vincule uma conta GitHub, confirme a pasta para novos projetos e mantenha um perfil vivo de Implementador e um de Revisor. Em cada projeto, informe a origem e a branch-base antes de preparar uma issue.</p></div>
@@ -599,7 +599,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
       setConflictView(null); setSaveState({ status: 'idle' });
     }}>Aplicar minha edição sobre a revisão consultada</button>}
     {recoveryMessage && <p role="status">{recoveryMessage}</p>}
-    {uncertainId && <section className="notice"><b>Gravação ainda não confirmada</b><p>O rascunho permanece somente nesta sessão. Consulte a operação original; o comando não será repetido automaticamente.</p><TechnicalDetails operationId={uncertainId} /><button type="button" onClick={() => void recoverSave()}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void recoverSave(true)}>Reapresentar a mesma operação</button>}</section>}
+    {uncertainId && <section className="notice"><b>Gravação ainda não confirmada</b><p>O rascunho permanece somente nesta sessão. Consulte a operação original; o comando não será repetido automaticamente.</p><button type="button" onClick={() => void recoverSave()}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void recoverSave(true)}>Reapresentar a mesma operação</button>}</section>}
     {projectId && draft.project && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Projeto selecionado</span><h2>Configuração do projeto</h2></div>
       <div className="configuration-guidance" role="note" aria-label="Dados necessários e controles opcionais">
         <div><h3>Para preparar uma issue</h3><p>Confirme o repositório GitHub, a branch-base, um perfil de cada papel e o quadro com seu mapeamento de Status. A issue precisa estar vinculada ao quadro para iniciar em qualquer modo, inclusive no início manual.</p></div>
@@ -614,6 +614,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
         <NumberField label="Limite de correções" value={draft.project.correction_limit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correction_limit: Math.max(0, Math.min(5, value)) }))} />
         <SelectField label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit' }, { value: 'pr', label: 'Pull request' }]} />
         <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
+        {draft.project.automation_enabled && !draft.global.automation_enabled && <p className="notice" role="status">Automação deste projeto habilitada. Fila global pausada. <a href="#principal/fila">Abrir fila global para habilitar novos inícios</a>.</p>}
         <SelectField label="Ordem de prioridade" value={draft.project.queue_order.priority_direction} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, priority_direction: value as 'asc' | 'desc' } }))} options={[{ value: 'asc', label: 'Crescente' }, { value: 'desc', label: 'Decrescente' }]} />
         <TextField label="Campo de prioridade (ID)" value={draft.project.queue_order.priority_field_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, priority_field_id: value || null } }))} />
         <Checkbox label="Usar posição do quadro" checked={draft.project.queue_order.use_board_position} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, use_board_position: value } }))} />
@@ -632,9 +633,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
       {draft.project.source.kind === 'local' && <div className="notice"><b>Origem local</b><p>Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.</p></div>}
     </section>}
 
-    <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">{saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span><TechnicalDetails operationId={saveState.operationId} /></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span><TechnicalDetails requestId={saveState.requestId} /></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span><TechnicalDetails requestId={saveState.requestId} /></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
-    {(saveState.status === 'error' || saveState.status === 'conflict') && <TechnicalDetails code={saveState.code} requestId={saveState.requestId} facts={saveState.facts} affectedRequirements={saveState.affectedRequirements} />}
-    <TechnicalDetails etag={load.etag} facts={{ account_id: settings?.account_id ?? null }} />
+    <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">{saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
+
+
   </div>;
 }
 
@@ -672,14 +673,14 @@ function ProjectMappingEditor({ configuration, options, optionsError, onChange, 
         const project = options?.projects.items.find((item) => item.id === id);
         updateMapping({ id, owner_id: project?.owner.id ?? '', status_field_id: '', status_option_ids: { ready: '', in_progress: '', in_review: '', delivered: '' } });
       }} options={(options?.projects.items ?? []).map((project) => ({ value: project.id, label: `${project.title} · ${project.owner.login}${project.closed ? ' · encerrado' : ''}` }))} disabled={options?.completeness === 'unavailable'} />
-      {staleProject && <div className="notice field-full"><b>Project salvo não aparece nas opções atuais</b><p>O quadro pode estar inacessível ou a consulta estar incompleta. Atualize as opções e escolha novamente se necessário.</p><TechnicalDetails entityType="GitHub Project" entityId={chosenProject} /></div>}
-      {mapping && <><div className="field-full"><TechnicalDetails entityType="Owner do quadro" entityId={mapping.owner_id || 'não confirmado'} /></div>
+      {staleProject && <div className="notice field-full"><b>Project salvo não aparece nas opções atuais</b><p>O quadro pode estar inacessível ou a consulta estar incompleta. Atualize as opções e escolha novamente se necessário.</p></div>}
+      {mapping && <><div className="field-full"></div>
         <SelectField label="Campo Status" value={chosenField} onChange={(id) => updateMapping({ ...mapping, status_field_id: id, status_option_ids: { ready: '', in_progress: '', in_review: '', delivered: '' } })} options={(options?.status_fields ?? []).map((field) => ({ value: field.id, label: field.name }))} disabled={!chosenProject || !options?.status_fields.length} />
-        {staleField && <div className="notice field-full"><b>Campo Status salvo não aparece nas opções atuais</b><p>Atualize as opções e selecione o campo consultado antes de salvar.</p><TechnicalDetails entityType="Campo Status" entityId={chosenField} /></div>}
+        {staleField && <div className="notice field-full"><b>Campo Status salvo não aparece nas opções atuais</b><p>Atualize as opções e selecione o campo consultado antes de salvar.</p></div>}
         {statusRoles.map((role) => {
           const id = mapping.status_option_ids[role];
           const roleLabel = ({ ready: 'Ready', in_progress: 'Em andamento', in_review: 'Em revisão', delivered: 'Entregue' } as const)[role];
-          return <Fragment key={role}><SelectField label={`Status ${roleLabel}`} value={id && optionNames.has(id) ? id : ''} onChange={(optionId) => updateMapping({ ...mapping, status_option_ids: { ...mapping.status_option_ids, [role]: optionId } })} options={(selectedField?.options ?? []).map((option) => ({ value: option.id, label: option.name }))} disabled={!selectedField} {...(id && !optionNames.has(id) ? { help: 'O valor salvo não aparece nas opções atuais. Atualize o catálogo e escolha o valor correspondente.' } : {})} />{id && !optionNames.has(id) && <TechnicalDetails entityType={`Status ${roleLabel}`} entityId={id} />}</Fragment>;
+          return <Fragment key={role}><SelectField label={`Status ${roleLabel}`} value={id && optionNames.has(id) ? id : ''} onChange={(optionId) => updateMapping({ ...mapping, status_option_ids: { ...mapping.status_option_ids, [role]: optionId } })} options={(selectedField?.options ?? []).map((option) => ({ value: option.id, label: option.name }))} disabled={!selectedField} {...(id && !optionNames.has(id) ? { help: 'O valor salvo não aparece nas opções atuais. Atualize o catálogo e escolha o valor correspondente.' } : {})} /></Fragment>;
         })}
       </>}
     </div>

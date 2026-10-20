@@ -93,13 +93,13 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
       <div className="attempt-filter-actions"><button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Atualizar</button></div>
     </div>
 
-    {state.error && <div className="queue-error" role="alert"><h2>{page ? 'Não foi possível abrir a próxima página' : 'Falha ao consultar o histórico'}</h2><p>{state.error}</p>{state.requestId && <p className="mono muted">Solicitação {state.requestId}</p>}<button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Tentar novamente</button></div>}
+    {state.error && <div className="queue-error" role="alert"><h2>{page ? 'Não foi possível abrir a próxima página' : 'Falha ao consultar o histórico'}</h2><p>{state.error}</p><button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Tentar novamente</button></div>}
     {!page && state.loading && <section className="card read-state" role="status"><p>Consultando histórico de tentativas…</p></section>}
     {page && page.items.length === 0 && <section className="card empty" role="status"><h2>{projectId || result ? 'Nenhuma tentativa corresponde aos filtros' : 'Nenhuma tentativa registrada'}</h2><p>{projectId || result ? 'Ajuste os filtros para consultar outras tentativas.' : 'Prepare uma issue a partir de um projeto configurado.'}</p></section>}
     {page && page.items.length > 0 && <section className="card attempt-history-card">
       {state.loading && <p className="queue-page-status" role="status">Atualizando o histórico; a página atual permanece disponível.</p>}
       <div className="table-wrap"><table className="attempt-history-table"><thead><tr><th>Issue</th><th>Etapa / resultado</th><th>Atualizada</th><th>Ações</th></tr></thead><tbody>{page.items.map((attempt) => <tr key={attempt.id}>
-        <td><b>#{attempt.issue_number}</b><br /><small className="mono">{attempt.id}</small></td>
+        <td><b>#{attempt.issue_number}</b></td>
         <td>{attempt.phase}<br /><small>{attempt.result ?? 'Em andamento'}{attempt.suspension ? ` · ${attempt.suspension}` : ''}</small></td>
         <td><time dateTime={new Date(attempt.updated_at_ms).toISOString()}>{new Date(attempt.updated_at_ms).toLocaleString('pt-BR')}</time></td>
         <td><div className="row"><button type="button" onClick={() => onDetail(attempt.id, attempt.project_id)}>Consultar</button>{attempt.result && <button type="button" onClick={() => onPrepareRetry(attempt.id, attempt.project_id)}>Nova tentativa</button>}</div></td>

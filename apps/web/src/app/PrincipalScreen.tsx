@@ -15,7 +15,7 @@ import { DashboardPanel } from '../features/operations/DashboardPanel.js';
 import { RecordsPanel } from '../features/records/RecordsPanel.js';
 import { ProfilesPanel } from '../features/projects/ProfilesPanel.js';
 import type { OnboardingController } from '../features/onboarding/useOnboarding.js';
-import { TechnicalDetails } from './OperatorSupport.js';
+
 import { diagnosticCopyFor } from './operator-language.js';
 
 type LoadState<T> = { status: 'loading'; previous?: T } | { status: 'read-error'; message: string; requestId: string | null; previous?: T } | { status: 'empty'; value: T } | { status: 'ready'; value: T };
@@ -77,7 +77,7 @@ function usePanelData(route: HashRoute, search: string, reloadKey: number): Load
 
 function LoadMessage({ state, retry }: { state: LoadState<ReadData>; retry: () => void }) {
   if (state.status === 'loading') return <div className="card read-state" role="status"><span className="eyebrow">Controlador local</span><p>Consultando dados atuais…</p></div>;
-  if (state.status === 'read-error') return <div className="card read-state" role="alert"><h2>Não foi possível carregar</h2><p>{state.message}</p><p><strong>Próxima ação:</strong> tente consultar novamente; os dados confirmados anteriormente continuam preservados.</p><TechnicalDetails requestId={state.requestId} /><button type="button" onClick={retry}>Tentar novamente</button></div>;
+  if (state.status === 'read-error') return <div className="card read-state" role="alert"><h2>Não foi possível carregar</h2><p>{state.message}</p><p><strong>Próxima ação:</strong> tente consultar novamente; os dados confirmados anteriormente continuam preservados.</p><button type="button" onClick={retry}>Tentar novamente</button></div>;
   return <></>;
 }
 
@@ -106,7 +106,7 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
     if (!pending) return;
     setPauseOperationId(pending.operationId);
     setPauseUncertain(true);
-    setPauseNotice(`Há uma operação de fila sem confirmação. Consulte ${pending.operationId}; nenhuma nova alteração será enviada enquanto o resultado estiver indefinido.`);
+    setPauseNotice('Há uma alteração da fila sem confirmação. Consulte o estado atual antes de tentar outra ação.');
   }, []);
   const title = route.tab === 'dashboard' ? 'Dashboard' : ({ projetos: 'Projetos', perfis: 'Perfis Globais', fila: 'Fila Ready', tentativas: 'Tentativas', registros: 'Registros', configuracao: 'Configuração' } as const)[route.tab];
 
@@ -142,10 +142,10 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
         setPauseNotice(operation.error?.message ?? 'O controlador confirmou que a alteração da fila falhou. O estado será consultado novamente.');
         queue.resetPages();
       } else {
-        setPauseNotice(`A operação ${operationId} permanece ${operation.state}. O estado da fila depende de uma confirmação posterior.`);
+        setPauseNotice('A alteração da fila ainda não foi confirmada. Consulte novamente antes de tentar outra ação.');
       }
     } catch (error: unknown) {
-      setPauseNotice(`Não foi possível consultar a operação ${operationId}. A identidade foi preservada; não repita a alteração.`);
+      setPauseNotice('Não foi possível consultar o resultado. A alteração não será enviada novamente até confirmar o estado da fila.');
       onActionError(error);
     } finally {
       setPausing(false);
@@ -170,12 +170,12 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     }} aria-label={`Filtrar ${title.toLocaleLowerCase('pt-BR')}`} placeholder="Filtrar por texto" /></label></div>}
     {route.tab !== 'dashboard' && route.tab !== 'perfis' && <LoadMessage state={state} retry={() => setReloadKey((value) => value + 1)} />}
-    {saveIssues.map((issue) => <section className="card read-state" role="alert" key={issue.identity}><h2>{issue.kind === 'conflict' ? 'Conflito ao salvar configuração' : 'Falha ao salvar configuração'}</h2><p>{issue.message}</p><p><strong>Próxima ação:</strong> abra a configuração relacionada e consulte os dados atuais antes de salvar novamente.</p><TechnicalDetails requestId={issue.requestId} entityType="Configuração" entityId={issue.identity === 'global-settings' ? null : issue.identity} /><div className="row"><a className="button-link" href={issue.identity === 'global-settings' ? '#principal/configuracao' : `#principal/configuracao?projectId=${encodeURIComponent(issue.identity)}`}>Abrir configuração relacionada</a><button type="button" onClick={() => setSaveIssues((current) => current.filter((item) => item.identity !== issue.identity))}>Dispensar após conferir</button></div></section>)}
+    {saveIssues.map((issue) => <section className="card read-state" role="alert" key={issue.identity}><h2>{issue.kind === 'conflict' ? 'Conflito ao salvar configuração' : 'Falha ao salvar configuração'}</h2><p>{issue.message}</p><p><strong>Próxima ação:</strong> abra a configuração relacionada e consulte os dados atuais antes de salvar novamente.</p><div className="row"><a className="button-link" href={issue.identity === 'global-settings' ? '#principal/configuracao' : `#principal/configuracao?projectId=${encodeURIComponent(issue.identity)}`}>Abrir configuração relacionada</a><button type="button" onClick={() => setSaveIssues((current) => current.filter((item) => item.identity !== issue.identity))}>Dispensar após conferir</button></div></section>)}
     {route.tab === 'projetos' && <>
-      {projectsCatalog.error && <section className="card read-state" role="alert"><h2>Falha ao consultar projetos</h2><p>{projectsCatalog.error.message}</p>{projectsCatalog.error.requestId && <p className="mono muted">Solicitação {projectsCatalog.error.requestId}</p>}<button type="button" onClick={projectsCatalog.retry}>Tentar novamente</button></section>}
+      {projectsCatalog.error && <section className="card read-state" role="alert"><h2>Falha ao consultar projetos</h2><p>{projectsCatalog.error.message}</p><button type="button" onClick={projectsCatalog.retry}>Tentar novamente</button></section>}
       {!projectsCatalog.error && projectsCatalog.loading && !projectsCatalog.page && <section className="card read-state" role="status"><p>Consultando catálogo de projetos…</p></section>}
       {!projectsCatalog.error && projectsCatalog.page && projectsCatalog.page.items.length === 0 && <section className="card empty" role="status"><h2>{search.trim() ? 'Nenhuma correspondência' : 'Nenhum projeto cadastrado'}</h2><p>{search.trim() ? 'Altere o filtro ou cadastre uma origem.' : 'Cadastre uma origem para configurar o projeto.'}</p></section>}
-      {projectsCatalog.page && projectsCatalog.page.items.length > 0 && <section className="card project-catalog"><div className="table-wrap"><table><thead><tr><th>Projeto / origem</th><th>Branch-base</th><th>Revisão</th><th>Pré-requisitos</th><th>Ação</th></tr></thead><tbody>{projectsCatalog.page.items.map((project) => <tr key={project.id}><td data-label="Projeto / origem"><b>{project.name}</b><br /><small className="mono">{project.source.location}</small><br /><small>{project.source.kind === 'local' ? 'Origem local' : 'GitHub'}</small></td><td data-label="Branch-base" className="mono">{project.base_branch}</td><td data-label="Revisão">{project.revision}</td><td data-label="Pré-requisitos">{project.prerequisites.length ? <ul className="compact-list">{project.prerequisites.map((item) => <li key={item.code}>{diagnosticCopyFor(item.code, 'blocked', item.message, item.recovery).cause}</li>)}</ul> : 'Sem impedimentos registrados'}</td><td data-label="Ações"><div className="row"><a className="button-link" href={`#principal/configuracao?projectId=${encodeURIComponent(project.id)}`}>Selecionar projeto</a><button type="button" onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: project.id })}>Preparar</button></div></td></tr>)}</tbody></table></div>{projectsCatalog.page.has_more && <div className="pagination-actions"><button type="button" onClick={() => void projectsCatalog.loadMore()} disabled={projectsCatalog.loading}>{projectsCatalog.loading ? 'Carregando…' : 'Carregar próxima página'}</button></div>}</section>}
+      {projectsCatalog.page && projectsCatalog.page.items.length > 0 && <section className="card project-catalog"><div className="table-wrap"><table><thead><tr><th>Projeto / origem</th><th>Branch-base</th><th>Pré-requisitos</th><th>Ação</th></tr></thead><tbody>{projectsCatalog.page.items.map((project) => <tr key={project.id}><td data-label="Projeto / origem"><b>{project.name}</b><br /><small className="mono">{project.source.location}</small><br /><small>{project.source.kind === 'local' ? 'Origem local' : 'GitHub'}</small></td><td data-label="Branch-base" className="mono">{project.base_branch}</td><td data-label="Pré-requisitos">{project.prerequisites.length ? <ul className="compact-list">{project.prerequisites.map((item) => <li key={item.code}>{diagnosticCopyFor(item.code, 'blocked', item.message, item.recovery).cause}</li>)}</ul> : 'Sem impedimentos registrados'}</td><td data-label="Ações"><div className="row"><a className="button-link" href={`#principal/configuracao?projectId=${encodeURIComponent(project.id)}`}>Selecionar projeto</a><button type="button" onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: project.id })}>Preparar</button></div></td></tr>)}</tbody></table></div>{projectsCatalog.page.has_more && <div className="pagination-actions"><button type="button" onClick={() => void projectsCatalog.loadMore()} disabled={projectsCatalog.loading}>{projectsCatalog.loading ? 'Carregando…' : 'Carregar próxima página'}</button></div>}</section>}
     </>}
     {route.tab === 'dashboard' && <DashboardPanel projects={dashboardProjects} projectsLoad={{ loading: state.status === 'loading', refreshing: state.status === 'loading' && Boolean(dashboardProjects), error: state.status === 'read-error' ? { message: state.message, requestId: state.requestId } : null, stale: Boolean(dashboardProjects) && (state.status === 'loading' || state.status === 'read-error'), empty: state.status !== 'loading' && state.status !== 'read-error' && isProjectPage(state.value) && state.value.items.length === 0 }} onboarding={onboarding} onOpenSetup={onOpenInitialSetup} onRefreshProjects={() => setReloadKey((value) => value + 1)} onPrepare={(projectId, issueId, trigger) => onOpenDialog('preparation', trigger, { projectId, issueId })} onAttempt={(attemptId, projectId) => {
       const params = new URLSearchParams(route.params);
@@ -195,10 +195,10 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
         const projectId = event.currentTarget.value;
         if (projectId) params.set('projectId', projectId); else params.delete('projectId');
         window.location.hash = `#principal/configuracao${params.size ? `?${params.toString()}` : ''}`;
-      }}><option value="">Configuração global</option>{selectedProjectId && !selectedProjectIsOnPage && <option value={selectedProjectId}>Projeto selecionado (fora da página atual)</option>}{projectsCatalog.page?.items.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label>{selectedProjectId && !selectedProjectIsOnPage && <TechnicalDetails entityType="Projeto selecionado" entityId={selectedProjectId} />}<a href="#principal/projetos">Abrir catálogo de projetos</a>{projectsCatalog.page?.has_more && <small>Há mais projetos no catálogo.</small>}</div>
+      }}><option value="">Configuração global</option>{selectedProjectId && !selectedProjectIsOnPage && <option value={selectedProjectId}>Projeto selecionado (fora da página atual)</option>}{projectsCatalog.page?.items.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}</select></label><a href="#principal/projetos">Abrir catálogo de projetos</a>{projectsCatalog.page?.has_more && <small>Há mais projetos no catálogo.</small>}</div>
       <ProjectConfigurationForm projectId={route.params.get('projectId')} onSaveIssue={(issue, identity) => setSaveIssues((current) => issue ? [...current.filter((item) => item.identity !== issue.identity), issue] : current.filter((item) => item.identity !== identity))} />
     </>}
-    {route.tab === 'fila' && <QueuePanel load={queue.load} pageNotice={queue.pageNotice} pauseNotice={pauseNotice} pauseOperationId={pauseOperationId} pauseUncertain={pauseUncertain} onConsultPause={() => void consultPause()} onRefresh={queue.resetPages} onNextPage={queue.nextPage} onPreviousPage={queue.previousPage} canGoBack={queue.canGoBack} pausing={pausing}
+    {route.tab === 'fila' && <QueuePanel load={queue.load} pageNotice={queue.pageNotice} pauseNotice={pauseNotice} pauseUncertain={pauseUncertain} onConsultPause={() => void consultPause()} onRefresh={queue.resetPages} onNextPage={queue.nextPage} onPreviousPage={queue.previousPage} canGoBack={queue.canGoBack} pausing={pausing}
       onEnable={(trigger) => onOpenDialog('enable-queue', trigger)} onPause={() => {
         const observation = queue.load.observation;
         const etag = queue.load.etag;
@@ -226,7 +226,7 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
               try { recordUncertainOperation({ operationId: command.operationId, kind: 'queue-pause', recordedAt: Date.now() }); } catch { /* Keep the command identity in memory. */ }
               setPauseOperationId(command.operationId);
               setPauseUncertain(true);
-              setPauseNotice(`Resposta incerta. Consulte a operação ${command.operationId}; a fila não será tratada como pausada sem recibo.`);
+              setPauseNotice('A resposta não foi confirmada. Consulte o estado atual da fila antes de tentar outra ação.');
             }
             onActionError(error);
           }).finally(() => setPausing(false));

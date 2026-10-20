@@ -3,6 +3,7 @@ import { buildHash, labelForTab, parseHash, routeIdentity, tabs, type DialogId }
 import { useHashRoute } from './useHashRoute.js';
 import { PrincipalScreen } from './PrincipalScreen.js';
 import { HttpError } from '../api/http.js';
+import { operatorErrorMessage } from './operator-language.js';
 import { ProjectRegistrationForm } from '../features/projects/ProjectForm.js';
 import { ProfileForm } from '../features/projects/ProfileForm.js';
 import { ProjectCreationDialog } from '../features/projects/ProjectCreationDialog.js';
@@ -20,7 +21,7 @@ import './styles/event-connection-status.css';
 import { useOnboarding } from '../features/onboarding/useOnboarding.js';
 import { InitialSetupDialog } from '../features/onboarding/InitialSetupDialog.js';
 
-type DialogState = { status: 'ready'; message: string } | { status: 'action-error'; message: string; requestId: string | null };
+type DialogState = { status: 'ready'; message: string } | { status: 'action-error'; message: string };
 
 const navSymbols: Record<(typeof tabs)[number], string> = {
   dashboard: '▦', projetos: '▱', perfis: '◇', fila: '≡', tentativas: '↗', registros: '⌕', configuracao: '⚙',
@@ -219,8 +220,10 @@ export function AppShell() {
   }
 
   function reportActionError(error: unknown): void {
-    const message = error instanceof HttpError ? error.message : 'A ação não foi concluída. Consulte o controlador antes de tentar novamente.';
-    setDialogState({ status: 'action-error', message, requestId: error instanceof HttpError ? error.requestId : null });
+    const message = error instanceof HttpError
+      ? operatorErrorMessage(error.code, error.message, error.status)
+      : 'A ação não foi concluída. Consulte o estado atual antes de tentar novamente.';
+    setDialogState({ status: 'action-error', message });
   }
 
   function closeDialogImmediately(): void {
@@ -424,7 +427,7 @@ export function AppShell() {
             window.location.hash = buildHash('configuracao', new URLSearchParams({ projectId }));
           }}
         /> : <>
-          {dialogState.status === 'action-error' && <div className="read-state" role="alert"><h3>A ação não foi concluída</h3><p>{dialogState.message}</p>{dialogState.requestId && <p className="mono muted">Solicitação {dialogState.requestId}</p>}</div>}
+          {dialogState.status === 'action-error' && <div className="read-state" role="alert"><h3>A ação não foi concluída</h3><p>{dialogState.message}</p></div>}
           {dialog === 'preparation' || dialog === 'start-confirmation' ? <PreparationDialog key={`${route.params.get('projectId') ?? ''}:${route.params.get('dialog') === 'preparation' ? route.params.get('attemptId') ?? 'new' : 'new'}:${route.params.get('issueId') ?? ''}`} projectId={route.params.get('projectId')} initialIssueId={dialog === 'preparation' ? route.params.get('issueId') : null} previousAttemptId={route.params.get('dialog') === 'preparation' ? route.params.get('attemptId') : null} onOpenAttempt={openAttempt} /> : dialog === 'detail' && route.params.get('attemptId') ? <AttemptDetailDialog attemptId={route.params.get('attemptId')!} selectedRound={route.params.get('roundId')} selectedDeliveryId={route.params.get('deliveryId')} onSelectionChange={(roundId, deliveryId) => {
             const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
             if (roundId) params.set('roundId', roundId); else params.delete('roundId');

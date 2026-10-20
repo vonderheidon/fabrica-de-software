@@ -6,7 +6,7 @@ import { ProfileForm } from '../projects/ProfileForm.js';
 import { ProjectsFolderField } from '../projects/ProjectsFolderField.js';
 import { useGitHubSetup } from '../projects/useGitHubSetup.js';
 import { useNativeSelection } from '../projects/useNativeSelection.js';
-import { TechnicalDetails } from '../../app/OperatorSupport.js';
+
 
 const steps: readonly { id: OnboardingStep; title: string; description: string }[] = [
   { id: 'github', title: 'Conectar GitHub', description: 'Confirme a conta ativa e vincule a identidade que a fábrica usará.' },
@@ -234,7 +234,7 @@ export function InitialSetupDialog({
   }
 
   if (onboarding.load.loading && !settings) return <div className="onboarding-loading" role="status"><p>Consultando o progresso salvo…</p></div>;
-  if (!settings) return <div className="onboarding-load-error" role="alert"><h3>Não foi possível abrir a configuração inicial</h3><p>{onboarding.load.error?.message ?? 'A configuração atual ainda não foi carregada.'}</p><TechnicalDetails requestId={onboarding.load.error?.requestId} /><div className="onboarding-step-actions"><button type="button" onClick={() => void onboarding.refresh()}>Tentar novamente</button><button type="button" onClick={onRequestClose}>Fechar</button></div></div>;
+  if (!settings) return <div className="onboarding-load-error" role="alert"><h3>Não foi possível abrir a configuração inicial</h3><p>{onboarding.load.error?.message ?? 'A configuração atual ainda não foi carregada.'}</p><div className="onboarding-step-actions"><button type="button" onClick={() => void onboarding.refresh()}>Tentar novamente</button><button type="button" onClick={onRequestClose}>Fechar</button></div></div>;
   if (!snapshot) return <div className="onboarding-load-error" role="alert"><h3>Não foi possível abrir a configuração inicial</h3><p>Consulte novamente a configuração do controlador.</p><button type="button" onClick={() => void onboarding.refresh()}>Tentar novamente</button></div>;
 
   if (completed) return <div className="onboarding-complete" role="status" aria-live="polite">
@@ -283,7 +283,7 @@ export function InitialSetupDialog({
           saveError={onboarding.operation.status === 'failed' && onboarding.operation.kind === 'projects-root' ? { message: onboarding.operation.message, requestId: onboarding.operation.requestId } : null}
           disabled={commandBlocked}
         />
-        {onboarding.operation.status === 'confirmed' && onboarding.operation.kind === 'projects-root' && <div className="onboarding-receipt" role="status"><p>Pasta salva e confirmada pelo recibo do controlador.</p><TechnicalDetails operationId={onboarding.operation.operationId} eventCursor={onboarding.operation.receipt.event_cursor} /></div>}
+        {onboarding.operation.status === 'confirmed' && onboarding.operation.kind === 'projects-root' && <div className="onboarding-receipt" role="status"><p>Pasta salva e confirmada pelo recibo do controlador.</p></div>}
         {onboarding.operation.status === 'failed' && onboarding.operation.kind === 'projects-root' && <p className="error" role="alert">{onboarding.operation.message}</p>}
       </>}
       {activeStep === 'profiles' && <>
@@ -299,7 +299,7 @@ export function InitialSetupDialog({
             </article>;
           })}
         </div>
-        {profileReceipt && <div className="onboarding-receipt" role="status"><p>O perfil de {profileReceipt.role === 'implementer' ? 'Implementador' : 'Revisor'} foi salvo com recibo confirmado. {latestProfileReceipt ? 'A coleção foi atualizada.' : 'Consultando a coleção atual antes de prosseguir.'}</p><TechnicalDetails eventCursor={profileReceipt.eventCursor} />{profileReceiptPending && <button type="button" onClick={() => void onboarding.refresh()}>Atualizar perfis</button>}</div>}
+        {profileReceipt && <div className="onboarding-receipt" role="status"><p>O perfil de {profileReceipt.role === 'implementer' ? 'Implementador' : 'Revisor'} foi salvo com recibo confirmado. {latestProfileReceipt ? 'A coleção foi atualizada.' : 'Consultando a coleção atual antes de prosseguir.'}</p>{profileReceiptPending && <button type="button" onClick={() => void onboarding.refresh()}>Atualizar perfis</button>}</div>}
         {!missingProfileType && <p className="notice compact-notice" role="status">Os dois papéis já têm perfis vivos. Você pode concluir a configuração inicial.</p>}
         {profileFormOpen && missingProfileType && <ProfileForm
           key={`${profileFormKey}:${profileType}`}
@@ -328,12 +328,12 @@ export function InitialSetupDialog({
       </>}
     </section>
 
-    {operationMessage && <div className={onboarding.operation.status === 'failed' ? 'notice onboarding-error' : 'notice onboarding-status'} role={onboarding.operation.status === 'failed' ? 'alert' : 'status'}><p>{operationMessage}</p>{onboarding.operation.status === 'failed' && <TechnicalDetails requestId={onboarding.operation.requestId} />}</div>}
+    {operationMessage && <div className={onboarding.operation.status === 'failed' ? 'notice onboarding-error' : 'notice onboarding-status'} role={onboarding.operation.status === 'failed' ? 'alert' : 'status'}><p>{operationMessage}</p></div>}
     {completionReceiptPending && <button type="button" onClick={() => void onboarding.refresh()} disabled={onboarding.load.refreshing}>Atualizar confirmação</button>}
-    {activeStep !== 'github' && setup.accountOperation.status === 'uncertain' && <div className="notice onboarding-uncertain" role="alert"><b>Vínculo do GitHub sem confirmação</b><p>{setup.accountOperation.message}</p><TechnicalDetails operationId={setup.accountOperation.operationId} /><button type="button" onClick={() => void setup.recoverAccountOperation()}>Consultar operação original</button>{setup.accountOperation.recoveryError && <p>{setup.accountOperation.recoveryError}</p>}</div>}
-    {activeStep !== 'github' && setup.executableOperation.status === 'uncertain' && <div className="notice onboarding-uncertain" role="alert"><b>Caminho do GitHub CLI sem confirmação</b><p>{setup.executableOperation.message}</p><TechnicalDetails operationId={setup.executableOperation.operationId} /><button type="button" onClick={() => void setup.recoverExecutableOperation()}>Consultar operação original</button>{setup.executableOperation.recoveryError && <p>{setup.executableOperation.recoveryError}</p>}</div>}
+    {activeStep !== 'github' && setup.accountOperation.status === 'uncertain' && <div className="notice onboarding-uncertain" role="alert"><b>Vínculo do GitHub sem confirmação</b><p>{setup.accountOperation.message}</p><button type="button" onClick={() => void setup.recoverAccountOperation()}>Consultar operação original</button>{setup.accountOperation.recoveryError && <p>{setup.accountOperation.recoveryError}</p>}</div>}
+    {activeStep !== 'github' && setup.executableOperation.status === 'uncertain' && <div className="notice onboarding-uncertain" role="alert"><b>Caminho do GitHub CLI sem confirmação</b><p>{setup.executableOperation.message}</p><button type="button" onClick={() => void setup.recoverExecutableOperation()}>Consultar operação original</button>{setup.executableOperation.recoveryError && <p>{setup.executableOperation.recoveryError}</p>}</div>}
     {onboarding.operation.status === 'uncertain' && <UncertainOperationFeedback operation={onboarding.operation} onRecover={onboarding.recover} />}
-    {onboarding.load.error && settings && <div className="notice onboarding-read-error" role="alert"><p>A consulta mais recente falhou; os dados exibidos continuam sendo da última leitura confirmada. {onboarding.load.error.message}</p><TechnicalDetails requestId={onboarding.load.error.requestId} /><button type="button" onClick={() => void onboarding.refresh()} disabled={onboarding.load.refreshing}>Tentar atualizar</button></div>}
+    {onboarding.load.error && settings && <div className="notice onboarding-read-error" role="alert"><p>A consulta mais recente falhou; os dados exibidos continuam sendo da última leitura confirmada. {onboarding.load.error.message}</p><button type="button" onClick={() => void onboarding.refresh()} disabled={onboarding.load.refreshing}>Tentar atualizar</button></div>}
 
     <div className="onboarding-footer">
       <div className="onboarding-footer-secondary">
@@ -349,7 +349,7 @@ export function InitialSetupDialog({
         {activeStep === 'profiles' && isFinalSetupState && <button type="button" className="primary" onClick={() => void onboarding.complete()} disabled={!canComplete || operationBusy}>Concluir configuração</button>}
       </div>
     </div>
-    {onboarding.operation.status === 'failed' && onboarding.operation.kind === 'suppress' && <div className="error" role="alert"><p>Não foi possível salvar a preferência. {onboarding.operation.message}</p><TechnicalDetails requestId={onboarding.operation.requestId} /></div>}
+    {onboarding.operation.status === 'failed' && onboarding.operation.kind === 'suppress' && <div className="error" role="alert"><p>Não foi possível salvar a preferência. {onboarding.operation.message}</p></div>}
     </div>
     {showExitPrompt && <div className="onboarding-prompt-layer"><section className="onboarding-exit-prompt" role="alert" aria-labelledby="onboarding-exit-title" aria-describedby="onboarding-exit-description">
       <span className="eyebrow">Configuração inicial</span>
@@ -377,7 +377,7 @@ function UncertainOperationFeedback({ operation, onRecover }: {
   return <div className="notice onboarding-uncertain" role="alert">
     <b>Operação sem confirmação</b>
     <p>{operation.message}</p>
-    <TechnicalDetails operationId={operation.operationId} />
+
     <div className="row"><button type="button" onClick={() => void onRecover()} disabled={operation.status !== 'uncertain'}>Consultar resultado</button>{operation.canResend && <button type="button" onClick={() => void onRecover(true)}>Reapresentar a mesma operação</button>}</div>
     {operation.recoveryError && <p>{operation.recoveryError}</p>}
   </div>;

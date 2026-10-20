@@ -46,7 +46,7 @@ export function hasOriginalConfigurationSave(operationId: string): boolean {
 
 export async function revalidateConfigurationSave(operationId: string): Promise<ConfigurationSaveRequest> {
   const original = requests.get(operationId);
-  if (!original || !missing.has(operationId)) throw new Error('Consulte o resultado original. Sem os dados originais em memória, mantenha a consulta ou procure suporte.');
+  if (!original || !missing.has(operationId)) throw new Error('Consulte o resultado original. Sem os dados desta operação, mantenha a consulta aberta e atualize novamente mais tarde.');
   const { data } = await requestJsonWithMetadata<SettingsView>('/api/v1/settings');
   if (getControllerInstanceId() !== original.instanceId || data.settings.installation_id !== original.installationId || data.settings.account_id !== original.accountId) {
     throw new Error('O contexto mudou. Restabeleça explicitamente a instalação e a conta originais para reapresentar a operação.');

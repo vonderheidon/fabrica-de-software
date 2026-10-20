@@ -1,7 +1,7 @@
 import type { SelectionCapabilities } from '#contracts';
 import type { NativeSelectionController, NativeSelectionState } from './useNativeSelection.js';
 import { nativeSelectionMessage } from './useNativeSelection.js';
-import { TechnicalDetails } from '../../app/OperatorSupport.js';
+
 
 export function ProjectsFolderField({ persistedValue, value, capability, selection, onChange, onRevalidate, saveError, disabled = false }: {
   persistedValue: string | null;
@@ -28,7 +28,7 @@ export function ProjectsFolderField({ persistedValue, value, capability, selecti
       </button>
     </div>
     <p id="projects-root-help" className="field-guidance">Define onde novos projetos poderão ser criados. Necessária para cadastrar projetos; informe e valide antes do primeiro cadastro. Use um caminho local acessível, por exemplo “C:\\Projetos”. Alterar a raiz vale para novos projetos e não move os existentes.</p>
-    {!capability.available && <div className="notice" role="status"><p>A seleção assistida de pasta está indisponível nesta sessão.</p><TechnicalDetails code="NATIVE_SELECTION_UNAVAILABLE" facts={{ reason: capability.reason ?? 'Não informado' }} /></div>}
+    {!capability.available && <div className="notice" role="status"><p>A seleção assistida de pasta está indisponível nesta sessão.</p></div>}
     <p className="projects-folder-saved-value"><span className="eyebrow">Pasta salva</span><span className="mono">{persistedValue ?? 'Ainda não configurada'}</span></p>
     {differsFromSaved && <p className="selection-message" role="status">A edição atual ainda não foi salva. O valor salvo acima permanece ativo.</p>}
     {message && <p className={selectionStateIsWarning(currentSelection) ? 'selection-message selection-message-warning' : 'selection-message'} role={selectionStateIsWarning(currentSelection) ? 'alert' : 'status'}>{message}</p>}
@@ -44,7 +44,7 @@ export function ProjectsFolderField({ persistedValue, value, capability, selecti
     {saveError && <div id="projects-root-error" className="notice" role="alert">
       <b>A pasta não foi confirmada</b>
       <p>{saveError.message} A edição e o valor salvo anteriormente foram mantidos. Tente salvar novamente após a revalidação ou escolha outra pasta.</p>
-      <TechnicalDetails requestId={saveError.requestId} />
+
     </div>}
   </div>;
 }

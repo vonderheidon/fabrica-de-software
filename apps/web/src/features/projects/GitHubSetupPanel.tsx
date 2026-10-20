@@ -3,7 +3,7 @@ import type { NativeSelectionController } from './useNativeSelection.js';
 import { nativeSelectionMessage } from './useNativeSelection.js';
 import type { GitHubSettingsOperation, GitHubSetupController } from './useGitHubSetup.js';
 import { FieldHelp } from './FieldHelp.js';
-import { OperatorDiagnosticCard, TechnicalDetails } from '../../app/OperatorSupport.js';
+import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 
 export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, disabled = false }: {
   settings: SettingsView;
@@ -42,7 +42,7 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
     <p className="muted">A verificação apenas consulta o GitHub CLI e a identidade observada. A fábrica não faz login nem troca a conta ativa do computador.</p>
 
     {setup.verification.status === 'checking' && <p role="status">Consultando executável, autenticação e identidade ativa…</p>}
-    {verificationError && <div className="notice" role="alert"><b>Status do GitHub não confirmado</b><p>{verificationError.message}</p><p>A falha desta consulta não altera nem apaga o resultado de uma gravação.</p><TechnicalDetails requestId={verificationError.requestId} /></div>}
+    {verificationError && <div className="notice" role="alert"><b>Status do GitHub não confirmado</b><p>{verificationError.message}</p><p>A falha desta consulta não altera nem apaga o resultado de uma gravação.</p></div>}
     {verificationStale && <div className="notice" role="status"><b>Observação anterior à configuração atual</b><p>Atualize a configuração e verifique o status novamente antes de vincular ou trocar a conta.</p></div>}
 
     <div className="github-account-summary" aria-live="polite">
@@ -123,17 +123,10 @@ export function GitHubDiagnostics({ options }: { options: GitHubSetupOptions }) 
   const diagnostics = [...new Map([...options.executable.diagnostics, ...options.diagnostics]
     .map((item) => [JSON.stringify([item.code, item.message, item.recovery]), item])).values()];
   const searchCodes = new Set(['GH_CANDIDATE_NOT_FOUND', 'GH_CANDIDATE_INVALID', 'GH_CANDIDATE_PATH_INVALID']);
-  const searchDetails = diagnostics.filter((item) => searchCodes.has(item.code));
   const actionable = diagnostics.filter((item) => !searchCodes.has(item.code));
   if (diagnostics.length === 0) return null;
   return <div className="github-diagnostics" aria-label="Diagnóstico do GitHub">
     {actionable.map((item, index) => <OperatorDiagnosticCard key={`${item.code}-${index}`} code={item.code} state="unavailable" cause={item.message} recovery={item.recovery} />)}
-    {searchDetails.length > 0 && <TechnicalDetails>
-      <p>Detalhes dos caminhos descartados durante a busca do GitHub CLI.</p>
-      <ul>{searchDetails.map((item, index) => <li key={`${item.code}-${index}`}>
-        <code>{item.code}</code>: {item.message} {item.recovery}
-      </li>)}</ul>
-    </TechnicalDetails>}
   </div>;
 }
 
@@ -148,7 +141,7 @@ function GitHubOperationFeedback({ operation, kind, onConsult }: { operation: Gi
     <p>{operation.message}</p>
     {operation.targetLogin && <p>Conta selecionada para a operação original: @{operation.targetLogin}</p>}
     {operation.targetPath && <p>O caminho da operação original foi preservado em memória para consulta.</p>}
-    <TechnicalDetails operationId={operation.operationId} />
+
     <button type="button" onClick={onConsult}>Consultar operação original</button>
     {operation.recoveryError && <p role="alert">{operation.recoveryError}</p>}
   </div>;
@@ -156,7 +149,7 @@ function GitHubOperationFeedback({ operation, kind, onConsult }: { operation: Gi
     <b>{kind === 'binding' ? 'Vínculo não salvo' : 'Caminho do executável não salvo'}</b>
     <p>{operation.message}</p>
     {operation.recovery && <p>{operation.recovery}</p>}
-    <TechnicalDetails requestId={operation.requestId} entityType={operation.activeAttemptId ? 'Tentativa que bloqueou a ação' : null} entityId={operation.activeAttemptId} />
+
     {operation.activeAttemptId && <p><a href={attemptDetailHref(operation.activeAttemptId)}>Abrir a tentativa ativa que bloqueou a troca</a></p>}
   </div>;
 }

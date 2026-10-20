@@ -3,7 +3,7 @@ import type { HttpCreationMode as CreationMode, HttpCreationView as CreationView
 import { createScaffoldRequest } from '../../api/observation-requests.js';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 import { readUncertainOperations, recordUncertainOperation, resolveUncertainOperation } from '../../api/uncertain-operations.js';
-import { OperatorDiagnosticCard, OperatorState, TechnicalDetails } from '../../app/OperatorSupport.js';
+import { OperatorDiagnosticCard, OperatorState } from '../../app/OperatorSupport.js';
 import { operatorState } from '../../app/operator-language.js';
 import './ProjectCreationDialog.css';
 
@@ -226,7 +226,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
       } else {
         try { recordUncertainOperation({ operationId, kind: 'scaffold-create', recordedAt: Date.now() }); } catch { /* Keep the operation identity in component state. */ }
         setUncertain(true);
-        setOperationNotice(`A resposta da criação está incerta. Consulte a operação ${operationId}; não envie outra criação.`);
+        setOperationNotice('A resposta da criação não foi confirmada. Consulte o estado atual antes de iniciar outra criação.');
       }
     } finally { setSubmitting(false); }
   }
@@ -328,7 +328,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
       {plan.plan.input.remote && <div><small>Repositório remoto</small><b>{plan.plan.owner_login ?? 'Proprietário selecionado'}/{plan.plan.input.remote.name}</b><span>{plan.plan.input.remote.visibility === 'private' ? 'Privado' : 'Público'}</span></div>}
     </div>
     <div className="creation-resource-list"><h4>Arquivos planejados</h4>{plan.plan.files.map((file) => <div className="creation-resource-row" key={file.path}><code>{file.path}</code><span>{file.bytes} bytes</span></div>)}</div>
-    <TechnicalDetails facts={{ template_digest: plan.plan.template_digest, parent_identity: plan.plan.parent_identity, account_id: plan.plan.account.id, owner_id: plan.plan.owner_id }}><ul>{plan.plan.files.map((file) => <li key={file.path}>{file.path}: {file.sha256}</li>)}</ul></TechnicalDetails>
+
     <div className="notice creation-engineering"><b>Engenharia incluída</b><p>Tracker {plan.plan.engineering.tracker} · domínio {plan.plan.engineering.domain} · instruções em {plan.plan.engineering.instruction_file} · triagem {plan.plan.engineering.triage_enabled ? 'incluída' : 'desativada'}. Nenhuma skill será instalada nem label criada.</p></div>
     <div className="creation-effect-list"><h4>Efeitos previstos</h4><ul>{plan.plan.effects.map((effect) => <li key={effect}>{stepLabels[effect] ?? effect}</li>)}</ul></div>
     {plan.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos ainda pendentes</b>{plan.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}</div>}
@@ -354,13 +354,13 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
         return <option key={mode} value={mode}>{modeLabels[mode]}{capability && !capability.available ? ' · indisponível neste host' : ''}</option>;
       })}</select>{modeCapability && !modeCapability.available && <small className="error">{modeCapability.reason} {modeCapability.recovery}</small>}</label>
       {remoteMode && <>
-        <div className="form-field"><label htmlFor="creation-owner-account">Proprietário do repositório<select id="creation-owner-account" value={form.ownerId === options?.account.id ? form.ownerId : ''} onChange={(event) => { const ownerId = event.currentTarget.value; ownerEditedRef.current = true; invalidatePlan((current) => ({ ...current, ownerId })); }}><option value="">Selecione…</option>{options?.account.id && options.account.login && <option value={options.account.id}>{options.account.login}</option>}</select></label><TechnicalDetails><label htmlFor="creation-owner">Outro proprietário (ID de suporte)<input id="creation-owner" value={form.ownerId} onChange={(event) => { const ownerId = event.currentTarget.value; ownerEditedRef.current = true; invalidatePlan((current) => ({ ...current, ownerId })); }} /></label></TechnicalDetails></div>
+        <div className="form-field"><label htmlFor="creation-owner-account">Proprietário do repositório<select id="creation-owner-account" value={form.ownerId === options?.account.id ? form.ownerId : ''} onChange={(event) => { const ownerId = event.currentTarget.value; ownerEditedRef.current = true; invalidatePlan((current) => ({ ...current, ownerId })); }}><option value="">Selecione…</option>{options?.account.id && options.account.login && <option value={options.account.id}>{options.account.login}</option>}</select></label></div>
         <label className="form-field" htmlFor="creation-remote-name">Nome do repositório remoto<input id="creation-remote-name" value={form.remoteName} onChange={(event) => { const remoteName = event.currentTarget.value; setRemoteNameEdited(true); invalidatePlan((current) => ({ ...current, remoteName })); }} /></label>
         <label className="form-field" htmlFor="creation-visibility">Visibilidade<select id="creation-visibility" value={form.visibility} onChange={(event) => { const visibility = event.currentTarget.value as FormState['visibility']; invalidatePlan((current) => ({ ...current, visibility })); }}><option value="private">Privado</option><option value="public">Público</option></select></label>
       </>}
       <label className="check form-check field-full"><input type="checkbox" checked={form.triageEnabled} onChange={(event) => { const triageEnabled = event.currentTarget.checked; invalidatePlan((current) => ({ ...current, triageEnabled })); }} />Incluir vocabulário de triagem nas instruções de engenharia</label>
     </div>
-    {options && <div className="creation-account-note"><small>Conta observada: <b>{options.account.login ?? 'Não confirmada'}</b></small><TechnicalDetails entityType="Conta" entityId={options.account.id} state={options.account.state} /></div>}
+    {options && <div className="creation-account-note"><small>Conta observada: <b>{options.account.login ?? 'Não confirmada'}</b></small></div>}
     {options?.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}
     {planError && <div className="read-state" role="alert">{planError}</div>}
     <div className="form-actions"><button type="submit" className="primary" disabled={!options || planning || uncertain || !form.name.trim() || !form.templateId || !form.destinationRelative.trim() || !form.baseBranch.trim() || (remoteMode && (!form.ownerId.trim() || !form.remoteName.trim())) || modeCapability?.available !== true}>{planning ? 'Preparando plano…' : 'Revisar plano'}</button></div>
@@ -385,14 +385,13 @@ function CreationResult({ load, onRefresh, onOpenProject, canReconcile, reconcil
     <dl className="creation-result-grid"><div><dt>Pasta</dt><dd><code>{creation.plan.destination}</code></dd></div><div><dt>Modalidade</dt><dd>{modeLabels[creation.plan.input.creation_mode]}</dd></div><div><dt>Branch-base</dt><dd>{creation.plan.input.base_branch}</dd></div><div><dt>Conta</dt><dd>{creation.plan.account.login ?? 'Não confirmada'}</dd></div></dl>
     {creation.plan.input.creation_mode === 'local' && <p>O projeto está somente nesta máquina. Confirme um remoto GitHub antes de iniciar uma issue.</p>}
     {creation.plan.input.creation_mode === 'remote_no_push' && <p>O repositório remoto foi solicitado sem envio do commit inicial. Confira os efeitos abaixo; a publicação do conteúdo local ainda precisa ser feita.</p>}
-    <div className="creation-effect-list"><h4>Efeitos da criação</h4>{visibleEffects.length === 0 && <p>Nenhum efeito remoto solicitado.</p>}{visibleEffects.map((effect) => <div className="creation-effect-row" key={effect.kind}><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><span className={`pill ${effect.state === 'confirmed' ? '' : 'warn'}`}><OperatorState value={effect.state} /></span>{effect.reason && <TechnicalDetails code={effect.reason} />}</div>)}</div>
+    <div className="creation-effect-list"><h4>Efeitos da criação</h4>{visibleEffects.length === 0 && <p>Nenhum efeito remoto solicitado.</p>}{visibleEffects.map((effect) => <div className="creation-effect-row" key={effect.kind}><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><span className={`pill ${effect.state === 'confirmed' ? '' : 'warn'}`}><OperatorState value={effect.state} /></span></div>)}</div>
     <div className="creation-progress-grid"><div><b>Etapas locais confirmadas</b><ul>{confirmedEffects.map((item) => <li key={item.step}>{stepLabels[item.step]}: <OperatorState value={item.state} /></li>)}</ul></div><div><b>Etapas pendentes ou incertas</b><ul>{pendingEffects.map((item) => <li key={item.step}>{stepLabels[item.step]}: <OperatorState value={item.state} /></li>)}{remoteEffects.filter((item) => ['unknown', 'running', 'failed_known'].includes(item.state)).map((item) => <li key={item.kind}>{stepLabels[item.kind]}: <OperatorState value={item.state} /></li>)}</ul>{pendingEffects.length === 0 && !remoteEffects.some((item) => ['unknown', 'running', 'failed_known'].includes(item.state)) && <p>Nenhuma etapa pendente registrada.</p>}</div></div>
-    {(creation.diagnostic || diagnostics.length > 0) && <div className="read-state" role="alert"><b>A criação precisa de atenção</b><p>Confira as etapas pendentes e consulte os efeitos preservados. A conferência não executa etapas restantes nem repete publicações.</p><TechnicalDetails code={creation.diagnostic} facts={{ diagnostics }} /></div>}
+    {(creation.diagnostic || diagnostics.length > 0) && <div className="read-state" role="alert"><b>A criação precisa de atenção</b>{creation.diagnostic && ['SCAFFOLD_GIT_IDENTITY_REQUIRED', 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED', 'CREATION_REMOTE_DESCRIPTION_CHANGED'].includes(creation.diagnostic)
+      ? <OperatorDiagnosticCard code={creation.diagnostic} state="blocked" />
+      : <p>Confira as etapas pendentes e consulte os efeitos preservados. A conferência não executa etapas restantes nem repete publicações.</p>}</div>}
     {prerequisites.length > 0 && <div className="notice"><b>Antes de iniciar uma issue</b>{prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} projectId={creation.project_id} />)}</div>}
-    <TechnicalDetails entityType="Criação" entityId={creation.id} state={creation.state} operationId={creation.operation_id} facts={{ template_id: creation.plan.input.template_id, template_digest: creation.plan.template_digest, baseline_sha: creation.baseline_sha, baseline_ref: creation.baseline_ref, account_id: creation.plan.account.id }}>
-      {effects.map((effect) => <div key={effect.operation_id}><b>{stepLabels[effect.kind]}</b><pre>{JSON.stringify({ operation_id: effect.operation_id, state: effect.state, receipt: effect.receipt, reason: effect.reason }, null, 2)}</pre></div>)}
-      {remoteEffects.map((effect) => <pre key={effect.kind}>{JSON.stringify(effect, null, 2)}</pre>)}
-    </TechnicalDetails>
+
     {reconcileNotice && <div className="read-state" role="status">{reconcileNotice}</div>}
     <div className="form-actions"><button type="button" onClick={onRefresh}>Consultar criação novamente</button>{canReconcile && !reconcileUncertain && <button type="button" onClick={onReconcile} disabled={reconciling}>{reconciling ? 'Conferindo…' : 'Conferir efeitos preservados'}</button>}{reconcileUncertain && <button type="button" onClick={onConsultReconcile} disabled={reconciling}>{reconciling ? 'Consultando…' : 'Consultar conferência'}</button>}{creation.project_id && <button type="button" className="primary" onClick={() => onOpenProject(creation.project_id!)}>Abrir configuração do projeto</button>}</div>
   </section>;

@@ -146,6 +146,8 @@ Sem responsável: ignorar. Outro responsável: ignorar. Múltiplos responsáveis
 
 Polling GraphQL com paginação completa dos itens necessários; snapshot atual é suficiente para fila. Não importar o gatilho `ProjectV2ItemStatusChangedEvent` ou depender de captar Backlog → Ready em uma janela temporal. Intervalo inicial recomendado 15 s, configurável com limite e backoff de leitura; não é SLA. API parcial, auth errada ou rate limit não autorizam despacho. Respeitar Retry-After/reset; UI indica consulta degradada.
 
+A seleção automática global consulta somente projetos com automação habilitada. Falha ou configuração incompleta de um projeto bloqueia seus candidatos, sem invalidar candidatos de outros projetos com leitura completa e identidade confirmada. Backoff de projeto fica restrito a ele; falhas compartilhadas de identidade ou mudanças de configuração durante a leitura bloqueiam o despacho. Uma observação global pode ser parcial (`complete=false`) e válida para os candidatos confirmados (`valid=true`); nesse caso, o total global permanece desconhecido e a interface identifica os projetos bloqueados. A habilitação de um projeto exige sua observação completa. Automação do projeto não substitui a habilitação global; a interface explica a pausa global e oferece acesso à fila para habilitá-la.
+
 ### 4.2 Consumo e repetição
 
 No banco, deduplicar por projeto/issue e ciclo de Ready observado. Registrar intenção e tentativa antes do lançamento. Uma issue que continua em Ready após tentativa iniciada não é reexecutada por cada polling, restart, falha de mover card ou reordenação. Tentativa falha/cancelada não ganha retry automático.
@@ -374,7 +376,7 @@ Contrato conceitual:
 - `cancelAttempt(attemptId) -> processo de encerramento e recibos`: idempotente por operação, inclui lançamentos pendentes.
 - `interactionSurface(handle)`: referência tipada terminal inicialmente, não PID/socket/token.
 
-O módulo execution é adapter-neutral. SessionId, PID, Maestri terminal ID e Job são detalhes privados; DTOs de diagnóstico podem expor IDs sanitizados, nunca permitir controle por PID. Adapter precisa declarar capacidades e limites; Eve futuro só será desenhado após pesquisa de seu SDK. Não criar simulação Eve nem usar igualdade de métodos como prova de substituibilidade.
+O módulo execution é adapter-neutral. SessionId, PID, Maestri terminal ID, Job, códigos de erro, IDs de correlação, recibos e fatos brutos de diagnóstico são detalhes privados do backend, disponíveis para os agentes e para a operação interna. Não os mostre ao operador em mensagens, painéis de suporte ou campos de entrada manual; identificadores necessários à correlação podem ser mantidos internamente pela interface sem serem renderizados. A UI apresenta somente estado, causa e próxima ação em linguagem do operador. Adapter precisa declarar capacidades e limites; Eve futuro só será desenhado após pesquisa de seu SDK. Não criar simulação Eve nem usar igualdade de métodos como prova de substituibilidade.
 
 Eventos úteis: passage-ready, progress, question-raised, question-answer-receipt, result-accepted, tracking-lost, cleanup-updated. Transcript completo não é necessário para manter resultados. Fila humana paralela e interceptação de mensagens nativas não pertencem à interface.
 
@@ -413,7 +415,7 @@ Uma interface em outra máquina deve acessar uma conexão autenticada explicitam
 
 ### Projetos
 
-Catálogo, Criar, Conectar e configuração. Separar projeto local de GitHub Project visualmente. Wizard curto com plano junto à ação; detalhes técnicos recolhidos. Erro de consulta de catálogo não apaga falha de save nem se confunde com sucesso de criação.
+Catálogo, Criar, Conectar e configuração. Separar projeto local de GitHub Project visualmente. Wizard curto com plano junto à ação. Não exibir detalhes técnicos, IDs internos, códigos brutos ou fatos de diagnóstico; mensagens de erro explicam o problema e a próxima ação em linguagem do operador. Erro de consulta de catálogo não apaga falha de save nem se confunde com sucesso de criação.
 
 ### Operação
 
@@ -421,11 +423,11 @@ Conta/host executor, esteira ligada/pausada, tentativa ativa, próximas issues e
 
 ### Tentativa
 
-Issue, modo, etapa/rodada, progresso, resultado, diff, checks, review, commit/PR e pergunta pendente. Ações conforme estado: Abrir terminal/pasta, Responder, Cancelar, Nova tentativa, Repetir captura em caso de falha técnica, Concluir publicação. Detalhes técnicos contêm integração/recibos sem segredos. Nenhum reset de equipe/liberação de reserva.
+Issue, modo, etapa/rodada, progresso, resultado, diff, checks, review, commit/PR e pergunta pendente. Ações conforme estado: Abrir terminal/pasta, Responder, Cancelar, Nova tentativa, Repetir captura em caso de falha técnica, Concluir publicação. A UI mostra resultados e orientações úteis ao operador; integração, recibos, IDs, códigos e fatos técnicos permanecem no backend para diagnóstico pelos agentes. Nenhum reset de equipe/liberação de reserva.
 
 ### Requisitos de UI
 
-Desktop/mobile, teclado, foco visível, nomes acessíveis computados, contraste/zoom medidos. Mensagens de save/polling não interrompem leitura histórica nem mudam seleção. Contexto de projeto/tentativa persistido na URL; resumo atual e detalhe histórico distintos. Conteúdo carregando/falha/vazio tem ação clara. Campos locais preservados em conflito; sem retry automático de criação/start. Teste visual usa exclusivamente Playwright MCP/Chrome conforme anexo.
+Desktop/mobile, teclado, foco visível, nomes acessíveis computados, contraste/zoom medidos. Mensagens de save/polling não interrompem leitura histórica nem mudam seleção. Contexto de projeto/tentativa persistido na URL; resumo atual e detalhe histórico distintos. Conteúdo carregando/falha/vazio tem ação clara. Diagnósticos na UI informam causa e próxima ação em linguagem do operador; detalhes técnicos, códigos brutos, IDs de correlação, recibos e fatos de diagnóstico ficam no backend e não são apresentados ao usuário. Campos locais preservados em conflito; sem retry automático de criação/start. Teste visual usa exclusivamente Playwright MCP/Chrome conforme anexo.
 
 ## 10. Desenvolvimento, aceitação e evolução
 
@@ -475,7 +477,7 @@ Validar primeiro o percurso vertical. Para cancelamento, dois cenários represen
 | AC-24 | UTF-8/frames | Português/emoji fragmentados conservados; malformed/oversize/EOF têm diagnóstico e encerram esperas |
 | AC-25 | Inicialização dentro do Maestri | Controlador iniciado pelo terminal-âncora com contexto herdado e validado; TUI e ownership confirmados; sem attach externo |
 | AC-26 | Cleanup | Recursos conhecidos iniciados pela fábrica recebem parada, recursos manuais não são alvos; confirmação ou incerteza explícita, sem alegar ausência global de processos nem apagar arquivos com parada incerta |
-| AC-27 | UI | Quatro percursos e três modos, conflito/save/polling, desktop/mobile/teclado e limites visuais |
+| AC-27 | UI | Quatro percursos e três modos, conflito/save/polling, desktop/mobile/teclado e limites visuais; nenhum detalhe técnico bruto, ID interno, código, recibo ou fato de diagnóstico é apresentado ao operador |
 | AC-29 | Persistência e desempenho | Com caches e arquivos ignorados volumosos, medir e registrar tamanho persistido (banco e artefatos auxiliares) e latência de listagens, histórico e polling antes/depois; aumentar esses arquivos não aumenta conteúdo persistido nem payloads, e essas consultas não leem ou serializam conteúdo do projeto; entrega continua identificada e recuperável pelo Git |
 | AC-28 | Manutenção | Mudança de executor/MCP sem SQL/UI internos; módulos respeitam imports e contratos; novos checks não alteram lifecycle |
 

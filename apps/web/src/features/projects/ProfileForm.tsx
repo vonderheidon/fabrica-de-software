@@ -7,7 +7,7 @@ import { configurationCommand } from './configuration-requests.js';
 import { createSaveLifecycle } from './save-lifecycle.js';
 import { catalogModel, profileChangesForSave, profileCombinationValid, selectProfileModel, selectProfileProvider } from './profile-editor.js';
 import { isLastProfileOfType } from './profile-collection.js';
-import { TechnicalDetails } from '../../app/OperatorSupport.js';
+
 
 type CatalogState = { status: 'loading' | 'ready' | 'error'; data: ExecutionCatalog | null; message?: string };
 type SaveState = { status: 'idle' } | { status: 'saving' } | { status: 'error' | 'conflict'; message: string; code?: string; requestId?: string | null; facts?: Readonly<Record<string, string | number | boolean | null>> | null; affectedRequirements?: readonly string[] };
@@ -409,10 +409,10 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
 
     {profileLoadError && <p role="alert" className="error">{profileLoadError}</p>}
     {refreshError && <div className="notice compact-notice" role="status"><p>A consulta da configuração mais recente falhou. Sua edição continua preservada.</p><button type="button" onClick={retryConfiguration}>Tentar consultar novamente</button></div>}
-    {saveState.status === 'error' && <div className="notice profile-save-error" role="alert"><b>Não foi possível confirmar o salvamento</b><p>{saveState.message}</p><TechnicalDetails code={saveState.code} requestId={saveState.requestId} facts={saveState.facts} affectedRequirements={saveState.affectedRequirements} /></div>}
+    {saveState.status === 'error' && <div className="notice profile-save-error" role="alert"><b>Não foi possível confirmar o salvamento</b><p>{saveState.message}</p></div>}
     {typeChangeBlocker && <div className="notice profile-save-error" role="alert"><b>Substitua o perfil nos projetos relacionados</b><p>{typeChangeBlocker.count} projeto(s) atual(is) usam este perfil neste papel.</p><ul className="compact-list">{typeChangeBlocker.projectIds.map((id, index) => <li key={id}><a href={`#principal/configuracao?projectId=${encodeURIComponent(id)}`}>Abrir configuração do projeto afetado {index + 1}</a></li>)}</ul>{typeChangeBlocker.truncated && <p>Há outros projetos relacionados além dos exibidos.</p>}{typeChangeBlocker.recovery && <p>{typeChangeBlocker.recovery}</p>}</div>}
-    {saveState.status === 'conflict' && <div className="notice profile-save-error" role="alert"><b>Conflito ao salvar</b><p>{saveState.message}</p><TechnicalDetails code={saveState.code} requestId={saveState.requestId} facts={saveState.facts} affectedRequirements={saveState.affectedRequirements} />{canApplyConflict && <button type="button" onClick={applyLatestRevision}>{profileId ? 'Aplicar minha edição sobre a revisão atual' : 'Usar a revisão atual e tentar novamente'}</button>}</div>}
-    {uncertainId && <div className="notice profile-save-error" role="alert"><b>Gravação ainda não confirmada</b><p>{recoveryMessage}</p><TechnicalDetails operationId={uncertainId} /><button type="button" onClick={() => void finishUncertainSave()} disabled={saveInFlightRef.current}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void finishUncertainSave(true)} disabled={saveInFlightRef.current}>Reapresentar a mesma operação</button>}</div>}
+    {saveState.status === 'conflict' && <div className="notice profile-save-error" role="alert"><b>Conflito ao salvar</b><p>{saveState.message}</p>{canApplyConflict && <button type="button" onClick={applyLatestRevision}>{profileId ? 'Aplicar minha edição sobre a revisão atual' : 'Usar a revisão atual e tentar novamente'}</button>}</div>}
+    {uncertainId && <div className="notice profile-save-error" role="alert"><b>Gravação ainda não confirmada</b><p>{recoveryMessage}</p><button type="button" onClick={() => void finishUncertainSave()} disabled={saveInFlightRef.current}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void finishUncertainSave(true)} disabled={saveInFlightRef.current}>Reapresentar a mesma operação</button>}</div>}
 
     <div className="profile-dialog-footer">
       <button type="button" onClick={onClose}>Cancelar</button>

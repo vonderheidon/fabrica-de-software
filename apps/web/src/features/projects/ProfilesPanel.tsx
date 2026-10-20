@@ -454,6 +454,6 @@ function ProfileDeleteBlockers({ error }: { error: HttpError }) {
       {truncated && <small>A lista de projetos relacionados foi limitada pelo controlador.</small>}
     </>}
     {error.recovery && <p><b>Próxima ação:</b> {error.recovery}</p>}
-    {error.requestId && <small>Consulte o suporte do controlador se o impedimento persistir.</small>}
+    {error.requestId && <small>Se o impedimento persistir, atualize os dados do perfil e tente novamente mais tarde.</small>}
   </div>;
 }

@@ -15,7 +15,7 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
   const [uncertain, setUncertain] = useState(false);
   const observation = load.observation;
   const authorized = observation?.summary_hash !== null && observation?.summary_hash !== undefined && authorizedSummaryHash === observation.summary_hash;
-  const ready = load.status === 'ready' && observation?.complete === true && observation.valid && observation.eligible_total !== null && observation.observation_id !== null && observation.summary_hash !== null && load.etag !== null;
+  const ready = load.status === 'ready' && observation?.valid === true && observation.observation_id !== null && observation.summary_hash !== null && load.etag !== null;
 
   useEffect(() => { setAuthorizedSummaryHash(null); }, [observation?.summary_hash]);
 
@@ -48,7 +48,7 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
       } else {
         try { recordUncertainOperation({ operationId: id, kind: 'queue-enable', recordedAt: Date.now() }); } catch { /* The operation id remains visible in this dialog. */ }
         setUncertain(true);
-        setMessage(`Resposta incerta para a operação ${id}. Consulte a operação antes de tentar outra alteração.`);
+        setMessage('A resposta não foi confirmada. Consulte o estado atual da fila antes de tentar outra alteração.');
       }
     } finally {
       setSubmitting(false);
@@ -71,10 +71,10 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
         setMessage(operation.error?.message ?? 'O controlador confirmou que a habilitação falhou. Revise a observação antes de uma nova autorização.');
         refresh();
       } else {
-        setMessage(`A operação ${operationId} permanece ${operation.state}. Não envie outra habilitação enquanto o resultado estiver indefinido.`);
+        setMessage('A habilitação ainda não foi confirmada. Não envie outra alteração até consultar o estado atual da fila.');
       }
     } catch (error: unknown) {
-      setMessage(error instanceof HttpError ? error.message : `Não foi possível consultar a operação ${operationId}. A identidade foi preservada; não reenvie a habilitação.`);
+      setMessage(error instanceof HttpError ? error.message : 'Não foi possível consultar o resultado. A habilitação não será enviada novamente até confirmar o estado da fila.');
     } finally {
       setSubmitting(false);
     }
@@ -83,9 +83,9 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
   return <div className="queue-enable-dialog">
     <p className="muted">Habilitar autoriza novos inícios somente para o escopo e as condições resumidas abaixo. A tentativa ativa permanece acompanhada.</p>
     {load.status === 'loading' && !observation && <p role="status">Consultando uma observação completa da fila…</p>}
-    {load.status === 'error' && !observation && <div className="queue-error" role="alert"><p>{load.message}</p>{load.requestId && <small className="mono">Solicitação {load.requestId}</small>}<button type="button" onClick={refresh}>Revalidar resumo</button></div>}
+    {load.status === 'error' && !observation && <div className="queue-error" role="alert"><p>{load.message}</p><button type="button" onClick={refresh}>Revalidar resumo</button></div>}
     {observation && <QueueEnableSummary observation={observation} />}
-    {observation && !observation.complete && <div className="notice" role="status">A consulta está degradada. Habilitar fica indisponível até o controlador confirmar uma leitura completa.</div>}
+    {observation && !observation.complete && <div className="notice" role="status">{observation.valid ? 'Projetos bloqueados permanecem sem execução. A autorização vale para os candidatos confirmados dos projetos disponíveis; o total global não está confirmado.' : 'A consulta está degradada. Habilitar fica indisponível até o controlador confirmar uma leitura válida.'}</div>}
     {message && <div className="notice queue-dialog-message" role={message.includes('incerta') ? 'alert' : 'status'}>{message}</div>}
     {ready && <label className="queue-authorization"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorizedSummaryHash(event.currentTarget.checked && observation ? observation.summary_hash : null)} />Autorizo habilitar a fila neste escopo, com estes modos e esta ordenação.</label>}
     <div className="row queue-dialog-actions"><button type="button" onClick={onClose} disabled={submitting}>Cancelar</button>{uncertain && <button type="button" onClick={() => void consultOperation()} disabled={submitting}>Consultar operação</button>}<button type="button" className="primary" onClick={() => void enable()} disabled={!ready || !authorized || submitting || uncertain}>{submitting ? 'Aguardando recibo…' : 'Habilitar fila'}</button></div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { HttpQuestion as Question } from '#contracts';
 import { useDecision } from './useDecision.js';
-import { TechnicalDetails, UnknownState } from '../../app/OperatorSupport.js';
+import { UnknownState } from '../../app/OperatorSupport.js';
 import { isPortugueseOperatorText, operatorCodeLabel } from '../../app/operator-language.js';
 
 type QuestionSummary = Pick<Question, 'id' | 'state'>;
@@ -42,7 +42,7 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
       <h4 id={`question-title-${question.id}`}>{scopeChange ? 'Decisão sobre mudança de critérios' : 'Decisão da passagem'}</h4>
       <span className={`pill ${question.state === 'delivered' ? '' : question.state === 'pending' ? 'warn' : 'neutral'}`} aria-label={`Estado da pergunta: ${stateLabels[question.state]}`}>{stateLabels[question.state]}</span>
     </div>
-    <TechnicalDetails code={question.state} entityType="Pergunta" entityId={question.id} facts={{ passage_id: question.passage_id, ttl_state: question.ttl.state, ttl_value: question.ttl.state === 'configured' ? question.ttl.value : null }} />
+
     <h5>{question.question.decision}</h5>
     <p className="decision-context">{question.question.context}</p>
     <div className="decision-alternatives"><b>Alternativas apresentadas</b><ol>{question.question.alternatives.map((alternative, index) => <li key={`${index}:${alternative}`}>{alternative}</li>)}</ol></div>
@@ -51,8 +51,8 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
       <h5 id={`scope-title-${question.id}`}>Mudança relevante nos critérios</h5>
       {scopeChange.reasons.length > 0 && <ul>{scopeChange.reasons.map((reason) => <li key={reason}>{isPortugueseOperatorText(reason) ? reason : operatorCodeLabel(reason)}</li>)}</ul>}
       <div className="decision-criteria-compare">
-        <div><b>Capturados · {scopeChange.captured_criteria.length}</b><ul>{scopeChange.captured_criteria.map((criterion) => <li key={criterion.id}>{criterion.text}<TechnicalDetails entityType="Critério capturado" entityId={criterion.id} /></li>)}</ul></div>
-        <div><b>Atuais · {scopeChange.current_criteria.length}</b><ul>{scopeChange.current_criteria.map((criterion) => <li key={criterion.id}>{criterion.text}<TechnicalDetails entityType="Critério atual" entityId={criterion.id} /></li>)}</ul></div>
+        <div><b>Capturados · {scopeChange.captured_criteria.length}</b><ul>{scopeChange.captured_criteria.map((criterion) => <li key={criterion.id}>{criterion.text}</li>)}</ul></div>
+        <div><b>Atuais · {scopeChange.current_criteria.length}</b><ul>{scopeChange.current_criteria.map((criterion) => <li key={criterion.id}>{criterion.text}</li>)}</ul></div>
       </div>
       <fieldset className="decision-scope-choice" disabled={question.state !== 'pending'}>
         <legend>Como deseja prosseguir?</legend>
@@ -75,7 +75,7 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
       {decision.draft && <div className="decision-preserved-draft"><b>Rascunho local preservado · não enviado</b><p>{decision.draft}</p></div>}
     </div>}
 
-    {decision.error && <div className="error" role="alert"><p>{decision.error}</p><TechnicalDetails code={decision.errorDetails?.code} requestId={decision.errorDetails?.requestId} facts={decision.errorDetails?.facts} affectedRequirements={decision.errorDetails?.affectedRequirements} operationId={decision.correlationId} /></div>}
+    {decision.error && <div className="error" role="alert"><p>{decision.error}</p></div>}
     {decision.notice && <p className="decision-notice" role="status">{decision.notice}</p>}
     <dl className="decision-timing">
       <div><dt>Pergunta criada</dt><dd>{new Date(question.raised_at_ms).toLocaleString('pt-BR')}</dd></div>
@@ -85,9 +85,9 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
       <div><dt>Expiração</dt><dd>{question.expired_at_ms === null ? question.ttl.state === 'configured' ? new Date(question.raised_at_ms + question.ttl.value).toLocaleString('pt-BR') : 'Sem TTL configurado' : new Date(question.expired_at_ms).toLocaleString('pt-BR')}</dd></div>
     </dl>
     {!Object.hasOwn(stateLabels, question.state) && <UnknownState value={String(question.state)} />}
-    {decision.operation && <div className="decision-operation"><p>Estado da resposta: {operationStateLabels[decision.operation.state]}</p><TechnicalDetails operationId={decision.operation.operation_id} state={decision.operation.state} requestId={decision.operation.request_id} eventCursor={decision.operation.receipt?.event_cursor} /></div>}
-    {decision.correlationId && !decision.operation && <TechnicalDetails operationId={decision.correlationId} />}
-    {question.delivery_receipt && question.state === 'delivered' ? <div className="decision-receipt" role="status"><p>A resposta foi entregue à passagem original em {new Date(question.delivery_receipt.received_at_ms).toLocaleString('pt-BR')}. A suspensão desta pergunta foi resolvida.</p><TechnicalDetails entityType="Passagem que recebeu a resposta" entityId={question.delivery_receipt.passage_id} /></div>
+    {decision.operation && <div className="decision-operation"><p>Estado da resposta: {operationStateLabels[decision.operation.state]}</p></div>}
+
+    {question.delivery_receipt && question.state === 'delivered' ? <div className="decision-receipt" role="status"><p>A resposta foi entregue à passagem original em {new Date(question.delivery_receipt.received_at_ms).toLocaleString('pt-BR')}. A suspensão desta pergunta foi resolvida.</p></div>
       : question.state === 'expired' ? <p className="notice" role="status">A pergunta expirou. A passagem continua suspensa até a coordenação encerrar ou resolver esse estado.</p>
         : question.state === 'cancelled' ? <p className="notice" role="status">A pergunta foi cancelada; a passagem não é reaberta por este diálogo.</p>
           : question.state === 'delivery_unknown' ? <p className="notice" role="status">A resposta foi gravada, mas a entrega ainda não foi confirmada. Consultar o recibo não envia a resposta novamente.</p>

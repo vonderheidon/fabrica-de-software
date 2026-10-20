@@ -6,7 +6,7 @@ describe('operator language', () => {
   it('recognizes persisted creation events and explains missing project configuration', () => {
     for (const event of ['creation.accepted', 'creation.completed', 'creation.stopped', 'creation.directory.running', 'creation.files.confirmed', 'creation.git.unknown', 'creation.baseline.confirmed', 'creation.reconcile.accepted', 'creation.reconciled']) {
       expect(isKnownOperatorEvent(event), event).toBe(true);
-      expect(operatorEventLabel(event)).not.toContain('Atualização técnica');
+      expect(operatorEventLabel(event)).not.toBe('Atualização registrada');
     }
     expect(isKnownOperatorEvent('creation.future.running')).toBe(false);
     expect(operatorState('completed').known).toBe(true);
@@ -26,7 +26,7 @@ describe('operator language', () => {
     });
   });
 
-  it('translates state labels and leaves unknown states with an explicit support fallback', () => {
+  it('translates state labels and leaves unknown states with an explicit neutral fallback', () => {
     expect(operatorState('in_review')).toEqual({ label: 'Em revisão', known: true });
     expect(operatorState('future_executor_state')).toEqual({ label: 'Estado desconhecido', known: false });
     expect(operatorVisibleFactValue('state', 'future_executor_state')).toBe('Estado desconhecido');
