@@ -19,6 +19,45 @@ No PowerShell que bloqueia scripts `.ps1`, use `npm.cmd` no lugar de `npm`. O ca
 
 `npm test` usa Vitest em modo não interativo, Fastify inject e SQLite temporário. O setup bloqueia conexões de rede e subprocessos; não chama providers, Maestri, terminais ou GitHub. `test:compiled` usa HTTP/SSE loopback real, porta efêmera e diretório/cwd temporários. Verifica shutdown, concorrência com outro processo Node e liberação do lock depois de término abrupto do processo criado pelo próprio teste. Nenhum dos comandos executa Git/GH.
 
+### Playwright MCP no OMP para revisão web
+
+Revisões com critérios de interface exigem Playwright MCP e Google Chrome instalado no host executor, conforme [INTEGRACAO-MAESTRI-OMP.md, seção 4](INTEGRACAO-MAESTRI-OMP.md#4-mcps-e-ferramentas). Ter Playwright disponível no chat do operador não o disponibiliza automaticamente às sessões OMP da fábrica.
+
+Na configuração de usuário do OMP, `~/.omp/agent/mcp.json`, acrescente a entrada abaixo ao objeto `mcpServers`, preservando os demais servidores e configurações:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.83",
+        "--browser",
+        "chrome",
+        "--isolated",
+        "--allow-unrestricted-file-access"
+      ]
+    }
+  }
+}
+```
+
+Node.js/npm devem estar acessíveis ao OMP para executar `npx`. A versão acima foi validada em 19/10/2026. `--isolated` usa um perfil de teste separado do navegador pessoal; `--allow-unrestricted-file-access` permite abrir páginas por `file://`, necessário para critérios que exigem HTML local sem servidor, e também permite acesso a arquivos fora das raízes do workspace.
+
+Em `~/.omp/agent/config.yml`, configure:
+
+```yaml
+browser:
+  enabled: false
+```
+
+O OMP 18.11.1 suprime servidores de automação como Playwright MCP quando o navegador nativo está habilitado. Desabilitá-lo permite carregar o MCP exigido pelo Revisor. Se houver perfil OMP nomeado ou diretório de configuração personalizado, aplique as entradas na configuração efetivamente usada pelo executor; não apenas na do chat do operador.
+
+Novas sessões carregam a configuração. Em sessões existentes, execute `/mcp reload` e confira `/mcp list`: `playwright` deve aparecer conectado. Antes de uma revisão real, confirme abertura de HTML, inspeção do conteúdo renderizado e screenshot pelo MCP, fechando o navegador de teste ao terminar. A configuração foi validada com 25 ferramentas descobertas no OMP e abertura de HTML local no Chrome isolado; isso comprova o ambiente, não aprova entregas anteriores nem inicia outra tentativa.
+
+Referências de configuração: [OMP MCP](https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md) e [Playwright MCP](https://github.com/microsoft/playwright-mcp).
+
 ## Inicialização e distribuição
 
 ```powershell
