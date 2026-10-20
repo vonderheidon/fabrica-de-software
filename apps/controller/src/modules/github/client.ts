@@ -131,15 +131,15 @@ export function createClient(rootReader: GraphQLReader) {
   async function getIssueContext(reference: IssueReference): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
     return readIssueContext(reference, rootReader.scope());
   }
-  async function readIssueContext(reference: IssueReference, reader: GraphQLReader): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
+  async function readIssueContext(reference: IssueReference, reader: GraphQLReader, queueHeader?: GitHubQueryResult<Record<string, unknown>>): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
     if (!Value.Check(GitHubIssueReference, reference)) return invalid();
-    const header = await reader.query(queries.issueQuery, { owner: reference.owner, name: reference.name, number: reference.number });
+    const header = queueHeader ?? await reader.query(queries.issueQuery, { owner: reference.owner, name: reference.name, number: reference.number });
     if (!header.data) return { ...header, data: null };
     let issue: Record<string, unknown>;
     try {
       const raw = child(header.data, 'repository', 'issueOrPullRequest');
       if (raw === null) return inaccessible();
-      issue = object(raw);
+      issue = queueHeader ? { ...object(raw), body: '' } : object(raw);
       if (issue.__typename === 'PullRequest') return { ...header, data: checked(ProjectItem, { id: issue.id, contentId: issue.id, title: issue.title, url: issue.url, kind: 'pull_request', archived: false, executable: false }) };
       if (issue.__typename !== 'Issue') return result('unavailable', null, ['RESPONSE_INVALID']);
       checked(IssueContext, { ...baseIssue(issue), assignees: [], comments: [], blockers: [], memberships: [], references: [] });
@@ -147,7 +147,7 @@ export function createClient(rootReader: GraphQLReader) {
     const id = string(issue.id);
     // Each nested connection has its own cursor. Never rely on a top-level --paginate to cover nested pages.
     const assignees = await collect(reader, queries.assigneesQuery, { id }, (data) => child(data, 'node', 'assignees'), (node) => checked(GitHubAccount, node));
-    const comments = await collect(reader, queries.commentsQuery, { id }, (data) => child(data, 'node', 'comments'), (node) => checked(IssueComment, node));
+    const comments = queueHeader ? result<IssueComment[]>('complete', []) : await collect(reader, queries.commentsQuery, { id }, (data) => child(data, 'node', 'comments'), (node) => checked(IssueComment, node));
     const blockers = await collect(reader, queries.blockersQuery, { id }, (data) => child(data, 'node', 'blockedBy'), (node) => checked(IssueBlocker, node));
     const memberships = await collect(reader, queries.membershipsQuery, { id }, (data) => child(data, 'node', 'projectItems'), (node) => checked(IssueMembership, {
       itemId: node.id, projectId: object(node.project).id, archived: node.isArchived, statusValues: [],
@@ -172,10 +172,10 @@ export function createClient(rootReader: GraphQLReader) {
     return result(parts.every((part) => part.state === 'complete') ? 'complete' : 'partial', data,
       parts.flatMap((part) => part.diagnostics.map((entry) => entry.code)), Math.max(0, ...parts.map((part) => part.retryAtMs ?? 0)) || null);
   }
-  async function getIssueContextById(id: string): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
+  async function getIssueContextById(id: string, options?: { purpose: 'queue' }): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
     if (!Value.Check(GitHubId, id)) return invalid();
     const reader = rootReader.scope();
-    const header = await reader.query(queries.issueReferenceQuery, { id });
+    const header = await reader.query(options?.purpose === 'queue' ? queries.queueIssueQuery : queries.issueReferenceQuery, { id });
     if (header.state !== 'complete' || !header.data) return { ...header, data: null };
     let reference: IssueReference;
     try {
@@ -185,7 +185,8 @@ export function createClient(rootReader: GraphQLReader) {
       const repo = object(raw.repository);
       reference = checked(GitHubIssueReference, { owner: object(repo.owner).login, name: repo.name, number: raw.number });
     } catch { return result('unavailable', null, ['RESPONSE_INVALID']); }
-    const context = await readIssueContext(reference, reader);
+    const queueHeader = options?.purpose === 'queue' ? { ...header, data: { repository: { issueOrPullRequest: header.data.node } } } : undefined;
+    const context = await readIssueContext(reference, reader, queueHeader);
     if (context.data && context.data.id !== id) return result('unavailable', null, ['RESPONSE_INVALID']);
     return context;
   }

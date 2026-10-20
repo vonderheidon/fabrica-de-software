@@ -367,7 +367,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     getExecutionOptions,
     selectSetting,
     getConfiguration: configurationView,
-    getQueue: queue.observe,
+    getQueue: queue.read,
     saveQueue: queue.save,
     async registerProject(body: ProjectRegistration, context: CommandContext) {
       if (!Value.Check(ProjectRegistration, body)) fail(400, 'REGISTRATION_INVALID', 'Project registration is invalid.');

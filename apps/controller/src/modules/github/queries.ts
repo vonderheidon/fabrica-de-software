@@ -4,6 +4,7 @@ export const repositoryFields = `id name url isArchived isPrivate owner { ${acco
 export const projectFields = 'id number title url closed owner { __typename ... on User { id login } ... on Organization { id login } }';
 export const identityQuery = `query FactoryIdentity { viewer { ${accountFields} } }`;
 export const issueReferenceQuery = 'query FactoryIssueReference($id:ID!) { node(id:$id) { __typename ... on Issue { id number repository { name owner { login } } } } }';
+export const queueIssueQuery = `query FactoryQueueIssue($id:ID!) { node(id:$id) { __typename ... on Issue { id number title state url repository { ${repositoryFields} } } } }`;
 export const projectOwnerQuery = 'query FactoryProjectOwner($id:ID!) { node(id:$id) { __typename ... on User { id login } ... on Organization { id login } } }';
 export const repositoriesQuery = `query FactoryRepositories($cursor:String) { viewer { repositories(first:100,after:$cursor,affiliations:[OWNER,COLLABORATOR,ORGANIZATION_MEMBER]) { nodes { ${repositoryFields} } ${page} } } }`;
 export const repositoryQuery = `query FactoryRepository($owner:String!,$name:String!) { repository(owner:$owner,name:$name) { ${repositoryFields} } }`;

@@ -153,14 +153,14 @@ export function createPipeline(deps: PipelineDependencies) {
       if (publication && !await publication.observeControllerAccount()) return;
       const scan = await deps.queue.observe({ limit: '100' });
       nextQueuePollAt = Math.max(nextQueuePollAt, scan.observation.polling.nextPollAtMs);
-      if (closed || !scan.observation.complete || !scan.observation.valid || !scan.observation.account.id) return;
-      storage.recordQueueObservations(scan.items.filter(item => item.kind === 'issue' && item.issueId !== null && !item.reasons.includes('PROJECT_MEMBERSHIP_MISSING')).map(item => ({
+      if (closed || !scan.observation.valid || !scan.observation.account.id) return;
+      storage.recordQueueObservations(scan.items.filter(item => item.kind === 'issue' && item.issueId !== null && !item.reasons.includes('PROJECT_MEMBERSHIP_MISSING') && !item.reasons.includes('READ_INCOMPLETE')).map(item => ({
         accountId: scan.observation.account.id!, projectId: item.projectId, issueId: item.issueId!, ready: item.ready, eligible: item.readyEligible, existingAttemptId: item.attemptId,
       })));
       if (!scan.observation.enabled) return;
       const current = await deps.queue.observe({ limit: '100' });
       nextQueuePollAt = Math.max(nextQueuePollAt, current.observation.polling.nextPollAtMs);
-      if (closed || !current.observation.enabled || !current.observation.complete || !current.observation.valid || current.observation.account.id !== scan.observation.account.id) return;
+      if (closed || !current.observation.enabled || !current.observation.valid || current.observation.account.id !== scan.observation.account.id) return;
       const candidate = current.items.find(item => item.eligible && item.issueId !== null);
       if (!candidate?.issueId) return;
       const cycle = storage.getQueueCycle(current.observation.account.id, candidate.projectId, candidate.issueId);

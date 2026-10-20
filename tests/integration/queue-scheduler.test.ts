@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HttpQueueObservation, QueueCommand, QueueObservation } from '#contracts';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
@@ -10,6 +12,8 @@ import { createGitHub } from '../../apps/controller/src/modules/github/index.js'
 import { createWorkspaces } from '../../apps/controller/src/modules/workspaces/index.js';
 import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
 import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
+import { toHttpQueueObservation } from '../../apps/controller/src/http/observation-views.js';
+import { QueuePanel } from '../../apps/web/src/features/queue/QueuePanel.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) { await f.pipeline.close(); await f.close(); } });
@@ -34,6 +38,68 @@ function command(observation: QueueObservation, enabled: boolean): QueueCommand 
 }
 
 describe('authorized queue changes', () => {
+  it('explains a global pause and authorizes only confirmed projects while another enabled project is incomplete', async () => {
+    const { f, queue, automation } = await fixture(false);
+    const other = f.storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
+      body: { name: 'Projeto pendente', source: { kind: 'local', location: f.directory }, base_branch: 'main' },
+      source: { kind: 'local', location: f.directory }, originNotes: [] }).resource.id;
+    automation(other, true);
+    const observed = await queue.observe({});
+    expect(observed.observation).toMatchObject({ complete: false, valid: true, enabled: false, eligibleTotal: null });
+    const noop = () => {};
+    const html = renderToStaticMarkup(createElement(QueuePanel, {
+      load: { status: 'ready', observation: toHttpQueueObservation(observed.observation), etag: observed.etag },
+      pageNotice: '', pauseNotice: '', pauseUncertain: false, onConsultPause: noop, onRefresh: noop,
+      onNextPage: noop, onPreviousPage: noop, canGoBack: false, pausing: false, onEnable: noop, onPause: noop, onAuthority: noop,
+    }));
+    expect(html).toContain('Fila global pausada');
+    expect(html).toContain('Projeto pendente');
+    expect(html).toContain('Aguardando habilitação da fila');
+    expect(html).toContain('Os candidatos confirmados dos demais projetos continuam disponíveis');
+    expect(html).toContain('class="primary">Habilitar fila</button>');
+    expect(html).not.toContain('PROJECT_NOT_READY');
+    const saved = await queue.save(command(observed.observation, true), { operationId: randomUUID(), expectedRevision: observed.etag });
+    expect(saved.queue).toMatchObject({ enabled: true, complete: false, valid: true });
+  });
+
+  it('shares display reads but always reads again for authority observations', async () => {
+    const { f, queue } = await fixture(false);
+    const identity = vi.mocked(f.github.getIdentity);
+    await Promise.all([queue.read({}), queue.read({})]);
+    expect(identity).toHaveBeenCalledTimes(2);
+    await queue.read({});
+    expect(identity).toHaveBeenCalledTimes(2);
+    await queue.observe({});
+    expect(identity).toHaveBeenCalledTimes(4);
+  });
+  it('expires display observations and invalidates them after local configuration changes', async () => {
+    const { f, queue, automation } = await fixture(false);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    const first = await queue.read({});
+    first.observation.page.items.length = 0;
+    expect((await queue.read({})).observation.page.items).toHaveLength(1);
+    const identity = vi.mocked(f.github.getIdentity);
+    automation(f.projectId, false);
+    expect((await queue.read({})).observation.page.items).toHaveLength(0);
+    expect(identity).toHaveBeenCalledTimes(4);
+    clock.mockReturnValue(Date.now() + 10_001);
+    await queue.read({});
+    expect(identity).toHaveBeenCalledTimes(6);
+  });
+  it('bounds simultaneous issue reads and preserves every row in board order', async () => {
+    const { f, queue } = await fixture();
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete(Array.from({ length: 7 }, (_, i) => ({ id: `ITEM_${i}`, contentId: `I_${i}`, archived: false, kind: 'issue' as const, title: 'Issue', url: f.issue.url, executable: true }))));
+    let active = 0; let peak = 0;
+    vi.mocked(f.github.getIssueContextById).mockImplementation(async (id) => {
+      peak = Math.max(peak, ++active);
+      await new Promise(resolve => setTimeout(resolve, 1));
+      active--;
+      return complete({ ...structuredClone(f.issue), id });
+    });
+    const result = await queue.observe({});
+    expect(peak).toBe(3);
+    expect(result.items).toHaveLength(7);
+  });
   it('requires the precondition and a current summary, then recovers the exact durable operation before another enable', async () => {
     const { f, queue } = await fixture(false); const before = await queue.observe({});
     const body = command(before.observation, true); const context = { operationId: randomUUID(), expectedRevision: before.etag };
@@ -99,6 +165,81 @@ describe('authorized queue changes', () => {
 });
 
 describe('durable scheduler', () => {
+  it('requires a complete project observation before enabling that project', async () => {
+    const { f, queue, automation } = await fixture(); automation(f.projectId, false);
+    vi.mocked(f.github.listProjectItems).mockResolvedValue({ state: 'partial', data: [], retryAtMs: null, diagnostics: [] });
+    const observed = await queue.observe({ projectId: f.projectId });
+    expect(observed.observation).toMatchObject({ complete: false, valid: false });
+    await expect(queue.save(command(observed.observation, true), { operationId: randomUUID(), expectedRevision: observed.etag }))
+      .rejects.toMatchObject({ code: 'QUEUE_SUMMARY_CHANGED' });
+    expect(f.storage.getConfiguration(f.projectId).view.configuration.automation_enabled).toBe(false);
+  });
+
+  it('keeps shared identity failures blocking every project', async () => {
+    const { f, queue, automation } = await fixture(); automation(f.register(), true);
+    vi.mocked(f.github.getIdentity).mockResolvedValue({ state: 'authentication_invalid', data: null, retryAtMs: null, diagnostics: [] });
+    expect((await queue.observe({})).observation).toMatchObject({ complete: false, valid: false });
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+  });
+
+  it('blocks all rows from a partially read project without consuming or rearming their cycles', async () => {
+    const { f, queue } = await fixture();
+    const original = await f.github.listProjectItems('PVT_test');
+    vi.mocked(f.github.listProjectItems).mockResolvedValue({ ...original, state: 'partial' });
+    const observed = await queue.observe({});
+    expect(observed.items).toHaveLength(1);
+    expect(observed.items[0]).toMatchObject({ eligible: false, readyEligible: false, reasons: expect.arrayContaining(['READ_INCOMPLETE']) });
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.getQueueCycle('ACCOUNT_test', f.projectId, f.issue.id)).toBeNull();
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+  });
+
+  it('starts an eligible project despite disabled incomplete registrations', async () => {
+    const { f, queue } = await fixture();
+    f.storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
+      body: { name: 'Incomplete test', source: { kind: 'local', location: f.directory }, base_branch: 'main' },
+      source: { kind: 'local', location: f.directory }, originNotes: [] });
+    const observed = await queue.observe({});
+    expect(observed.observation.complete).toBe(true);
+    expect(observed.items).toHaveLength(1);
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.listAttempts({}).items).toHaveLength(1);
+    expect(f.execution.startPassage).toHaveBeenCalledOnce();
+  });
+
+  it('isolates an unavailable enabled project and its retry deadline from a healthy project', async () => {
+    const { f, queue, automation } = await fixture(); const other = f.register(); automation(other, true);
+    const current = f.storage.getConfiguration(other);
+    const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
+    const mapping = { ...configuration.github_project!, id: 'UNAVAILABLE_BOARD' };
+    f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: other,
+      body: { project_changes: { github_project: mapping } }, configuration: { ...configuration, github_project: mapping }, globalChanges: {} });
+    const original = vi.mocked(f.github.listProjectItems).getMockImplementation()!;
+    vi.mocked(f.github.listProjectItems).mockImplementation(async id => id === mapping.id
+      ? { state: 'inaccessible', data: null, retryAtMs: Date.now() + 120_000, diagnostics: [] } : original(id));
+    const observed = await queue.observe({});
+    expect(observed.observation.complete).toBe(false);
+    expect(observed.observation.valid).toBe(true);
+    expect(observed.observation.diagnostics).toContainEqual(expect.objectContaining({ code: 'PROJECT_QUEUE_BLOCKED' }));
+    expect(observed.items.filter(item => item.eligible).map(item => item.projectId)).toEqual([f.projectId]);
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.listAttempts({}).items).toHaveLength(1);
+    expect(f.execution.startPassage).toHaveBeenCalledOnce();
+  });
+
+  it('keeps candidates visible while global automation is paused without starting', async () => {
+    const { f, queue } = await fixture(false);
+    const observed = await queue.observe({});
+    expect(observed.observation.enabled).toBe(false);
+    expect(observed.items[0]?.eligible).toBe(true);
+    expect(observed.observation.diagnostics).toContainEqual(expect.objectContaining({ code: 'GLOBAL_AUTOMATION_PAUSED' }));
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+  });
+
   it.each(['account', 'assignee', 'status'])('applies existing authority governance to an automatic attempt after %s changes', async kind => {
     const { f, queue } = await fixture(); await f.pipeline.close();
     const github = { ...createGitHub(), ...f.github, getRepository: vi.fn(async () => complete(structuredClone(f.issue.repository))),

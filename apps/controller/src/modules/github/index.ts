@@ -14,6 +14,7 @@ export type { IssueReference, ProjectSelection, ReadinessReason } from './client
 export type { GitHubContext, GitHubHostAccess } from './transport.js';
 
 export interface GitHubOptions {
+  observeQuery?: (measurement: { operation: string; duration_ms: number }) => void;
   context?: GitHubContext;
   access?: GitHubHostAccess;
   savedExecutablePath?: () => string | null;
@@ -29,9 +30,11 @@ export function createGitHub(options: GitHubOptions = {}) {
   const resolver = options.resolver ?? new GitHubExecutableResolver({ ...(access ? { access } : {}), ...(options.context ? { initialExecutable: options.context.executable } : {}) });
   const savedPath = options.savedExecutablePath ?? (() => null);
   const runner = async (input: string, onSend?: () => void) => {
+    const started = performance.now();
     const context = options.context && !access ? options.context : await resolver.contextForUse(savedPath());
     if (!context) throw new GitHubRunnerError('CONTEXT_UNAVAILABLE');
-    return (options.runnerFactory ?? createGhRunner)(context)(input, onSend);
+    try { return await (options.runnerFactory ?? createGhRunner)(context)(input, onSend); }
+    finally { options.observeQuery?.({ operation: (JSON.parse(input) as { query: string }).query.match(/^query\s+(\w+)/)?.[1] ?? 'other', duration_ms: Math.round(performance.now() - started) }); }
   };
   const reader = new GraphQLReader(runner);
   return {

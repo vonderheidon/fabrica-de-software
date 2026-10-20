@@ -34,6 +34,7 @@ export async function startController(hostContext: ControllerHostContext = {}, d
     const githubAccess = hostContext.githubAccess ?? (hostContext.github ? { kind: hostContext.github.kind, cwd: hostContext.github.cwd } : undefined);
     const github = createGitHub({ ...(hostContext.github ? { context: hostContext.github } : {}), ...(githubAccess ? { access: githubAccess } : {}),
       savedExecutablePath: storage.getGitHubExecutablePath,
+      observeQuery: measurement => app?.log.info({ event: 'github_read', ...measurement }, 'GitHub read completed'),
       ...(hostContext.githubAccess || hostContext.github ? { attemptEffectAuthorization: { kind: 'confirmed_attempt' as const } } : {}),
       ...(hostContext.githubMutationAuthorization ? { mutationAuthorization: hostContext.githubMutationAuthorization } : {}),
       ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}) });

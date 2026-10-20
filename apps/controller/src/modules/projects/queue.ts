@@ -17,9 +17,11 @@ const problem = (status: 400 | 404 | 409 | 412 | 428 | 503, code: string, messag
 type QueueCommandBody = Static<typeof QueueCommand>;
 
 export function createQueue({ storage, github, hostName = hostname() }: QueueDependencies) {
-  // Only retry deadlines are retained; no board or previous authority is cached.
+  // Display observations never grant authority: save and scheduler still call observe directly.
+  const displayReads = new Map<string, { expires: number; promise: Promise<QueueResult> }>();
   let retryAtMs = 0;
   let failureDelayMs = 0;
+  const projectBackoff = new Map<string, { retryAtMs: number; delayMs: number; etag: string }>();
   async function observe(query: QueueQueryType): Promise<QueueResult> {
     if (!Value.Check(QueueQuery, query)) problem(400, 'QUEUE_QUERY_INVALID', 'Queue query is invalid.');
     if (query.projectId && query.projectIds) problem(400, 'QUEUE_SCOPE_INVALID', 'Select one project scope.');
@@ -47,11 +49,14 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     const activeAttempt = storage.listAttempts({ result: 'active', limit: '1' }).items[0] ?? null;
     const currentHost = hostName;
     const diagnostics: QueueObservation['diagnostics'] = identity.diagnostics.map(({ code, message, recovery }) => ({ code, message, recovery }));
+    if (!settings.view.settings.automation_enabled) diagnostics.push({ code: 'GLOBAL_AUTOMATION_PAUSED', message: 'A fila global está pausada, mesmo nos projetos com automação habilitada.', recovery: 'Abra a fila global e use Habilitar fila para autorizar novos inícios automáticos.' });
     if (deferred) diagnostics.push({ code: 'QUEUE_READ_BACKOFF', message: 'Consulta adiada após falha de leitura.', recovery: 'Aguarde o próximo instante de consulta informado.' });
     let remoteRetryAtMs = identity.retryAtMs ?? 0;
     const modesByProject: QueueObservation['modesByProject'] = [];
     const rows: QueueItem[] = [];
     let complete = identity.state === 'complete' && Boolean(identity.data);
+    let safeProjects = 0;
+    const blockedProjects: string[] = [];
     const sortValues = new Map<QueueItem, { priority: number | null; board: number | null; direction: 'asc' | 'desc' }>();
     let priorityAvailable = false;
     let boardAvailable = false;
@@ -59,28 +64,39 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     for (const projectSummary of allProjects) {
       const configured = configurations.get(projectSummary.id)!;
       const configuration = configured.view.configuration;
+      if (!selectedIds && !configuration.automation_enabled) continue;
       modesByProject.push({ projectId: projectSummary.id, mode: configuration.default_delivery_mode });
       if (!configuration.github_project || !configuration.source.repository_id) {
         complete = false;
+        blockedProjects.push(projectSummary.id);
         diagnostics.push({ code: 'PROJECT_NOT_READY', message: `${projectSummary.name}: quadro GitHub ou repositório não está configurado.`, recovery: 'Abra a configuração do projeto, confirme a origem e selecione o quadro pelo nome antes de habilitar a fila.' });
         continue;
       }
       if (deferred || identity.state !== 'complete' || !identity.data) continue;
+      const pending = projectBackoff.get(projectSummary.id);
+      if (pending && pending.etag === configured.etag && now < pending.retryAtMs) {
+        complete = false;
+        blockedProjects.push(projectSummary.id);
+        diagnostics.push({ code: 'PROJECT_QUEUE_BLOCKED', message: `${projectSummary.name}: consulta adiada após falha de leitura; somente este projeto está bloqueado.`, recovery: 'Aguarde a próxima consulta automática ou confira a configuração e o acesso ao quadro deste projeto.' });
+        continue;
+      }
+      const firstRow = rows.length;
+      let projectComplete = true;
+      let projectRetryAtMs = 0;
       const [items, projectDetails] = await Promise.all([
         github.listProjectItems(configuration.github_project.id), github.getProject(configuration.github_project.id),
       ]);
-      remoteRetryAtMs = Math.max(remoteRetryAtMs, items.retryAtMs ?? 0, projectDetails.retryAtMs ?? 0);
-      diagnostics.push(...items.diagnostics.map(({ code, message, recovery }) => ({ code, message, recovery })),
-        ...projectDetails.diagnostics.map(({ code, message, recovery }) => ({ code, message, recovery })));
-      if (items.state !== 'complete' || projectDetails.state !== 'complete' || !projectDetails.data) complete = false;
+      projectRetryAtMs = Math.max(items.retryAtMs ?? 0, projectDetails.retryAtMs ?? 0);
+      diagnostics.push(...[...items.diagnostics, ...projectDetails.diagnostics].map(({ code, message, recovery }) => ({ code, message: `${projectSummary.name}: ${message}`, recovery })));
+      if (items.state !== 'complete' || projectDetails.state !== 'complete' || !projectDetails.data) projectComplete = false;
       const details = projectDetails.data;
       const mappingValid = details?.project.id === configuration.github_project.id &&
         details.project.owner.id === configuration.github_project.owner_id && !details.project.closed &&
         Object.values(configuration.github_project.status_option_ids).every((id) => details.singleSelectFields
           .find((field) => field.id === configuration.github_project?.status_field_id)?.options.some((option) => option.id === id));
       if (!mappingValid) {
-        complete = false;
-        diagnostics.push({ code: 'PROJECT_MAPPING_INVALID', message: 'O Project, proprietário ou mapeamento de Status diverge da configuração.', recovery: 'Confira os IDs configurados no projeto.' });
+        projectComplete = false;
+        diagnostics.push({ code: 'PROJECT_MAPPING_INVALID', message: `${projectSummary.name}: o quadro, proprietário ou mapeamento de Status diverge da configuração.`, recovery: 'Abra a configuração deste projeto e confirme o quadro e os valores de Status.' });
       }
       const priorityField = configuration.queue_order.priority_field_id;
       const numericPriority = Boolean(priorityField && details?.numberFields?.some((field) => field.id === priorityField));
@@ -90,6 +106,15 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       if (priorityField && !numericPriority) diagnostics.push({ code: 'PRIORITY_VALUE_UNAVAILABLE', message: 'O campo de prioridade numérica não está disponível neste Project.', recovery: 'Confira o ID do campo; será usada posição documentada ou número/ID.' });
       if (configuration.queue_order.use_board_position && !useBoard) diagnostics.push({ code: 'BOARD_POSITION_UNAVAILABLE', message: 'A leitura não fornece posição documentada dos itens.', recovery: 'A ordem usa número crescente e ID.' });
       if (activeAttempt) diagnostics.push({ code: 'QUEUE_OCCUPIED', message: 'Já existe uma tentativa ativa. Os demais candidatos permanecem visíveis e não serão descartados.', recovery: 'A fila pode consumir o próximo candidato quando a tentativa terminar.' });
+      const issueItems = (items.data ?? []).filter(item => item.kind === 'issue' && item.contentId);
+      const issues = new Map<string, Awaited<ReturnType<QueueGitHub['getIssueContextById']>>>();
+      let nextIssue = 0;
+      await Promise.all(Array.from({ length: Math.min(3, issueItems.length) }, async () => {
+        while (nextIssue < issueItems.length) {
+          const item = issueItems[nextIssue++]!;
+          issues.set(item.id, await github.getIssueContextById(item.contentId!, { purpose: 'queue' }));
+        }
+      }));
       for (const item of items.data ?? []) {
         const projectLabel = projectSummary.name;
         const cycle = item.contentId && settings.view.settings.account_id ? storage.getQueueCycle(settings.view.settings.account_id, projectSummary.id, item.contentId) : null;
@@ -109,13 +134,13 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
 
         if (kind !== 'issue') {
           reasons = [kind === 'draft' ? 'DRAFT_ITEM' : kind === 'pull_request' ? 'PULL_REQUEST' : 'READ_INCOMPLETE'];
-          if (kind === 'inaccessible') complete = false;
+          if (kind === 'inaccessible') projectComplete = false;
         } else if (item.contentId) {
-          const issue = await github.getIssueContextById(item.contentId);
-          remoteRetryAtMs = Math.max(remoteRetryAtMs, issue.retryAtMs ?? 0);
-          diagnostics.push(...issue.diagnostics.map(({ code, message, recovery }) => ({ code, message, recovery })));
+          const issue = issues.get(item.id)!;
+          projectRetryAtMs = Math.max(projectRetryAtMs, issue.retryAtMs ?? 0);
+          diagnostics.push(...issue.diagnostics.map(({ code, message, recovery }) => ({ code, message: `${projectSummary.name}: ${message}`, recovery })));
           if (issue.state !== 'complete' || !issue.data || !('repository' in issue.data) || !projectDetails.data) {
-            complete = false;
+            projectComplete = false;
             reasons = ['READ_INCOMPLETE'];
           } else {
             const context = issue.data;
@@ -143,7 +168,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
             priority = numericPriority ? membership?.numberValues?.find((entry) => entry.fieldId === priorityField)?.value ?? null : null;
           }
         } else {
-          complete = false;
+          projectComplete = false;
           reasons = ['READ_INCOMPLETE'];
         }
         if (item.archived) { eligible = false; reasons.push('ARCHIVED_ITEM'); }
@@ -161,13 +186,31 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
           reasons = [...new Set([...reasons, 'ATTEMPT_ACTIVE' as const])];
         }
         const row: QueueItem = { projectId: projectSummary.id, projectName: projectLabel, itemId: item.id, kind, issueId, number, title, url, assignees,
-          status, ready, readyEligible, eligible, reasons: [...new Set(reasons)], consumption: prior ? prior.active ? 'active' : 'consumed' : complete ? 'available' : 'unknown',
+          status, ready, readyEligible, eligible, reasons: [...new Set(reasons)], consumption: prior ? prior.active ? 'active' : 'consumed' : projectComplete ? 'available' : 'unknown',
           attemptId: prior?.id ?? null, order: { position: 1,
             criterion: numericPriority ? `Prioridade numérica ${configuration.queue_order.priority_direction}; ${useBoard ? 'posição do Project' : 'número/ID'}`
               : useBoard ? 'Posição documentada do Project; número/ID' : 'Fallback: número crescente; ID',
             value: priority === null ? null : String(priority) } };
         rows.push(row);
         sortValues.set(row, { priority, board: useBoard ? item.position ?? null : null, direction: configuration.queue_order.priority_direction });
+      }
+      if (projectComplete) {
+        safeProjects++;
+        projectBackoff.delete(projectSummary.id);
+      } else {
+        complete = false;
+        blockedProjects.push(projectSummary.id);
+        const interval = settings.view.settings.time_defaults.polling_interval_ms;
+        const maximum = settings.view.settings.time_defaults.polling_backoff_max_ms ?? Math.max(interval, 60_000);
+        const delayMs = Math.min(maximum, Math.max(interval, (pending?.delayMs ?? 0) * 2));
+        projectBackoff.set(projectSummary.id, { retryAtMs: Math.max(Date.now() + delayMs, projectRetryAtMs), delayMs, etag: configured.etag });
+        diagnostics.push({ code: 'PROJECT_QUEUE_BLOCKED', message: `${projectSummary.name}: leitura incompleta; somente este projeto está bloqueado.`, recovery: 'Confira o acesso ao quadro e o mapeamento de Status na configuração deste projeto. A consulta será repetida automaticamente.' });
+        for (const row of rows.slice(firstRow)) {
+          row.eligible = false;
+          row.readyEligible = false;
+          row.reasons = [...new Set([...row.reasons, 'READ_INCOMPLETE' as const])];
+          if (row.consumption === 'available') row.consumption = 'unknown';
+        }
       }
     }
     const configStamp = [settings.etag, ...allProjects.map((project) => configurations.get(project.id)!.etag)];
@@ -207,24 +250,30 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
         (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || compareId(a.issueId ?? a.itemId, b.issueId ?? b.itemId);
     });
     rows.forEach((row, index) => { row.order.position = index + 1; });
-    const valid = complete && settings.view.settings.account_id !== null && settings.view.settings.account_id === identity.data?.id && modesByProject.length > 0;
-    if (!complete) for (const row of rows) {
+    const sharedValid = !configurationChanged && !accountChanged && identity.state === 'complete' && Boolean(identity.data) && settings.view.settings.account_id !== null && settings.view.settings.account_id === identity.data?.id;
+    const valid = sharedValid && (selectedIds ? complete : safeProjects > 0);
+    if (!sharedValid) for (const row of rows) {
       row.eligible = false;
       row.readyEligible = false;
       row.reasons = [...new Set([...row.reasons, 'READ_INCOMPLETE' as const])];
       if (row.consumption === 'available') row.consumption = 'unknown';
     }
     const eligibleTotal = complete ? rows.filter((row) => row.eligible).length : null;
-    const summaryHash = hash({ scope, configStamp, modesByProject, accountId: identity.data?.id ?? null,
+    const summaryHash = hash({ scope, configStamp, modesByProject, blockedProjects: blockedProjects.sort(), accountId: identity.data?.id ?? null,
       expectedAccountId: settings.view.settings.account_id, host: currentHost, complete, valid, eligibleTotal,
       candidates: rows.map(({ projectId, itemId, kind, issueId, ready, readyEligible, eligible, reasons, status, assignees, order: itemOrder }) =>
         [projectId, itemId, kind, issueId, ready, readyEligible, eligible, reasons, status, assignees.map((assignee) => assignee.id).sort(), itemOrder]), order });
     const intervalMs = settings.view.settings.time_defaults.polling_interval_ms;
     const backoffMaxMs = settings.view.settings.time_defaults.polling_backoff_max_ms ?? Math.max(intervalMs, 60_000);
     if (!deferred) {
-      failureDelayMs = complete ? 0 : Math.min(backoffMaxMs, Math.max(intervalMs, failureDelayMs * 2));
-      retryAtMs = complete ? 0 : Math.max(Date.now() + failureDelayMs, remoteRetryAtMs);
+      failureDelayMs = sharedValid ? 0 : Math.min(backoffMaxMs, Math.max(intervalMs, failureDelayMs * 2));
+      retryAtMs = sharedValid ? 0 : Math.max(Date.now() + failureDelayMs, remoteRetryAtMs);
     }
+    const projectDeadlines = blockedProjects.flatMap(id => {
+      const pending = projectBackoff.get(id);
+      return pending ? [pending.retryAtMs] : [];
+    });
+    const observationRetryAtMs = retryAtMs || (safeProjects === 0 && projectDeadlines.length ? Math.min(...projectDeadlines) : 0);
     const observationId = randomUUID();
     const pageScope = hash([summaryHash, selectedIds ?? null]);
     let offset = 0;
@@ -251,7 +300,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       host: { expected: currentHost, observed: currentHost, matches: true },
       order, page: { items: pageItems, has_more: hasMore, next_cursor: hasMore ? Buffer.from(JSON.stringify({ scope: pageScope, offset: offset + limit })).toString('base64url') : null, event_cursor: settings.view.event_cursor },
       diagnostics: [...new Map(diagnostics.map((entry) => [JSON.stringify(entry), entry])).values()].slice(0, 100), eventCursor: settings.view.event_cursor,
-      polling: { intervalMs, backoffMaxMs, retryAtMs: retryAtMs || null, nextPollAtMs: Math.max(Date.now() + intervalMs, retryAtMs) },
+      polling: { intervalMs, backoffMaxMs, retryAtMs: observationRetryAtMs || null, nextPollAtMs: Math.max(Date.now() + intervalMs, observationRetryAtMs) },
     };
     return { observation, etag, items: rows };
   }
@@ -266,7 +315,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       if (context.expectedRevision === undefined) problem(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
       if (command.enabled) {
         const fresh = await observe(query);
-        if (!fresh.observation.complete || !fresh.observation.valid || fresh.observation.summaryHash !== command.authorizedSummaryHash ||
+        if (!fresh.observation.valid || fresh.observation.summaryHash !== command.authorizedSummaryHash ||
           fresh.etag !== context.expectedRevision || hash(fresh.observation.scope.projectIds) !== hash([...command.scope.projectIds].sort()) ||
           (command.scope.kind === 'project' && !storage.getSettings().automation_enabled)) throw new QueueSummaryChanged(fresh);
       }
@@ -282,5 +331,22 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     return { queue: latest.observation, operationId: operation.operation_id, receipt, etag: latest.etag };
   }
 
-  return { observe, save };
+  async function read(query: QueueQueryType): Promise<QueueResult> {
+    if (!Value.Check(QueueQuery, query)) problem(400, 'QUEUE_QUERY_INVALID', 'Queue query is invalid.');
+    const settings = storage.getGlobalConfiguration();
+    const key = JSON.stringify([settings.etag, settings.view.event_cursor, query.projectId, query.projectIds, query.cursor, query.limit]);
+    const now = Date.now();
+    let entry = displayReads.get(key);
+    if (!entry || entry.expires <= now) {
+      if (displayReads.size >= 8) displayReads.delete(displayReads.keys().next().value!);
+      entry = { expires: Infinity, promise: observe(query) };
+      displayReads.set(key, entry);
+      const current = entry;
+      void current.promise.then(result => {
+        current.expires = result.observation.complete ? Date.now() + Math.min(10_000, settings.view.settings.time_defaults.polling_interval_ms) : 0;
+      }, () => { if (displayReads.get(key) === current) displayReads.delete(key); });
+    }
+    return structuredClone(await entry.promise);
+  }
+  return { observe, read, save };
 }

@@ -166,10 +166,10 @@ describe('complete Ready observations without dispatch', () => {
     try {
       vi.mocked(f.github.listProjectItems).mockResolvedValueOnce({ state: 'rate_limited', data: null, diagnostics: [], retryAtMs: 20000 });
       expect((await f.queue.observe({})).observation.polling).toMatchObject({ intervalMs: 100, backoffMaxMs: 500, retryAtMs: 20000, nextPollAtMs: 20000 });
-      const calls = vi.mocked(f.github.getIdentity).mock.calls.length;
+      const calls = vi.mocked(f.github.listProjectItems).mock.calls.length;
       clock.mockReturnValue(19999);
       expect((await f.queue.observe({})).observation).toMatchObject({ complete: false, valid: false, eligibleTotal: null });
-      expect(f.github.getIdentity).toHaveBeenCalledTimes(calls);
+      expect(f.github.listProjectItems).toHaveBeenCalledTimes(calls);
       clock.mockReturnValue(20000);
       expect((await f.queue.observe({})).observation).toMatchObject({ valid: true, polling: { retryAtMs: null, nextPollAtMs: 20100 } });
     } finally { clock.mockRestore(); }
@@ -971,11 +971,14 @@ describe('global and aggregate configuration', () => {
     expect(f.storage.getConfiguration(id)).toEqual(before);
   });
 
-  it('keeps an unconfigured or partial queue distinct from an empty complete queue', async () => {
-    const f = fixture(); const headers = await session(f); await register(f, headers);
+  it('excludes disabled incomplete projects globally but reports their prerequisites in a scoped observation', async () => {
+    const f = fixture(); const headers = await session(f); const projectId = (await register(f, headers)).json<ProjectDetail>().project.id;
     const response = await f.app.inject({ method: 'GET', url: '/api/v1/queue?limit=25', headers });
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ complete: false, valid: false, eligible_total: null, page: { items: [], has_more: false }, diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'PROJECT_NOT_READY' })]) });
+    expect(response.json()).toMatchObject({ complete: true, valid: false, eligible_total: 0, page: { items: [], has_more: false } });
+    expect(response.json().diagnostics).not.toContainEqual(expect.objectContaining({ code: 'PROJECT_NOT_READY' }));
+    const scoped = await f.app.inject({ method: 'GET', url: `/api/v1/queue?project_id=${projectId}`, headers });
+    expect(scoped.json()).toMatchObject({ complete: false, valid: false, eligible_total: null, diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'PROJECT_NOT_READY' })]) });
     expect(response.headers.etag).toBeTruthy();
   });
 
@@ -990,7 +993,7 @@ describe('global and aggregate configuration', () => {
       enabled: false, scope: { kind: 'account', project_ids: [projectId] },
     } });
     expect(paused.statusCode).toBe(200);
-    expect(paused.json()).toMatchObject({ operation_id: operationId, queue: { enabled: false, complete: false }, receipt: { revision: expect.any(Number), event_cursor: expect.any(String) } });
+    expect(paused.json()).toMatchObject({ operation_id: operationId, queue: { enabled: false, complete: true }, receipt: { revision: expect.any(Number), event_cursor: expect.any(String) } });
     expect(f.storage.getGlobalConfiguration().view.settings.automation_enabled).toBe(false);
   });
 

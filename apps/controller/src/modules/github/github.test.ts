@@ -216,6 +216,16 @@ function issueResponses() {
   ];
 }
 describe('issue preparation context', () => {
+  it('reads queue eligibility without fetching comments or references, retaining nested pagination', async () => {
+    const responses = issueResponses();
+    responses.splice(3, 2);
+    responses.shift();
+    const header = http({ data: { node: { __typename: 'Issue', id: 'I_1', number: 1, title: 'Implement', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/1', repository: wireRepository } } });
+    const { client, calls } = fixture([header, ...responses]);
+    const response = await client.getIssueContextById('I_1', { purpose: 'queue' });
+    expect(response).toMatchObject({ state: 'complete', data: { id: 'I_1', comments: [], references: [], blockers: [{ state: 'OPEN' }, { state: 'CLOSED' }], memberships: [{ statusValues: [{ optionId: 'READY' }] }] } });
+    expect(calls.some(call => call.query.includes('FactoryComments'))).toBe(false);
+  });
   it('reads numeric priority values by exact field ID on independent field-value pages', async () => {
     const responses = issueResponses();
     responses[9] = http({ data: { node: { fieldValues: page([
