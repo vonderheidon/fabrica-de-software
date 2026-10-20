@@ -5,10 +5,11 @@ import { Delivery, EffectView } from '#contracts';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
 import type { GitReader } from './git.js';
 import type { LocalCommitResult } from './publication.js';
+import type { AttemptEffectAuthorization } from '../github/index.js';
 
 /** Additional trusted host boundary; never populated from a request or environment. */
 export interface PushAuthorization { accountId: string; repositoryIds: readonly string[] }
-export function createRemotePublisher(dataDirectory?: string, git?: GitReader, authorization?: PushAuthorization, canonicalize: (path: string) => Promise<string> = realpath) {
+export function createRemotePublisher(dataDirectory?: string, git?: GitReader, authorization?: PushAuthorization, canonicalize: (path: string) => Promise<string> = realpath, attemptEffectAuthorization?: AttemptEffectAuthorization) {
   async function context(delivery: Delivery, effect: EffectView) {
     const i = effect.expectedIdentity;
     if (!Value.Check(Delivery,delivery) || !Value.Check(EffectView,effect) || effect.kind !== 'push' || !effect.authorized || !['running','unknown'].includes(effect.state) ||
@@ -49,7 +50,9 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     async pushApproved(delivery: Delivery,effect: EffectView,accountId: string,authorize: () => Promise<void>): Promise<LocalCommitResult> {
       let sent = false;
       try {
-        if (!effect.expectedIdentity.repositoryId || !authorization || authorization.accountId !== accountId || !authorization.repositoryIds.includes(effect.expectedIdentity.repositoryId)) return { state: 'failed_known',receipt: null,reason: 'PUSH_NOT_AUTHORIZED' };
+        const confirmedEffect = attemptEffectAuthorization?.kind === 'confirmed_attempt' && effect.authorized && typeof authorize === 'function';
+        const trustedTarget = authorization?.accountId === accountId && authorization.repositoryIds.includes(effect.expectedIdentity.repositoryId ?? '');
+        if (!effect.expectedIdentity.repositoryId || (!confirmedEffect && !trustedTarget)) return { state: 'failed_known',receipt: null,reason: 'PUSH_NOT_AUTHORIZED' };
         const c = await context(delivery,effect); const prior = await inspect(c);
         if (prior.state === 'confirmed') return prior;
         if (prior.reason !== 'REMOTE_REF_NOT_OBSERVED' || effect.state !== 'running') return { ...prior,state: 'failed_known' };

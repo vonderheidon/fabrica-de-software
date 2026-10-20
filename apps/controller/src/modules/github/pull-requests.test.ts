@@ -28,6 +28,19 @@ function fixture() {
   return { effect,node,body,reader,run,authorization,writer: createEffectWriter(reader,authorization),existing: () => { created = true; },hide: () => { hidden = true; },show: () => { hidden = false; },lose: () => { lost = true; },partial: () => { partial = true; },duplicate: () => { duplicate = true; },paginate: () => { pageTwo = true; } };
 }
 
+it('creates a PR for a confirmed attempt without another host grant and preserves revocation and readback', async () => {
+  const f = fixture(); const writer = createEffectWriter(f.reader,undefined,{ kind: 'confirmed_attempt' });
+  expect(await writer({ effect: { ...f.effect,authorized: false },accountId: 'A',body: f.body,authorize: async () => {} })).toMatchObject({ reason: 'MUTATION_NOT_AUTHORIZED' });
+  expect(await writer({ effect: f.effect,accountId: 'A',body: f.body })).toMatchObject({ reason: 'MUTATION_NOT_AUTHORIZED' });
+  expect(f.run).not.toHaveBeenCalled();
+  expect(await writer({ effect: f.effect,accountId: 'A',body: f.body,authorize: async () => { throw new Error('REVOKED'); } })).toMatchObject({ reason: 'EFFECT_AUTHORITY_REVOKED' });
+  expect(f.run.mock.calls.some(([x]) => JSON.parse(x).query.includes('mutation'))).toBe(false);
+  const input = { effect: f.effect,accountId: 'A',body: f.body,authorize: async () => {} };
+  expect(await writer(input)).toMatchObject({ state: 'confirmed' });
+  expect(await writer(input)).toMatchObject({ state: 'confirmed' });
+  expect(f.run.mock.calls.filter(([x]) => JSON.parse(x).query.includes('mutation'))).toHaveLength(1);
+});
+
 it('creates with exact base/head/repository and confirms only after full readback with the approved head SHA', async () => {
   const f = fixture(); const result = await f.writer({ effect: f.effect,accountId: 'A',body: f.body });
   expect(result).toMatchObject({ state: 'confirmed',receipt: { id: 'PR_123',baseBranch: 'main',repositoryId: 'R',commitSha: 'c'.repeat(40) } });

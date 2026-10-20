@@ -28,6 +28,18 @@ async function fixture() {
   return { ...f,d,effect,sha,git,publisher,remote: (sha: string | null) => { remote = sha; },lose: () => { lost = true; },config: () => { config = true; },wrongParent: () => { wrongParent = true; } };
 }
 
+it('publishes a confirmed attempt without a static repository grant and rechecks revocation', async () => {
+  const f = await fixture();
+  const publisher = createRemotePublisher(f.root,f.git,undefined,async p => p,{ kind: 'confirmed_attempt' });
+  expect(await publisher.pushApproved(f.d,f.effect,'A',async () => { throw new Error('REVOKED'); })).toMatchObject({ state: 'failed_known' });
+  expect(f.git.mock.calls.some(([,args]) => args.includes('push'))).toBe(false);
+  const authorize = vi.fn(async () => {});
+  expect(await publisher.pushApproved(f.d,f.effect,'A',authorize)).toMatchObject({ state: 'confirmed' });
+  expect(authorize).toHaveBeenCalledOnce();
+  expect(await publisher.pushApproved(f.d,f.effect,'A',authorize)).toMatchObject({ state: 'confirmed' });
+  expect(f.git.mock.calls.filter(([,args]) => args.includes('push'))).toHaveLength(1);
+});
+
 it('pushes a single explicit approved SHA/ref to the authorized HTTPS repository then confirms readback', async () => {
   const f = await fixture(); const index = await readFile(join(f.implementation,'.git/index')); const authorize = vi.fn(async () => {});
   const r = await f.publisher.pushApproved(f.d,f.effect,'A',authorize);

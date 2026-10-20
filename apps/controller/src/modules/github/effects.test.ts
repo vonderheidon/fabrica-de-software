@@ -61,14 +61,14 @@ it('shares query rate-limit cooldown with mutations and does not send a second r
   expect(await writer({ effect: f.effect,accountId: 'A',body: f.body })).toMatchObject({ state: 'failed_known',reason: 'RATE_LIMITED' });
   expect(f.run).toHaveBeenCalledOnce();
 });
-it('projects a confirmed attempt through runtime authority without granting PR permission', async () => {
+it('projects a confirmed attempt through runtime authority without accepting an invalid PR body', async () => {
   const f = fixture();
   const writer = createEffectWriter(f.reader, undefined, { kind: 'confirmed_attempt' });
   const effect: EffectView = { ...f.effect, kind: 'project_status', expectedIdentity: { repositoryId: 'R', issueId: 'I', projectId: 'P', itemId: 'ITEM', fieldId: 'FIELD', optionId: 'PROGRESS' } };
   const authorize = vi.fn(async () => {});
   expect(await writer({ effect, accountId: 'A' })).toMatchObject({ reason: 'MUTATION_NOT_AUTHORIZED' });
   expect(await writer({ effect: { ...effect, authorized: false }, accountId: 'A', authorize })).toMatchObject({ reason: 'MUTATION_NOT_AUTHORIZED' });
-  expect(await writer({ effect: { ...f.effect, kind: 'pull_request' }, accountId: 'A', body: f.body, authorize })).toMatchObject({ reason: 'MUTATION_NOT_AUTHORIZED' });
+  expect(await writer({ effect: { ...f.effect, kind: 'pull_request' }, accountId: 'A', body: f.body, authorize })).toMatchObject({ reason: 'EFFECT_INPUT_INVALID' });
   expect(f.run).not.toHaveBeenCalled();
   const revoked = vi.fn(async () => { throw new Error('REVOKED'); });
   expect(await writer({ effect, accountId: 'A', authorize: revoked })).toMatchObject({ reason: 'EFFECT_AUTHORITY_REVOKED' });

@@ -20,7 +20,7 @@ export function createEffectWriter(reader: GraphQLReader, authorization?: GitHub
     if (!Value.Check(EffectView, effect) || !Value.Check(OperationId, effect.operationId) || !Value.Check(GitHubId, accountId) || effect.state !== 'running') return denied('EFFECT_INPUT_INVALID');
     if (!['issue_comment','project_status','pull_request'].includes(effect.kind) || !effect.attemptId || effect.creationId) return denied('EFFECT_INPUT_INVALID');
     const identity = effect.expectedIdentity;
-    const confirmedEffect = attemptEffectAuthorization?.kind === 'confirmed_attempt' && (effect.kind === 'project_status' || effect.kind === 'issue_comment') && effect.authorized && !!authorize;
+    const confirmedEffect = attemptEffectAuthorization?.kind === 'confirmed_attempt' && effect.authorized && !!authorize;
     const trustedTarget = authorization?.accountId === accountId && authorization.repositoryIds.includes(identity.repositoryId ?? '') &&
       (effect.kind !== 'project_status' || authorization.projectIds.includes(identity.projectId ?? ''));
     if (!identity.repositoryId || (!confirmedEffect && !trustedTarget)) return denied('MUTATION_NOT_AUTHORIZED');

@@ -28,7 +28,7 @@ export function createWorkspaces(options: WorkspaceOptions) {
     captureDelivery: createCapturer(options.dataDirectory, git), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git),
     verifyRetainedDelivery: createRetainedVerifier(options.dataDirectory, git),
     ...createLocalPublisher(options.dataDirectory, git),
-    ...createRemotePublisher(options.dataDirectory,git,options.pushAuthorization),
+    ...createRemotePublisher(options.dataDirectory,git,options.pushAuthorization,undefined,options.context ? { kind: 'confirmed_attempt' } : undefined),
     materializeCheck: createCheckMaterializer(options.dataDirectory, git),
     materializeReview: createCheckMaterializer(options.dataDirectory, git, undefined, 'reviews'),
     validateReview: createReviewValidator(options.dataDirectory, git),
