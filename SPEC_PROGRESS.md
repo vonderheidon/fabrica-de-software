@@ -2754,3 +2754,57 @@ Data: 2026-10-18. Escopo US-22–24, RF-103–109 e RNF-19. Esta entrega documen
 - Roteiros por versão, contexto e autorização: Preparar a execução responsável das provas sem dispará-las pelo harness ou pela suíte padrão.
 - Cobertura dos percursos reais e da UI: Preparar os quatro roteiros históricos com os cenários ainda exigidos para a versão entregue.
 - Entrega imutável e fechamento sem aprovação implícita: Preparar a revisão independente por referência Git e manter os resultados de cada superfície separados.
+
+## Sprint 001 - Fundação persistente e contratos de exclusão [CONCLUIDA]
+- Persistência de autorização, alvos e recibo mínimo: Adicionar as três tabelas normativas e suas proteções de identidade, preservando a base existente.
+- Contratos públicos fechados: Definir os tipos wire de exclusão e preparar sua integração tipada com operações existentes.
+
+## Sprint 002 - Pertencimento integral e exceção SQL restrita [CONCLUIDA]
+- Inventário relacional exclusivo: Disponibilizar a seleção completa dos registros pertencentes ao cadastro e os bloqueios de propriedade compartilhada ou ambígua.
+- Guardas de finalização e prova do ciclo: Permitir DELETE exclusivamente no contexto transacional autorizado e comprovar a remoção dos ciclos da base.
+
+## Sprint 003 - Conferência de alvos e segurança de caminhos [CONCLUIDA]
+- Alvos atuais e conferência determinística: Determinar o conjunto completo autorizado a partir da configuração salva e do inventário versionado.
+- Proteção lexical, efetiva e de identidade: Identificar caminhos protegidos, sobreposições, links e situações em que a plataforma não oferece garantia suficiente.
+
+## Sprint 004 - Aceite durável e barreiras concorrentes [CONCLUIDA]
+- Aceitação idempotente e atômica: Aceitar somente a conferência atual e estabelecer operação, pendência e alvos de forma indivisível.
+- Barreira de trabalho e sobreposição de vínculos: Integrar a pendência aos autorizadores existentes e às gravações que possam comprometer exclusividade.
+
+## Correção feat-009 — remoção por referência [PENDENTE; CAPACIDADE NATIVA NÃO LIBERADA]
+
+- Fonte de verdade: `docs/Docs20261020_114742/SPEC20261020_114742.md`, §3.2, protocolo de filesystem, itens 4–9. Não alterar as identidades originalmente aceitas nem procurar pastas movidas.
+- `workspaces.removeProjectDeletion` revalida todo o conjunto antes de cada alvo, mantém as identidades originais, interrompe novos efeitos na primeira falha e reconcilia ausência ao terminar. Erros têm motivo/ação sanitizados; substituição conserva a orientação normativa de retirada externa da substituta.
+- Candidato Windows/NTFS: `resources/deletion/windows-reference.cs` e `workspaces/windows-reference.ts`. Abre ancestrais e objetos sem seguir reparse points e sem compartilhar escrita/delete; conserva os handles até os efeitos, confere IDs/volume/resolução e usa `SetFileInformationByHandle` no objeto aberto. Não há fallback para remoção recursiva por string. Volumes, caminhos ou recursos não comprováveis bloqueiam. Não coleta conteúdo nem persiste inventário de arquivos.
+- Provas nativas ficam em `tests/native/project-deletion.proof.ts`, executadas explicitamente por `npm.cmd run test:deletion-native`, sem os mocks de processos da suíte padrão. A prova anteriormente misturada à suíte padrão para ancestral junction/symlink foi transferida e ampliada, não considerada aprovada por omissão.
+- Provas positivas locais: remoção integral de `.git`, ignorados, arquivos pessoais, trabalho não publicado e acréscimos posteriores ao aceite; proteção de raiz/ancestrais/descendentes junto aos efeitos; troca de descendente por symlink após enumeração; arquivo em uso e retomada; preservação de destinos de symlinks, irmãos e dados compartilhados; preservação da substituta/original movida, ausência segura e reaparecimento; operação real de workspaces sob composição exclusiva de qualificação.
+- Impedimento: três provas de junction (raiz, descendente e ancestral) falham com `EPERM` ao criar a fixture, antes da verificação do produto. Isso NÃO comprova remoção de junctions. O adaptador padrão continua sem anunciar capacidade destrutiva; o candidato também declara `safeReferenceRemoval=false`. Não concluir feat-009-c1/c2 nem a entrega afetada enquanto essas provas não passarem e a composição nativa não for qualificada/liberada. A prova de conteúdo c3 é positiva para o candidato, não aceite do percurso completo.
+- Referências das primitivas: [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew), [SetFileInformationByHandle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle) e [disposição de arquivos](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntddk/ns-ntddk-_file_disposition_information_ex). Verificações de build/typecheck/lint não substituem as provas nativas pendentes.
+- Validação técnica desta correção: `npm.cmd run typecheck`, `npm.cmd run lint` e `npm.cmd run build`: exit 0; seis arquivos direcionados de contratos/storage/workspaces: 111 testes aprovados. `npm.cmd run test:deletion-native`: exit 1, 14 aprovados e três falhas de criação de junction por `EPERM`. Recurso C# fonte/distribuição com SHA-256 idêntico; `git diff --check`: exit 0. Build mantém o aviso de tamanho do bundle web. Não foi executada a suíte integral nem houve validação de UI ou efeitos externos.
+
+## Sprint 006 - Coordenador durável e recuperação de execução [CONCLUIDA]
+- Execução exclusiva e progresso interrompível: Coordenar accepted, running, pending e reconfirmation_required sem depender da conexão HTTP.
+- Retomada manual e recuperação no startup: Recuperar a mesma autorização persistida e expor capacidades corretas de acompanhamento.
+
+## Sprint 007 - Finalização integral e recuperação mínima [CONCLUIDA]
+- Conclusão física e relacional comprovada: Integrar a finalização SQL autorizada ao coordenador, impedindo sucesso parcial.
+- Replay após remoção do cadastro: Resolver a chave original depois da conclusão sem reconstruir ou reter contexto excluído.
+
+## Sprint 008 - API integrada e proteções HTTP [CONCLUIDA]
+- Rotas públicas do ciclo de exclusão: Disponibilizar os quatro endpoints normativos com respostas e semântica idempotente completas.
+- Extensões compatíveis de consultas e comandos: Integrar resumos de pendência, capacidades negativas e recibo mínimo aos contratos existentes.
+
+## Sprint 009 - Transporte frontend e operações incertas [CONCLUIDA]
+- Hooks e adaptadores da API de exclusão: Consumir os contratos compartilhados pelo wrapper existente com polling e isolamento de contexto.
+- Recuperação de envio incerto: Integrar project.delete ao mecanismo de operações incertas sem persistir conteúdo do projeto.
+
+## Sprint 010 - Confirmação acessível na configuração [CONCLUIDA]
+- Ação e conferência vinculadas ao cadastro salvo: Apresentar projeto, todos os caminhos, perdas e preservações antes do clique autorizador.
+- Acessibilidade e estados iniciais: Aplicar diálogo e linguagem operacional existentes a confirmação, bloqueio e envio incerto.
+
+## Sprint 011 - Acompanhamento persistente e conclusão no frontend [CONCLUIDA]
+- Pendência reabrível e retomada segura: Completar os estados de acompanhamento e os avisos na configuração e listagem.
+- Sucesso, seleção e rascunhos isolados: Atualizar o contexto visual somente após succeeded e preservar trabalho não pertencente ao cadastro removido.
+
+## Sprint 013 - Medição de persistência e volume [CONCLUIDA]
+- Prova comparativa de volume e latência: Medir persistência, payloads e consultas com ampliação de caches e ignorados sem criar SLA novo.
