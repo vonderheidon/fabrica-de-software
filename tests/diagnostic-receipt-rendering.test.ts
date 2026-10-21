@@ -5,7 +5,7 @@ import type { HttpDiagnosticsView } from '#contracts';
 import { RecordsPanel } from '../apps/web/src/features/records/RecordsPanel.js';
 
 vi.mock('../apps/web/src/features/records/useRecords.js', () => ({
-  useRecords: () => ({ page: null, loading: false }),
+  useRecords: () => ({ page: null, loading: false, pageIndex: 0 }),
 }));
 
 vi.mock('../apps/web/src/features/records/useDiagnostics.js', () => ({
@@ -23,12 +23,13 @@ vi.mock('../apps/web/src/features/records/useDiagnostics.js', () => ({
 }));
 
 describe('diagnostic receipt rendering', () => {
-  it('shows the persisted receipt revision and cursor alongside its operation', () => {
+  it('shows completion while keeping receipt and operation diagnostics private', () => {
     const html = renderToStaticMarkup(createElement(RecordsPanel, {
       filters: { projectId: '', attemptId: '', operationId: '' }, onFilterChange: () => {},
     }));
-    expect(html).toContain('00000000-0000-4000-8000-000000000001');
-    expect(html).toContain('<dt>Revisão do recibo</dt><dd>1</dd>');
-    expect(html).toContain('<dt>Cursor do recibo</dt><dd class="mono">37</dd>');
+    expect(html).toContain('Concluída');
+    expect(html).not.toContain('00000000-0000-4000-8000-000000000001');
+    expect(html).not.toContain('Revisão do recibo');
+    expect(html).not.toContain('Cursor do recibo');
   });
 });

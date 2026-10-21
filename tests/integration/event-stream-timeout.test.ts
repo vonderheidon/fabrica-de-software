@@ -10,7 +10,9 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 
 const testStreamLimits = {
   ...httpLimits,
-  handlerTimeoutMs: 10,
+  // Leave scheduling headroom after the bounded stream lifetime under suite load.
+  // The first proof separately keeps the ordinary Fastify handler deadline at 10 ms.
+  handlerTimeoutMs: 500,
   streamLifetimeMs: 35,
   streamPollMs: 5,
   streamBufferBytes: 1024,

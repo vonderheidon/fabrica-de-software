@@ -60,7 +60,7 @@ describe('configuration operation recovery', () => {
     vi.resetModules();
     const reloaded = await import('./configuration-save.js');
     expect(reloaded.hasOriginalConfigurationSave(operationId)).toBe(false);
-    await expect(reloaded.resendConfigurationSave(operationId)).rejects.toThrow('dados originais');
+    await expect(reloaded.resendConfigurationSave(operationId)).rejects.toThrow('Sem os dados desta operação');
     expect(fetch.mock.calls.filter(call => (call[1] as RequestInit).method === 'PUT')).toHaveLength(0);
   });
 });

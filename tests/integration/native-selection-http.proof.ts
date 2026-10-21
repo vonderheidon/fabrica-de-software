@@ -11,13 +11,15 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 it('keeps the native picker alive after a complete HTTP POST body arrives', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'factory-native-selection-'));
   const storage = openStorage({ dataDirectory: directory });
-  const app = Fastify({ connectionTimeout: 20 });
+  // Allow request parsing/schema setup before exercising the longer picker wait.
+  // The picker still outlives the socket timeout, so removing the route override fails this proof.
+  const app = Fastify({ connectionTimeout: 500 });
   let pickerAborted = false;
   const projects = createProjects({
     storage, github: createGitHub(), directoryBase: directory,
     workspaces: { inspectOrigin: async () => { throw new Error('Origin inspection is outside this proof.'); } },
     selectProjectsDirectory: async signal => {
-      await new Promise<void>(resolve => setTimeout(resolve, 50));
+      await new Promise<void>(resolve => setTimeout(resolve, 750));
       pickerAborted = signal?.aborted ?? false;
       return pickerAborted ? null : directory;
     },
