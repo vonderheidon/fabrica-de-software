@@ -31,6 +31,21 @@ function durableRows(f: AttemptFixture) {
     operations: f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all(), events: f.storage.getEvents({}) };
 }
 
+it('exposes the configuration lock and rejects edits while the project is executing', async () => {
+  const f = await fixture();
+  const before = f.storage.getConfiguration(f.projectId);
+  const prepared = await f.prepare();
+  const operation = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
+  const response = await f.app.inject({ method: 'GET', url: `/api/v1/projects/${f.projectId}/configuration`, headers: f.headers });
+  expect(response.statusCode).toBe(200);
+  expect(response.json()).toMatchObject({ configuration_lock: { attempt_id: operation.resource.id } });
+  const saved = await f.app.inject({ method: 'PUT', url: `/api/v1/projects/${f.projectId}/configuration`,
+    headers: { ...f.headers, 'idempotency-key': randomUUID(), 'if-match': before.etag }, payload: { project_changes: { guidance: 'Do not save' } } });
+  expect(saved.statusCode).toBe(409);
+  expect(saved.json()).toMatchObject({ code: 'PROJECT_CONFIGURATION_LOCKED' });
+  expect(f.storage.getConfiguration(f.projectId).view.configuration.guidance).toBe(before.view.configuration.guidance);
+});
+
 it('serves and saves the same configuration schemas, preserving omission, null, exact time and receipt semantics', async () => {
   const f = await fixture();
   const before = f.storage.getGlobalConfiguration();

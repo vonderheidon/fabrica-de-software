@@ -14,6 +14,7 @@ import { readSettings } from './settings.js';
 import { configurationETag, digest, guarded, readConfiguration, readSettingsView } from './configuration-reads.js';
 import { assertProjectProfileRoles } from './profile-integrity.js';
 import { assertProjectAvailable, assertDeletionPathsAvailable } from './project-deletion-barrier.js';
+import { assertProjectConfigurationEditable } from './project-configuration-lock.js';
 
 interface ProfileReferenceBlockers { readonly count: number; readonly projectIds: readonly string[] }
 
@@ -412,6 +413,7 @@ export function saveConfiguration(db: Database.Database, input: SaveConfiguratio
   return guarded(() => db.transaction(() => {
     const recovered = recoverConfigurationCommand(db, command); if (recovered) return recovered;
     assertProjectAvailable(db, input.projectId);
+    assertProjectConfigurationEditable(db, input.projectId);
     if (input.body.project_changes.source?.kind === 'local') assertDeletionPathsAvailable(db, [input.body.project_changes.source.location]);
     const view = readConfiguration(db, input.projectId); checkRevision(configurationETag(view), input.expectedRevision);
     checkExplicitGlobals(input.body.global_changes ?? {}, input.globalChanges);

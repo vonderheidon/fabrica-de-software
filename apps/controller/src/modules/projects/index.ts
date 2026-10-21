@@ -508,6 +508,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       const current = storage.getConfiguration(projectId);
       const deletion = current.view.prerequisites.find(item => item.code === 'PROJECT_DELETION_PENDING');
       if (deletion) throw new OperationError(409, deletion.code, deletion.message, { recovery: deletion.recovery });
+      if (current.view.configuration_lock) throw new OperationError(409, 'PROJECT_CONFIGURATION_LOCKED', 'Este projeto tem uma tentativa ou publicação em andamento. Aguarde a conclusão ou cancele a tentativa e aguarde a confirmação da parada para alterar as configurações.');
       precondition(current.etag, context.expectedRevision);
       await validateProfileChanges(body.profile_changes, current.view.profiles);
       const previous = current.view.configuration;

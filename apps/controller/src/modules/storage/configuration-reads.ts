@@ -10,6 +10,7 @@ import { readSettings } from './settings.js';
 import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
 import { deletionOperation, deletionRecovery } from './project-deletion-barrier.js';
+import { projectConfigurationLock } from './project-configuration-lock.js';
 
 export const digest = (value: unknown): string => createHash('sha256').update(canonical(value)).digest('hex');
 function canonical(value: unknown): string {
@@ -157,7 +158,7 @@ export function readConfiguration(db: Database.Database, projectId: string): Con
     automation_enabled: r.automation_enabled === 1, queue_order: readQueueOrderJson(JSON.parse(String(r.queue_order_json)) as unknown), guidance: r.guidance,
   };
   if (!Value.Check(ProjectRevision, configuration)) throw new StorageError('PROJECT_DATA_INVALID');
-  const view = { deletion: project.deletion, configuration, ...readSettingsView(db), prerequisites: project.prerequisites };
+  const view = { deletion: project.deletion, configuration_lock: projectConfigurationLock(db, projectId), configuration, ...readSettingsView(db), prerequisites: project.prerequisites };
   if (!Value.Check(ConfigurationView, view)) throw new StorageError('PROJECT_DATA_INVALID');
   return view;
 }

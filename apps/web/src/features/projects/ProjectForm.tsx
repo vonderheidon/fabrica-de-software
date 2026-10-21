@@ -419,6 +419,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
     if (Object.keys(timeFieldErrorsRef.current).length > 0) return;
     if (projectId && knownProjectDeletion(projectId)) return;
     if (load.status !== 'ready' || load.identity !== identity || !draft) return;
+    if (isConfigurationView(load.view) && load.view.configuration_lock) return;
     const baseline = load.view;
     const baseGlobal: GlobalConfiguration = { ...baseline.settings, profiles: baseline.profiles };
     const globalChanges: Partial<GlobalConfiguration> = {};
@@ -555,6 +556,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
   if (!draft) return <section className="card read-state" role="status"><p>Preparando edição…</p></section>;
   const implementerProfiles = profilesForRole(draft.profiles, 'implementer');
   const reviewerProfiles = profilesForRole(draft.profiles, 'reviewer');
+  const configurationLock = isConfigurationView(load.view) ? load.view.configuration_lock : null;
   const implementerProfileAvailable = implementerProfiles.some((profile) => profile.id === draft.project?.implementer_profile_id);
   const reviewerProfileAvailable = reviewerProfiles.some((profile) => profile.id === draft.project?.reviewer_profile_id);
   const hasUnavailableProjectProfile = Boolean(draft.project && (
@@ -601,7 +603,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
     }}>Aplicar minha edição sobre a revisão consultada</button>}
     {recoveryMessage && <p role="status">{recoveryMessage}</p>}
     {uncertainId && <section className="notice"><b>Gravação ainda não confirmada</b><p>O rascunho permanece somente nesta sessão. Consulte a operação original; o comando não será repetido automaticamente.</p><button type="button" onClick={() => void recoverSave()}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void recoverSave(true)}>Reapresentar a mesma operação</button>}</section>}
+    {projectId && configurationLock && <div className="notice" role="status"><b>Configuração disponível somente para consulta</b><p>Este projeto tem uma tentativa ou publicação em andamento. Aguarde a conclusão ou cancele a tentativa e aguarde a confirmação da parada para alterar as configurações.</p><a className="button-link" href={`#principal/tentativas?projectId=${encodeURIComponent(projectId)}&attemptId=${encodeURIComponent(configurationLock.attempt_id)}&dialog=detail`}>Ver tentativa</a></div>}
     {projectId && draft.project && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Projeto selecionado</span><h2>{projectName}</h2><p className="muted">As alterações serão usadas nas próximas preparações deste projeto.</p></div>
+      <fieldset disabled={Boolean(configurationLock)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }} aria-label="Configuração do projeto">
       <div className="configuration-guidance" role="note" aria-label="Dados necessários e controles opcionais">
         <div><h3>Para preparar uma issue</h3><p>Confirme o repositório GitHub, a branch-base, um perfil de cada papel e o quadro com seu mapeamento de Status. A issue precisa estar vinculada ao quadro para iniciar em qualquer modo, inclusive no início manual.</p></div>
         <div><h3>Controles opcionais</h3><p>Checks, orientações e limite de correções podem permanecer nos valores atuais. O modo de entrega parte do padrão configurado.</p></div>
@@ -632,6 +636,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         {draft.project.checks.map((check, index) => <fieldset className="check-card" key={check.id}><legend>Check {index + 1}</legend><div className="form-grid"><TextField label={`Comando do check ${index + 1}`} value={check.command} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, command: value } : item) }))} /><TextField label={`cwd relativo do check ${index + 1}`} value={check.cwd_relative} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, cwd_relative: value } : item) }))} help="Deve permanecer relativo ao ambiente da tentativa." /><NumberField label={`Timeout do check ${index + 1}`} value={check.timeout_ms ?? 60000} min={1} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, timeout_ms: value } : item) }))} unit="ms" /></div><button type="button" className="danger-button" onClick={() => updateProject((current) => ({ ...current, checks: current.checks.filter((item) => item.id !== check.id) }))}>Remover check</button></fieldset>)}
       </div>
       {draft.project.source.kind === 'local' && <div className="notice"><b>Origem local</b><p>Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.</p></div>}
+      </fieldset>
     </section>}
     {projectId && isConfigurationView(load.view) && <section className="card project-danger-zone"><div><h3>Exclusão do projeto</h3><p>Remova o cadastro e os dados locais após conferir o que será perdido. Os recursos do GitHub serão preservados.</p></div><ProjectDeletionAction key={`${projectId}:${accountId ?? ''}`} projectId={projectId} projectRevision={load.view.configuration.revision}
       installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
@@ -639,7 +644,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
 
     <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">
       {!projectId && (saveState.status === 'idle' || saveState.status === 'saved') && <span className="muted">{same(draft.global, draft.baselineGlobal) ? 'Nenhuma alteração pendente.' : 'Há alterações não salvas.'}</span>}
-      {saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={deletionRestricted || saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
+      {saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={Boolean(configurationLock) || deletionRestricted || saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
 
 
   </div>;

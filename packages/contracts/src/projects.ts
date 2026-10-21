@@ -183,7 +183,7 @@ export const SettingsSaved = Type.Object({
   warnings: Type.Optional(Type.Array(OperationWarning, { maxItems: 10 })),
 }, closed);
 export type SettingsSaved = Static<typeof SettingsSaved>;
-export const ConfigurationView = Type.Object({ deletion, configuration: ProjectRevision, ...SettingsView.properties, prerequisites: Type.Array(Prerequisite) }, closed);
+export const ConfigurationView = Type.Object({ deletion, configuration_lock: Type.Optional(Type.Union([Type.Object({ attempt_id: Type.String() }, closed), Type.Null()])), configuration: ProjectRevision, ...SettingsView.properties, prerequisites: Type.Array(Prerequisite) }, closed);
 export type ConfigurationView = Static<typeof ConfigurationView>;
 export const ConfigurationSaved = Type.Object({ ...ConfigurationView.properties, operation_id: OperationId, receipt: OperationReceipt }, closed);
 export type ConfigurationSaved = Static<typeof ConfigurationSaved>;
