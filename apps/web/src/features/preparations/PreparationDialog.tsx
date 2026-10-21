@@ -2,6 +2,7 @@ import { knownProjectDeletion, rememberProjectDeletion, useProjectDeletionRestri
 import { isProjectDeletionCompleted } from '../../api/project-deletion.js';
 import { startAttemptBody } from '../attempts/execution-requests.js';
 import { changedChoices, hasBlockingPrerequisites } from './preparation-requests.js';
+import { IssueOptionsNotice } from './IssueOptionsNotice.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ConfigurationView, ProjectDetail, DeliveryMode, IssueOptions, OperationAccepted, OperationView, Preparation, PreparationCreated, PreparationChoices, PreparationUpdate, HttpAttemptDetail as AttemptDetail, SettingsView, StoredExecutionProfile } from '#contracts';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
@@ -332,7 +333,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
       <a className="button-link" href="#principal/perfis">Abrir Perfis Globais</a>
     </div>}
     {issuesError && <div className="queue-error" role="alert"><b>Não foi possível consultar as issues</b><p>{issuesError}</p><p><strong>Próxima ação:</strong> atualize a consulta e confirme que a issue continua elegível.</p><button type="button" onClick={() => { setIssues(null); setIssuesError(null); setIssueReload((value) => value + 1); }}>Consultar novamente</button></div>}
-    {issues && issues.completeness !== 'complete' && <div className="notice"><b>Opções {issues.completeness === 'partial' ? 'parciais' : 'indisponíveis'}</b>{[...issues.prerequisites, ...issues.diagnostics].map((item, index) => <OperatorDiagnosticCard key={`${item.code}-${index}`} code={item.code} state="unavailable" cause={item.message} recovery={item.recovery} projectId={projectId} />)}<button type="button" onClick={() => setIssueReload((value) => value + 1)}>Consultar issues novamente</button></div>}
+    {issues && <IssueOptionsNotice issues={issues} projectId={projectId} onReload={() => setIssueReload((value) => value + 1)} />}
     {selectedIssue && issueBlockers.length > 0 && <div className="notice"><b>Impedimentos desta issue</b><ul>{issueBlockers.map((reason) => <li key={reason}>{operatorCodeLabel(reason)}</li>)}</ul></div>}
     </section>
 
