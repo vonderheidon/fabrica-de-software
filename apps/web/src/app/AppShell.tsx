@@ -20,6 +20,7 @@ import { EventConnectionStatus } from './EventConnectionStatus.js';
 import './styles/event-connection-status.css';
 import { useOnboarding } from '../features/onboarding/useOnboarding.js';
 import { InitialSetupDialog } from '../features/onboarding/InitialSetupDialog.js';
+import { trackProjectDeletions } from '../features/projects/project-deletion-observer.js';
 
 type DialogState = { status: 'ready'; message: string } | { status: 'action-error'; message: string };
 
@@ -38,6 +39,8 @@ export function AppShell() {
   const { dialog, setDialog } = dialogs;
   const onboarding = useOnboarding(route.tab === 'dashboard' || route.params.get('dialog') === 'initial-setup');
   const eventState = useControllerEvents();
+  const deletionPollingIntervalMs = onboarding.load.snapshot?.settings.settings.time_defaults.polling_interval_ms ?? 15000;
+  useEffect(() => trackProjectDeletions(deletionPollingIntervalMs), [deletionPollingIntervalMs]);
   const [dialogState, setDialogState] = useState<DialogState>({ status: 'ready', message: '' });
   const [profileSavePending, setProfileSavePending] = useState(false);
   const profileSavePendingRef = useRef(false);

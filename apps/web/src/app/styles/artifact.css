@@ -186,6 +186,12 @@ td:first-child, th:first-child { padding-left: 0; }
 .profile-delete-dialog form { display: grid; gap: 8px; }
 .profile-delete-dialog .profile-delete-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
 .profile-delete-dialog button { min-height: 44px; }
+.project-deletion-dialog { box-sizing: border-box; overflow-wrap: anywhere; }
+.project-deletion-dialog h2:focus { outline: 3px solid var(--accent); outline-offset: 3px; }
+.project-deletion-targets { padding-inline-start: 22px; }
+.project-deletion-targets li { margin-block: 14px; }
+.project-deletion-targets span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.project-deletion-dialog .profile-delete-actions > button { white-space: normal; max-width: 100%; }
 .dialog h2 { font-size: 24px; margin: 20px 0 8px; }
 .close-button { min-width: 44px; min-height: 44px; padding: 7px 12px; font-size: 22px; }
 @media (max-width: 950px) {

@@ -113,6 +113,8 @@ export function createPipeline(deps: PipelineDependencies) {
     const saved = storage.getPreparation(body.preparationId);
     if (saved.etag !== context.expectedRevision) throw new OperationError(412, 'REVISION_CONFLICT', 'The preparation changed.');
     const config = storage.getConfiguration(saved.view.project_id);
+    const deletion = config.view.prerequisites.find(item => item.code === 'PROJECT_DELETION_PENDING');
+    if (deletion) throw new OperationError(409, deletion.code, deletion.message, { recovery: deletion.recovery });
     const profileCounts = storage.getGlobalConfiguration().view.profile_counts;
     const missingProfileTypes = (['implementer', 'reviewer'] as const).filter((role) => profileCounts[role] === 0);
     if (missingProfileTypes.length > 0) {

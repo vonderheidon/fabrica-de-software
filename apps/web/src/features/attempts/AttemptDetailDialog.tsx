@@ -293,6 +293,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       </section>
 
       {delivery && <PublicationDialog
+        projectId={attempt.project_id}
         attemptId={attemptId}
         attemptEtag={attemptEtag}
         delivery={delivery}

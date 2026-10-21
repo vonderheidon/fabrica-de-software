@@ -1,4 +1,5 @@
 import { serializeOperationReceipt } from './common-json.js';
+import { assertAttemptProjectAvailable, assertProjectAvailable, deletionOperation } from './project-deletion-barrier.js';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { CompletePublication, ReconcilePublication, AuthorizeUpgrade, OperationId, type EffectView, type PublicationSummary } from '#contracts';
@@ -37,6 +38,7 @@ export function publicationSnapshot(db: Database.Database, attemptId: string, de
 /** Local eligibility uses scalar projections; polling never deserializes the captured task or evidence. */
 function publicationBlockReason(db: Database.Database, attemptId: string, deliveryId: string, explicit: boolean): string | null {
   const a = readAttempt(db, attemptId); const d = readDelivery(db, deliveryId);
+  if (deletionOperation(db, a.projectId)) return 'PROJECT_DELETION_PENDING';
   if (d.attemptId !== attemptId) throw new OperationError(404, 'DELIVERY_NOT_FOUND', 'The delivery does not belong to this attempt.');
   const r = db.prepare<[string], { state: string; independence_state: string; content_identity: string; passage_id: string; verification_id: string }>(
     'SELECT state,independence_state,content_identity,passage_id,verification_id FROM reviews WHERE delivery_id=?').get(deliveryId);
@@ -66,6 +68,7 @@ function publicationBlockReason(db: Database.Database, attemptId: string, delive
   return null;
 }
 export function assertPublicationEligible(db: Database.Database, attemptId: string, deliveryId: string, explicit: boolean): void {
+  assertAttemptProjectAvailable(db, attemptId);
   const reason = publicationBlockReason(db, attemptId, deliveryId, explicit);
   if (reason) throw new OperationError(409, reason, 'ICR requires the approved current version, completed passages, reconciled resources and current authority.');
 }
@@ -88,6 +91,7 @@ export function acceptPublication(db: Database.Database, c: PublicationCommand):
   return guarded(() => db.transaction(() => {
     const old = recoverPublication(db, c); if (old) return { created: false, operation: old };
     const a = readAttempt(db, c.attemptId); const s = readSettings(db);
+    assertProjectAvailable(db, a.projectId);
     if (c.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
     if (c.expectedRevision !== `"${a.id}:${a.revision}"`) throw new OperationError(412, 'REVISION_CONFLICT', 'The attempt changed.');
     const deliveryId = 'deliveryId' in c.body ? c.body.deliveryId : null;
@@ -181,6 +185,7 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
   if (a.result && !['delivered','interrupted'].includes(a.result)) reason = 'PUBLICATION_REVOKED';
   if (a.pendingQuestionId) reason = 'HUMAN_DECISION';
   if (a.suspension) reason = a.suspension;
+  if (deletionOperation(db, a.projectId)) reason = 'PROJECT_DELETION_PENDING';
   // Count effects without loading their identities, receipts or authorization documents.
   const counts = db.prepare<[string, string | null], { confirmed: number; pending: number; unknown: number }>(`SELECT
     coalesce(sum(state='confirmed'),0) AS confirmed,
@@ -203,5 +208,6 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
     pendingEffects: counts.pending,
     unknownEffects: counts.unknown,
     completeCapability: reason ? { available: false, reason_code: reason } : { available: true },
-    reconcileCapability: counts.unknown > 0 ? { available: true } : { available: false, reason_code: 'NO_UNRESOLVED_EFFECTS' } };
+    reconcileCapability: reason === 'PROJECT_DELETION_PENDING' ? { available: false, reason_code: reason }
+      : counts.unknown > 0 ? { available: true } : { available: false, reason_code: 'NO_UNRESOLVED_EFFECTS' } };
 }

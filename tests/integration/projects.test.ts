@@ -14,6 +14,7 @@ import {
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
+import { createProjectDeletionPersistence } from '../../apps/controller/src/modules/storage/project-deletions.js';
 import { createProjects, type ProjectDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { createQueue } from '../../apps/controller/src/modules/projects/queue.js';
 
@@ -292,6 +293,7 @@ function fixture(realAdapters = false, selectionCallbacks: Pick<ProjectDependenc
     ? { ...selectionCallbacks, ...(resolvedExecution ? { execution: resolvedExecution } : {}) }
     : { github, githubSetup, workspaces: { inspectOrigin }, ...selectionCallbacks, ...(resolvedExecution ? { execution: resolvedExecution } : {}) }); resources.push(app);
   const db = new Database(join(directory, 'factory.sqlite')); db.pragma('foreign_keys = ON'); resources.push(db);
+  createProjectDeletionPersistence(db);
   return { app, storage, db, directory, github, githubSetup, inspectOrigin, inspection, execution: resolvedExecution };
 }
 type Fixture = ReturnType<typeof fixture>;
@@ -935,7 +937,7 @@ describe('global and aggregate configuration', () => {
       const accepted = saveTimeDefaults(db, { operationId: randomUUID(), expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
       const identity = db.prepare('SELECT installation_id FROM factory_settings').get();
       applyMigrations(db, loadMigrations(), () => { throw new Error('Must not reseed'); });
-      expect(db.pragma('user_version', { simple: true })).toBe(24); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
+      expect(db.pragma('user_version', { simple: true })).toBe(26); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
       expect(db.prepare('SELECT * FROM projects').all()).toEqual([]); expect(db.prepare('SELECT * FROM execution_profiles').all()).toEqual([]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect(readOperation(db, accepted.operation_id)).toEqual(accepted);

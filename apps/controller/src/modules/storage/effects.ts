@@ -1,4 +1,5 @@
 import { serializeOperationReceipt } from './common-json.js';
+import { assertAttemptProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -41,6 +42,7 @@ function explicitGrant(db: Database.Database, attemptId: string, deliveryId: str
     .get(operationId,attemptId,deliveryId));
 }
 function validateAttemptEffect(db: Database.Database, attemptId: string, deliveryId: string | null, kind: EffectView['kind'], identity: EffectIdentity, sourceOperationId: string): void {
+  assertAttemptProjectAvailable(db, attemptId);
   const a = readAttempt(db,attemptId); const capture = readCapture(db,attemptId);
   if (!['issue_comment','project_status','local_commit','push','pull_request'].includes(kind)) throw new OperationError(409,'EFFECT_NOT_AUTHORIZED','Creation effects cannot originate in an attempt.');
   const explicit = explicitGrant(db,attemptId,deliveryId,sourceOperationId);

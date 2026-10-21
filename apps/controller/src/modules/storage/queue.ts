@@ -1,4 +1,5 @@
 import { serializeOperationReceipt } from './common-json.js';
+import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -52,6 +53,7 @@ export function saveQueueChange(db: Database.Database, command: QueueChange): St
     if (command.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
     const { scope, enabled } = command.body;
     const ids = projectIds(db, scope); const settings = readSettings(db);
+    if (enabled) for (const id of ids) assertProjectAvailable(db, id);
     if (queueETag(db, scope) !== command.expectedRevision) throw new OperationError(412, 'REVISION_CONFLICT', 'Queue configuration changed.');
     if (scope.kind === 'account' && digest(ids) !== digest([...scope.projectIds].sort())) throw new OperationError(409, 'QUEUE_SCOPE_CHANGED', 'The configured project set changed.');
     if (enabled && (!settings.account_id || !settings.projects_root ||

@@ -109,7 +109,7 @@ describe('revocation and explicit retry', () => {
     await f.pipeline.close(); f.storage.close(); removeRecoverySchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(24); expect(reopened.getSettings().installation_id).toBe(instance);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(26); expect(reopened.getSettings().installation_id).toBe(instance);
       expect(reopened.getAttemptCapture(f.id)).toEqual(capture); expect(reopened.getAttempt(f.id).result).toBe('interrupted');
       expect(() => reopened.executionPersistence().confirmReady({ passageId: a.passageId }, f.profile, '18.11.1')).toThrow();
     } finally { reopened.close(); }

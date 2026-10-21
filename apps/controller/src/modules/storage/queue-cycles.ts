@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import { OperationError } from './operations.js';
 import { readSettings } from './settings.js';
+import { assertProjectAvailable, deletionOperation } from './project-deletion-barrier.js';
 
 export function latestIssueAttempt(db: Database.Database, repositoryId: string, issueId: string): { id: string; active: boolean } | null {
   const row = db.prepare<[string | null, string, string], { id: string; result: string | null }>(`SELECT id,result FROM attempts
@@ -40,6 +41,7 @@ export function recordQueueObservations(db: Database.Database, observations: rea
   const write = db.transaction(() => {
     const now = Date.now();
     for (const [ordinal, observation] of observations.entries()) {
+      if (deletionOperation(db, observation.projectId)) continue;
       const current = readQueueCycle(db, observation.accountId, observation.projectId, observation.issueId);
       if (!current) {
         db.prepare(`INSERT INTO queue_cycles(account_id,project_id,issue_id,cycle_number,last_ready,consumed_attempt_id,updated_at_ms,last_eligible,observed_ordinal)
@@ -70,6 +72,7 @@ export function recordQueueObservations(db: Database.Database, observations: rea
 }
 
 export function consumeQueueCycle(db: Database.Database, accountId: string, projectId: string, issueId: string, cycleNumber: number, attemptId: string): void {
+  assertProjectAvailable(db, projectId);
   const changed = db.prepare(`UPDATE queue_cycles SET consumed_attempt_id=?,updated_at_ms=? WHERE account_id=? AND project_id=? AND issue_id=?
     AND cycle_number=? AND last_ready=1 AND consumed_attempt_id IS NULL`).run(attemptId, Date.now(), accountId, projectId, issueId, cycleNumber);
   if (changed.changes !== 1) throw new OperationError(409, 'QUEUE_CYCLE_ALREADY_CONSUMED', 'The observed Ready cycle was already consumed or has changed.');
@@ -80,7 +83,8 @@ export function consumeQueueCycle(db: Database.Database, accountId: string, proj
     .run(randomUUID(), Date.now(), attemptId, accountId, projectId, issueId);
   // A duplicate project registration cannot turn the same observed Ready into a new job.
   db.prepare(`UPDATE queue_cycles SET consumed_attempt_id=?,updated_at_ms=? WHERE account_id=? AND issue_id=?
-    AND last_ready=1 AND consumed_attempt_id IS NULL AND project_id IN (
+    AND last_ready=1 AND consumed_attempt_id IS NULL
+    AND NOT EXISTS (SELECT 1 FROM project_deletions d WHERE d.project_id=queue_cycles.project_id) AND project_id IN (
       SELECT p.id FROM projects p JOIN project_revisions r ON r.id=p.current_revision_id
       JOIN attempts a ON a.id=? AND a.repository_id=r.repository_id)`)
     .run(attemptId, Date.now(), accountId, issueId, attemptId);

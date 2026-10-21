@@ -19,6 +19,8 @@ export interface PreparationDependencies {
 }
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
 function prerequisite(code: string): Prerequisite {
+  if (code === 'PROJECT_DELETION_PENDING') return { code, message: 'Este projeto tem uma exclusão pendente.',
+    recovery: 'Acompanhe a exclusão deste projeto e aguarde sua conclusão.' };
   return { code, message: `Preparation requires attention: ${code}.`, recovery: 'Review the issue, account, committed base and configuration; refresh the preparation before starting.' };
 }
 function profileSnapshot(profile: StoredExecutionProfile) {
@@ -88,6 +90,7 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     ]);
     const issue = issueResult.state === 'complete' && issueResult.data && 'repository' in issueResult.data ? issueResult.data : null;
     const reasons = [...resolved.reasons];
+    if (view.prerequisites.some(item => item.code === 'PROJECT_DELETION_PENDING')) reasons.push('PROJECT_DELETION_PENDING');
     if (!view.settings.account_id) reasons.push('ACCOUNT_UNOBSERVED');
     if (identity.state !== 'complete' || !identity.data || issueResult.state !== 'complete') reasons.push('READ_INCOMPLETE');
     if (identity.data && identity.data.id !== view.settings.account_id) reasons.push('ACCOUNT_CHANGED');
@@ -152,6 +155,8 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     if (previous && command.expectedRevision !== previous.etag) fail(412, 'REVISION_CONFLICT', 'Preparation changed. Reload and reapply your draft.');
     const projectId = command.kind === 'preparation.create' ? command.projectId : previous!.view.project_id;
     const config = storage.getConfiguration(projectId);
+    const deletion = config.view.prerequisites.find(item => item.code === 'PROJECT_DELETION_PENDING');
+    if (deletion) throw new OperationError(409, deletion.code, deletion.message, { recovery: deletion.recovery });
     const choices: PreparationChoices = command.kind === 'preparation.create' ? command.body : { ...previous!.view, ...command.body.changes };
     if (choices.previous_attempt_id) storage.validatePreviousAttempt(choices.previous_attempt_id, projectId, choices.issue_id);
     const resolved = effective(config.view, choices);

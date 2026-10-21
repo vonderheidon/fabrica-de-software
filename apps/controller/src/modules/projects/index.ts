@@ -15,6 +15,8 @@ import type { Workspaces } from '../workspaces/index.js';
 import type { Execution } from '../execution/index.js';
 import { createQueue } from './queue.js';
 export { createPreparations, type Preparations, type PreparationDependencies } from './preparations.js';
+export { createProjectDeletions } from './project-deletions.js';
+export { createDeletionCoordinator } from './deletion.js';
 export { createScaffold, type Scaffold, type ScaffoldDependencies } from './scaffold.js';
 export { loadScaffoldCatalog as validateScaffoldResources } from './scaffold-resources.js';
 export { interpretIssue } from '../pipeline/index.js';
@@ -504,6 +506,8 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       const recovered = storage.recoverConfigurationCommand(command);
       if (recovered) return configurationResponse(projectId, recovered);
       const current = storage.getConfiguration(projectId);
+      const deletion = current.view.prerequisites.find(item => item.code === 'PROJECT_DELETION_PENDING');
+      if (deletion) throw new OperationError(409, deletion.code, deletion.message, { recovery: deletion.recovery });
       precondition(current.etag, context.expectedRevision);
       await validateProfileChanges(body.profile_changes, current.view.profiles);
       const previous = current.view.configuration;

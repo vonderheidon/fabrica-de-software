@@ -25,7 +25,7 @@ import type { CatalogQuery, ConfigurationView, EventPage, EventQuery, FactorySet
 import { StorageError } from './errors.js';
 import { applyMigrations, inspectHistory, loadMigrations } from './migrations.js';
 import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, seedSettings } from './settings.js';
-import { hasUncertainAccountCleanup, OperationError, readOperation, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
+import { hasUncertainAccountCleanup, OperationError, readOperation, readCompletedProjectDeletion, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
 import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readCapture, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
 import { createExecutionPersistence } from './execution.js';
 import { acceptRecovery, recoverRecovery, finishRecovery, readResources, readOwnedPassage, resourceSnapshot, validatePreviousAttempt, type RecoveryCommand, type ResourceSnapshot } from './recovery.js';
@@ -47,6 +47,15 @@ import { recoverConfigurationCommand, registerProject, saveConfiguration, saveSe
 import { latestIssueAttempt, readQueueCycle, recordQueueObservations, type QueueCycle, type QueueCycleObservation } from './queue-cycles.js';
 import { queueETag, recoverQueueChange, saveQueueChange, type QueueChange } from './queue.js';
 import type { QueueScope } from '#contracts';
+import { createProjectDeletionPersistence, type FinalizeProjectDeletion } from './project-deletions.js';
+import { createDeletionWorkerPersistence } from './project-deletion-worker.js';
+export type { DeletionWorker } from './project-deletion-worker.js';
+import type { ProjectDeletionInventory } from './project-deletion-inventory.js';
+import { readProjectDeletionPaths } from './project-deletion-paths.js';
+import { acceptProjectDeletion, recoverProjectDeletion, readProjectDeletion, type AcceptProjectDeletion, type ProjectDeletionCommand } from './project-deletion-acceptance.js';
+export type { AcceptProjectDeletion, ProjectDeletionCommand } from './project-deletion-acceptance.js';
+export type { FinalizeProjectDeletion } from './project-deletions.js';
+export type { ProjectDeletionInventory } from './project-deletion-inventory.js';
 
 export { StorageError } from './errors.js';
 export { OperationError, type SaveTimeDefaults, type StoredOperation } from './operations.js';
@@ -67,6 +76,13 @@ export interface StorageDiagnostics {
 }
 
 export interface Storage {
+  deletionWorker: ReturnType<typeof createDeletionWorkerPersistence>;
+  acceptProjectDeletion(input: AcceptProjectDeletion): ReturnType<typeof acceptProjectDeletion>;
+  recoverProjectDeletion(command: ProjectDeletionCommand): ReturnType<typeof recoverProjectDeletion>;
+  getProjectDeletion(operationId: string): ReturnType<typeof readProjectDeletion>;
+  getProjectDeletionPaths(projectId: string): ReturnType<typeof readProjectDeletionPaths>;
+  getProjectDeletionInventory(projectId: string): ProjectDeletionInventory;
+  finalizeProjectDeletion(command: FinalizeProjectDeletion): { operation_id: string; state: 'succeeded' };
   captureLocalHost(): void;
   getOperationSummary(query: OperationSummaryQuery): ReturnType<typeof readOperationSummary>;
   getContextDiagnostics(context: DiagnosticContext): ReturnType<typeof readContextDiagnostics>;
@@ -155,6 +171,7 @@ export interface Storage {
   checkHealth(): void;
   getSettingsETag(): string;
   getOperation(operationId: string): StoredOperation | null;
+  getCompletedProjectDeletion(operationId: string): ReturnType<typeof readCompletedProjectDeletion>;
   hasUncertainAccountCleanup(operationId: string): boolean;
   saveTimeDefaults(input: SaveTimeDefaults): StoredOperation;
   getEvents(query: EventQuery, through?: string): EventPage;
@@ -208,6 +225,7 @@ export function openStorage(options: StorageOptions): Storage {
       throw new StorageError('STORAGE_PRAGMA_MISMATCH');
     }
     const connection = db;
+    const projectDeletions = createProjectDeletionPersistence(connection);
     const resultListeners = new Set<(binding: PassageBinding) => void>();
     applyMigrations(connection, migrations, () => seedSettings(connection));
     const tables = connection.prepare<[], { name: string; strict: number }>(
@@ -222,6 +240,13 @@ export function openStorage(options: StorageOptions): Storage {
       foreignKeys, journalMode, synchronous, busyTimeoutMs: timeout, schemaVersion: migrations.length,
     });
     return {
+      deletionWorker: createDeletionWorkerPersistence(connection, directory),
+      getProjectDeletionPaths: projectId => guarded(() => connection.transaction(() => readProjectDeletionPaths(connection, projectId, directory))()),
+      acceptProjectDeletion: input => guarded(() => acceptProjectDeletion(connection, directory, input)),
+      recoverProjectDeletion: command => guarded(() => connection.transaction(() => recoverProjectDeletion(connection, command))()),
+      getProjectDeletion: operationId => guarded(() => connection.transaction(() => readProjectDeletion(connection, operationId))()),
+      getProjectDeletionInventory: projectId => guarded(() => projectDeletions.inventory(projectId)),
+      finalizeProjectDeletion: command => guarded(() => projectDeletions.finalize(command)),
       captureLocalHost: () => guarded(() => captureLocalHost(connection)),
       listAttempts: query => guarded(() => connection.transaction(() => readAttemptPage(connection, query))()),
       getAttemptDetail: (id, query) => guarded(() => connection.transaction(() => readAttemptDetail(connection, id, query))()),
@@ -322,6 +347,7 @@ export function openStorage(options: StorageOptions): Storage {
         const settings = readSettings(connection);
         return settingsETag(settings.installation_id, settings.revision);
       },
+      getCompletedProjectDeletion: id => guarded(() => readCompletedProjectDeletion(connection, id)),
       getOperation: (id) => {
         try { return connection.transaction(() => readOperation(connection, id))(); }
         catch (error) {

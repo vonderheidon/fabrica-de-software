@@ -14,6 +14,7 @@ for (const name of ['implementer.v1.json', 'reviewer.v1.json']) {
   copyFileSync(new URL(name, roles), new URL(name, distributedRoles));
 }
 cpSync(new URL('../resources/templates/', import.meta.url), new URL('../dist/resources/templates/', import.meta.url), { recursive: true });
+cpSync(new URL('../resources/deletion/', import.meta.url), new URL('../dist/resources/deletion/', import.meta.url), { recursive: true });
 
 const faviconDefinition = JSON.parse(readFileSync(new URL('../resources/favicon.v1.json', import.meta.url), 'utf8'));
 const faviconBytes = createFaviconIco(faviconDefinition);

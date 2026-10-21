@@ -178,7 +178,7 @@ it('migrates real SQLite v7 without reseeding, changing captured refs or fabrica
   await f.pipeline.close(); f.storage.close(); removeReviewSchema(f.db);
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(24); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(26); expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getDelivery(d)).toMatchObject({ delivery: old.delivery, verification: old.verification }); expect(reopened.getReview(d)).toBeNull();
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   } finally { reopened.close(); }

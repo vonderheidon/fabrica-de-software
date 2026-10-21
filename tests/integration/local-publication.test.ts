@@ -165,7 +165,7 @@ it('migrates actual v13 effect/request definitions preserving confirmed historic
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(24); expect(storage.getSettings().installation_id).toBe(instanceId);
+    expect(storage.getDiagnostics().schemaVersion).toBe(26); expect(storage.getSettings().installation_id).toBe(instanceId);
     expect(storage.getEffects(f.attemptId)).toEqual(effects); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='changed' WHERE operation_id=?").run(effects[0]!.operationId)).toThrow();
     expect(storage.getAttempt(f.attemptId).result).toBe('delivered');

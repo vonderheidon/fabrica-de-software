@@ -1,4 +1,5 @@
 import { serializeOperationReceipt } from './common-json.js';
+import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -76,6 +77,7 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     const capture = input.capture;
     if (!Value.Check(AttemptCapture, capture)) throw new OperationError(400, 'CAPTURE_INVALID', 'The attempt capture is invalid.');
     const preparation = readPreparation(db, input.command.body.preparationId);
+    assertProjectAvailable(db, preparation.view.project_id);
     const config = readConfiguration(db, preparation.view.project_id); const settings = readSettings(db);
     assertProfileTypesAvailable(db);
     assertPreparationProfileRoles(db, config.configuration, preparation.view);

@@ -3,7 +3,7 @@ import type { ProjectPage } from '#contracts';
 import { isProjectPage } from './PrincipalScreen.js';
 
 const page: ProjectPage = {
-  items: [{
+  items: [{ deletion: null,
     id: 'abcdef12-1234-4123-8123-123456789012', name: 'Factory project', account_id: null,
     source: { kind: 'local', location: 'C:/projects/factory' }, base_branch: 'main', revision: 1,
     current_revision_id: 'abcdef12-1234-4123-8123-123456789013', prerequisites: [],

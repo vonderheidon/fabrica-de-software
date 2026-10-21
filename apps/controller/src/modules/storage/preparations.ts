@@ -1,4 +1,5 @@
 import { serializeOperationReceipt } from './common-json.js';
+import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { preparationCommandJson } from './configuration-command-json.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
@@ -73,6 +74,7 @@ export function savePreparation(db: Database.Database, input: SavePreparation): 
     if (previous && command.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
     if (previous && command.expectedRevision !== previous.etag) throw new OperationError(412, 'REVISION_CONFLICT', 'Preparation changed. Reload current data.');
     const projectId = command.kind === 'preparation.create' ? command.projectId : previous!.view.project_id;
+    assertProjectAvailable(db, projectId);
     const config = readConfiguration(db, projectId);
     if (configurationETag(config) !== input.configurationETag) throw new OperationError(412, 'REVISION_CONFLICT', 'Configuration changed while preparing the issue.');
     const choices: PreparationChoices = command.kind === 'preparation.create' ? command.body : {

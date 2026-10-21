@@ -1,3 +1,4 @@
+import { DeletionSummary } from './deletion-summary.js';
 import { Type, type Static } from '@sinclair/typebox';
 import { ArtifactPolicy, Capability, DeliveryMode, FactorySettings, OperationId, OperationReceipt, OperationWarning, Page, TimeDefaults } from './base.js';
 import { GitHubDiagnostic, GitHubProject, GitHubProjectOwner, StatusField } from './github.js';
@@ -148,7 +149,9 @@ export const ExecutionCatalog = Type.Union([
   }, closed),
 ]);
 export type ExecutionCatalog = Static<typeof ExecutionCatalog>;
+const deletion = Type.Union([DeletionSummary, Type.Null()]);
 export const ProjectSummary = Type.Object({
+  deletion,
   id: OperationId, name: text(256), account_id: nullable(), source: ProjectConfiguration.properties.source,
   base_branch: text(1024), revision, current_revision_id: OperationId,
   prerequisites: Type.Array(Prerequisite, { maxItems: 100 }),
@@ -162,7 +165,7 @@ export type ProjectPage = Static<typeof ProjectPage>;
 export const ProjectRegistration = Type.Object({ name: text(256), source: OriginSource, base_branch: text(1024) }, closed);
 export type ProjectRegistration = Static<typeof ProjectRegistration>;
 const cursor = Type.String({ pattern: '^[0-9]+$', maxLength: 20 });
-export const ProjectDetail = Type.Object({ project: ProjectSummary, prerequisites: Type.Array(Prerequisite), event_cursor: cursor }, closed);
+export const ProjectDetail = Type.Object({ deletion, project: ProjectSummary, prerequisites: Type.Array(Prerequisite), event_cursor: cursor }, closed);
 export type ProjectDetail = Static<typeof ProjectDetail>;
 export const ProjectRegistered = Type.Object({ ...ProjectDetail.properties, operation_id: OperationId }, closed);
 export type ProjectRegistered = Static<typeof ProjectRegistered>;
@@ -180,7 +183,7 @@ export const SettingsSaved = Type.Object({
   warnings: Type.Optional(Type.Array(OperationWarning, { maxItems: 10 })),
 }, closed);
 export type SettingsSaved = Static<typeof SettingsSaved>;
-export const ConfigurationView = Type.Object({ configuration: ProjectRevision, ...SettingsView.properties, prerequisites: Type.Array(Prerequisite) }, closed);
+export const ConfigurationView = Type.Object({ deletion, configuration: ProjectRevision, ...SettingsView.properties, prerequisites: Type.Array(Prerequisite) }, closed);
 export type ConfigurationView = Static<typeof ConfigurationView>;
 export const ConfigurationSaved = Type.Object({ ...ConfigurationView.properties, operation_id: OperationId, receipt: OperationReceipt }, closed);
 export type ConfigurationSaved = Static<typeof ConfigurationSaved>;

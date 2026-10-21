@@ -1,4 +1,5 @@
 import { serializeOperationReceipt } from './common-json.js';
+import { assertProjectAvailable } from './project-deletion-barrier.js';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { CancelAttempt, RemoveResource, EmptyBody, OperationId, AttemptResource, type Delivery } from '#contracts';
@@ -78,6 +79,7 @@ export function acceptRecovery(db: Database.Database, command: RecoveryCommand, 
   return guarded(() => db.transaction(() => {
     const old = recoverRecovery(db, command); if (old) return { operation: old, created: false };
     const attempt = readAttempt(db, command.attemptId); const s = readSettings(db);
+    if (command.kind !== 'attempt.cancel') assertProjectAvailable(db, attempt.projectId);
     let created = true; let revision: number;
     if (command.kind === 'attempt.cancel') {
       created = !db.prepare('SELECT operation_id FROM cancellation_requests WHERE attempt_id=?').get(attempt.id);

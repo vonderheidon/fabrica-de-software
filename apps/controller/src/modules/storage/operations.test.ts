@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { createProjectDeletionPersistence } from './project-deletions.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { acquireControllerLock, openStorage, type Storage } from './index.js';
 import { applyMigrations, loadMigrations } from './migrations.js';
@@ -34,6 +35,7 @@ describe('operations and local ownership', () => {
     expect(next.getOperation(accepted.operation_id)).toEqual(accepted);
     expect(save(next).receipt?.event_cursor).toBe('2');
     const db = new Database(join(directory, 'factory.sqlite'));
+    createProjectDeletionPersistence(db);
     try {
       const row = db.prepare('SELECT * FROM operation_requests WHERE operation_id = ?').get(accepted.operation_id);
       expect(Object.keys(row as object).sort()).toEqual(['operation_id', 'installation_id', 'account_id', 'operation_kind', 'resource_type', 'resource_id', 'request_hash', 'expected_revision_json', 'receipt_json', 'result_account_id'].sort());
@@ -76,7 +78,7 @@ describe('operations and local ownership', () => {
     try { identity = snapshot.prepare('SELECT installation_id FROM factory_settings').get(); } finally { snapshot.close(); }
     const upgraded = openStorage({ dataDirectory: oldDirectory });
     resources.push(upgraded);
-    expect(upgraded.getDiagnostics().schemaVersion).toBe(24);
+    expect(upgraded.getDiagnostics().schemaVersion).toBe(26);
     expect({ installation_id: upgraded.getSettings().installation_id }).toEqual(identity);
     expect(upgraded.getSettings().revision).toBe(1);
     expect(save(upgraded).state).toBe('succeeded');

@@ -2,7 +2,7 @@ import { readOperationReceipt, serializeOperationReceipt, storeTimeDefaults } fr
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { OperationId, OperationReceipt, TimeDefaults, type OperationView, type ErrorResponse } from '#contracts';
+import { OperationId, OperationReceipt, TimeDefaults, type OperationView, type ErrorResponse, type DeletionCompleted } from '#contracts';
 import { readSettings } from './settings.js';
 import { StorageError } from './errors.js';
 
@@ -57,6 +57,13 @@ function rowFor(db: Database.Database, operationId: string) {
   return db.prepare<[string], OperationRow>('SELECT * FROM operation_requests WHERE operation_id = ?').get(operationId);
 }
 
+/** Completed deletions have no account/resource/history left to reconstruct. */
+export function readCompletedProjectDeletion(db: Database.Database, operationId: string): DeletionCompleted | null {
+  if (!Value.Check(OperationId, operationId)) throw new OperationError(400, 'OPERATION_ID_INVALID', 'A operação é inválida.');
+  return db.prepare('SELECT 1 FROM project_deletion_receipts WHERE operation_id=?').get(operationId)
+    ? { operation_id: operationId, state: 'succeeded' } : null;
+}
+
 export function readOperation(db: Database.Database, operationId: string): StoredOperation | null {
   if (!Value.Check(OperationId, operationId)) throw new OperationError(400, 'OPERATION_ID_INVALID', 'Operation ID must be a UUID.');
   const settings = readSettings(db);
@@ -77,6 +84,17 @@ export function readOperation(db: Database.Database, operationId: string): Store
   ).get(operationId);
   const receipt = row.receipt_json === null ? undefined : readOperationReceipt(JSON.parse(row.receipt_json) as unknown);
   if (receipt !== undefined && !Value.Check(OperationReceipt, receipt)) throw new StorageError('OPERATION_DATA_INVALID');
+  if (row.operation_kind === 'project.delete' && row.resource_type === 'project') {
+    const deletion = db.prepare<[string, string], { state: string }>(
+      'SELECT state FROM project_deletions WHERE operation_id=? AND project_id=?',
+    ).get(operationId, row.resource_id);
+    if (!deletion || !receipt || !event || event.entity_type !== 'project' || event.entity_id !== row.resource_id ||
+      event.event_type !== 'project.deletion.accepted' || receipt.revision !== 1 || receipt.event_cursor !== String(event.seq)) {
+      throw new StorageError('OPERATION_DATA_INVALID');
+    }
+    return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'project', id: row.resource_id },
+      state: deletion.state === 'accepted' ? 'accepted' : deletion.state === 'running' || deletion.state === 'finalizing' ? 'running' : 'unknown', receipt };
+  }
   if (isBindingOperation) {
     const expectedEvent = row.operation_kind === 'settings.account.bind' ? 'settings.account.bound' : 'settings.account.switched';
     const linkedAccount = row.result_account_id ? db.prepare<[string], { login: string }>(

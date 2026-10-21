@@ -13,11 +13,13 @@ import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
 import { captureFixture } from '../fixtures/capture.js';
 import { removeReviewSchema } from '../fixtures/review-schema.js';
+import { createProjectDeletionPersistence } from '../../apps/controller/src/modules/storage/project-deletions.js';
 
 const fixtures: AttemptFixture[] = []; const apps: ReturnType<typeof createApp>[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const f of fixtures.splice(0)) await f.close(); });
 async function fixture(http = false) {
   const f = await attemptFixture(); fixtures.push(f);
+  createProjectDeletionPersistence(f.db);
   const app = http ? createApp(loadConfiguration({ FACTORY_DATA_DIR: f.directory, FACTORY_LOG_LEVEL: 'silent' }, f.directory), f.storage,
     undefined, undefined, { github: f.github, workspaces: f.workspaces }, f.pipeline) : null;
   if (app) { apps.push(app); await app.ready(); }
@@ -43,7 +45,7 @@ describe('durable immutable deliveries', () => {
     f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DROP TABLE capture_warnings; DROP TABLE capture_runs; DROP TABLE deliveries; DELETE FROM schema_migrations WHERE version>=6; PRAGMA user_version=5;');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(24); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(26); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(accepted);
       expect(reopened.getDelivery(f.binding.deliveryVersion).delivery).toMatchObject({ captureState: 'failed', diagnostic: 'CAPTURE_CONTINUITY_REVOKED', contentIdentity: null });
       const command = { operationId: randomUUID(), attemptId: f.a.id, deliveryId: f.binding.deliveryVersion, body: { producerPassageId: f.a.passageId },

@@ -5,7 +5,7 @@ import { acquireControllerLock, openStorage, StorageError, OperationError } from
 import { httpLimits } from './http/security/index.js';
 import { createGitHub, type GitHubContext, type GitHubHostAccess, type GitHubMutationAuthorization } from './modules/github/index.js';
 import { createWorkspaces, type GitContext } from './modules/workspaces/index.js';
-import { createPreparations, createQueue, validateScaffoldResources } from './modules/projects/index.js';
+import { createPreparations, createQueue, validateScaffoldResources, createDeletionCoordinator } from './modules/projects/index.js';
 import { createExecution, ExecutionError, type ExecutionHost } from './modules/execution/index.js';
 import { createPipeline, type Pipeline } from './modules/pipeline/index.js';
 import { createVerification } from './modules/verification/index.js';
@@ -29,6 +29,7 @@ export async function startController(hostContext: ControllerHostContext = {}, d
   let app: ReturnType<typeof createApp>;
   let execution: ReturnType<typeof createExecution> | undefined;
   let pipeline: Pipeline | undefined;
+  let deletions: ReturnType<typeof createDeletionCoordinator> | undefined;
   try {
     storage.captureLocalHost();
     const githubAccess = hostContext.githubAccess ?? (hostContext.github ? { kind: hostContext.github.kind, cwd: hostContext.github.cwd } : undefined);
@@ -54,6 +55,7 @@ export async function startController(hostContext: ControllerHostContext = {}, d
     const activeExecution = execution;
     const preparations = createPreparations({ storage, github, workspaces });
     const logFailure = (code: string) => console.error(JSON.stringify({ level: 'error', code, message: 'Pipeline operation failed.' }));
+    deletions = createDeletionCoordinator({ storage, workspaces, logFailure });
     const verification = createVerification({ storage, workspaces, dataDirectory: configuration.dataDirectory, logFailure });
     const queue = createQueue({ storage, github });
     pipeline = createPipeline({ storage, execution, preparations, workspaces, verification, github, queue, publication: { github, workspaces, verification },
@@ -64,9 +66,12 @@ export async function startController(hostContext: ControllerHostContext = {}, d
       }, logFailure });
     app = createApp(configuration, storage, undefined, { github, githubSetup: github, githubRuntime: github, workspaces, execution,
       ...(hostContext.selectProjectsDirectory ? { selectProjectsDirectory: hostContext.selectProjectsDirectory } : {}),
-      ...(hostContext.selectGitHubExecutable ? { selectGitHubExecutable: hostContext.selectGitHubExecutable } : {}) }, { github, workspaces }, pipeline, { github, workspaces }, { execution });
+      ...(hostContext.selectGitHubExecutable ? { selectGitHubExecutable: hostContext.selectGitHubExecutable } : {}) }, { github, workspaces }, pipeline, { github, workspaces }, { execution }, { workspaces, coordinator: deletions });
+    app.addHook('preClose', async () => { await deletions?.close(); });
+    deletions.recover();
   } catch (error) {
     try {
+      await deletions?.close();
       if (pipeline) await pipeline.close();
       else if (execution) await execution.close();
     } finally { try { storage.close(); } finally { lock.close(); } }

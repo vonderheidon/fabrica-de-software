@@ -13,6 +13,7 @@
     }
   },
   "scripts": {
+    "test:browser:deletion": "node scripts/run-deletion-browser.mjs",
     "build": "tsc -p tsconfig.json && vite build && node scripts/copy-resources.mjs",
     "typecheck": "tsc -p tsconfig.check.json --noEmit",
     "lint": "node scripts/check-boundaries.mjs",
@@ -25,6 +26,8 @@
     "test:persistence": "vitest run tests/acceptance/persistence-maintenance.test.ts tests/acceptance/persistence-audit.test.ts tests/acceptance/execution-composition.test.ts tests/acceptance/persistence-report.test.ts tests/boundaries.test.ts --reporter=verbose",
     "proof:persistence": "node scripts/persistence-proof.mjs",
     "test:maintenance-native": "npm run build && vitest run --config vitest.maintenance.config.ts --reporter=verbose",
+    "test:deletion-persistence": "vitest run --config vitest.deletion.config.ts tests/native/project-deletion.integration.proof.ts --reporter=verbose",
+    "test:deletion-native": "vitest run --config vitest.deletion.config.ts --reporter=verbose",
     "acceptance:check": "node scripts/first-slice-evidence.mjs",
     "package:local": "npm run build && node scripts/package-distribution.mjs",
     "test:distribution": "node scripts/smoke-distribution.mjs",
@@ -46,6 +49,8 @@
     "@types/react": "18.3.24",
     "@types/react-dom": "18.3.7",
     "@vitejs/plugin-react": "5.2.0",
+    "happy-dom": "20.8.4",
+    "playwright": "1.64.1",
     "typescript": "5.9.3",
     "vite": "8.3.4",
     "vitest": "5.0.5"

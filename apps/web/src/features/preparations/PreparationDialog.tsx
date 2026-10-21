@@ -1,3 +1,5 @@
+import { knownProjectDeletion, rememberProjectDeletion, useProjectDeletionRestriction } from '../projects/ProjectDeletionPendingNotice.js';
+import { isProjectDeletionCompleted } from '../../api/project-deletion.js';
 import { startAttemptBody } from '../attempts/execution-requests.js';
 import { changedChoices, hasBlockingPrerequisites } from './preparation-requests.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -14,6 +16,14 @@ type Props = { projectId: string | null; initialIssueId?: string | null; previou
 type PreparationDraft = { preparationId: string; etag: string; choices: PreparationChoices; savedChoices: PreparationChoices; current: Preparation; conflict: Preparation | null };
 const memory = new Map<string, PreparationDraft>();
 const creationPromises = new Map<string, Promise<PreparationDraft>>();
+if (typeof window !== 'undefined') window.addEventListener('factory-project-deleted', () => {
+  for (const key of memory.keys()) {
+    const parts: unknown = JSON.parse(key);
+    if (Array.isArray(parts) && typeof parts[0] === 'string' && isProjectDeletionCompleted(parts[0])) {
+      memory.delete(key); creationPromises.delete(key);
+    }
+  }
+});
 const modes: readonly { value: DeliveryMode; label: string }[] = [
   { value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit local' }, { value: 'pr', label: 'Pull request' },
 ];
@@ -21,6 +31,7 @@ const savedKey = (projectId: string, previousAttemptId?: string | null, initialI
 const startRequestTimeoutMs = 30_000;
 
 export function PreparationDialog({ projectId, initialIssueId = null, previousAttemptId = null, onOpenAttempt }: Props) {
+  const deletionRestricted = useProjectDeletionRestriction(projectId);
   const [issues, setIssues] = useState<IssueOptions | null>(null);
   const [projectName, setProjectName] = useState('Consultando nome do projeto…');
   const [profiles, setProfiles] = useState<readonly StoredExecutionProfile[]>([]);
@@ -52,9 +63,10 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const identity = projectId ? savedKey(projectId, previousAttemptId, initialIssueId) : '';
 
   const installDraft = useCallback((value: PreparationDraft) => {
+    if (projectId && isProjectDeletionCompleted(projectId)) return;
     draftRef.current = value;
     setDraftState(value);
-    memory.set(identity, value);
+    if (projectId && !isProjectDeletionCompleted(projectId)) memory.set(identity, value);
   }, [identity]);
 
   useEffect(() => {
@@ -64,7 +76,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     const key = savedKey(projectId, previousAttemptId, initialIssueId);
     setProjectName('Consultando nome do projeto…');
     void requestJson<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(projectId)}`, { signal: controller.signal }).then((detail) => {
-      if (active) setProjectName(detail.project.name);
+      if (active) { rememberProjectDeletion(projectId, detail.deletion); setProjectName(detail.project.name); }
     }).catch(() => { if (active) setProjectName('Nome do projeto indisponível. Consulte novamente.'); });
     const saved = memory.get(key);
     const cached = saved && (!initialIssueId || saved.choices.issue_id === initialIssueId) ? saved : undefined;
@@ -84,7 +96,10 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     }
     if (!cached) setConfigurationReady(false);
     void requestJson<ConfigurationView>(`/api/v1/projects/${encodeURIComponent(projectId)}/configuration`, { signal: controller.signal }).then((configuration) => {
-      if (!active || cached) return;
+      if (!active) return;
+      rememberProjectDeletion(projectId, configuration.deletion);
+      window.dispatchEvent(new Event('factory-project-deletion-pending'));
+      if (cached) return;
       setMode(configuration.configuration.default_delivery_mode);
       setGuidance(configuration.configuration.guidance);
       setConfigurationReady(true);
@@ -114,6 +129,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   }, [projectId]);
 
   useEffect(() => {
+    if (projectId && (knownProjectDeletion(projectId) || isProjectDeletionCompleted(projectId))) return;
     if (!issues || !configurationReady || !projectId || draftRef.current || createPendingRef.current || !issueId) return;
     createPendingRef.current = true;
     setCreating(true);
@@ -142,6 +158,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   }, [choices, draft]);
 
   const saveLatest = useCallback(async (): Promise<void> => {
+    if (projectId && knownProjectDeletion(projectId)) return;
     if (saveLoopRef.current) return saveLoopRef.current;
     const current = draftRef.current;
     if (!current) return;
@@ -149,7 +166,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     const task = Promise.resolve().then(async () => {
       setSaving(true); setSaveError(null);
       try {
-        while (draftRef.current && latestChoicesRef.current && !sameChoices(latestChoicesRef.current, draftRef.current.savedChoices)) {
+        while (!(projectId && knownProjectDeletion(projectId)) && draftRef.current && latestChoicesRef.current && !sameChoices(latestChoicesRef.current, draftRef.current.savedChoices)) {
           const state = draftRef.current;
           const requestChoices = latestChoicesRef.current;
           const { data, etag } = await requestJsonWithMetadata<PreparationCreated>(`/api/v1/preparations/${encodeURIComponent(state.preparationId)}`, {
@@ -205,6 +222,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   }
 
   async function submitStart(): Promise<void> {
+    if (projectId && (knownProjectDeletion(projectId) || isProjectDeletionCompleted(projectId))) return;
     if (startInFlightRef.current) return;
     const latest = draftRef.current;
     if (!latest || !authorizedHash || authorizedHash !== latest.current.summary_hash) return;
@@ -276,6 +294,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   }, [startState]);
 
   const pendingStartId = startState.status === 'uncertain' ? startState.operationId : startState.status === 'observed' && ['unknown', 'accepted', 'running'].includes(startState.operation.state) ? startState.operation.operation_id : null;
+  if (deletionRestricted) return <p role="alert">Este cadastro está em exclusão. Preparação e início estão indisponíveis. Acompanhe a exclusão na configuração.</p>;
   if (!projectId) return <div className="preparation-dialog"><div className="notice"><b>Selecione um projeto</b><p>Abra a preparação a partir de um projeto configurado para consultar issues e pré-requisitos atuais.</p></div>{pendingStartId && <div className="notice"><b>Início sem confirmação</b><p>Consulte a operação original antes de qualquer outra ação. O cliente não enviará outro início automaticamente.</p><button type="button" onClick={() => void inspectStart(pendingStartId)}>Consultar operação original</button>{startState.status === 'observed' && <><p>Estado: {operatorState(startState.operation.state).label}</p></>}</div>}</div>;
   const selectedIssue = issues?.items.find((item) => item.content_id === issueId);
   const issueBlockers = selectedIssue?.reasons.filter((reason) => reason !== 'ISSUE_REVALIDATION_REQUIRED') ?? [];

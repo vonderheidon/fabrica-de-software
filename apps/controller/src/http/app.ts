@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { Writable } from 'node:stream';
 import Fastify from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import { EmptyQuery, ErrorResponse, HealthResponse, OperationParams, OperationView } from '#contracts';
+import { EmptyQuery, ErrorResponse, HealthResponse, OperationParams, OperationViewWithDeletion } from '#contracts';
 import type { ControllerConfiguration } from '../config.js';
 import type { Storage } from '../modules/storage/index.js';
 import { installErrors, HttpError } from './errors.js';
@@ -13,6 +13,8 @@ import { installEventRoutes } from './routes/events.js';
 import { createProjects, type ProjectDependencies } from '../modules/projects/index.js';
 import { createGitHub, type GitHub } from '../modules/github/index.js';
 import { createWorkspaces } from '../modules/workspaces/index.js';
+import { createProjectDeletions, createDeletionCoordinator } from '../modules/projects/index.js';
+import { installProjectDeletionRoutes } from './routes/project-deletions.js';
 import { installProjectRoutes } from './routes/projects.js';
 import { createPreparations, type PreparationDependencies } from '../modules/projects/index.js';
 import { installPreparationRoutes } from './routes/preparations.js';
@@ -30,7 +32,7 @@ import { installOperationRoutes } from './routes/operation.js';
 
 type ProjectAppDependencies = Partial<Pick<ProjectDependencies, 'github' | 'githubSetup' | 'workspaces' | 'execution' | 'selectProjectsDirectory' | 'selectGitHubExecutable'>> & { githubRuntime?: GitHub };
 
-export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: ProjectAppDependencies, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>) {
+export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: ProjectAppDependencies, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>, deletionDependencies?: { workspaces: Parameters<typeof createDeletionCoordinator>[0]['workspaces']; coordinator: ReturnType<typeof createDeletionCoordinator> }) {
   const app = Fastify({
     logger: {
       level: configuration.logLevel,
@@ -83,6 +85,11 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
     ...(projectDependencies?.selectProjectsDirectory ? { selectProjectsDirectory: projectDependencies.selectProjectsDirectory } : {}),
     ...(projectDependencies?.selectGitHubExecutable ? { selectGitHubExecutable: projectDependencies.selectGitHubExecutable } : {}) });
   installProjectRoutes(app, projects);
+  const deletionWorkspaces = deletionDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory });
+  const deletionCoordinator = deletionDependencies?.coordinator ?? createDeletionCoordinator({ storage, workspaces: deletionWorkspaces,
+    logFailure: code => app.log.error({ code }, 'Project deletion stopped') });
+  installProjectDeletionRoutes(app, storage, createProjectDeletions({ storage, workspaces: deletionWorkspaces, coordinator: deletionCoordinator }), deletionCoordinator);
+  if (!deletionDependencies) app.addHook('preClose', async () => { await deletionCoordinator.close(); });
   installQueueRoutes(app, projects);
   const preparations = createPreparations({ storage, github: preparationDependencies?.github ?? defaultGitHub, workspaces: preparationDependencies?.workspaces ?? workspaces });
   installPreparationRoutes(app, preparations);
@@ -121,8 +128,10 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   installDeliveryRoutes(app, pipeline, storage);
 
   app.get('/api/v1/operations/:operationId', {
-    schema: { params: OperationParams, querystring: EmptyQuery, response: { 200: OperationView, 400: ErrorResponse, 401: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse } },
+    schema: { params: OperationParams, querystring: EmptyQuery, response: { 200: OperationViewWithDeletion, 400: ErrorResponse, 401: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse } },
   }, async (request) => {
+    const completed = storage.getCompletedProjectDeletion(request.params.operationId);
+    if (completed) return completed;
     const operation = storage.getOperation(request.params.operationId);
     if (!operation) throw new HttpError(404, 'OPERATION_NOT_FOUND', 'Operation not found in the current scope.');
     const { error, ...view } = operation;

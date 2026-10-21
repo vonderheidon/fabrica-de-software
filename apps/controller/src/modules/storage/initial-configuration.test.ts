@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import { createProjectDeletionPersistence } from './project-deletions.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage } from './index.js';
 import { applyMigrations, loadMigrations } from './migrations.js';
@@ -19,6 +20,7 @@ function directory() {
 }
 function database(path: string) {
   const db = new Database(join(path, 'factory.sqlite'));
+  createProjectDeletionPersistence(db);
   db.pragma('foreign_keys = ON');
   resources.push(db);
   return db;
@@ -57,7 +59,7 @@ describe('initial configuration persistence foundation', () => {
       '08a177028d9a9eca76b7a67bc943cb1bf47bfade8b483e69bae95cc97bf1d1b7',
     ]);
     const { db, storage } = fixture();
-    expect(storage.getDiagnostics().schemaVersion).toBe(24);
+    expect(storage.getDiagnostics().schemaVersion).toBe(26);
     expect(db.prepare('SELECT version,name,checksum FROM schema_migrations ORDER BY version').all())
       .toEqual(loadMigrations().map(({ version, name, checksum }) => ({ version, name, checksum })));
     expect(db.prepare('SELECT applied_at_ms FROM schema_migrations WHERE version=19').get())

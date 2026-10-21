@@ -13,6 +13,7 @@ import { StorageError } from './errors.js';
 import { readSettings } from './settings.js';
 import { configurationETag, digest, guarded, readConfiguration, readSettingsView } from './configuration-reads.js';
 import { assertProjectProfileRoles } from './profile-integrity.js';
+import { assertProjectAvailable, assertDeletionPathsAvailable } from './project-deletion-barrier.js';
 
 interface ProfileReferenceBlockers { readonly count: number; readonly projectIds: readonly string[] }
 
@@ -254,6 +255,7 @@ function writeProfiles(db: Database.Database, view: SettingsView, changes: Profi
   return changed;
 }
 function writeGlobals(db: Database.Database, view: SettingsView, changes: GlobalChanges): boolean {
+  if (changes.projects_root) assertDeletionPathsAvailable(db, [changes.projects_root]);
   if (!Value.Check(GlobalChanges, changes)) throw new OperationError(400, 'SETTINGS_INVALID', 'Settings changes are invalid.');
   const next = mergeGlobalChanges(view.settings, changes);
   if (!Value.Check(FactorySettings, next)) throw new OperationError(400, 'SETTINGS_INVALID', 'Settings changes are invalid.');
@@ -308,6 +310,8 @@ function writeOnboarding(db: Database.Database, view: SettingsView, changes: Onb
 }
 
 export function insertRevision(db: Database.Database, projectId: string, revisionId: string, revision: number, c: ProjectConfiguration, notes: readonly string[]): void {
+  assertProjectAvailable(db, projectId);
+  if (c.source.kind === 'local') assertDeletionPathsAvailable(db, [c.source.location]);
   if (!Value.Check(ProjectConfiguration, c) || notes.length > 50 || !notes.every((n) => /^[A-Z_]{1,128}$/.test(n))) throw new OperationError(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');
   assertProjectProfileRoles(db, c);
   db.prepare(`INSERT INTO project_revisions(id, project_id, revision_number, source_kind, source_location, repository_id, repository_url, base_branch, github_project_id, github_project_owner_id, status_field_id, status_options_json, implementer_profile_id, reviewer_profile_id, checks_json, correction_limit, default_delivery_mode, automation_enabled, queue_order_json, guidance, origin_notes_json, created_at_ms)
@@ -320,6 +324,10 @@ export function registerProject(db: Database.Database, input: RegisterProject): 
   const command: ConfigurationCommand = { ...input, kind: 'project.register' };
   return guarded(() => db.transaction(() => {
     const recovered = recoverConfigurationCommand(db, command); if (recovered) return recovered;
+    assertDeletionPathsAvailable(db, [
+      ...(input.body.source.kind === 'local' ? [input.body.source.location] : []),
+      ...(input.source.kind === 'local' ? [input.source.location] : []),
+    ]);
     const s = readSettings(db); const id = randomUUID(); const revisionId = randomUUID(); const now = Date.now();
     db.prepare('INSERT INTO projects(id, account_id, name, current_revision_id, revision, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, 1, ?, ?)').run(id, s.account_id, input.body.name, revisionId, now, now);
     insertRevision(db, id, revisionId, 1, { source: input.source, base_branch: input.body.base_branch, github_project: null,
@@ -403,6 +411,8 @@ export function saveConfiguration(db: Database.Database, input: SaveConfiguratio
   const command: ConfigurationCommand = { ...input, kind: 'project.configuration.update' };
   return guarded(() => db.transaction(() => {
     const recovered = recoverConfigurationCommand(db, command); if (recovered) return recovered;
+    assertProjectAvailable(db, input.projectId);
+    if (input.body.project_changes.source?.kind === 'local') assertDeletionPathsAvailable(db, [input.body.project_changes.source.location]);
     const view = readConfiguration(db, input.projectId); checkRevision(configurationETag(view), input.expectedRevision);
     checkExplicitGlobals(input.body.global_changes ?? {}, input.globalChanges);
     if (!Value.Check(ProjectConfiguration, input.configuration)) throw new OperationError(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');

@@ -4,11 +4,12 @@ import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import {
   CatalogQuery, ConfigurationView, OperationId, ProjectDetail, ProjectPage, ProjectRevision, SettingsView, StoredExecutionProfile,
-  type FactorySettings, type Prerequisite, type ProjectConfiguration, type ProjectSummary,
+  type DeletionSummary, type FactorySettings, type Prerequisite, type ProjectConfiguration, type ProjectSummary,
 } from '#contracts';
 import { readSettings } from './settings.js';
 import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
+import { deletionOperation, deletionRecovery } from './project-deletion-barrier.js';
 
 export const digest = (value: unknown): string => createHash('sha256').update(canonical(value)).digest('hex');
 function canonical(value: unknown): string {
@@ -92,7 +93,8 @@ export function readSettingsView(db: Database.Database): SettingsView {
 export function configurationETag(view: SettingsView | ConfigurationView): string {
   return `"${digest({ installation: view.settings.installation_id, account: view.settings.account_id, settings: view.settings.revision,
     profiles: view.profiles.map((p) => [p.id, p.revision]),
-    project: 'configuration' in view ? [view.configuration.project_id, view.configuration.id, view.configuration.revision] : null })}"`;
+    project: 'configuration' in view ? [view.configuration.project_id, view.configuration.id, view.configuration.revision] : null,
+    ...('configuration' in view && view.prerequisites.some(item => item.code === 'PROJECT_DELETION_PENDING') ? { deletionPending: true } : {}) })}"`;
 }
 interface ProjectRow {
   id: string; name: string; account_id: string | null; revision: number; current_revision_id: string;
@@ -116,13 +118,18 @@ function source(row: ProjectRow): ProjectConfiguration['source'] {
   return { kind: row.source_kind, location: row.source_location,
     ...(row.repository_id && row.repository_url ? { repository_id: row.repository_id, repository_url: row.repository_url } : {}) };
 }
-function summary(row: ProjectRow, settings: FactorySettings): ProjectSummary {
+function readDeletionSummary(db: Database.Database, projectId: string): DeletionSummary | null {
+  if (!deletionOperation(db, projectId)) return null;
+  return db.prepare<[string], DeletionSummary>('SELECT operation_id,state,reason,recovery FROM project_deletions WHERE project_id=?').get(projectId) ?? null;
+}
+function summary(row: ProjectRow, settings: FactorySettings, pending: DeletionSummary | null): ProjectSummary {
   const originNotes: unknown = JSON.parse(row.origin_notes_json);
   if (!Array.isArray(originNotes) || originNotes.length > 50 || !originNotes.every((n): n is string => typeof n === 'string' && /^[A-Z_]{1,128}$/.test(n))) throw new StorageError('PROJECT_DATA_INVALID');
   const globalPrerequisites: Prerequisite[] = [];
+  if (pending) globalPrerequisites.push({ code: 'PROJECT_DELETION_PENDING', message: 'Este projeto tem uma exclusão pendente.', recovery: deletionRecovery });
   if (!settings.account_id) globalPrerequisites.push({ code: 'ACCOUNT_UNOBSERVED', message: 'No GitHub account has been selected from an observation.', recovery: 'Observe the authorized controller account before execution.' });
   if (!settings.projects_root) globalPrerequisites.push({ code: 'PROJECTS_ROOT_REQUIRED', message: 'A project root is not configured.', recovery: 'Choose an accessible local project directory.' });
-  return { id: row.id, name: row.name, account_id: row.account_id, source: source(row), base_branch: row.base_branch,
+  return { deletion: pending, id: row.id, name: row.name, account_id: row.account_id, source: source(row), base_branch: row.base_branch,
     revision: row.revision, current_revision_id: row.current_revision_id,
     prerequisites: [...prerequisites({ source: source(row), github_project: row.github_project_id ? { id: row.github_project_id } : null,
       implementer_profile_id: row.implementer_profile_id, reviewer_profile_id: row.reviewer_profile_id }, originNotes), ...globalPrerequisites],
@@ -133,8 +140,8 @@ export function readProject(db: Database.Database, id: string): ProjectDetail {
   const s = readSettings(db);
   const row = db.prepare<[string, string | null], ProjectRow>(`SELECT ${summaryColumns} FROM projects p JOIN project_revisions r ON r.id = p.current_revision_id AND r.project_id = p.id WHERE p.id = ? AND (p.account_id IS ? OR p.account_id IS NULL)`).get(id, s.account_id);
   if (!row) throw new OperationError(404, 'PROJECT_NOT_FOUND', 'Project not found in the current scope.');
-  const project = summary(row, s);
-  const view = { project, prerequisites: project.prerequisites, event_cursor: eventCursor(db) };
+  const project = summary(row, s, readDeletionSummary(db, row.id));
+  const view = { deletion: project.deletion, project, prerequisites: project.prerequisites, event_cursor: eventCursor(db) };
   if (!Value.Check(ProjectDetail, view)) throw new StorageError('PROJECT_DATA_INVALID');
   return view;
 }
@@ -150,7 +157,7 @@ export function readConfiguration(db: Database.Database, projectId: string): Con
     automation_enabled: r.automation_enabled === 1, queue_order: readQueueOrderJson(JSON.parse(String(r.queue_order_json)) as unknown), guidance: r.guidance,
   };
   if (!Value.Check(ProjectRevision, configuration)) throw new StorageError('PROJECT_DATA_INVALID');
-  const view = { configuration, ...readSettingsView(db), prerequisites: project.prerequisites };
+  const view = { deletion: project.deletion, configuration, ...readSettingsView(db), prerequisites: project.prerequisites };
   if (!Value.Check(ConfigurationView, view)) throw new StorageError('PROJECT_DATA_INVALID');
   return view;
 }
@@ -174,7 +181,7 @@ export function readProjects(db: Database.Database, query: CatalogQuery): Projec
     WHERE (p.account_id IS ? OR p.account_id IS NULL) AND p.rowid <= ? AND instr(lower(p.name), lower(?)) > 0
     AND (p.name COLLATE NOCASE > ? OR (p.name COLLATE NOCASE = ? AND p.id > ?)) ORDER BY p.name COLLATE NOCASE, p.id LIMIT ?`)
     .all(s.account_id, highWater, search, afterName, afterName, afterId, limit + 1) as ProjectRow[];
-  const items = rows.slice(0, limit).map((row) => summary(row, s));
+  const items = rows.slice(0, limit).map((row) => summary(row, s, readDeletionSummary(db, row.id)));
   const hasMore = rows.length > limit;
   const view = { items, next_cursor: hasMore ? Buffer.from(JSON.stringify({ scope, after: items.at(-1)?.id, highWater })).toString('base64url') : null, has_more: hasMore, event_cursor: eventCursor(db) };
   if (!Value.Check(ProjectPage, view)) throw new StorageError('PROJECT_DATA_INVALID');

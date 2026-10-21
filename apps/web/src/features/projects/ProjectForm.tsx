@@ -1,3 +1,4 @@
+import { knownProjectDeletion, useProjectDeletionRestriction } from './ProjectDeletionPendingNotice.js';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type {
   ConfigurationOptions, ConfigurationView, ExecutionProfile, GlobalConfiguration, ProjectConfiguration,
@@ -19,6 +20,7 @@ import { useGitHubSetup } from './useGitHubSetup.js';
 import { useNativeSelection } from './useNativeSelection.js';
 import { FieldHelp, fieldGuidanceFor } from './FieldHelp.js';
 import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
+import { ProjectDeletionAction } from './ProjectDeletionAction.js';
 
 type EditableView = EditableConfigurationView;
 type EditableProfile = ExecutionProfile & { id?: string };
@@ -228,6 +230,7 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
 
 export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId: string | null; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
   const identity = projectId ?? 'global-settings';
+  const deletionRestricted = useProjectDeletionRestriction(projectId);
   const identityRef = useRef(identity);
   const saveLifecycleRef = useRef(createSaveLifecycle(identity));
   identityRef.current = identity;
@@ -412,6 +415,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   async function save(revalidateProjectsRoot = false): Promise<void> {
     if (uncertainId || saveInFlightRef.current || saveState.status === 'saving') return;
     if (Object.keys(timeFieldErrorsRef.current).length > 0) return;
+    if (projectId && knownProjectDeletion(projectId)) return;
     if (load.status !== 'ready' || load.identity !== identity || !draft) return;
     const baseline = load.view;
     const baseGlobal: GlobalConfiguration = { ...baseline.settings, profiles: baseline.profiles };
@@ -557,6 +561,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   ));
 
   return <div className="configuration-editor">
+    {projectId && isConfigurationView(load.view) && <ProjectDeletionAction key={`${projectId}:${accountId ?? ''}`} projectId={projectId} projectRevision={load.view.configuration.revision}
+      installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
+      pollingIntervalMs={load.view.settings.time_defaults.polling_interval_ms} />}
     {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p><div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
     <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><a href={projectId ? `#principal/registros?projectId=${encodeURIComponent(projectId)}` : '#principal/registros'}>Abrir registros e diagnóstico deste contexto</a></div><p className="muted">Os dados operacionais ficam em var/factory na raiz da instalação. A execução usa o contexto Maestri herdado neste computador. Nenhum campo de credencial ou Wire é solicitado.</p></div>
     {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Seu rascunho continua aberto. Os valores abaixo vêm da configuração atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
@@ -633,7 +640,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
       {draft.project.source.kind === 'local' && <div className="notice"><b>Origem local</b><p>Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.</p></div>}
     </section>}
 
-    <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">{saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
+    <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">{saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={deletionRestricted || saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
 
 
   </div>;

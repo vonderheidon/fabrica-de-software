@@ -1,8 +1,11 @@
+import { selectionAfterProjectDeletion } from '../features/projects/deletion-selection.js';
+import { ProjectDeletionPendingNotice, knownProjectDeletion, forgetProjectDeletion } from '../features/projects/ProjectDeletionPendingNotice.js';
+import { isProjectDeletionCompleted } from '../api/project-deletion.js';
 import { useEffect, useRef, useState } from 'react';
 import { ProjectPage, type SettingsView } from '#contracts';
 import { Value } from '@sinclair/typebox/value';
 import { requestJson, requestJsonWithMetadata, HttpError } from '../api/http.js';
-import { buildHash, routeIdentity, type PrincipalTab, type HashRoute } from './hash-route.js';
+import { buildHash, parseHash, routeIdentity, type PrincipalTab, type HashRoute } from './hash-route.js';
 import { draftIdentity, getDraft, setDraft } from './drafts.js';
 import { useProjects } from '../features/projects/useProjects.js';
 import { ProjectConfigurationForm } from '../features/projects/ProjectForm.js';
@@ -87,6 +90,7 @@ function hasReadData(state: LoadState<ReadData>): state is { status: 'empty' | '
 
 export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOpenInitialSetup, onboarding, onActionError }: { route: HashRoute; onOpenDialog: (id: string, trigger: HTMLElement, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string; issueId?: string }) => void; onOpenProfileDialog: (profileId: string | null, projectId: string | null, trigger: HTMLElement) => void; onOpenInitialSetup: (trigger: HTMLElement) => void; onboarding: OnboardingController; onActionError: (error: unknown) => void }) {
   const [saveIssues, setSaveIssues] = useState<SaveIssue[]>([]);
+  const [projectNotice, setProjectNotice] = useState<string | null>(null);
   const identity = draftIdentity(route);
   const searchContext = route.params.get('search') ?? '';
   const [search, setSearch] = useState(() => getDraft<string>(identity, 'search') ?? searchContext);
@@ -110,13 +114,56 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
   }, []);
   const title = route.tab === 'dashboard' ? 'Dashboard' : ({ projetos: 'Projetos', perfis: 'Perfis Globais', fila: 'Fila Ready', tentativas: 'Tentativas', registros: 'Registros', configuracao: 'Configuração' } as const)[route.tab];
 
-  if (route.error) return <section className="card route-error" role="alert"><span className="eyebrow">Navegação</span><h1>Contexto inválido</h1><p>{route.error}</p><a href="#principal/dashboard">Voltar para a Principal</a></section>;
-
   const data = hasReadData(state) ? state.value : null;
   const previousData = hasReadData(state) ? null : state.previous ?? null;
   const projectPage = (route.tab === 'dashboard' || route.tab === 'projetos') && isProjectPage(data) ? data : null;
   const dashboardProjects = projectPage ?? ((route.tab === 'dashboard' || route.tab === 'projetos') && isProjectPage(previousData) ? previousData : null);
   const selectedProjectId = route.params.get('projectId') ?? '';
+  useEffect(() => {
+    const clearSelection = (projectId: string) => {
+      const current = parseHash(window.location.hash);
+      const next = selectionAfterProjectDeletion(current.params, projectId);
+      if (!next) return;
+      window.history.replaceState(null, '', buildHash(current.tab, next));
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+      requestAnimationFrame(() => { if (new URLSearchParams(window.location.hash.split('?')[1] ?? '').has('projectId')) return; const target = document.querySelector<HTMLElement>('#configuration-project, main h1, main h2'); target?.setAttribute('tabindex', '-1'); target?.focus(); });
+    };
+    const completed = (event: Event) => {
+      const projectId = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (projectId) {
+        forgetProjectDeletion(projectId);
+        clearSelection(projectId);
+        setSaveIssues(current => current.filter(issue => issue.identity !== projectId));
+      }
+      setProjectNotice('Projeto excluído.');
+      setReloadKey(value => value + 1);
+    };
+    const unavailable = (event: Event) => {
+      const projectId = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (!projectId || parseHash(window.location.hash).params.get('projectId') !== projectId) return;
+      clearSelection(projectId);
+      setSaveIssues(current => current.filter(issue => issue.identity !== projectId));
+      setProjectNotice(current => current ?? 'O projeto selecionado não está disponível. A seleção foi limpa.');
+    };
+    window.addEventListener('factory-project-deleted', completed);
+    window.addEventListener('factory-project-unavailable', unavailable);
+    const controller = new AbortController();
+    if (selectedProjectId && !route.error) {
+      if (isProjectDeletionCompleted(selectedProjectId)) clearSelection(selectedProjectId);
+      else void requestJson<unknown>(`/api/v1/projects/${encodeURIComponent(selectedProjectId)}`, { signal: controller.signal }).catch((error: unknown) => {
+        if (!controller.signal.aborted && error instanceof HttpError && error.status === 404) {
+          window.dispatchEvent(new CustomEvent('factory-project-unavailable', { detail: { projectId: selectedProjectId } }));
+        }
+      });
+    }
+    return () => {
+      controller.abort();
+      window.removeEventListener('factory-project-deleted', completed);
+      window.removeEventListener('factory-project-unavailable', unavailable);
+    };
+  }, [route.tab, selectedProjectId, route.error]);
+  if (route.error) return <section className="card route-error" role="alert"><span className="eyebrow">Navegação</span><h1>Contexto inválido</h1><p>{route.error}</p><a href="#principal/dashboard">Voltar para a Principal</a></section>;
+
   const selectedProjectIsOnPage = projectsCatalog.page?.items.some((project) => project.id === selectedProjectId) ?? false;
   const preparationProjectId = selectedProjectId || projectPage?.items[0]?.id || '';
   const isFilteredList = route.tab === 'projetos' || route.tab === 'registros';
@@ -153,9 +200,10 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
   }
 
   return <>
+    {projectNotice && <section className="notice" role="status"><p>{projectNotice}</p><button type="button" onClick={() => setProjectNotice(null)}>Dispensar aviso</button></section>}
     <div className="line heading">
       <div><div className="eyebrow">Operação / {title}</div><h1>{title}</h1><span className="muted">Controlador local · dados consultados sob demanda</span></div>
-      <div className="row">{route.tab === 'projetos' && <><button type="button" className="primary" onClick={(event) => onOpenDialog('create', event.currentTarget)}>Criar projeto</button><button type="button" onClick={(event) => onOpenDialog('register', event.currentTarget)}>Adicionar existente</button><button type="button" disabled={!selectedProjectId} aria-describedby={!selectedProjectId ? 'preparation-unavailable' : undefined} onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: selectedProjectId })}>Preparar issue</button></>}{route.tab === 'dashboard' && <button type="button" className="primary" disabled={!preparationProjectId} aria-describedby={!preparationProjectId ? 'preparation-unavailable' : undefined} onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: preparationProjectId })}>Preparar issue</button>}</div>
+      <div className="row">{route.tab === 'projetos' && <><button type="button" className="primary" onClick={(event) => onOpenDialog('create', event.currentTarget)}>Criar projeto</button><button type="button" onClick={(event) => onOpenDialog('register', event.currentTarget)}>Adicionar existente</button><button type="button" disabled={!selectedProjectId || Boolean(knownProjectDeletion(selectedProjectId))} aria-describedby={!selectedProjectId ? 'preparation-unavailable' : undefined} onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: selectedProjectId })}>Preparar issue</button></>}{route.tab === 'dashboard' && <button type="button" className="primary" disabled={!preparationProjectId || Boolean(knownProjectDeletion(preparationProjectId))} aria-describedby={!preparationProjectId ? 'preparation-unavailable' : undefined} onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: preparationProjectId })}>Preparar issue</button>}</div>
     </div>
     {route.tab === 'dashboard' && !preparationProjectId && <p id="preparation-unavailable" className="muted">{state.status === 'loading' ? 'Aguarde a consulta dos projetos para preparar uma issue.' : state.status === 'read-error' ? 'Não foi possível consultar os projetos. Tente novamente abaixo para preparar uma issue.' : <>Cadastre um projeto para preparar uma issue. <a href="#principal/projetos">Abrir projetos</a></>}</p>}
     {route.tab === 'projetos' && !selectedProjectId && <p id="preparation-unavailable" className="muted">Selecione um projeto na lista para preparar uma issue. Se ainda não houver projetos, use Criar projeto ou Adicionar existente.</p>}
@@ -175,7 +223,7 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
       {projectsCatalog.error && <section className="card read-state" role="alert"><h2>Falha ao consultar projetos</h2><p>{projectsCatalog.error.message}</p><button type="button" onClick={projectsCatalog.retry}>Tentar novamente</button></section>}
       {!projectsCatalog.error && projectsCatalog.loading && !projectsCatalog.page && <section className="card read-state" role="status"><p>Consultando catálogo de projetos…</p></section>}
       {!projectsCatalog.error && projectsCatalog.page && projectsCatalog.page.items.length === 0 && <section className="card empty" role="status"><h2>{search.trim() ? 'Nenhuma correspondência' : 'Nenhum projeto cadastrado'}</h2><p>{search.trim() ? 'Altere o filtro ou cadastre uma origem.' : 'Cadastre uma origem para configurar o projeto.'}</p></section>}
-      {projectsCatalog.page && projectsCatalog.page.items.length > 0 && <section className="card project-catalog"><div className="table-wrap"><table><thead><tr><th>Projeto / origem</th><th>Branch-base</th><th>Pré-requisitos</th><th>Ação</th></tr></thead><tbody>{projectsCatalog.page.items.map((project) => <tr key={project.id}><td data-label="Projeto / origem"><b>{project.name}</b><br /><small className="mono">{project.source.location}</small><br /><small>{project.source.kind === 'local' ? 'Origem local' : 'GitHub'}</small></td><td data-label="Branch-base" className="mono">{project.base_branch}</td><td data-label="Pré-requisitos">{project.prerequisites.length ? <ul className="compact-list">{project.prerequisites.map((item) => <li key={item.code}>{diagnosticCopyFor(item.code, 'blocked', item.message, item.recovery).cause}</li>)}</ul> : 'Sem impedimentos registrados'}</td><td data-label="Ações"><div className="row"><a className="button-link" href={`#principal/configuracao?projectId=${encodeURIComponent(project.id)}`}>Selecionar projeto</a><button type="button" onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: project.id })}>Preparar</button></div></td></tr>)}</tbody></table></div>{projectsCatalog.page.has_more && <div className="pagination-actions"><button type="button" onClick={() => void projectsCatalog.loadMore()} disabled={projectsCatalog.loading}>{projectsCatalog.loading ? 'Carregando…' : 'Carregar próxima página'}</button></div>}</section>}
+      {projectsCatalog.page && projectsCatalog.page.items.length > 0 && <section className="card project-catalog"><div className="table-wrap"><table><thead><tr><th>Projeto / origem</th><th>Branch-base</th><th>Pré-requisitos</th><th>Ação</th></tr></thead><tbody>{projectsCatalog.page.items.map((project) => <tr key={project.id}><td data-label="Projeto / origem"><b>{project.name}</b><br /><small className="mono">{project.source.location}</small><br /><small>{project.source.kind === 'local' ? 'Origem local' : 'GitHub'}</small></td><td data-label="Branch-base" className="mono">{project.base_branch}</td><td data-label="Pré-requisitos">{project.prerequisites.length ? <ul className="compact-list">{project.prerequisites.map((item) => <li key={item.code}>{diagnosticCopyFor(item.code, 'blocked', item.message, item.recovery).cause}</li>)}</ul> : 'Sem impedimentos registrados'}</td><td data-label="Ações"><div className="row"><a className="button-link" href={`#principal/configuracao?projectId=${encodeURIComponent(project.id)}`}>Selecionar projeto</a>{project.deletion ? <ProjectDeletionPendingNotice projectId={project.id} projectName={project.name} revision={project.revision} deletion={project.deletion} /> : <button type="button" onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: project.id })}>Preparar</button>}</div></td></tr>)}</tbody></table></div>{projectsCatalog.page.has_more && <div className="pagination-actions"><button type="button" onClick={() => void projectsCatalog.loadMore()} disabled={projectsCatalog.loading}>{projectsCatalog.loading ? 'Carregando…' : 'Carregar próxima página'}</button></div>}</section>}
     </>}
     {route.tab === 'dashboard' && <DashboardPanel projects={dashboardProjects} projectsLoad={{ loading: state.status === 'loading', refreshing: state.status === 'loading' && Boolean(dashboardProjects), error: state.status === 'read-error' ? { message: state.message, requestId: state.requestId } : null, stale: Boolean(dashboardProjects) && (state.status === 'loading' || state.status === 'read-error'), empty: state.status !== 'loading' && state.status !== 'read-error' && isProjectPage(state.value) && state.value.items.length === 0 }} onboarding={onboarding} onOpenSetup={onOpenInitialSetup} onRefreshProjects={() => setReloadKey((value) => value + 1)} onPrepare={(projectId, issueId, trigger) => onOpenDialog('preparation', trigger, { projectId, issueId })} onAttempt={(attemptId, projectId) => {
       const params = new URLSearchParams(route.params);

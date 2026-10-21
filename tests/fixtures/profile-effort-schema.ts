@@ -1,7 +1,9 @@
 import type Database from 'better-sqlite3';
+import { removeProjectDeletionSchema } from './project-deletion-schema.js';
 
 /** Disposable historical fixtures only; production migrations remain forward-only. */
 export function removeProfileEffortSchema(db: Database.Database): void {
+  removeProjectDeletionSchema(db);
   if (db.pragma('user_version', { simple: true }) !== 24) return;
   const nullEffort = db.prepare("SELECT 1 AS found FROM execution_profiles WHERE effort IS NULL LIMIT 1").get();
   if (nullEffort) throw new Error('FIXTURE_NULL_EFFORT');

@@ -33,7 +33,7 @@ describe('fixed local installation', () => {
     expect(storage.getSettings()).not.toHaveProperty('dataRoot');
     expect(storage.getSettings()).not.toHaveProperty('maestriSettings');
     expect(storage.getSettings().designated_host).toBe(hostname());
-    expect(storage.getDiagnostics().schemaVersion).toBe(24);
+    expect(storage.getDiagnostics().schemaVersion).toBe(26);
   });
 
   it('upgrades disposable v19 in place preserving identity, setup facts, historical ledger and receipts', () => {

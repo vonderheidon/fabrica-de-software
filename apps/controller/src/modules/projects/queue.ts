@@ -64,6 +64,12 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
     for (const projectSummary of allProjects) {
       const configured = configurations.get(projectSummary.id)!;
       const configuration = configured.view.configuration;
+      if (configured.view.prerequisites.some(item => item.code === 'PROJECT_DELETION_PENDING')) {
+        blockedProjects.push(projectSummary.id);
+        diagnostics.push({ code: 'PROJECT_DELETION_PENDING', message: `${projectSummary.name}: exclusão pendente.`,
+          recovery: 'Acompanhe a exclusão deste projeto e aguarde sua conclusão.' });
+        continue;
+      }
       if (!selectedIds && !configuration.automation_enabled) continue;
       modesByProject.push({ projectId: projectSummary.id, mode: configuration.default_delivery_mode });
       if (!configuration.github_project || !configuration.source.repository_id) {

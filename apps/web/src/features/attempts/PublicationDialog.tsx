@@ -1,3 +1,5 @@
+import { knownProjectDeletion, rememberProjectDeletion, useProjectDeletionRestriction } from '../projects/ProjectDeletionPendingNotice.js';
+import type { ProjectDetail } from '#contracts';
 import { completePublicationBody, reconcilePublicationBody, authorizeUpgradeBody } from './execution-requests.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { HttpDeliveryDetail as DeliveryDetail, DeliveryMode, HttpEffectView as EffectView, OperationAccepted, OperationView } from '#contracts';
@@ -7,6 +9,7 @@ import { UnknownState } from '../../app/OperatorSupport.js';
 import { operatorCodeLabel, operatorErrorMessage, operatorState } from '../../app/operator-language.js';
 
 type Props = {
+  projectId: string;
   attemptId: string;
   attemptEtag: string | null;
   delivery: DeliveryDetail;
@@ -27,7 +30,19 @@ function messageFor(error: unknown): string {
   return error instanceof HttpError ? error.message : 'Não foi possível confirmar a resposta. Consulte a operação original antes de qualquer nova ação.';
 }
 
-export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, onRefresh }: Props) {
+export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery, effects, onRefresh }: Props) {
+  const deletionRestricted = useProjectDeletionRestriction(projectId);
+  const [projectChecked, setProjectChecked] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setProjectChecked(false);
+    void requestJson<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(projectId)}`).then((data) => {
+      if (!active) return;
+      rememberProjectDeletion(projectId, data.deletion); setProjectChecked(true);
+      window.dispatchEvent(new Event('factory-project-deletion-pending'));
+    }).catch(() => { /* A failed lookup cannot authorize publication. */ });
+    return () => { active = false; };
+  }, [projectId]);
   const deliveryId = delivery.delivery.id;
   const summary = delivery.publication;
   const authorizedMode = delivery.authorizations.authorized_mode;
@@ -97,6 +112,7 @@ export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, o
   }, [operationId, onRefresh]);
 
   async function send(kind: Action, targetMode?: DeliveryMode): Promise<void> {
+    if (!projectChecked || knownProjectDeletion(projectId)) return;
     if (action?.uncertain || action?.view?.state === 'accepted' || action?.view?.state === 'running' || action?.view?.state === 'unknown') return;
     const id = crypto.randomUUID();
     setError(null);
@@ -128,6 +144,7 @@ export function PublicationDialog({ attemptId, attemptEtag, delivery, effects, o
   const actionState = action?.view?.state ?? (action?.accepted ? 'accepted' : action?.uncertain ? 'unknown' : undefined);
   const actionLabel = action?.kind === 'complete' ? 'Conclusão do modo' : action?.kind === 'reconcile' ? 'Reconciliação' : `Autorização de ${action?.targetMode ? modeLabel[action.targetMode] : 'modo superior'}`;
 
+  if (deletionRestricted || !projectChecked) return <p role="status">Publicação indisponível. Consulte o cadastro; uma exclusão pendente impede publicar.</p>;
   return <section className="card publication-panel" aria-labelledby="publication-panel-title">
     <div className="line"><div><span className="eyebrow">Entrega e publicação</span><h3 id="publication-panel-title">Versão e efeitos autorizados</h3></div><button type="button" onClick={onRefresh}>Atualizar estado</button></div>
     {[summary.commit, summary.push, summary.pull_request].some((effect) => effect?.state === 'failed_known') && <p role="alert">Publicação bloqueada. A versão aprovada foi preservada. Consulte o motivo abaixo e, após resolver o impedimento, use Concluir modo autorizado para continuar os efeitos pendentes.</p>}

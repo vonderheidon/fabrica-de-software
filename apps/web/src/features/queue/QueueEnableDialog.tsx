@@ -82,6 +82,7 @@ export function QueueEnableDialog({ projectId, onClose, onEnabled }: { projectId
 
   return <div className="queue-enable-dialog">
     <p className="muted">Habilitar autoriza novos inícios somente para o escopo e as condições resumidas abaixo. A tentativa ativa permanece acompanhada.</p>
+    <p className="notice">Issues que continuam em Ready podem ser executadas novamente.</p>
     {load.status === 'loading' && !observation && <p role="status">Consultando uma observação completa da fila…</p>}
     {load.status === 'error' && !observation && <div className="queue-error" role="alert"><p>{load.message}</p><button type="button" onClick={refresh}>Revalidar resumo</button></div>}
     {observation && <QueueEnableSummary observation={observation} />}

@@ -1,4 +1,5 @@
 import { serializeOperationReceipt } from './common-json.js';
+import { assertDeletionPathsAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -52,6 +53,7 @@ export function acceptCreation(db: Database.Database, command: CreationCommand):
   return guarded(() => db.transaction(() => {
     const prior = recoverCreation(db, command); if (prior) return { created: false, operation: prior };
     const s = readSettings(db); const plan = command.body.plan;
+    assertDeletionPathsAvailable(db, [plan.destination]);
     if (plan.installationId !== s.installation_id || plan.settingsETag !== configurationETag(readSettingsView(db)) ||
       (plan.input.creationMode !== 'local' && (!s.account_id || plan.account.id !== s.account_id || plan.account.state !== 'complete' || !plan.input.remote || plan.ownerId !== plan.input.remote.ownerId || !plan.ownerLogin))) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration or account changed. Review a new creation plan.');
     if (db.prepare('SELECT id FROM project_creations WHERE destination=? COLLATE NOCASE').get(plan.destination)) throw new OperationError(409, 'SCAFFOLD_DESTINATION_RESERVED', 'A creation already identifies this destination. Inspect that creation.');
@@ -69,6 +71,7 @@ export function acceptCreation(db: Database.Database, command: CreationCommand):
 export function recordCreationStep(db: Database.Database, id: string, step: CreationStep['step'], state: CreationStep['state'], baselineSha?: string): void {
   guarded(() => db.transaction(() => {
     const c = readCreation(db,id).creation;
+    assertDeletionPathsAvailable(db, [c.plan.destination]);
     if (!['pending','running'].includes(c.state) || c.plan.settingsETag !== configurationETag(readSettingsView(db))) throw new OperationError(409,'SCAFFOLD_PLAN_CHANGED','Creation authority changed. Inspect preserved resources.');
     const order = ['directory','files','git','baseline'] as const;
     const previous = order.slice(0,order.indexOf(step as typeof order[number]));

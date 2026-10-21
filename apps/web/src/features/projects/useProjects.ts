@@ -1,6 +1,8 @@
+import { rememberProjectDeletion } from './ProjectDeletionPendingNotice.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectPage } from '#contracts';
 import { HttpError, requestJson } from '../../api/http.js';
+import { isProjectDeletionCompleted } from '../../api/project-deletion.js';
 
 type ProjectsState = {
   page: ProjectPage | null;
@@ -15,6 +17,29 @@ export function useProjects(search: string, enabled = true) {
   const query = search.trim();
 
   useEffect(() => {
+    const refresh = () => { if (enabled) setReload(value => value + 1); };
+    const onCompleted = () => {
+      requestVersion.current += 1;
+      setState((prior) => ({ ...prior, page: prior.page ? { ...prior.page, items: prior.page.items.filter((item) => !isProjectDeletionCompleted(item.id)) } : null }));
+      refresh();
+    };
+    const onEvent = (event: Event) => {
+      const notice = (event as CustomEvent<{ event_type?: string }>).detail;
+      if (notice?.event_type?.startsWith('project.')) refresh();
+    };
+    window.addEventListener('factory-project-deleted', onCompleted);
+    window.addEventListener('factory-project-unavailable', refresh);
+    window.addEventListener('factory-controller-event', onEvent);
+    window.addEventListener('factory-controller-resync', refresh);
+    return () => {
+      window.removeEventListener('factory-project-deleted', onCompleted);
+      window.removeEventListener('factory-project-unavailable', refresh);
+      window.removeEventListener('factory-controller-event', onEvent);
+      window.removeEventListener('factory-controller-resync', refresh);
+    };
+  }, [enabled]);
+
+  useEffect(() => {
     const version = ++requestVersion.current;
     if (!enabled) { setState({ page: null, loading: false, error: null }); return; }
     let active = true;
@@ -23,7 +48,8 @@ export function useProjects(search: string, enabled = true) {
     const params = new URLSearchParams({ limit: '25' });
     if (query) params.set('search', query);
     requestJson<ProjectPage>(`/api/v1/projects?${params.toString()}`, { signal: controller.signal }).then((page) => {
-      if (active && requestVersion.current === version) setState({ page, loading: false, error: null });
+      for (const item of page.items) rememberProjectDeletion(item.id, item.deletion);
+      if (active && requestVersion.current === version) setState({ page: { ...page, items: page.items.filter((item) => !isProjectDeletionCompleted(item.id)) }, loading: false, error: null });
     }).catch((error: unknown) => {
       if (!active || requestVersion.current !== version || (error instanceof DOMException && error.name === 'AbortError')) return;
       setState({ page: null, loading: false, error: {
@@ -44,7 +70,8 @@ export function useProjects(search: string, enabled = true) {
     try {
       const next = await requestJson<ProjectPage>(`/api/v1/projects?${params.toString()}`);
       if (requestVersion.current !== version) return;
-      setState((value) => ({ page: value.page ? { ...next, items: [...value.page.items, ...next.items] } : next, loading: false, error: null }));
+      for (const item of next.items) rememberProjectDeletion(item.id, item.deletion);
+      setState((value) => ({ page: { ...next, items: [...(value.page?.items ?? []), ...next.items].filter((item) => !isProjectDeletionCompleted(item.id)) }, loading: false, error: null }));
     } catch (error: unknown) {
       if (requestVersion.current !== version) return;
       setState((value) => ({ ...value, loading: false, error: {
@@ -54,5 +81,6 @@ export function useProjects(search: string, enabled = true) {
     }
   }, [query, state.loading, state.page]);
 
-  return { ...state, retry: () => setReload((value) => value + 1), loadMore };
+  const page = state.page ? { ...state.page, items: state.page.items.filter((item) => !isProjectDeletionCompleted(item.id)) } : null;
+  return { ...state, page, retry: () => setReload((value) => value + 1), loadMore };
 }
