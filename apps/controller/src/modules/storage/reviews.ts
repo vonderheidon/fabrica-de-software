@@ -113,6 +113,12 @@ export function beginCorrection(db: Database.Database, deliveryId: string): Corr
   return guarded(() => db.transaction(() => {
     const review = readReview(db, deliveryId); const d = readDelivery(db, deliveryId); const a = readAttempt(db, d.attemptId);
     if (!review || review.state !== 'rejected' || a.result || a.suspension || a.deliveryId !== d.id || a.phase !== 'reviewing') return null;
+    // An invalid reviewer workspace is not evidence that implementation needs correction.
+    if (review.independenceState !== 'valid') {
+      db.prepare("UPDATE attempts SET phase='finished',result='failed',suspension=NULL,diagnostic=?,revision=revision+1,updated_at_ms=? WHERE id=?")
+        .run(review.diagnostic ?? 'REVIEW_PRODUCT_CHANGED', Date.now(), a.id);
+      attemptEvent(db, a.id, 'attempt.failed'); return null;
+    }
     const capture = readCapture(db, a.id);
     if (d.round >= 1 + capture.configuration.configuration.correction_limit) {
       db.prepare("UPDATE attempts SET phase='finished',result='rejected',suspension=NULL,revision=revision+1,updated_at_ms=? WHERE id=?").run(Date.now(), a.id);

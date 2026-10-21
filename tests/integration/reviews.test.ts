@@ -66,6 +66,7 @@ it('dispatches review after durable capture/checks, with exact profile/tree and 
   expect(request.binding.role).toBe('reviewer'); expect(request.cwd).toContain(join('reviews', review.id, 'checkout'));
   expect(request.cwd).not.toBe(calls[0]![0].cwd); expect(request.binding.passageId).not.toBe(calls[0]![0].binding.passageId);
   expect(task).not.toHaveProperty('transcript'); expect(task).not.toHaveProperty('implementerResult');
+  expect(task.evidenceDirectory).toBe('.factory-evidence/');
   expect(task.delivery).toEqual(delivery.delivery); expect(passage.effectiveProfile?.model).toBe(f.profile.model);
   expect(review.contentIdentity).toBe(delivery.verification?.contentIdentity);
   const accepted = f.accept(f.result()); await f.pipeline.drain();
@@ -74,12 +75,13 @@ it('dispatches review after durable capture/checks, with exact profile/tree and 
   expect(f.persistence.acceptResult({ binding: passage.binding, result: accepted.result, sha256: accepted.sha256 }).receiptId).toBe(accepted.receiptId);
 });
 
-it('invalidates declared approval if the reviewer changed product, and never repairs independence in place', async () => {
-  const f = await fixture(0); f.implement(); await f.pipeline.drain(); const { review, passage } = f.reviewer();
+it('never sends invalid review integrity back to the implementer even with corrections available', async () => {
+  const f = await fixture(2); f.implement(); await f.pipeline.drain(); const { review, passage } = f.reviewer();
   f.storage.recordReviewIntegrity(passage.binding, false); f.storage.recordReviewIntegrity(passage.binding, true);
   f.accept(f.result()); await f.pipeline.drain();
   expect(f.storage.getReview(review.deliveryId)).toMatchObject({ state: 'rejected', independenceState: 'invalid', diagnostic: 'REVIEW_PRODUCT_CHANGED' });
-  expect(f.status()).toMatchObject({ phase: 'finished', result: 'rejected', round: 1 });
+  expect(f.status()).toMatchObject({ phase: 'finished', result: 'failed', round: 1, diagnostic: 'REVIEW_PRODUCT_CHANGED' });
+  expect(f.execution.continuePassage).not.toHaveBeenCalled();
 });
 
 it.each([0, 1, 2, 3, 4, 5])('exhausts correctionLimit=%i only after reviewing the last allowed version', async limit => {

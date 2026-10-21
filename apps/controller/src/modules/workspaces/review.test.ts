@@ -43,6 +43,7 @@ async function fixture() {
 it('materializes a private review checkout from retained content, preserves implementation and allows ignored caches', async () => {
   const f = await fixture(); const old = await readFile(join(f.implementation, 'tracked.txt'));
   expect(f.checkout).toContain(join('reviews', f.id, 'checkout'));
+  expect(await readFile(join(f.checkout, '.git', 'info', 'exclude'), 'utf8')).toContain('/.factory-evidence/');
   await mkdir(join(f.checkout, 'cache')); await writeFile(join(f.checkout, 'cache', 'generated'), Buffer.alloc(1_048_576));
   expect(await f.validate()).toBe(true); expect(await readFile(join(f.implementation, 'tracked.txt'))).toEqual(old);
   expect(f.calls.every(c => c.cwd !== f.implementation)).toBe(true);

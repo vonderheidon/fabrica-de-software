@@ -252,7 +252,8 @@ export function createPipeline(deps: PipelineDependencies) {
             criteria: capture.criteria, delivery, verification: storage.getDelivery(deliveryId).verification,
             checks: storage.getCheckHistory(deliveryId, { limit: '100' }).entries.filter(c => c.verificationId === claimed.verificationId),
             findings, guidance: capture.configuration.guidance, profileGuidance: reviewer.guidance,
-            authority: 'Review this immutable version independently. Never change product content. Resolve each prior finding using findingKey equal to its supplied id. A rejection needs concrete criterion evidence or an actionable blocking finding.' }) }, signalFor(delivery.attemptId));
+            evidenceDirectory: '.factory-evidence/',
+            authority: 'Review this immutable version independently. Never change product content. Save screenshots and review reports only in .factory-evidence/ inside this checkout, already ignored locally by Git. Never modify tracked files for evidence or use evidence files as product code. Resolve each prior finding using findingKey equal to its supplied id. A rejection needs concrete criterion evidence or an actionable blocking finding.' }) }, signalFor(delivery.attemptId));
       };
       await launch();
     } catch (error) {

@@ -1,4 +1,4 @@
-import { realpath, mkdir } from 'node:fs/promises';
+import { realpath, mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, OperationId } from '#contracts';
@@ -43,6 +43,11 @@ export function createCheckMaterializer(dataDirectory?: string, git?: GitReader,
       if (fetchedIdentity.exitCode !== 0 || fetchedIdentity.stdout.trim() !== delivery.commitSha) throw new CaptureError('DELIVERY_INTEGRITY_FAILED');
       const result = await git(checkout, [...args, 'checkout', '--detach', delivery.commitSha!, '--']);
       if (result.exitCode !== 0) throw new CaptureError('CHECK_MATERIALIZATION_FAILED');
+      if (purpose === 'reviews') {
+        const info = resolve(checkout, '.git', 'info');
+        await ensureDirectory(info); await plainDirectory(info, canonicalize);
+        await writeFile(resolve(info, 'exclude'), '\n/.factory-evidence/\n', { flag: 'a' });
+      }
       const identity = await git(checkout, [...args, 'rev-parse', '--verify', 'HEAD^{tree}']);
       const status = await git(checkout, [...args, 'status', '--porcelain=v2', '-z', '--untracked-files=all']);
       if (identity.exitCode !== 0 || identity.stdout.trim() !== delivery.contentIdentity || status.exitCode !== 0 || status.stdout !== '') throw new CaptureError('DELIVERY_INTEGRITY_FAILED');
