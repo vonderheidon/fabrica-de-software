@@ -20,8 +20,18 @@ export function installAssets(app: FastifyInstance, webRoot: string) {
       root: webRoot,
       prefix: '/',
       wildcard: false,
+      globIgnore: ['assets/**'],
       cacheControl: false,
       index: ['index.html'],
+      dotfiles: 'ignore',
+    });
+    await assets.register(fastifyStatic, {
+      root: resolve(webRoot, 'assets'),
+      prefix: '/assets/',
+      decorateReply: false,
+      wildcard: true,
+      cacheControl: false,
+      index: false,
       dotfiles: 'ignore',
     });
   });

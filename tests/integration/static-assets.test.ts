@@ -52,7 +52,7 @@ function fixture() {
   installSecurity(app, loadConfiguration({}, directory), randomUUID());
   app.get('/api/v1/settings', async () => ({ ready: true }));
   app.get('/api/v1/events/stream', async () => ({}));
-  return { app, favicon };
+  return { app, favicon, directory };
 }
 
 afterEach(async () => {
@@ -61,6 +61,22 @@ afterEach(async () => {
 });
 
 describe('public client assets with a protected same-origin API', () => {
+  it('serves rebuilt assets after startup without opening API or private files', async () => {
+    const { app, directory } = fixture();
+    await app.ready();
+    writeFileSync(join(directory, 'assets/rebuilt.js'), 'console.log("rebuilt");');
+    for (const method of ['GET', 'HEAD'] as const) {
+      const response = await app.inject({ method, url: '/assets/rebuilt.js', headers: { host } });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['set-cookie']).toBeUndefined();
+    }
+    for (const url of ['/assets/%2eenv', '/assets/%2e%2e/%2eenv', '/assets/%2e%2e/api/v1/settings']) {
+      const response = await app.inject({ url, headers: { host } });
+      expect(response.body).not.toContain('SYNTHETIC_PRIVATE_FILE');
+      expect(response.statusCode).not.toBe(200);
+    }
+    expect((await app.inject({ url: '/api/v1/settings', headers: { host } })).statusCode).toBe(401);
+  });
   it.each(['/', '/index.html', '/assets/client.js', '/assets/client.css'])('serves GET and HEAD %s before bootstrap without issuing a session', async url => {
     const { app } = fixture();
     for (const method of ['GET', 'HEAD'] as const) {
