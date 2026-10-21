@@ -251,10 +251,6 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
   const [timeFieldErrors, setTimeFieldErrors] = useState<Record<string, string>>({});
   const timeFieldErrorsRef = useRef<Record<string, string>>({});
   const accountId = load.status === 'ready' && load.identity === identity ? load.view.settings.account_id : null;
-  const linkedAccount = githubSetup.verification.data?.linked_account;
-  const accountLabel = accountId
-    ? linkedAccount?.id === accountId ? `@${linkedAccount.login}` : 'Conta vinculada; login não consultado'
-    : 'Nenhuma conta vinculada';
   const draftScope = configurationDraftIdentity(accountId, identity);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [projectName, setProjectName] = useState('Configuração do projeto');
@@ -566,15 +562,17 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
     draft.project.reviewer_profile_id !== null && !reviewerProfileAvailable
   ));
 
-  return <div className="configuration-editor">
+  return <div className={`configuration-editor${projectId ? '' : ' global-settings-editor'}`}>
     {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p><div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
-    {!projectId && <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><a href="#principal/registros">Abrir registros e diagnóstico deste contexto</a></div><p className="muted">Os dados operacionais ficam em var/factory na raiz da instalação. A execução usa o contexto Maestri herdado neste computador. Nenhum campo de credencial ou Wire é solicitado.</p></div>}
     {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Seu rascunho continua aberto. Os valores abaixo vêm da configuração atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
-    {!projectId && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Operação local</span><h2>Configuração global</h2></div><div className="form-grid">
-      {!projectId && <div className="field-full configuration-guidance" role="note" aria-label="Dados necessários e controles opcionais">
-        <div><h3>Para começar</h3><p>Vincule uma conta GitHub, confirme a pasta para novos projetos e mantenha um perfil vivo de Implementador e um de Revisor. Em cada projeto, informe a origem e a branch-base antes de preparar uma issue.</p></div>
-        <div><h3>Pode permanecer no padrão</h3><p>Intervalo de consulta, tempo ativo, TTL da pergunta, política de artefatos e ordenação da fila podem usar os valores atuais. A automação começa desativada e só deve ser habilitada após revisar a fila.</p></div>
-      </div>}
+    {globalSettingsView && globalSettingsEtag && <GitHubSetupPanel
+      settings={globalSettingsView}
+      settingsEtag={globalSettingsEtag}
+      setup={githubSetup}
+      selection={nativeSelection}
+      disabled={saveState.status === 'saving' || githubSettingsPending}
+    />}
+    {!projectId && <section className="card form-section settings-operation"><div className="panel-title"><h2>Operação local</h2><p className="muted">Pasta e padrões para novos projetos e tentativas. Gerencie os papéis de execução em <a href="#principal/perfis">Perfis</a>.</p></div><div className="form-grid">
       <ProjectsFolderField
         persistedValue={settings?.projects_root ?? null}
         value={draft.global.projects_root}
@@ -585,20 +583,13 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         saveError={projectsRootSaveError}
         disabled={saveState.status === 'saving' || githubSettingsPending}
       />
+      <div className="field-full settings-group-title"><h3>Tempos de acompanhamento</h3></div>
       <MinutesField id="polling-interval-minutes" label="Intervalo de consulta" value={draft.global.time_defaults.polling_interval_ms} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, polling_interval_ms: value })} onValidityChange={(message) => updateTimeFieldValidity('polling_interval_ms', message)} />
       <MinutesField id="passage-active-time-minutes" label="Tempo ativo por passagem" value={draft.global.time_defaults.passage_active_time_ms} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, passage_active_time_ms: value })} onValidityChange={(message) => updateTimeFieldValidity('passage_active_time_ms', message)} />
-      <ConfiguredLimitField label="TTL de pergunta" value={draft.global.time_defaults.question_ttl} defaultUnit="ms" onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, question_ttl: value })} />
+      <div className="field-full settings-group-title"><h3>Perguntas e automação</h3></div>
+      <ConfiguredLimitField label="Definir prazo para perguntas" value={draft.global.time_defaults.question_ttl} onValidityChange={(message) => updateTimeFieldValidity('question_ttl', message)} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, question_ttl: value })} />
       <Checkbox label="Automação global habilitada" checked={draft.global.automation_enabled} onChange={(value) => updateGlobal('automation_enabled', value)} />
-      <p className="muted field-full">Política de artefatos: exclusão automática desativada pelo contrato. Os dados atuais permanecem nesta revisão até serem salvos.</p>
     </div></section>}
-
-    {globalSettingsView && globalSettingsEtag && <GitHubSetupPanel
-      settings={globalSettingsView}
-      settingsEtag={globalSettingsEtag}
-      setup={githubSetup}
-      selection={nativeSelection}
-      disabled={saveState.status === 'saving' || githubSettingsPending}
-    />}
 
     {conflictView && conflictETagRef.current && <button type="button" onClick={() => {
       const etag = conflictETagRef.current;
@@ -646,16 +637,18 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
       pollingIntervalMs={load.view.settings.time_defaults.polling_interval_ms} onProjectNameChange={setProjectName} /></section>}
 
-    <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">{saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={deletionRestricted || saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
+    <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">
+      {!projectId && (saveState.status === 'idle' || saveState.status === 'saved') && <span className="muted">{same(draft.global, draft.baselineGlobal) ? 'Nenhuma alteração pendente.' : 'Há alterações não salvas.'}</span>}
+      {saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={deletionRestricted || saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
 
 
   </div>;
 }
 
 type LimitValue = { state: 'not_configured' } | { state: 'configured'; value: number; unit: string };
-function ConfiguredLimitField({ label, value, onChange, defaultUnit }: { label: string; value: LimitValue; onChange: (value: LimitValue) => void; defaultUnit: string }) {
+function ConfiguredLimitField({ label, value, onChange, onValidityChange }: { label: string; value: LimitValue; onChange: (value: LimitValue) => void; onValidityChange: (message: string | null) => void }) {
   const configured = value.state === 'configured';
-  return <div className="limit-field"><Checkbox label={`${label} configurado`} checked={configured} onChange={(checked) => onChange(checked ? { state: 'configured', value: 0, unit: defaultUnit } : { state: 'not_configured' })} />{configured && <div className="row"><NumberField label={`${label} valor`} value={value.value} min={0} step={0.01} onChange={(next) => onChange({ ...value, value: next })} /><TextField label={`${label} unidade`} value={value.unit} onChange={(unit) => onChange({ ...value, unit })} /></div>}</div>;
+  return <div className="limit-field"><Checkbox label={label} checked={configured} onChange={(checked) => { onValidityChange(null); onChange(checked ? { state: 'configured', value: 0, unit: 'ms' } : { state: 'not_configured' }); }} />{configured && <div className="row"><MinutesField id="question-ttl-minutes" label="Duração" value={value.value} allowZero maximumMilliseconds={Number.MAX_SAFE_INTEGER} onValidityChange={onValidityChange} onChange={(next) => onChange({ ...value, value: next, unit: 'ms' })} /></div>}</div>;
 }
 
 function Checkbox({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {

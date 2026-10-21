@@ -7,11 +7,13 @@ type Props = {
   label: string;
   value: number;
   disabled?: boolean;
+  allowZero?: boolean;
+  maximumMilliseconds?: number;
   onChange: (milliseconds: number) => void;
   onValidityChange: (message: string | null) => void;
 };
 
-export function MinutesField({ id, label, value, disabled = false, onChange, onValidityChange }: Props) {
+export function MinutesField({ id, label, value, disabled = false, allowZero = false, maximumMilliseconds = 2_147_483_647, onChange, onValidityChange }: Props) {
   const initialPresentation = presentMillisecondsAsMinutes(value);
   const initialValueRef = useRef(value);
   const initialTextRef = useRef(initialPresentation.text);
@@ -34,7 +36,7 @@ export function MinutesField({ id, label, value, disabled = false, onChange, onV
   }, [onValidityChange, value]);
 
   function validate(nextText: string): ReturnType<typeof resolveMinuteDraft> {
-    const result = resolveMinuteDraft(nextText, initialTextRef.current, initialValueRef.current);
+    const result = resolveMinuteDraft(nextText, initialTextRef.current, initialValueRef.current, allowZero, maximumMilliseconds);
     const message = result.valid ? null : result.message;
     setError(message);
     onValidityChange(message);

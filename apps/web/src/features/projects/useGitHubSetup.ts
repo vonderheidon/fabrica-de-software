@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GitHubSetupOptions, HttpAttemptPage, OperationWarning, SettingsSaved, SettingsUpdate, SettingsView } from '#contracts';
 import { consultConfigurationSave, finishConfigurationSave, operationNotLocatedMessage, retainConfigurationSave } from '../../api/configuration-save.js';
 import { getControllerInstanceId, HttpError, requestJsonWithMetadata } from '../../api/http.js';
@@ -97,7 +97,7 @@ export function useGitHubSetup(input: {
     verificationControllerRef.current = null;
   }, []);
 
-  async function verify(): Promise<void> {
+  const verify = useCallback(async (): Promise<void> => {
     const current = latestInputRef.current;
     const currentEtag = current.etag;
     if (!current.enabled || !current.settings || !currentEtag) return;
@@ -127,7 +127,12 @@ export function useGitHubSetup(input: {
     } finally {
       if (requestId === requestIdRef.current) verificationControllerRef.current = null;
     }
-  }
+  }, []);
+
+  const settingsReady = input.settings !== null;
+  useEffect(() => {
+    if (input.enabled && settingsReady && input.etag) void verify();
+  }, [input.enabled, input.etag, settingsReady, verify]);
 
   const eligibleAccounts = eligibleGitHubAccounts(verification.data);
   const selectedAccount = eligibleAccounts.find((account) => account.login === selectedLogin) ?? null;

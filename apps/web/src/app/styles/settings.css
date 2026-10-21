@@ -1,0 +1,51 @@
+.global-settings-editor { gap: 20px; max-width: 1080px; }
+.global-settings-editor .form-section { margin: 0; padding: 24px; }
+.global-settings-editor h2 { font-size: 18px; font-weight: 650; margin: 0; }
+.global-settings-editor h3 { font-size: 13px; font-weight: 650; margin: 0; }
+.global-settings-editor .panel-title { margin-bottom: 20px; }
+.global-settings-editor .panel-title p { margin: 7px 0 0; font-size: 12px; }
+.global-settings-editor .form-grid { gap: 20px 28px; align-items: start; }
+.global-settings-editor .form-field { margin: 0; }
+.global-settings-editor .field-guidance { margin: 7px 0 0; font-size: 12px; line-height: 1.55; max-width: 68ch; }
+.global-settings-editor button { min-height: 40px; padding: 9px 14px; font-size: 12px; line-height: 20px; font-weight: 600; border-radius: 7px; white-space: nowrap; }
+.global-settings-editor input:not([type='checkbox']), .global-settings-editor select { min-height: 40px; padding: 9px 12px; font-size: 13px; line-height: 20px; }
+.settings-group-title { padding-top: 20px; border-top: 1px solid var(--border); }
+.global-settings-editor .projects-folder-input-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.global-settings-editor .projects-folder-input-row input { width: 100%; }
+.global-settings-editor .projects-folder-saved-value { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px 12px; border: 0; background: transparent; padding: 0; margin: 12px 0; font-size: 12px; }
+.global-settings-editor .projects-folder-saved-value .eyebrow { font-size: 11px; letter-spacing: 0; text-transform: none; }
+.global-settings-editor .projects-folder-saved-value .mono { font-family: var(--font); }
+.global-settings-editor .projects-folder-field > button { justify-self: start; }
+.input-with-unit { position: relative; display: flex; gap: 0; }
+.input-with-unit input { width: 100%; padding-right: 50px !important; font-variant-numeric: tabular-nums; }
+.input-with-unit > small { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); white-space: nowrap; pointer-events: none; }
+.global-settings-editor .form-check { min-height: 24px; margin: 0; gap: 9px; font-size: 13px; }
+.global-settings-editor .form-check input { flex: 0 0 18px; margin: 0; }
+.global-settings-editor .form-check-field .field-guidance { margin-left: 27px; }
+.global-settings-editor .limit-field .row { margin-top: 14px; }
+.global-settings-editor .github-setup-panel { gap: 16px; }
+.global-settings-editor .github-setup-panel .panel-title { margin: 0; }
+.global-settings-editor .github-setup-panel > p { margin: 0; font-size: 12px; }
+.github-account-summary.github-factory-account { grid-template-columns: minmax(0, 1fr); }
+.global-settings-editor .github-account-summary > div { background: #f7f8f9; border: 0; padding: 14px 16px; gap: 8px; }
+.global-settings-editor .github-account-summary .eyebrow { font-size: 11px; text-transform: none; letter-spacing: 0; }
+.global-settings-editor .github-account-summary strong { font-size: 15px; font-weight: 600; }
+.github-connection-details, .github-binding-details { border-top: 1px solid var(--border); padding-top: 14px; }
+.github-connection-details > summary, .github-binding-details > summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 4px 0; }
+.github-connection-details[open] > summary, .github-binding-details[open] > summary { margin-bottom: 14px; }
+.global-settings-editor .github-binding-controls { align-items: start; }
+.global-settings-editor .github-binding-action { gap: 7px; }
+.global-settings-editor .github-binding-action > span { font-size: 12px; font-weight: 600; }
+.global-settings-editor .github-binding-action button { justify-self: start; }
+.global-settings-editor .form-actions-card { position: static; display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 16px 0 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; gap: 16px; }
+.global-settings-editor .save-feedback { flex: 1; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+.global-settings-editor .form-actions-card > button { flex-shrink: 0; width: auto; }
+@media (max-width: 680px) {
+  .global-settings-editor .form-section { padding: 20px; }
+  .global-settings-editor .form-grid { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .global-settings-editor .projects-folder-input-row { grid-template-columns: minmax(0, 1fr); }
+  .global-settings-editor .projects-folder-input-row button { width: auto; justify-self: start; }
+  .global-settings-editor .github-account-summary { grid-template-columns: minmax(0, 1fr); }
+  .global-settings-editor .github-setup-panel .panel-title { align-items: flex-start; flex-wrap: wrap; }
+  .global-settings-editor .form-actions-card { flex-wrap: wrap; }
+}

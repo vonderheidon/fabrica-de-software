@@ -5,10 +5,9 @@ export type MinuteParseResult =
 export type MinutePresentation = { text: string; approximate: boolean };
 
 const millisecondsPerMinute = 60_000n;
-const maximumMilliseconds = 2_147_483_647n;
 const displayScale = 10n ** 10n;
 
-export function parseMinutes(text: string): MinuteParseResult {
+export function parseMinutes(text: string, allowZero = false, maximumMilliseconds = 2_147_483_647): MinuteParseResult {
   const value = text.trim();
   if (value.startsWith('-')) return { valid: false, message: 'Informe um valor em minutos maior que zero.' };
   if (value.length === 0 || value.length > 64) {
@@ -30,8 +29,8 @@ export function parseMinutes(text: string): MinuteParseResult {
   }
 
   const milliseconds = millisecondNumerator / denominator;
-  if (milliseconds === 0n) return { valid: false, message: 'Informe um valor em minutos maior que zero.' };
-  if (milliseconds > maximumMilliseconds) {
+  if (milliseconds === 0n && !allowZero) return { valid: false, message: 'Informe um valor em minutos maior que zero.' };
+  if (milliseconds > BigInt(maximumMilliseconds)) {
     return { valid: false, message: 'Esse valor em minutos ultrapassa o máximo permitido.' };
   }
 
@@ -56,8 +55,8 @@ export function presentMillisecondsAsMinutes(milliseconds: number): MinutePresen
   };
 }
 
-export function resolveMinuteDraft(text: string, initialText: string, initialMilliseconds: number): MinuteParseResult {
-  return text === initialText ? { valid: true, milliseconds: initialMilliseconds } : parseMinutes(text);
+export function resolveMinuteDraft(text: string, initialText: string, initialMilliseconds: number, allowZero = false, maximumMilliseconds = 2_147_483_647): MinuteParseResult {
+  return text === initialText ? { valid: true, milliseconds: initialMilliseconds } : parseMinutes(text, allowZero, maximumMilliseconds);
 }
 
 export function formatMinuteValue(milliseconds: number): string {

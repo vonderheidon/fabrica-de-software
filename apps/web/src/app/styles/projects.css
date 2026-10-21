@@ -1,0 +1,48 @@
+.project-catalog { padding: 0; border-radius: 12px; overflow: hidden; }
+.project-catalog th { padding: 16px 20px; background: #f6f7f8; font-size: 10px; font-weight: 650; }
+.project-catalog td { padding: 22px 20px; vertical-align: middle; }
+.project-catalog th:first-child, .project-catalog td:first-child { padding-left: 24px; }
+.project-catalog tbody tr:last-child td { border-bottom: 0; }
+.project-catalog tbody tr:hover { background: #fafbfc; }
+.project-catalog td:first-child { width: 33%; }
+.project-catalog td:first-child b { display: inline-block; margin-bottom: 7px; font-size: 15px; font-weight: 650; }
+.project-catalog td:first-child small { line-height: 1.7; }
+.project-catalog td:first-child .mono { font-family: var(--font); font-size: 12px; }
+.project-catalog .compact-list { margin: 0; padding-left: 16px; color: #796044; line-height: 1.6; }
+.project-ready { color: #52685b; font-size: 12px; }
+.project-row-actions { display: grid; grid-template-columns: 1fr; gap: 8px; min-width: 152px; }
+.project-row-actions > button { display: inline-flex; align-items: center; justify-content: center; width: 100%; min-height: 40px; padding: 9px 14px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; border-radius: 7px; }
+.project-row-actions > button:last-child { background: #f3f5f6; border-color: #e0e4e7; }
+.project-row-actions > button:enabled:hover { background: #eaeef0; border-color: #bac2c8; }
+.project-catalog .pagination-actions { padding: 0 24px 20px; }
+
+/* Fields use one focus treatment, including selects reached with the keyboard. */
+input:focus, select:focus, textarea:focus { border-color: #bd7034; box-shadow: 0 0 0 2px #bd703426; outline: none; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+.project-configuration-dialog { background: #fff; padding: 28px 32px; }
+.project-configuration-dialog .dialog-toolbar { background: #fff; }
+.project-configuration-dialog .configuration-editor { gap: 24px; }
+.project-configuration-dialog .form-section { padding: 0; border: 0; border-radius: 0; margin: 0; }
+.project-configuration-dialog .panel-title h2 { font-size: 25px; margin: 8px 0; }
+.project-configuration-dialog .panel-title p { font-size: 13px; }
+.project-configuration-dialog .configuration-guidance { background: #f5f6f7; border: 0; border-radius: 8px; padding: 18px 20px; gap: 24px; margin-bottom: 24px; }
+.project-configuration-dialog .form-grid { gap: 12px 28px; }
+.project-configuration-dialog .form-field label { margin: 10px 0 8px; }
+.project-configuration-dialog .field-guidance { font-size: 11px; line-height: 1.6; margin-top: 7px; }
+.project-configuration-dialog .mapping-editor { margin: 28px 0; padding: 20px; background: #fafbfc; border-color: #e3e6e9; border-radius: 10px; }
+.project-configuration-dialog .project-danger-zone { background: #fffafa; border-radius: 10px; padding: 20px; }
+.project-configuration-dialog .form-actions-card { box-shadow: none; border-top: 1px solid var(--border); padding-inline: 0; }
+@media (max-width: 850px) {
+  .project-catalog td, .project-catalog th { padding-inline: 14px; }
+  .project-row-actions { min-width: 132px; }
+}
+@media (max-width: 650px) {
+  .project-catalog td:first-child { width: 100%; padding-left: 0; }
+  .project-catalog td { padding: 10px 0; }
+  .project-catalog tr { padding: 20px; }
+  .project-catalog td:first-child::before { display: none; }
+  .project-catalog .project-row-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .project-row-actions > button { white-space: normal; }
+  .project-configuration-dialog { padding: 20px; }
+  .project-configuration-dialog .form-grid, .project-configuration-dialog .configuration-guidance { grid-template-columns: minmax(0, 1fr); }
+}

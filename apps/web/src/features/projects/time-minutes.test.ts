@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { formatMinuteValue, parseMinutes, presentMillisecondsAsMinutes, resolveMinuteDraft } from './time-minutes.js';
 
 describe('exact minute conversion', () => {
+  it('supports question deadlines without changing the other time limits', () => {
+    expect(parseMinutes('0', true, Number.MAX_SAFE_INTEGER)).toEqual({ valid: true, milliseconds: 0 });
+    expect(parseMinutes('0,55', true, Number.MAX_SAFE_INTEGER)).toEqual({ valid: true, milliseconds: 33_000 });
+    expect(parseMinutes('50000', true, Number.MAX_SAFE_INTEGER)).toEqual({ valid: true, milliseconds: 3_000_000_000 });
+    expect(parseMinutes('0').valid).toBe(false);
+    expect(parseMinutes('50000').valid).toBe(false);
+    expect(parseMinutes('0,000001', true, Number.MAX_SAFE_INTEGER).valid).toBe(false);
+    const previous = presentMillisecondsAsMinutes(1);
+    expect(resolveMinuteDraft(previous.text, previous.text, 1, true, Number.MAX_SAFE_INTEGER)).toEqual({ valid: true, milliseconds: 1 });
+  });
   it.each([
     ['2', 120_000],
     ['5', 300_000],

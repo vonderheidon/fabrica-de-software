@@ -27,7 +27,7 @@ export function ProjectsFolderField({ persistedValue, value, capability, selecti
         {selectionBusy && currentSelection?.status === 'selecting' ? 'Aguardando a janela…' : 'Selecionar pasta'}
       </button>
     </div>
-    <p id="projects-root-help" className="field-guidance">Define onde novos projetos poderão ser criados. Necessária para cadastrar projetos; informe e valide antes do primeiro cadastro. Use um caminho local acessível, por exemplo “C:\\Projetos”. Alterar a raiz vale para novos projetos e não move os existentes.</p>
+    <p id="projects-root-help" className="field-guidance">Pasta local para novos projetos. Alterá-la não move os existentes. Exemplo: C:\Projetos.</p>
     {!capability.available && <div className="notice" role="status"><p>A seleção assistida de pasta está indisponível nesta sessão.</p></div>}
     <p className="projects-folder-saved-value"><span className="eyebrow">Pasta salva</span><span className="mono">{persistedValue ?? 'Ainda não configurada'}</span></p>
     {differsFromSaved && <p className="selection-message" role="status">A edição atual ainda não foi salva. O valor salvo acima permanece ativo.</p>}

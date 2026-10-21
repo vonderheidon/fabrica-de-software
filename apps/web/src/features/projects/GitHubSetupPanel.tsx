@@ -16,8 +16,10 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
   const verificationReady = setup.verification.status === 'ready';
   const verificationError = setup.verification.status === 'error' ? setup.verification.error : null;
   const verificationStale = options !== null && (setup.verification.status !== 'ready' || setup.verification.settingsEtag !== settingsEtag);
-  const linkedLogin = options?.linked_account?.login ?? (settings.settings.account_id ? 'Vínculo salvo; login ainda não consultado' : 'Nenhuma conta vinculada');
-  const observedLogin = options?.observed_account?.login ?? 'Nenhuma identidade ativa confirmada';
+  const checking = setup.verification.status === 'idle' || setup.verification.status === 'checking';
+  const linkedAccount = options?.linked_account?.id === settings.settings.account_id ? options?.linked_account : null;
+  const linkedLogin = linkedAccount ? `@${linkedAccount.login}` : !settings.settings.account_id ? 'Nenhuma conta vinculada' : checking ? 'Consultando conta…' : 'Vínculo salvo; consulta não confirmada';
+  const observedLogin = options?.observed_account ? `@${options.observed_account.login}` : checking ? 'Consultando autenticação…' : verificationError ? 'Não foi possível consultar' : 'Nenhuma conta ativa confirmada';
   const accountMismatch = Boolean(options?.linked_account && options.observed_account && options.linked_account.id !== options.observed_account.id);
   const settingsMismatch = options !== null && (options.linked_account?.id ?? null) !== settings.settings.account_id;
   const operationBusy = setup.accountOperation.status === 'saving' || setup.executableOperation.status === 'saving' || disabled;
@@ -34,20 +36,19 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
 
   return <section className="card form-section github-setup-panel" aria-labelledby="github-setup-title">
     <div className="panel-title line">
-      <div><span className="eyebrow">Identidade externa</span><h2 id="github-setup-title">GitHub</h2></div>
+      <div><h2 id="github-setup-title">Conta GitHub</h2></div>
       <button type="button" onClick={() => void setup.verify()} disabled={disabled || setup.verification.status === 'checking'} aria-busy={setup.verification.status === 'checking'}>
         {setup.verification.status === 'checking' ? 'Verificando…' : 'Verificar status'}
       </button>
     </div>
-    <p className="muted">A verificação apenas consulta o GitHub CLI e a identidade observada. A fábrica não faz login nem troca a conta ativa do computador.</p>
+    <p className="muted">Usa a autenticação do GitHub CLI neste computador. Alterar o vínculo exige uma ação explícita.</p>
 
-    {setup.verification.status === 'checking' && <p role="status">Consultando executável, autenticação e identidade ativa…</p>}
+    {setup.verification.status === 'checking' && <p role="status">Atualizando status da conta…</p>}
     {verificationError && <div className="notice" role="alert"><b>Status do GitHub não confirmado</b><p>{verificationError.message}</p><p>A falha desta consulta não altera nem apaga o resultado de uma gravação.</p></div>}
     {verificationStale && <div className="notice" role="status"><b>Observação anterior à configuração atual</b><p>Atualize a configuração e verifique o status novamente antes de vincular ou trocar a conta.</p></div>}
 
-    <div className="github-account-summary" aria-live="polite">
-      <div><span className="eyebrow">Conta vinculada</span><strong>{options?.linked_account?.login ? `@${options.linked_account.login}` : linkedLogin}</strong></div>
-      <div><span className="eyebrow">Identidade ativa observada</span><strong>{options?.observed_account?.login ? `@${options.observed_account.login}` : observedLogin}</strong></div>
+    <div className="github-account-summary github-factory-account" aria-live="polite">
+      <div><span className="eyebrow">Vinculada à fábrica</span><strong>{linkedLogin}</strong></div>
     </div>
     {accountMismatch && <div className="notice" role="alert">
       <b>Conta ativa diferente da vinculada</b>
@@ -56,6 +57,8 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
     {settingsMismatch && !verificationStale && <div className="notice" role="alert"><b>A configuração mudou durante a consulta</b><p>Releia a configuração e verifique o status antes de vincular uma conta.</p></div>}
 
     {options && <>
+      <details className="github-connection-details"><summary>Detalhes da conexão</summary>
+      <p><strong>Conta ativa neste computador:</strong> {observedLogin}</p>
       <div className="github-executable-summary">
         <span className="eyebrow">GitHub CLI</span>
         {options.executable.state === 'observed'
@@ -71,9 +74,10 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
           <span>{account.eligible ? 'Elegível para vínculo' : account.active && account.valid ? 'Identidade não confirmada' : 'Não elegível para vínculo'}</span>
         </li>)}</ul>
       </div>}
+      </details>
       {options.retry_at_ms !== null && <p className="notice" role="status">A próxima consulta GitHub está prevista para {new Date(options.retry_at_ms).toLocaleString('pt-BR')}.</p>}
 
-      {setup.eligibleAccounts.length > 0 && <div className="form-grid github-binding-controls">
+      {setup.eligibleAccounts.length > 0 && <details className="github-binding-details"><summary>{settings.settings.account_id ? 'Gerenciar vínculo da conta' : 'Vincular uma conta'}</summary><div className="form-grid github-binding-controls">
         <div className="form-field"><label htmlFor="github-eligible-login">Conta elegível</label>
           <select id="github-eligible-login" value={setup.selectedLogin} aria-describedby="github-eligible-login-help" onChange={(event) => setup.setSelectedLogin(event.currentTarget.value)} disabled={!setup.observationCurrent || operationBusy || bindingPending}>
             <option value="">Selecione pelo login</option>
@@ -82,12 +86,12 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
           <FieldHelp id="github-eligible-login-help" label="Conta elegível" />
         </div>
         <div className="form-field github-binding-action">
-          <span>Ação explícita</span>
+          <span>Vínculo com a fábrica</span>
           <button type="button" className="primary" onClick={() => void setup.bindSelectedAccount()} disabled={!setup.bindingAction || !setup.observationCurrent || operationBusy || bindingPending}>
             {setup.accountOperation.status === 'saving' ? 'Salvando vínculo…' : accountActionLabel}
           </button>
         </div>
-      </div>}
+      </div></details>}
       {setup.eligibleAccounts.length === 0 && verificationReady && <p className="empty">Nenhuma conta ativa, válida e confirmada está disponível para vínculo.</p>}
 
       <GitHubDiagnostics options={options} />
