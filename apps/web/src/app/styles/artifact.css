@@ -170,8 +170,26 @@ td, th { padding: 16px 10px; border-bottom: 1px solid var(--border); vertical-al
 td:first-child, th:first-child { padding-left: 0; }
 .table-wrap { overflow: auto; }
 .empty { padding: 45px; text-align: center; color: var(--muted); }
-.dialog-backdrop { position: fixed; inset: 0; background: #20212266; z-index: 10; display: grid; place-items: center; padding: 20px; backdrop-filter: blur(3px); }
-.dialog { width: min(680px, 100%); max-height: 90vh; max-height: min(90vh, calc(100dvh - 24px)); overflow: auto; overscroll-behavior: contain; scroll-padding-block: 22px; background: var(--bg); padding: 28px; border-radius: 12px; box-shadow: 0 20px 80px #20212229; }
+.dialog-backdrop { position: fixed; inset: 0; background: #20212280; z-index: 10; display: grid; place-items: center; padding: 20px; backdrop-filter: blur(5px); }
+.dialog { box-sizing: border-box; width: min(720px, 100%); max-height: 90vh; max-height: min(90vh, calc(100dvh - 24px)); overflow: auto; overscroll-behavior: contain; scroll-padding-block: 80px; background: var(--bg); padding: 28px; border: 1px solid #ffffffb3; border-radius: 18px; box-shadow: 0 24px 90px #15191e40; }
+.dialog-toolbar { position: sticky; top: -28px; z-index: 4; padding-block: 12px; margin-top: -12px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.dialog-toolbar .eyebrow { color: var(--accent); }
+.dialog .close-button { border-radius: 50%; background: var(--surface); }
+.project-configuration-dialog { width: min(1080px, 100%); }
+.project-configuration-dialog .configuration-editor { margin-top: 24px; }
+.project-configuration-dialog .form-section { box-shadow: none; }
+.project-danger-zone { display: flex; align-items: center; justify-content: space-between; gap: 24px; border-color: #e7ccc8; }
+.project-danger-zone h3 { margin: 0 0 8px; }
+.project-danger-zone p { margin: 0; color: var(--muted); max-width: 620px; }
+.project-danger-zone > button { flex-shrink: 0; }
+.project-configuration-dialog .form-actions-card { bottom: -28px; margin-bottom: -28px; padding-block: 20px; border-radius: 0; border-inline: 0; background: var(--surface); }
+@media (max-width: 600px) {
+  .dialog-backdrop { padding: 12px; }
+  .dialog { padding: 20px; border-radius: 14px; }
+  .dialog-toolbar { top: -20px; }
+  .project-danger-zone { align-items: stretch; flex-direction: column; }
+  .project-configuration-dialog .form-actions-card { position: sticky; bottom: -20px; margin-bottom: -20px; }
+}
 .dialog-backdrop { overflow-y: auto; place-items: start center; }
 .dialog { margin-block: auto; }
 .dialog [id$="-title"], .dialog :focus-visible { scroll-margin-block: 22px; }
@@ -179,7 +197,7 @@ td:first-child, th:first-child { padding-left: 0; }
 .dialog-prompt h3, .dialog-prompt p { margin: 0; }
 .dialog-prompt-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .dialog-prompt-actions button { min-height: 44px; }
-.profile-delete-dialog { width: min(560px, calc(100vw - 24px)); max-height: 90vh; max-height: min(90vh, calc(100dvh - 24px)); overflow: auto; overscroll-behavior: contain; padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--fg); box-shadow: 0 20px 80px #20212240; }
+.profile-delete-dialog { width: min(560px, calc(100vw - 24px)); max-height: 90vh; max-height: min(90vh, calc(100dvh - 24px)); overflow: auto; overscroll-behavior: contain; padding: 28px; border: 1px solid var(--border); border-radius: 18px; background: var(--bg); color: var(--fg); box-shadow: 0 24px 90px #15191e40; }
 .profile-delete-dialog::backdrop { background: #20212299; backdrop-filter: blur(3px); }
 .profile-delete-dialog:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
 .profile-delete-dialog h2 { margin: 8px 0; font-size: 22px; }
@@ -187,7 +205,7 @@ td:first-child, th:first-child { padding-left: 0; }
 .profile-delete-dialog .profile-delete-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
 .profile-delete-dialog button { min-height: 44px; }
 .project-deletion-dialog { box-sizing: border-box; overflow-wrap: anywhere; }
-.project-deletion-dialog h2:focus { outline: 3px solid var(--accent); outline-offset: 3px; }
+.project-deletion-dialog h2:focus { outline: none; }
 .project-deletion-targets { padding-inline-start: 22px; }
 .project-deletion-targets li { margin-block: 14px; }
 .project-deletion-targets span { display: block; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }

@@ -4,7 +4,7 @@ import { useHashRoute } from './useHashRoute.js';
 import { PrincipalScreen } from './PrincipalScreen.js';
 import { HttpError } from '../api/http.js';
 import { operatorErrorMessage } from './operator-language.js';
-import { ProjectRegistrationForm } from '../features/projects/ProjectForm.js';
+import { ProjectConfigurationForm, ProjectRegistrationForm } from '../features/projects/ProjectForm.js';
 import { ProfileForm } from '../features/projects/ProfileForm.js';
 import { ProjectCreationDialog } from '../features/projects/ProjectCreationDialog.js';
 import { QueueEnableDialog } from '../features/queue/QueueEnableDialog.js';
@@ -70,6 +70,7 @@ export function AppShell() {
   wizardRouteRef.current = { dialog, dirty: wizardHasUnsaved, saving: wizardSaving };
   const dialogRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const dialogHadFocusRef = useRef(false);
   const appRef = useRef<HTMLDivElement>(null);
   const title = labelForTab(route.tab);
 
@@ -119,7 +120,7 @@ export function AppShell() {
       }
       const current = wizardRouteRef.current;
       const previousHash = lastKnownHashRef.current;
-      if (current.dialog === 'initial-setup' && (current.dirty || current.saving) && nextHash !== previousHash) {
+      if ((current.dialog === 'initial-setup' || current.dialog === 'project-configuration') && (current.dirty || current.saving) && nextHash !== previousHash) {
         if (current.saving) {
           window.history.replaceState(null, '', previousHash);
           window.dispatchEvent(new HashChangeEvent('hashchange'));
@@ -137,6 +138,33 @@ export function AppShell() {
     };
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent): void => {
+      const current = wizardRouteRef.current;
+      if (current.dialog !== 'project-configuration' || !current.dirty && !current.saving) return;
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    const projectRemoved = (event: Event): void => {
+      const id = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
+      if (id && params.get('projectId') === id) {
+        wizardRouteRef.current = { dialog: null, dirty: false, saving: false };
+        wizardHasUnsavedRef.current = false;
+        setWizardHasUnsaved(false);
+        setWizardClosePrompt(false);
+      }
+    };
+    window.addEventListener('beforeunload', beforeUnload);
+    window.addEventListener('factory-project-deleted', projectRemoved, true);
+    window.addEventListener('factory-project-unavailable', projectRemoved, true);
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload);
+      window.removeEventListener('factory-project-deleted', projectRemoved, true);
+      window.removeEventListener('factory-project-unavailable', projectRemoved, true);
+    };
   }, []);
 
   useEffect(() => {
@@ -162,15 +190,20 @@ export function AppShell() {
   useEffect(() => {
     if (!dialog) {
       appRef.current?.removeAttribute('inert');
+      if (!dialogHadFocusRef.current) return;
+      dialogHadFocusRef.current = false;
       const returnTarget = returnFocusRef.current;
+      returnFocusRef.current = null;
       if (returnTarget?.isConnected) returnTarget.focus();
       else appRef.current?.querySelector<HTMLElement>('.nav-link[aria-current="page"]')?.focus();
       return;
     }
+    dialogHadFocusRef.current = true;
     appRef.current?.setAttribute('inert', '');
     const firstFocusable = dialogRef.current?.querySelector<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
     firstFocusable?.focus();
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (document.querySelector('dialog[open]')) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         closeDialog();
@@ -194,7 +227,7 @@ export function AppShell() {
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
-  }, [dialog, profileClosePrompt]);
+  }, [dialog, profileClosePrompt, wizardClosePrompt]);
 
   useEffect(() => {
     const content = profileContentRef.current;
@@ -208,7 +241,7 @@ export function AppShell() {
   }, [profileClosePrompt]);
 
   function openDialog(id: string, trigger: HTMLElement, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string; profileId?: string; issueId?: string }): void {
-    if (!['register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation', 'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication', 'diagnostic', 'interaction', 'profile', 'initial-setup'].includes(id)) return;
+    if (!['register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation', 'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication', 'diagnostic', 'interaction', 'profile', 'initial-setup', 'project-configuration'].includes(id)) return;
     returnFocusRef.current = trigger;
     if (id === 'initial-setup') setWizardDialogTitle('Configuração inicial');
     setDialogState({ status: 'ready', message: id === 'diagnostic' ? 'Revise a origem local autorizada e a proteção da solicitação. O navegador não libera CORS nem repete o bootstrap automaticamente.' : 'O conteúdo desta ação será conectado à funcionalidade correspondente.' });
@@ -274,7 +307,7 @@ export function AppShell() {
   }
 
   function closeDialog(): void {
-    if (dialog === 'initial-setup') {
+    if (dialog === 'initial-setup' || dialog === 'project-configuration') {
       requestWizardClose();
       return;
     }
@@ -324,7 +357,7 @@ export function AppShell() {
   }
 
   function interceptWizardNavigation(event: MouseEvent<HTMLDivElement>): void {
-    if (dialog !== 'initial-setup') return;
+    if (dialog !== 'initial-setup' && dialog !== 'project-configuration') return;
     const target = event.target;
     if (!(target instanceof Element)) return;
     const anchor = target.closest<HTMLAnchorElement>('a[href^="#principal/"]');
@@ -359,7 +392,7 @@ export function AppShell() {
       <aside className="sidebar">
         <div className="brand"><span className="mark" aria-hidden="true">nf</span> Nova Fábrica</div>
         <div className="sidebar-navigation"><div className="eyebrow workspace-label">Workspace local</div><nav className="nav" aria-label="Navegação principal">
-          {tabs.map((tab) => <a key={tab} href={buildHash(tab, route.params)} className={`nav-link${route.tab === tab && !route.error ? ' active' : ''}`} aria-current={route.tab === tab && !route.error ? 'page' : undefined}><span className="symbol" aria-hidden="true">{navSymbols[tab]}</span>{navLabels[tab]}</a>)}
+          {tabs.map((tab) => <a key={tab} href={buildHash(tab, tab === 'configuracao' ? new URLSearchParams() : route.params)} className={`nav-link${route.tab === tab && !route.error ? ' active' : ''}`} aria-current={route.tab === tab && !route.error ? 'page' : undefined}><span className="symbol" aria-hidden="true">{navSymbols[tab]}</span>{navLabels[tab]}</a>)}
         </nav></div>
         <footer className="sidebar-footer"><span className="avatar" aria-hidden="true">NF</span><div><b>Controlador local</b><br /><small>Sessão técnica do navegador</small></div><a className="quiet-button quiet-link" href="#principal/registros">Registros e diagnóstico</a></footer>
       </aside>
@@ -369,10 +402,19 @@ export function AppShell() {
       </main>
     </div>
     {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
-      <div className={`dialog${dialog === 'profile' ? ' profile-dialog' : ''}${dialog === 'initial-setup' ? ' initial-setup-dialog' : ''}`} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1}>
-        <div className="line"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label={dialog === 'profile' && profileClosePrompt ? 'Voltar à edição do perfil' : 'Fechar diálogo'} onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending || dialog === 'initial-setup' && wizardSaving}>×</button></div>
+      <div className={`dialog${dialog === 'profile' ? ' profile-dialog' : ''}${dialog === 'initial-setup' ? ' initial-setup-dialog' : ''}${dialog === 'project-configuration' ? ' project-configuration-dialog' : ''}`} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1} onClickCapture={interceptWizardNavigation}>
+        <div className="line dialog-toolbar"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label={dialog === 'profile' && profileClosePrompt ? 'Voltar à edição do perfil' : 'Fechar diálogo'} onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending || (dialog === 'initial-setup' || dialog === 'project-configuration') && wizardSaving}>×</button></div>
         <h2 id="dialog-title">{dialog === 'initial-setup' ? wizardDialogTitle : dialog === 'profile' && profileClosePrompt ? 'Descartar alterações do perfil?' : dialog === 'profile' ? (route.params.has('profileId') ? 'Editar perfil' : 'Criar perfil') : dialog === 'diagnostic' ? 'Diagnóstico de acesso' : labelForDialog(dialog)}</h2>
-        {dialog === 'initial-setup' ? <InitialSetupDialog
+        {dialog === 'project-configuration' ? <>
+          {wizardClosePrompt ? <section className="dialog-prompt" aria-labelledby="configuration-close-title">
+            <span className="eyebrow">Alterações não salvas</span><h3 id="configuration-close-title">Sair da configuração do projeto?</h3>
+            <p>As alterações ainda não foram salvas. Você pode continuar editando ou sair e manter o rascunho nesta sessão para retomar depois.</p>
+            <div className="dialog-prompt-actions"><button type="button" autoFocus onClick={continueWizard}>Continuar editando</button><button type="button" onClick={discardWizard}>Sair e manter rascunho</button></div>
+          </section> : null}
+          <div hidden={wizardClosePrompt}>
+            {route.params.get('projectId') ? <ProjectConfigurationForm key={route.params.get('projectId')} projectId={route.params.get('projectId')} onDraftStateChange={updateWizardDraftState} onSaveIssue={() => undefined} /> : <p>Selecione um projeto no catálogo para abrir sua configuração.</p>}
+          </div>
+        </> : dialog === 'initial-setup' ? <InitialSetupDialog
           onboarding={onboarding}
           closePrompt={wizardClosePrompt}
           resetKey={wizardResetKey}
@@ -403,8 +445,8 @@ export function AppShell() {
           </section>}
         </> : dialog === 'register' ? <ProjectRegistrationForm identity={routeIdentity(route)} onRegistered={(projectId) => {
           setDialog(null);
-          const params = new URLSearchParams({ projectId });
-          window.location.hash = buildHash('configuracao', params);
+          const params = new URLSearchParams({ projectId, dialog: 'project-configuration' });
+          window.location.hash = buildHash('projetos', params);
         }} /> : dialog === 'create' || dialog === 'creation-plan' || dialog === 'partial' ? <ProjectCreationDialog
           creationId={dialog === 'partial' ? route.params.get('creationId') : null}
           onCreationId={(creationId) => {
@@ -427,7 +469,7 @@ export function AppShell() {
           }}
           onOpenProject={(projectId) => {
             setDialog(null);
-            window.location.hash = buildHash('configuracao', new URLSearchParams({ projectId }));
+            window.location.hash = buildHash('projetos', new URLSearchParams({ projectId, dialog: 'project-configuration' }));
           }}
         /> : <>
           {dialogState.status === 'action-error' && <div className="read-state" role="alert"><h3>A ação não foi concluída</h3><p>{dialogState.message}</p></div>}
@@ -453,7 +495,7 @@ function labelForDialog(dialog: DialogId): string {
     preparation: 'Preparar issue', 'start-confirmation': 'Confirmar início', 'enable-queue': 'Habilitar fila Ready',
     authority: 'Autoridade do projeto', detail: 'Detalhe da tentativa', decision: 'Responder decisão', stop: 'Parada da tentativa',
     delivery: 'Entrega', publication: 'Reconciliação da publicação', diagnostic: 'Diagnóstico', interaction: 'Sessão operacional', profile: 'Perfil',
-    'initial-setup': 'Configuração inicial',
+    'initial-setup': 'Configuração inicial', 'project-configuration': 'Configuração do projeto',
   };
   return labels[dialog];
 }

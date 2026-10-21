@@ -450,7 +450,7 @@ function ProfileDeleteBlockers({ error }: { error: HttpError }) {
     {activeAttemptCount > 0 && <p>{activeAttemptCount} tentativa(s) ativa(s) ainda usam este perfil. Aguarde um resultado antes de excluir.</p>}
     {projectCount > 0 && <>
       <p>{projectCount} projeto(s) atual(is) usam este perfil. Substitua o perfil nas configurações indicadas e salve antes de excluir.</p>
-      <ul>{projectIds.map((projectId, index) => <li key={projectId}><a href={`#principal/configuracao?projectId=${encodeURIComponent(projectId)}`} aria-label={`Abrir configuração do projeto relacionado ${index + 1}`}>Abrir configuração do projeto relacionado {index + 1}</a></li>)}</ul>
+      <ul>{projectIds.map((projectId, index) => <li key={projectId}><a href={`#principal/projetos?dialog=project-configuration&projectId=${encodeURIComponent(projectId)}`} aria-label={`Abrir configuração do projeto relacionado ${index + 1}`}>Abrir configuração do projeto relacionado {index + 1}</a></li>)}</ul>
       {truncated && <small>A lista de projetos relacionados foi limitada pelo controlador.</small>}
     </>}
     {error.recovery && <p><b>Próxima ação:</b> {error.recovery}</p>}

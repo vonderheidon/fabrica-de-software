@@ -27,7 +27,7 @@ export function OperatorDiagnosticCard({
     <div className="line"><b>{copy.title}</b><span className={`pill ${state === 'passed' ? '' : 'warn'}`}>{status.label}{previous ? ' · anterior' : ''}</span></div>
     <p>{copy.cause}</p>
     <p className="muted"><strong>Próxima ação:</strong> {copy.nextAction}</p>
-    {['PROJECT_REQUIRED', 'REMOTE_UNCONFIRMED', 'PROFILES_REQUIRED', 'PROFILE_REQUIRED', 'PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'KANBAN_DIVERGENCE'].includes(code) && <a className="button-link" href={projectId ? `#principal/configuracao?projectId=${encodeURIComponent(projectId)}` : '#principal/projetos'}>{projectId ? 'Configurar este projeto' : 'Escolher projeto para configurar'}</a>}
+    {['PROJECT_REQUIRED', 'REMOTE_UNCONFIRMED', 'PROFILES_REQUIRED', 'PROFILE_REQUIRED', 'PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'KANBAN_DIVERGENCE'].includes(code) && <a className="button-link" href={projectId ? `#principal/projetos?dialog=project-configuration&projectId=${encodeURIComponent(projectId)}` : '#principal/projetos'}>{projectId ? 'Configurar este projeto' : 'Escolher projeto para configurar'}</a>}
     {code === 'GLOBAL_AUTOMATION_PAUSED' && <a className="button-link" href="#principal/fila">Abrir fila global</a>}
     {!status.known && <UnknownState value={state} />}
   </article>;

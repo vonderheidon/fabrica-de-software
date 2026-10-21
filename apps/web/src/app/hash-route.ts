@@ -14,7 +14,7 @@ const tabLabels: Record<PrincipalTab, string> = {
 export const dialogIds = [
   'register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation',
   'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication',
-  'diagnostic', 'interaction', 'profile', 'initial-setup',
+  'diagnostic', 'interaction', 'profile', 'initial-setup', 'project-configuration',
 ] as const;
 export type DialogId = (typeof dialogIds)[number];
 
@@ -63,6 +63,10 @@ export function parseHash(hash: string): HashRoute {
   const dialog = params.get('dialog');
   if (dialog !== null && !dialogIds.some((id) => id === dialog)) {
     return { tab: tabValue as PrincipalTab, params, error: 'O conteúdo solicitado não é válido.' };
+  }
+  if (tabValue === 'configuracao' && params.has('projectId') && !params.has('dialog')) {
+    params.set('dialog', 'project-configuration');
+    return { tab: 'projetos', params, error: null };
   }
   return { tab: tabValue as PrincipalTab, params, error: null };
 }

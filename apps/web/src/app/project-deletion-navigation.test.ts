@@ -38,10 +38,9 @@ it('clears deleted selection and dependent record filters and announces completi
   expect(container.textContent?.match(/Projeto excluído\./g)).toHaveLength(1);
 });
 it('preserves the current project when another deletion finishes late', async () => {
-  await mount('#principal/configuracao?projectId=other');
+  await mount('#principal/projetos?projectId=other&dialog=project-configuration');
   await act(async () => { window.dispatchEvent(new CustomEvent('factory-project-deleted', { detail: { projectId: 'removed' } })); });
-  expect(window.location.hash).toBe('#principal/configuracao?projectId=other');
-  expect(container.textContent).toContain('other');
+  expect(window.location.hash).toBe('#principal/projetos?projectId=other&dialog=project-configuration');
 });
 it('repairs an obsolete saved URL on a confirmed 404 without announcing deletion success', async () => {
   api.read.mockImplementation(async (path: string) => {
@@ -49,8 +48,8 @@ it('repairs an obsolete saved URL on a confirmed 404 without announcing deletion
     return {};
   });
   await mount('#principal/configuracao?projectId=removed');
-  expect(window.location.hash).toBe('#principal/configuracao');
-  expect(container.textContent).toContain('Configuração global disponível');
+  expect(window.location.hash).toBe('#principal/projetos');
+  expect(container.textContent).toContain('Projetos');
   expect(container.textContent).toContain('A seleção foi limpa.');
   expect(container.textContent).not.toContain('Projeto excluído.');
 });

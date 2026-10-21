@@ -127,10 +127,10 @@ function restoreEditedFields(latest: EditorDraft, saved: PersistedEditorDraft): 
 
 function draftFromView(view: EditableView): EditorDraft {
   return {
-    global: { ...view.settings, profiles: view.profiles }, profiles: view.profiles.map(editableProfile),
-    project: isConfigurationView(view) ? view.configuration : null, dirty: [],
-    baselineGlobal: { ...view.settings, profiles: view.profiles }, baselineProfiles: view.profiles.map(editableProfile),
-    baselineProject: isConfigurationView(view) ? view.configuration : null,
+    global: structuredClone({ ...view.settings, profiles: view.profiles }), profiles: view.profiles.map(editableProfile),
+    project: isConfigurationView(view) ? structuredClone(view.configuration) : null, dirty: [],
+    baselineGlobal: structuredClone({ ...view.settings, profiles: view.profiles }), baselineProfiles: view.profiles.map(editableProfile),
+    baselineProject: isConfigurationView(view) ? structuredClone(view.configuration) : null,
   };
 }
 
@@ -228,7 +228,7 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
   </form>;
 }
 
-export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId: string | null; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
+export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateChange }: { projectId: string | null; onDraftStateChange?: (dirty: boolean, saving: boolean) => void; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
   const identity = projectId ?? 'global-settings';
   const deletionRestricted = useProjectDeletionRestriction(projectId);
   const identityRef = useRef(identity);
@@ -257,6 +257,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     : 'Nenhuma conta vinculada';
   const draftScope = configurationDraftIdentity(accountId, identity);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
+  const [projectName, setProjectName] = useState('Configuração do projeto');
   const draftRef = useRef<EditorDraft | null>(null);
   const [options, setOptions] = useState<{ key: string; data: ConfigurationOptions } | null>(null);
   const [optionsError, setOptionsError] = useState<{ key: string; message: string } | null>(null);
@@ -269,6 +270,11 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [canResend, setCanResend] = useState(false);
   const initializedDraftRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const dirty = Boolean(draft && draft.project && !same(draft.project, draft.baselineProject));
+    onDraftStateChange?.(dirty, saveState.status === 'saving');
+  }, [draft, saveState.status, onDraftStateChange]);
 
   useEffect(() => {
     const lifecycle = saveLifecycleRef.current;
@@ -423,7 +429,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     if (revalidateProjectsRoot) {
       if (projectId || draft.global.projects_root === null) return;
       globalChanges.projects_root = draft.global.projects_root;
-    } else {
+    } else if (!projectId) {
       for (const key of ['projects_root', 'automation_enabled', 'time_defaults', 'artifact_policy'] as const) {
         if (!same(baseGlobal[key], draft.global[key])) Object.assign(globalChanges, { [key]: draft.global[key] });
       }
@@ -561,13 +567,10 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
   ));
 
   return <div className="configuration-editor">
-    {projectId && isConfigurationView(load.view) && <ProjectDeletionAction key={`${projectId}:${accountId ?? ''}`} projectId={projectId} projectRevision={load.view.configuration.revision}
-      installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
-      pollingIntervalMs={load.view.settings.time_defaults.polling_interval_ms} />}
     {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p><div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
-    <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><a href={projectId ? `#principal/registros?projectId=${encodeURIComponent(projectId)}` : '#principal/registros'}>Abrir registros e diagnóstico deste contexto</a></div><p className="muted">Os dados operacionais ficam em var/factory na raiz da instalação. A execução usa o contexto Maestri herdado neste computador. Nenhum campo de credencial ou Wire é solicitado.</p></div>
+    {!projectId && <div className="card editor-context"><div><span className="eyebrow">Contexto observado</span><p><b>Conta vinculada</b> · {accountLabel}</p><a href="#principal/registros">Abrir registros e diagnóstico deste contexto</a></div><p className="muted">Os dados operacionais ficam em var/factory na raiz da instalação. A execução usa o contexto Maestri herdado neste computador. Nenhum campo de credencial ou Wire é solicitado.</p></div>}
     {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Seu rascunho continua aberto. Os valores abaixo vêm da configuração atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
-    <section className="card form-section"><div className="panel-title"><span className="eyebrow">Operação local</span><h2>Configuração global</h2></div><div className="form-grid">
+    {!projectId && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Operação local</span><h2>Configuração global</h2></div><div className="form-grid">
       {!projectId && <div className="field-full configuration-guidance" role="note" aria-label="Dados necessários e controles opcionais">
         <div><h3>Para começar</h3><p>Vincule uma conta GitHub, confirme a pasta para novos projetos e mantenha um perfil vivo de Implementador e um de Revisor. Em cada projeto, informe a origem e a branch-base antes de preparar uma issue.</p></div>
         <div><h3>Pode permanecer no padrão</h3><p>Intervalo de consulta, tempo ativo, TTL da pergunta, política de artefatos e ordenação da fila podem usar os valores atuais. A automação começa desativada e só deve ser habilitada após revisar a fila.</p></div>
@@ -587,7 +590,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
       <ConfiguredLimitField label="TTL de pergunta" value={draft.global.time_defaults.question_ttl} defaultUnit="ms" onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, question_ttl: value })} />
       <Checkbox label="Automação global habilitada" checked={draft.global.automation_enabled} onChange={(value) => updateGlobal('automation_enabled', value)} />
       <p className="muted field-full">Política de artefatos: exclusão automática desativada pelo contrato. Os dados atuais permanecem nesta revisão até serem salvos.</p>
-    </div></section>
+    </div></section>}
 
     {globalSettingsView && globalSettingsEtag && <GitHubSetupPanel
       settings={globalSettingsView}
@@ -607,7 +610,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
     }}>Aplicar minha edição sobre a revisão consultada</button>}
     {recoveryMessage && <p role="status">{recoveryMessage}</p>}
     {uncertainId && <section className="notice"><b>Gravação ainda não confirmada</b><p>O rascunho permanece somente nesta sessão. Consulte a operação original; o comando não será repetido automaticamente.</p><button type="button" onClick={() => void recoverSave()}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void recoverSave(true)}>Reapresentar a mesma operação</button>}</section>}
-    {projectId && draft.project && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Projeto selecionado</span><h2>Configuração do projeto</h2></div>
+    {projectId && draft.project && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Projeto selecionado</span><h2>{projectName}</h2><p className="muted">As alterações serão usadas nas próximas preparações deste projeto.</p></div>
       <div className="configuration-guidance" role="note" aria-label="Dados necessários e controles opcionais">
         <div><h3>Para preparar uma issue</h3><p>Confirme o repositório GitHub, a branch-base, um perfil de cada papel e o quadro com seu mapeamento de Status. A issue precisa estar vinculada ao quadro para iniciar em qualquer modo, inclusive no início manual.</p></div>
         <div><h3>Controles opcionais</h3><p>Checks, orientações e limite de correções podem permanecer nos valores atuais. O modo de entrega parte do padrão configurado.</p></div>
@@ -639,6 +642,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue }: { projectId
       </div>
       {draft.project.source.kind === 'local' && <div className="notice"><b>Origem local</b><p>Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.</p></div>}
     </section>}
+    {projectId && isConfigurationView(load.view) && <section className="card project-danger-zone"><div><h3>Exclusão do projeto</h3><p>Remova o cadastro e os dados locais após conferir o que será perdido. Os recursos do GitHub serão preservados.</p></div><ProjectDeletionAction key={`${projectId}:${accountId ?? ''}`} projectId={projectId} projectRevision={load.view.configuration.revision}
+      installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
+      pollingIntervalMs={load.view.settings.time_defaults.polling_interval_ms} onProjectNameChange={setProjectName} /></section>}
 
     <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">{saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={deletionRestricted || saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
 

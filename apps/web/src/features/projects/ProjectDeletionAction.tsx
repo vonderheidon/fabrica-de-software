@@ -6,7 +6,8 @@ import { requestJson } from '../../api/http.js';
 import type { DeletionOriginContext } from '../../api/project-deletion.js';
 import { ProjectDeletionDialog } from './ProjectDeletionDialog.js';
 
-export function ProjectDeletionAction({ projectId, projectRevision, installationId, accountId, hasUnsavedChanges, pollingIntervalMs }: {
+export function ProjectDeletionAction({ projectId, projectRevision, installationId, accountId, hasUnsavedChanges, pollingIntervalMs, onProjectNameChange }: {
+  onProjectNameChange?: (name: string) => void;
   projectId: string; projectRevision: number; installationId: string; accountId: string | null; hasUnsavedChanges: boolean; pollingIntervalMs: number;
 }) {
   const [projectName, setProjectName] = useState<string | null>(null);
@@ -24,9 +25,10 @@ export function ProjectDeletionAction({ projectId, projectRevision, installation
       if (!Value.Check(ProjectDetail, data) || data.project.id !== projectId || data.project.revision !== projectRevision) { setError(true); return; }
       rememberProjectDeletion(projectId, data.deletion);
       setProjectName(data.project.name);
+      onProjectNameChange?.(data.project.name);
     }).catch(() => { if (active) setError(true); });
     return () => { active = false; controller.abort(); };
-  }, [projectId, projectRevision, reload]);
+  }, [projectId, projectRevision, reload, onProjectNameChange]);
   const deletion = knownProjectDeletion(projectId);
   if (deletion && !context) return <ProjectDeletionPendingNotice projectId={projectId} projectName={projectName ?? 'Projeto'} revision={projectRevision} deletion={deletion} pollingIntervalMs={pollingIntervalMs} />;
   return <>

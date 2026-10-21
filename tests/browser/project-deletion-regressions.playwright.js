@@ -76,12 +76,12 @@ async (sourcePage, options = {}) => {
   };
   const beginDeletion = async fixture => {
     log(`Request deletion: ${fixture.relative}`);
-    await page.goto(`${origin}/#principal/configuracao?projectId=${fixture.projectId}`);
+    await page.goto(`${origin}/#principal/projetos?projectId=${fixture.projectId}&dialog=project-configuration`);
     if (await page.getByText('Projeto excluído.', { exact: true }).count()) await page.getByRole('button', { name: 'Dispensar aviso', exact: true }).click();
     await page.getByRole('button', { name: 'Excluir definitivamente', exact: true }).click();
-    const confirm = page.getByRole('dialog').getByRole('button', { name: 'Excluir definitivamente', exact: true });
+    const confirm = page.locator('dialog[open]').getByRole('button', { name: 'Excluir definitivamente', exact: true });
     await confirm.click({ trial: true, timeout: 60_000 });
-    await page.getByRole('dialog').getByText(fixture.directory, { exact: true }).waitFor();
+    await page.locator('dialog[open]').getByText(fixture.directory, { exact: true }).waitFor();
     const acceptance = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/v1/projects/${fixture.projectId}/deletion`);
     await confirm.click();
     const response = await acceptance;
@@ -90,6 +90,7 @@ async (sourcePage, options = {}) => {
     fixture.operationId = status.operation_id;
     assert(status.state !== 'succeeded', 'This scenario must close the dialog before completion, not after a synchronous success');
     await page.getByRole('button', { name: 'Fechar acompanhamento', exact: true }).click();
+    await page.getByRole('button', { name: 'Fechar diálogo', exact: true }).click();
     log('Close tracking before confirmed completion');
   };
   const waitForCompletion = async fixture => {
@@ -126,12 +127,12 @@ async (sourcePage, options = {}) => {
     await page.getByRole('table').waitFor();
     assert(await page.getByRole('table').getByText(navigation.name, { exact: true }).count() === 0, 'The deleted registration must leave the catalogue');
     await page.getByRole('link', { name: 'Configuração', exact: true }).click();
-    assert(await page.getByRole('combobox', { name: 'Projeto selecionado', exact: true }).inputValue() === '', 'Configuration must return to global settings');
+    await page.getByRole('heading', { name: 'Configuração global', exact: true }).waitFor();
+    assert(await page.locator('#configuration-project').count() === 0, 'Global settings must have no project selector');
     await cleanAlerts();
     await page.goBack();
     await page.goBack();
     await page.goBack();
-    await page.getByRole('combobox', { name: 'Projeto selecionado', exact: true }).waitFor();
     await page.waitForURL(url => !url.hash.includes('projectId='), { timeout: 10_000 });
     assert(!new URL(page.url()).hash.includes('projectId='), 'Back navigation must not resurrect a deleted selection');
     await cleanAlerts();
@@ -141,11 +142,13 @@ async (sourcePage, options = {}) => {
     const survivor = await create('survivor');
     const reload = await create('reload');
     await beginDeletion(reload);
-    await page.getByRole('combobox', { name: 'Projeto selecionado', exact: true }).selectOption(survivor.projectId);
+    await page.goto(`${origin}/#principal/projetos?projectId=${survivor.projectId}&dialog=project-configuration`);
+    await page.getByRole('button', { name: 'Salvar configuração', exact: true }).waitFor();
     await page.reload();
     log('Reload with another project selected');
     await waitForCompletion(reload);
-    assert(await page.getByRole('combobox', { name: 'Projeto selecionado', exact: true }).inputValue() === survivor.projectId, 'Recovery after reload must preserve another selected project');
+    assert(new URLSearchParams(new URL(page.url()).hash.split('?')[1]).get('projectId') === survivor.projectId, 'Recovery after reload must preserve another selected project');
+    assert(await page.getByRole('button', { name: 'Salvar configuração', exact: true }).isVisible(), 'The other project configuration must remain open');
     assert((await page.request.get(`${origin}/api/v1/projects/${survivor.projectId}`)).ok(), 'The other project must remain registered');
     await screenshot('reload-preserves-selection');
     passed.push('Reload pending deletion, recover its receipt and preserve another selected project');
