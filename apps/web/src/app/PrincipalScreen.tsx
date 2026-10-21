@@ -164,7 +164,7 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
   }, [route.tab, selectedProjectId, route.error]);
   if (route.error) return <section className="card route-error" role="alert"><span className="eyebrow">Navegação</span><h1>Contexto inválido</h1><p>{route.error}</p><a href="#principal/dashboard">Voltar para a Principal</a></section>;
 
-  const preparationProjectId = selectedProjectId || projectPage?.items[0]?.id || '';
+  const preparationProjectId = selectedProjectId || (route.tab === 'dashboard' ? dashboardProjects : projectPage)?.items[0]?.id || '';
   const isFilteredList = route.tab === 'projetos' || route.tab === 'registros';
 
   async function consultPause(): Promise<void> {
@@ -201,7 +201,7 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
   return <>
     {projectNotice && <section className="notice" role="status"><p>{projectNotice}</p><button type="button" onClick={() => setProjectNotice(null)}>Dispensar aviso</button></section>}
     <div className="line heading">
-      <div><div className="eyebrow">Operação / {title}</div><h1>{title}</h1><span className="muted">Controlador local · dados consultados sob demanda</span></div>
+      <div><h1>{title}</h1>{route.tab === 'dashboard' && <span className="muted">Acompanhe a operação e os últimos resultados dos seus projetos.</span>}</div>
       <div className="row">{route.tab === 'projetos' && <><button type="button" className="primary" onClick={(event) => onOpenDialog('create', event.currentTarget)}>Criar projeto</button><button type="button" onClick={(event) => onOpenDialog('register', event.currentTarget)}>Adicionar existente</button><button type="button" disabled={!selectedProjectId || Boolean(knownProjectDeletion(selectedProjectId))} aria-describedby={!selectedProjectId ? 'preparation-unavailable' : undefined} onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: selectedProjectId })}>Preparar issue</button></>}{route.tab === 'dashboard' && <button type="button" className="primary" disabled={!preparationProjectId || Boolean(knownProjectDeletion(preparationProjectId))} aria-describedby={!preparationProjectId ? 'preparation-unavailable' : undefined} onClick={(event) => onOpenDialog('preparation', event.currentTarget, { projectId: preparationProjectId })}>Preparar issue</button>}</div>
     </div>
     {route.tab === 'dashboard' && !preparationProjectId && <p id="preparation-unavailable" className="muted">{state.status === 'loading' ? 'Aguarde a consulta dos projetos para preparar uma issue.' : state.status === 'read-error' ? 'Não foi possível consultar os projetos. Tente novamente abaixo para preparar uma issue.' : <>Cadastre um projeto para preparar uma issue. <a href="#principal/projetos">Abrir projetos</a></>}</p>}

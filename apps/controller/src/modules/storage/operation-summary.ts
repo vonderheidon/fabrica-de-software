@@ -29,7 +29,11 @@ export function readOperationSummary(db: Database.Database, query: OperationSumm
     'SELECT count(*) AS n FROM attempts WHERE account_id IS ? AND result IS NULL AND (? IS NULL OR project_id=?)').get(s.account_id, query.projectId ?? null, query.projectId ?? null)!.n;
   const recentResults = db.prepare<[string | null, string | null, string | null], OperationSummary['recentResults'][number]>(`SELECT id,project_id AS projectId,issue_id AS issueId,
     json_extract(capture_json,'$.issue.number') AS issueNumber,phase,result,suspension,revision,created_at_ms AS createdAtMs,updated_at_ms AS updatedAtMs
-    FROM attempts WHERE account_id IS ? AND result IS NOT NULL AND (? IS NULL OR project_id=?) ORDER BY updated_at_ms DESC,id DESC LIMIT 5`)
+    FROM attempts a WHERE account_id IS ? AND result IS NOT NULL AND (? IS NULL OR project_id=?)
+      AND NOT EXISTS (SELECT 1 FROM attempts newer WHERE newer.account_id IS a.account_id
+        AND newer.project_id=a.project_id AND newer.issue_id=a.issue_id AND newer.result IS NOT NULL
+        AND (newer.updated_at_ms>a.updated_at_ms OR (newer.updated_at_ms=a.updated_at_ms AND newer.id>a.id)))
+    ORDER BY updated_at_ms DESC,id DESC LIMIT 5`)
     .all(s.account_id, query.projectId ?? null, query.projectId ?? null);
   const observed = db.prepare<[string | null, string | null, string | null], OperationSummary['nextCandidates'][number]>(`SELECT c.project_id AS projectId,c.issue_id AS issueId,c.updated_at_ms AS observedAtMs
     FROM queue_cycles c JOIN projects p ON p.id=c.project_id JOIN project_revisions r ON r.id=p.current_revision_id

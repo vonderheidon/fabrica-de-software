@@ -1,0 +1,50 @@
+.nav-icon { width: 20px; height: 20px; flex: 0 0 20px; color: currentColor; }
+.sidebar { background: #202326; }
+.nav-link { min-height: 44px; gap: 13px; }
+.nav-link.active { background: #383c40; box-shadow: inset 3px 0 #e1a66c; }
+.topbar { min-height: 64px; }
+.content { max-width: 1400px; }
+.heading h1 { font-size: 30px; font-weight: 650; }
+.dashboard-panels { gap: 20px; }
+.dashboard-panels .card { padding: 22px 24px; border-color: #e3e6e9; border-radius: 12px; }
+.dashboard-panels h2 { font-size: 17px; font-weight: 650; margin: 5px 0 0; letter-spacing: -.3px; }
+.dashboard-panels .eyebrow { font-size: 10px; letter-spacing: 1.1px; }
+.dashboard-panels .panel-title { margin-bottom: 16px; }
+.dashboard-panels .panel-title > a, .dashboard-context-card .row > a { font-size: 12px; text-decoration: none; }
+.dashboard-panels a:hover { text-decoration: underline; }
+.dashboard-context-card .dashboard-facts { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; gap: 24px; }
+.dashboard-facts > div { padding: 12px 0 0; }
+.dashboard-facts dd { font-size: 14px; font-weight: 600; }
+.dashboard-facts dt { font-size: 12px; }
+.dashboard-grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-areas: 'active blockers' 'results queue' 'projects projects'; gap: 20px; }
+.dashboard-active { grid-area: active; }
+.dashboard-blockers { grid-area: blockers; }
+.dashboard-results { grid-area: results; }
+.dashboard-queue { grid-area: queue; }
+.dashboard-projects { grid-area: projects; }
+.dashboard-panels .empty-inline { margin: 0; padding: 8px 0; line-height: 1.6; }
+.dashboard-result { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; }
+.dashboard-result:last-child { padding-bottom: 0; }
+.dashboard-result small { display: block; margin-top: 5px; font-size: 12px; }
+.result-link { border: 0; background: transparent; padding: 0; border-radius: 2px; font-weight: 650; text-align: left; min-height: 28px; }
+.result-link:enabled:hover { color: var(--accent); background: transparent; text-decoration: underline; }
+.result-meta { flex: 0 0 auto; display: grid; justify-items: end; gap: 7px; }
+.result-meta time { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.result-meta .pill { font-size: 11px; }
+.result-delivered { color: #286348; background: #eaf4ed; }
+.result-failed, .result-rejected { color: #9b3933; background: #fbeeea; }
+.result-interrupted { color: #835f22; background: #faf1df; }
+.result-cancelled { color: #626871; background: #eef0f3; }
+.dashboard-projects .event { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 14px 0; font-size: 13px; }
+.dashboard-projects .event p { font-size: 12px; }
+.project-pending { font-size: 12px; color: #835f22; text-align: right; }
+@media (max-width: 900px) {
+  .dashboard-grid { grid-template-columns: 1fr; grid-template-areas: 'active' 'blockers' 'queue' 'results' 'projects'; }
+}
+@media (max-width: 600px) {
+  .dashboard-context-card .dashboard-facts { grid-template-columns: 1fr; gap: 12px; }
+  .dashboard-panels .card { padding: 18px; }
+  .dashboard-context-card .panel-title { flex-wrap: wrap; }
+  .dashboard-projects .event { align-items: flex-start; }
+  .dashboard-result { gap: 10px; }
+}

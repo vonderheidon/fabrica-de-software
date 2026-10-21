@@ -16,6 +16,8 @@
   background: currentColor;
 }
 
+.pill.event-connection-status::before { content: none; }
+
 .event-connection-status-connecting {
   border-color: #cbd5d0;
   background: #f3f7f4;

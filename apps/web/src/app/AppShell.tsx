@@ -25,7 +25,13 @@ import { trackProjectDeletions } from '../features/projects/project-deletion-obs
 type DialogState = { status: 'ready'; message: string } | { status: 'action-error'; message: string };
 
 const navSymbols: Record<(typeof tabs)[number], string> = {
-  dashboard: '▦', projetos: '▱', perfis: '◇', fila: '≡', tentativas: '↗', registros: '⌕', configuracao: '⚙',
+  dashboard: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
+  projetos: 'M3 7V5h6l2 2h10v13H3z',
+  perfis: 'M8 21v-2a4 4 0 0 1 8 0v2 M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M3 21v-2a4 4 0 0 1 3-4 M21 21v-2a4 4 0 0 0-3-4',
+  fila: 'M8 6h13 M8 12h13 M8 18h13 M3 6h1 M3 12h1 M3 18h1',
+  tentativas: 'M8 4H4v4 M4 8a9 9 0 1 1-1 8 M12 7v5l3 2',
+  registros: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 12h7 M9 16h7',
+  configuracao: 'M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6',
 };
 
 const navLabels: Record<(typeof tabs)[number], string> = {
@@ -392,12 +398,11 @@ export function AppShell() {
       <aside className="sidebar">
         <div className="brand"><span className="mark" aria-hidden="true">nf</span> Nova Fábrica</div>
         <div className="sidebar-navigation"><div className="eyebrow workspace-label">Workspace local</div><nav className="nav" aria-label="Navegação principal">
-          {tabs.map((tab) => <a key={tab} href={buildHash(tab, tab === 'configuracao' ? new URLSearchParams() : route.params)} className={`nav-link${route.tab === tab && !route.error ? ' active' : ''}`} aria-current={route.tab === tab && !route.error ? 'page' : undefined}><span className="symbol" aria-hidden="true">{navSymbols[tab]}</span>{navLabels[tab]}</a>)}
+          {tabs.map((tab) => <a key={tab} href={buildHash(tab, tab === 'configuracao' ? new URLSearchParams() : route.params)} className={`nav-link${route.tab === tab && !route.error ? ' active' : ''}`} aria-current={route.tab === tab && !route.error ? 'page' : undefined}><svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={navSymbols[tab]} /></svg>{navLabels[tab]}</a>)}
         </nav></div>
-        <footer className="sidebar-footer"><span className="avatar" aria-hidden="true">NF</span><div><b>Controlador local</b><br /><small>Sessão técnica do navegador</small></div><a className="quiet-button quiet-link" href="#principal/registros">Registros e diagnóstico</a></footer>
       </aside>
       <main className="main">
-        <header className="topbar"><span>Workspace <span className="crumb-separator">/</span><b>{title}</b></span><div className="row"><EventConnectionStatus state={eventState} /><span className="pill neutral">Acesso local</span><span className="mono muted">Controlador técnico</span></div></header>
+        <header className="topbar"><span>Nova Fábrica <span className="crumb-separator">/</span><b>{title}</b></span><EventConnectionStatus state={eventState} /></header>
         <div className="content"><PrincipalScreen route={route} onOpenDialog={openDialog} onOpenInitialSetup={(trigger) => openDialog('initial-setup', trigger)} onboarding={onboarding} onOpenProfileDialog={(profileId, projectId, trigger) => openDialog('profile', trigger, { ...(projectId ? { projectId } : {}), ...(profileId ? { profileId } : {}) })} onActionError={reportActionError} /></div>
       </main>
     </div>

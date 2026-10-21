@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { AppShell } from './app/AppShell.js';
 import './app/styles/tokens.css';
 import './app/styles/artifact.css';
+import './app/styles/dashboard.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Application root is missing.');
