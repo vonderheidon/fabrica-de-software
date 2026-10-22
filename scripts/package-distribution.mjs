@@ -18,23 +18,24 @@ export function createDistribution() {
   mkdirSync(join(root, 'build'), { recursive: true });
   const target = mkdtempSync(join(root, 'build', 'Fábrica distribuição-'));
   /** @param {string} source @param {string} destination @param {boolean} [excludeNestedModules] */
-  function copy(source, destination, excludeNestedModules = false) {
+  function copy(source, destination, excludeNestedModules = false, runtimeOnly = false) {
     cpSync(source, destination, { recursive: true, errorOnExist: true, force: false, filter: current => {
       if (excludeNestedModules && current !== source && basename(current) === 'node_modules') return false;
+      if (runtimeOnly && (current.endsWith('.d.ts') || current.endsWith('.map'))) return false;
       const info = lstatSync(current);
       if (info.isSymbolicLink() || !(info.isFile() || info.isDirectory())) throw new Error('DISTRIBUTION_RESOURCE_REDIRECTED');
       return true;
     } });
   }
-  copy(join(root, 'dist'), join(target, 'dist'));
-  for (const name of ['package-lock.json', '.env.example', 'SPEC.md', 'SPEC_PROGRESS.md', 'GLOSSARY.md', 'INTEGRACAO-MAESTRI-OMP.md']) copy(join(root, name), join(target, name));
-  copy(join(root, 'docs/operation'), join(target, 'docs/operation'));
-  copy(join(root, 'docs/integration/first-slice'), join(target, 'docs/integration/first-slice'));
-  writeFileSync(join(target, 'README.md'), '# Nova fábrica de software — pacote local\n\nConsulte [o manual de operação](docs/operation/README.md) para pré-requisitos, inicialização pelo terminal-âncora, atualização, recuperação e limites de validação.\n\nNode 24 e executáveis do host são pré-requisitos externos. As dependências nativas empacotadas correspondem à plataforma e ABI em distribution.json. Este pacote contém apenas o comando npm start; checks de desenvolvimento exigem o repositório canônico.\n', { flag: 'wx' });
+  for (const name of ['apps/controller', 'packages/contracts', 'resources', 'web']) {
+    copy(join(root, 'dist', name), join(target, 'dist', name), false, true);
+  }
+  copy(join(root, 'package-lock.json'), join(target, 'package-lock.json'));
   mkdirSync(join(target, 'scripts'));
   copy(join(root, 'scripts/start-host.mjs'), join(target, 'scripts/start-host.mjs'));
   const runtimeManifest = { ...manifest, scripts: { start: manifest.scripts.start },
     imports: { '#contracts': './dist/packages/contracts/src/index.js' } };
+  delete runtimeManifest.devDependencies;
   writeFileSync(join(target, 'package.json'), JSON.stringify(runtimeManifest, null, 2) + '\n', { flag: 'wx' });
   let packages = 0;
   for (const [name, entry] of Object.entries(lock.packages)) {
@@ -48,7 +49,7 @@ export function createDistribution() {
     copy(source, join(target, name), true);
     packages++;
   }
-  writeFileSync(join(target, 'distribution.json'), JSON.stringify({ formatVersion: 1, nodeMajor: 24, databasePath: 'var/factory/factory.sqlite',
+  writeFileSync(join(target, 'distribution.json'), JSON.stringify({ formatVersion: 1, version: manifest.version, createdAt: new Date().toISOString(), nodeMajor: 24, databasePath: 'var/factory/factory.sqlite',
     platform: process.platform, architecture: process.arch, nativeModulesAbi: process.versions.modules, packages }, null, 2) + '\n', { flag: 'wx' });
   return target;
 }
