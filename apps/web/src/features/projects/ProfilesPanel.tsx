@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { CloseIcon } from '../../app/CloseIcon.js';
 import type { SettingsSaved, StoredExecutionProfile } from '#contracts';
@@ -293,12 +294,12 @@ export function ProfilesPanel({ onOpenProfileDialog }: {
         <label className="form-field" htmlFor="profile-search">Buscar por nome ou orientação
           <input id="profile-search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="Digite o texto completo" />
         </label>
-        <label className="form-field" htmlFor="profile-model-filter">Provider e modelo
-          <select id="profile-model-filter" value={modelKey} onChange={(event) => setModelKey(event.currentTarget.value)}>
+        <div className="form-field"><label htmlFor="profile-model-filter">Provider e modelo
+          </label><CustomSelect id="profile-model-filter" value={modelKey} onChange={(event) => setModelKey(event.currentTarget.value)}>
             <option value="">Todos os providers e modelos</option>
             {models.map((model) => <option key={model.key} value={model.key}>{model.provider} · {model.model}</option>)}
-          </select>
-        </label>
+          </CustomSelect>
+        </div>
       </div>
       <div className="profile-type-tabs" role="tablist" aria-label="Filtrar perfis por tipo" aria-orientation="horizontal">
         {roleTabs.map((tab, index) => <button

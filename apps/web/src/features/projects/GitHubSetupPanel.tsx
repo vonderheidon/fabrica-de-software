@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import type { GitHubSetupOptions, SettingsView } from '#contracts';
 import type { NativeSelectionController } from './useNativeSelection.js';
 import { nativeSelectionMessage } from './useNativeSelection.js';
@@ -79,10 +80,10 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
 
       {setup.eligibleAccounts.length > 0 && <details className="github-binding-details"><summary>{settings.settings.account_id ? 'Gerenciar vínculo da conta' : 'Vincular uma conta'}</summary><div className="form-grid github-binding-controls">
         <div className="form-field"><label htmlFor="github-eligible-login">Conta elegível</label>
-          <select id="github-eligible-login" value={setup.selectedLogin} aria-describedby="github-eligible-login-help" onChange={(event) => setup.setSelectedLogin(event.currentTarget.value)} disabled={!setup.observationCurrent || operationBusy || bindingPending}>
+          <CustomSelect id="github-eligible-login" value={setup.selectedLogin} aria-describedby="github-eligible-login-help" onChange={(event) => setup.setSelectedLogin(event.currentTarget.value)} disabled={!setup.observationCurrent || operationBusy || bindingPending}>
             <option value="">Selecione pelo login</option>
             {setup.eligibleAccounts.map((account) => <option key={account.id} value={account.login}>@{account.login}</option>)}
-          </select>
+          </CustomSelect>
           <FieldHelp id="github-eligible-login-help" label="Conta elegível" />
         </div>
         <div className="form-field github-binding-action">

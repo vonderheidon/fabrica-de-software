@@ -1,6 +1,10 @@
 // Run with Playwright MCP browser_run_code_unsafe({ filename: 'tests/browser/onboarding-regressions.playwright.js' }).
 // Requires the built application at the current page origin; no configuration is saved.
 async (page) => {
+  const selectCustom = async (control, value) => {
+    await control.click();
+    await control.locator('..').locator(`.custom-select-options > button[data-value=${JSON.stringify(value)}]`).click();
+  };
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   const origin = new URL(page.url()).origin;
   const session = await page.request.post(`${origin}/api/v1/session`, { headers: { 'X-Factory-Client': 'web', origin }, data: {} });
@@ -89,20 +93,20 @@ async (page) => {
     await name.press('End');
     await name.pressSequentially(' principal');
     assert(await name.inputValue() === 'Implementador principal', 'Repeated name changes must keep the form mounted and preserve text');
-    await dialog.locator('#profile-provider').selectOption('test-a');
-    await dialog.locator('#profile-model').selectOption('model-a');
-    await dialog.locator('#profile-effort').selectOption('high');
+    await selectCustom(dialog.locator('#profile-provider'), 'test-a');
+    await selectCustom(dialog.locator('#profile-model'), 'model-a');
+    await selectCustom(dialog.locator('#profile-effort'), 'high');
     await dialog.locator('#profile-guidance').fill('Mudanças pequenas');
     await dialog.locator('#profile-guidance').press('End');
     await dialog.locator('#profile-guidance').pressSequentially(' e verificáveis');
     assert(await dialog.locator('#profile-guidance').inputValue() === 'Mudanças pequenas e verificáveis', 'Guidance must survive repeated input events');
-    assert(await dialog.locator('#profile-effort').inputValue() === 'high', 'Effort must survive subsequent input events');
+    assert(await dialog.locator('#profile-effort').getAttribute('data-value') === 'high', 'Effort must survive subsequent input events');
     passed.push('Confirmed folder allows advancing and name, model, effort and guidance survive repeated edits');
 
-    await dialog.locator('#profile-provider').selectOption('test-b');
-    assert(await dialog.locator('#profile-model').inputValue() === '', 'Changing provider must clear an incompatible model');
-    await dialog.locator('#profile-model').selectOption('model-b');
-    assert(await dialog.locator('#profile-effort').inputValue() === '', 'Models without effort choices must retain the empty effort selection');
+    await selectCustom(dialog.locator('#profile-provider'), 'test-b');
+    assert(await dialog.locator('#profile-model').getAttribute('data-value') === '', 'Changing provider must clear an incompatible model');
+    await selectCustom(dialog.locator('#profile-model'), 'model-b');
+    assert(await dialog.locator('#profile-effort').getAttribute('data-value') === '', 'Models without effort choices must retain the empty effort selection');
     assert(await name.inputValue() === 'Implementador principal', 'Changing provider must preserve the name');
     assert(await dialog.locator('#profile-guidance').inputValue() === 'Mudanças pequenas e verificáveis', 'Changing provider must preserve guidance');
     assert(await dialog.isVisible(), 'The wizard must remain visible after all edits');

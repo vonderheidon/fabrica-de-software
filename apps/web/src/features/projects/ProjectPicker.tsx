@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import { useEffect, useState } from 'react';
 import type { ProjectDetail } from '#contracts';
 import { requestJson } from '../../api/http.js';
@@ -20,15 +21,22 @@ export function ProjectPicker({ id, value, onChange, emptyLabel = 'Todos os proj
     }).catch(() => { if (!controller.signal.aborted) { setSelected(null); setSelectionError(true); } });
     return () => controller.abort();
   }, [value, listed]);
+  const selectedName = projects.page?.items.find(item => item.id === value)?.name ?? (selected?.id === value ? selected.name : selectionError ? 'Projeto indisponível' : 'Consultando projeto…');
   return <div className="form-field">
-    <label htmlFor={`${id}-search`}>Buscar projeto por nome</label><input id={`${id}-search`} value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
-    <label htmlFor={id}>Projeto</label><select id={id} value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+    <label htmlFor={id}>Projeto</label>
+    <CustomSelect id={id} value={value} searchValue={search} onSearchChange={setSearch} searchLabel="Buscar projeto" loading={projects.loading} onChange={event => {
+      const projectId = event.currentTarget.value;
+      const project = projects.page?.items.find(item => item.id === projectId);
+      if (project) setSelected({ id: project.id, name: project.name });
+      onChange(projectId);
+      setSearch('');
+    }} footer={<>
+      {projects.error && <div role="alert"><p>{projects.error.message}</p><button type="button" onClick={projects.retry}>Tentar novamente</button></div>}
+      {projects.page?.has_more && <button type="button" disabled={projects.loading} onClick={() => void projects.loadMore()}>Carregar mais projetos</button>}
+    </>}>
       <option value="">{emptyLabel}</option>
-      {value && !listed && <option value={value}>{selected?.id === value ? selected.name : selectionError ? 'Nome do projeto indisponível nesta consulta' : 'Consultando projeto selecionado…'}</option>}
-      {projects.page?.items.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}
-    </select>
-    {projects.loading && <small role="status">Consultando projetos…</small>}
-    {projects.error && <div role="alert"><p>{projects.error.message}</p><button type="button" onClick={projects.retry}>Consultar projetos novamente</button></div>}
-    {projects.page?.has_more && <button type="button" disabled={projects.loading} onClick={() => void projects.loadMore()}>Carregar mais projetos</button>}
+      {value && !listed && <option value={value}>{selectedName}</option>}
+      {projects.page?.items.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
+    </CustomSelect>
   </div>;
 }

@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptSelection } from './execution-requests.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -195,20 +196,20 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
       <div className="attempt-detail-heading"><div className="eyebrow">Detalhe da tentativa</div><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Registros e diagnóstico</a></div></div>
-      <div className="attempt-version-controls"><label htmlFor="attempt-round">Rodada
-        <select id="attempt-round" value={selectedRoundValue} onChange={(event) => {
+      <div className="attempt-version-controls"><div className="form-field"><label htmlFor="attempt-round">Rodada
+        </label><CustomSelect id="attempt-round" value={selectedRoundValue} onChange={(event) => {
           const value = event.currentTarget.value;
           const selected = roundItems.map(asRecord).find((item) => String(item.round) === value);
           onSelectionChange(value, typeof selected?.delivery_id === 'string' ? selected.delivery_id : null);
         }}>
           {Array.from({ length: attempt.round }, (_, index) => String(index + 1)).map((round) => <option key={round} value={round}>Rodada {round}</option>)}
-        </select>
-      </label><label htmlFor="attempt-version">Versão
-        <select id="attempt-version" value={effectiveDeliveryId ?? ''} onChange={(event) => onSelectionChange(selectedRoundValue, event.currentTarget.value || null)}>
+        </CustomSelect>
+      </div><div className="form-field"><label htmlFor="attempt-version">Versão
+        </label><CustomSelect id="attempt-version" value={effectiveDeliveryId ?? ''} onChange={(event) => onSelectionChange(selectedRoundValue, event.currentTarget.value || null)}>
           {!effectiveDeliveryId && <option value="">Versão planejada ou não capturada</option>}
           {roundItems.map(asRecord).filter((item) => String(item.round) === selectedRoundValue && typeof item.delivery_id === 'string').map((item) => <option key={String(item.delivery_id)} value={String(item.delivery_id)}>Versão {item.content_identity ? 'capturada' : 'pendente'}</option>)}
-        </select>
-      </label></div>
+        </CustomSelect>
+      </div></div>
 
       <section className="attempt-axis-card card"><h3>Estado operacional</h3><dl className="preparation-facts"><div><dt>Etapa</dt><dd><OperatorState value={attempt.phase} /></dd></div><div><dt>Resultado final</dt><dd>{attempt.result ? <OperatorState value={attempt.result} /> : 'Ainda não concluído'}</dd></div><div><dt>Suspensão</dt><dd>{attempt.suspension ? operatorCodeLabel(attempt.suspension) : 'Nenhuma'}</dd></div><div><dt>Acompanhamento</dt><dd><OperatorState value={attempt.tracking} /></dd></div><div><dt>Limpeza</dt><dd>{cleanupLabel(attempt.cleanup)}</dd></div><div><dt>Publicação</dt><dd><OperatorState value={attempt.publication.local_state} /></dd></div><div><dt>Modo capturado</dt><dd>{deliveryModeLabel(attempt.publication.mode)}</dd></div></dl>
         {attempt.diagnostic && <OperatorDiagnosticCard code={attempt.diagnostic} state="blocked" cause={attempt.diagnostic} recovery="Atualize a tentativa e consulte Registros e diagnóstico antes de uma nova ação." />}

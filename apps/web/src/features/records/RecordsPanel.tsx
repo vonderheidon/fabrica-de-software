@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import { useMemo, useState } from 'react';
 import type { HttpDiagnosticCheck as DiagnosticCheck, HttpDiagnosticContext as DiagnosticContext } from '#contracts';
 import { useDiagnostics } from './useDiagnostics.js';
@@ -58,7 +59,7 @@ export function RecordsPanel({ filters, onFilterChange }: Props) {
     <section className="card diagnostics-panel" aria-labelledby="diagnostics-heading">
       <div className="line panel-title"><div><span className="eyebrow">Verificação contextual</span><h2 id="diagnostics-heading">Diagnóstico acionável</h2></div><button type="button" onClick={diagnostic.refresh} disabled={diagnostic.loading || diagnostic.refreshing || !context}>Atualizar fatos</button></div>
       <p className="muted">Consultas atuais são somente leitura. Verificar inicia apenas as checagens locais e não repete operações de criação, execução ou publicação.</p>
-      <div className="form-grid"><label htmlFor="diagnostic-scope">Contexto<select id="diagnostic-scope" value={scope} onChange={(event) => setScopeValue(event.currentTarget.value as Scope)}><option value="host">Host</option><option value="project">Projeto</option><option value="creation">Criação</option><option value="attempt">Tentativa</option></select></label>{scope !== 'host' && <DiagnosticContextPicker key={scope} scope={scope} value={contextId} onChange={setContextId} />}</div>
+      <div className="form-grid"><div className="form-field"><label htmlFor="diagnostic-scope">Contexto</label><CustomSelect id="diagnostic-scope" value={scope} onChange={(event) => setScopeValue(event.currentTarget.value as Scope)}><option value="host">Host</option><option value="project">Projeto</option><option value="creation">Criação</option><option value="attempt">Tentativa</option></CustomSelect></div>{scope !== 'host' && <DiagnosticContextPicker key={scope} scope={scope} value={contextId} onChange={setContextId} />}</div>
       {!context && <p className="notice" role="status">Selecione o projeto, a criação pelo nome ou a tentativa pela issue para carregar seus fatos.</p>}
       {diagnostic.loading && !diagnostic.view && <p className="muted" role="status">Consultando diagnóstico…</p>}
       {(diagnostic.refreshing || diagnostic.stale) && <p className="stale-note" role="status">Atualizando os fatos; o relatório exibido pertence à consulta anterior.</p>}

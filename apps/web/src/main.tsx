@@ -7,6 +7,7 @@ import './app/styles/dashboard.css';
 import './app/styles/projects.css';
 import './app/styles/settings.css';
 import './app/styles/queue.css';
+import './app/styles/selects.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Application root is missing.');

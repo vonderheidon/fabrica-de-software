@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import { useEffect, useState } from 'react';
 import type { HttpAttemptPage, HttpCreationView, HttpEventPage } from '#contracts';
 import { requestJson } from '../../api/http.js';
@@ -41,7 +42,7 @@ export function DiagnosticContextPicker({ scope, value, onChange }: {
     return () => controller.abort();
   }, [scope, cursor, reload]);
   if (scope === 'project') return <ProjectPicker id="diagnostic-project" value={value} onChange={onChange} emptyLabel="Selecione o projeto" />;
-  return <div className="form-field"><label htmlFor="diagnostic-context-choice">{scope === 'creation' ? 'Criação' : 'Tentativa'}<select id="diagnostic-context-choice" value={value} onChange={(event) => onChange(event.currentTarget.value)}><option value="">Selecione pelo nome ou pela issue</option>{value && !choices.some((item) => item.id === value) && <option value={value}>Contexto selecionado na navegação</option>}{choices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label}</option>)}</select></label>
+  return <div className="form-field"><div className="form-field"><label htmlFor="diagnostic-context-choice">{scope === 'creation' ? 'Criação' : 'Tentativa'}</label><CustomSelect id="diagnostic-context-choice" value={value} onChange={(event) => onChange(event.currentTarget.value)}><option value="">Selecione pelo nome ou pela issue</option>{value && !choices.some((item) => item.id === value) && <option value={value}>Contexto selecionado na navegação</option>}{choices.map((choice) => <option value={choice.id} key={choice.id}>{choice.label}</option>)}</CustomSelect></div>
     {loading && <p role="status">Consultando contextos…</p>}{error && <div role="alert"><p>{error}</p><button type="button" onClick={() => setReload((current) => current + 1)}>Consultar novamente</button></div>}
     {!loading && !error && choices.length === 0 && <p>Nenhum contexto encontrado nesta página de registros.</p>}
     {nextCursor && <button type="button" disabled={loading} onClick={() => setCursor(nextCursor)}>Carregar mais contextos</button>}

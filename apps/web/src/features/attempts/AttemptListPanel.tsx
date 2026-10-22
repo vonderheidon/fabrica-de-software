@@ -1,9 +1,11 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import { useEffect, useState } from 'react';
 import type { HttpAttemptPage as AttemptPage } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptProjectFilter } from './execution-requests.js';
 import { ProjectPicker } from '../projects/ProjectPicker.js';
+import { operatorCodeLabel, operatorState } from '../../app/operator-language.js';
 
 type Props = {
   projectId: string;
@@ -83,13 +85,14 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
 
   const page = state.page;
   return <section className="attempt-list-panel" aria-label="Histórico de tentativas">
+    <div className="attempt-intro"><span className="eyebrow">Acompanhamento</span><h2>Histórico de execução</h2><p className="muted">Consulte o resultado de cada tentativa ou prepare uma nova execução da issue.</p></div>
     <div className="attempt-filters card">
       <ProjectPicker id="attempt-project-filter" value={projectId} onChange={(value) => onFilterChange(value, result)} />
-      <label htmlFor="attempt-result-filter">Resultado
-        <select id="attempt-result-filter" value={result} onChange={(event) => onFilterChange(projectId, event.currentTarget.value)}>
+      <div className="form-field"><label htmlFor="attempt-result-filter">Resultado
+        </label><CustomSelect id="attempt-result-filter" value={result} onChange={(event) => onFilterChange(projectId, event.currentTarget.value)}>
           {resultOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-      </label>
+        </CustomSelect>
+      </div>
       <div className="attempt-filter-actions"><button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Atualizar</button></div>
     </div>
 
@@ -97,15 +100,15 @@ export function AttemptListPanel({ projectId, result, onFilterChange, onPrepareR
     {!page && state.loading && <section className="card read-state" role="status"><p>Consultando histórico de tentativas…</p></section>}
     {page && page.items.length === 0 && <section className="card empty" role="status"><h2>{projectId || result ? 'Nenhuma tentativa corresponde aos filtros' : 'Nenhuma tentativa registrada'}</h2><p>{projectId || result ? 'Ajuste os filtros para consultar outras tentativas.' : 'Prepare uma issue a partir de um projeto configurado.'}</p></section>}
     {page && page.items.length > 0 && <section className="card attempt-history-card">
-      {state.loading && <p className="queue-page-status" role="status">Atualizando o histórico; a página atual permanece disponível.</p>}
-      <div className="table-wrap"><table className="attempt-history-table"><thead><tr><th>Issue</th><th>Etapa / resultado</th><th>Atualizada</th><th>Ações</th></tr></thead><tbody>{page.items.map((attempt) => <tr key={attempt.id}>
-        <td><b>#{attempt.issue_number}</b></td>
-        <td>{attempt.phase}<br /><small>{attempt.result ?? 'Em andamento'}{attempt.suspension ? ` · ${attempt.suspension}` : ''}</small></td>
-        <td><time dateTime={new Date(attempt.updated_at_ms).toISOString()}>{new Date(attempt.updated_at_ms).toLocaleString('pt-BR')}</time></td>
-        <td><div className="row"><button type="button" onClick={() => onDetail(attempt.id, attempt.project_id)}>Consultar</button>{attempt.result && <button type="button" onClick={() => onPrepareRetry(attempt.id, attempt.project_id)}>Nova tentativa</button>}</div></td>
+      <div className="line attempt-history-heading"><h2>Tentativas registradas</h2><span className="muted">{page.items.length} nesta página</span></div>
+      {state.loading && <p className="queue-page-status" role="status">Atualizando histórico…</p>}
+      <div className="table-wrap"><table className="attempt-history-table"><thead><tr><th scope="col">Issue</th><th scope="col">Situação</th><th scope="col">Última atualização</th><th scope="col">Ações</th></tr></thead><tbody>{page.items.map((attempt) => <tr key={attempt.id}>
+        <td><span className="attempt-issue-title"><b>Issue #{attempt.issue_number}</b>{attempt.issue_title ? ` - ${attempt.issue_title}` : ''}</span></td>
+        <td data-label="Situação"><span className={`pill result-${attempt.result ?? 'running'}`}>{operatorState(attempt.result ?? 'running').label}</span><small className="attempt-phase">{operatorState(attempt.phase).label}{attempt.suspension ? ` · ${operatorCodeLabel(attempt.suspension)}` : ''}</small></td>
+        <td data-label="Última atualização"><time dateTime={new Date(attempt.updated_at_ms).toISOString()}>{new Date(attempt.updated_at_ms).toLocaleDateString('pt-BR')}<small className="attempt-time">{new Date(attempt.updated_at_ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</small></time></td>
+        <td data-label="Ações"><div className="attempt-row-actions"><button type="button" onClick={() => onDetail(attempt.id, attempt.project_id)}>Consultar</button>{attempt.result && <button type="button" className="attempt-retry" onClick={() => onPrepareRetry(attempt.id, attempt.project_id)}>Nova tentativa</button>}</div></td>
       </tr>)}</tbody></table></div>
-      <div className="attempt-pagination" aria-label="Paginação do histórico"><button type="button" onClick={previousPage} disabled={visiblePageIndex === 0 || state.loading}>Anterior</button><span>Página {visiblePageIndex + 1} · {page.has_more ? 'há mais tentativas' : 'fim do histórico observado'}</span><button type="button" onClick={nextPage} disabled={!page.has_more || !page.next_cursor || state.loading || state.error !== null}>Próxima</button></div>
-      {state.loading && <p className="queue-page-status" role="status">Consultando página…</p>}
+      <div className="attempt-pagination" aria-label="Paginação do histórico"><button type="button" onClick={previousPage} disabled={visiblePageIndex === 0 || state.loading}>Anterior</button><span>Página {visiblePageIndex + 1}{!page.has_more && ' · Fim do histórico'}</span><button type="button" onClick={nextPage} disabled={!page.has_more || !page.next_cursor || state.loading || state.error !== null}>Próxima</button></div>
     </section>}
   </section>;
 }

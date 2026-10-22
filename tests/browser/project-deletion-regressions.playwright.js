@@ -4,6 +4,10 @@
 // projects root and local scaffold/deletion capabilities; no GitHub repository.
 // Failures preserve screenshots and list any fixture requiring operator recovery.
 async (sourcePage, options = {}) => {
+  const selectCustom = async (control, value) => {
+    await control.click();
+    await control.locator('..').locator(`.custom-select-options > button[data-value=${JSON.stringify(value)}]`).click();
+  };
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   const origin = new URL(sourcePage.url()).origin;
   assert(new URL(origin).hostname === '127.0.0.1', 'Open the local application at 127.0.0.1 before running');
@@ -53,7 +57,7 @@ async (sourcePage, options = {}) => {
     await page.getByRole('button', { name: 'Criar projeto', exact: true }).click();
     await page.getByRole('textbox', { name: 'Nome do projeto', exact: true }).fill(fixture.name);
     await page.getByRole('textbox', { name: /Diretório relativo/ }).fill(fixture.relative);
-    await page.getByRole('combobox', { name: 'Modalidade de criação', exact: true }).selectOption('local');
+    await selectCustom(page.locator('#creation-mode'), 'local');
     const planResponse = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/v1/scaffold/plans');
     await page.getByRole('button', { name: 'Revisar plano', exact: true }).click();
     const response = await planResponse;

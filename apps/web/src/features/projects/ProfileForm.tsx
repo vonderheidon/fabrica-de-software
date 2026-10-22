@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { ConfigurationSaved, ExecutionCatalog, ExecutionProfile, ProfileType, SettingsSaved, StoredExecutionProfile } from '#contracts';
 import { finishConfigurationSave, retainConfigurationSave, consultConfigurationSave, hasOriginalConfigurationSave, revalidateConfigurationSave, resendConfigurationSave } from '../../api/configuration-save.js';
@@ -369,38 +370,38 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
         <small id="profile-name-help" className="field-guidance">Nome usado para escolher este perfil nos projetos.</small>
       </div>
       <div className="form-field field-full"><label htmlFor="profile-type">Tipo</label>
-        <select id="profile-type" value={draft.profile_type} disabled={Boolean(profileId) || lockInitialProfileType} aria-describedby="profile-type-help" onChange={(event) => { const value = event.currentTarget.value as ProfileType; updateDraft((current) => ({ ...current, profile_type: value })); }}>
+        <CustomSelect id="profile-type" value={draft.profile_type} disabled={Boolean(profileId) || lockInitialProfileType} aria-describedby="profile-type-help" onChange={(event) => { const value = event.currentTarget.value as ProfileType; updateDraft((current) => ({ ...current, profile_type: value })); }}>
           <option value="implementer">Implementador</option><option value="reviewer">Revisor</option>
-        </select>
+        </CustomSelect>
         <small id="profile-type-help" className="field-guidance">Escolha o papel do agente. O tipo permanece fixo após a criação.</small>
       </div>
       <div className="form-field field-full"><label htmlFor="profile-executor">Executor</label>
-        <select id="profile-executor" value={draft.executor} disabled aria-describedby="profile-executor-help"><option value="maestri-omp">Maestri / OMP</option></select>
+        <CustomSelect id="profile-executor" value={draft.executor} disabled aria-describedby="profile-executor-help"><option value="maestri-omp">Maestri / OMP</option></CustomSelect>
         <small id="profile-executor-help" className="field-guidance">As execuções deste perfil usam Maestri / OMP.</small>
       </div>
       <h3 className="dialog-section-title">Modelo e execução</h3>
       <div className="form-field"><label htmlFor="profile-provider">Provedor</label>
-        <select id="profile-provider" value={draft.provider} required disabled={!canEditSelections} aria-describedby="profile-provider-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => selectProfileProvider(current, loadedCatalog, value)); }}>
+        <CustomSelect id="profile-provider" value={draft.provider} required disabled={!canEditSelections} aria-describedby="profile-provider-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => selectProfileProvider(current, loadedCatalog, value)); }}>
           <option value="">Selecione…</option>
           {draft.provider && !providerExists && <option value={draft.provider}>{draft.provider} · fora do catálogo atual</option>}
           {providers.map(([provider, name]) => <option value={provider} key={provider}>{name}</option>)}
-        </select>
+        </CustomSelect>
         <small id="profile-provider-help" className="field-guidance">Selecione o provedor para consultar seus modelos disponíveis.</small>
       </div>
       <div className="form-field"><label htmlFor="profile-model">Modelo</label>
-        <select id="profile-model" value={draft.model} required disabled={!canEditSelections || !draft.provider} aria-describedby="profile-model-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => selectProfileModel(current, loadedCatalog, value)); }}>
+        <CustomSelect id="profile-model" value={draft.model} required disabled={!canEditSelections || !draft.provider} aria-describedby="profile-model-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => selectProfileModel(current, loadedCatalog, value)); }}>
           <option value="">Selecione…</option>
           {draft.model && !modelExists && <option value={draft.model}>{draft.model} · fora do catálogo atual</option>}
           {models.map((model) => <option value={model.model} key={`${model.provider}:${model.model}`}>{model.model_name}</option>)}
-        </select>
+        </CustomSelect>
         <small id="profile-model-help" className="field-guidance">Modelo do provedor selecionado. A troca pode redefinir o esforço.</small>
       </div>
       <div className="form-field"><label htmlFor="profile-effort">Esforço</label>
-        <select id="profile-effort" value={draft.effort ?? ''} disabled={!canEditSelections || !currentModel} aria-describedby="profile-effort-help" onChange={(event) => { const value = event.currentTarget.value || null; updateDraft((current) => ({ ...current, effort: value })); }}>
+        <CustomSelect id="profile-effort" value={draft.effort ?? ''} disabled={!canEditSelections || !currentModel} aria-describedby="profile-effort-help" onChange={(event) => { const value = event.currentTarget.value || null; updateDraft((current) => ({ ...current, effort: value })); }}>
           <option value="" disabled={Boolean(currentModel && currentModel.efforts.length > 0)}>Não se aplica</option>
           {draft.effort && !effortExists && <option value={draft.effort}>{draft.effort} · fora do catálogo atual</option>}
           {effortOptions.map((effort) => <option value={effort} key={effort}>{effort}</option>)}
-        </select>
+        </CustomSelect>
         <small id="profile-effort-help" className="field-guidance">Nível de raciocínio oferecido pelo modelo. Use “Não se aplica” quando não houver opções.</small>
       </div>
       <h3 className="dialog-section-title">Orientações</h3>

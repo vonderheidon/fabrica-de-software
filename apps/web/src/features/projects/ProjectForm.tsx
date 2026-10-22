@@ -1,3 +1,4 @@
+import { CustomSelect } from '../../app/CustomSelect.js';
 import { knownProjectDeletion, useProjectDeletionRestriction } from './ProjectDeletionPendingNotice.js';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type {
@@ -166,7 +167,7 @@ function SelectField({ label, value, onChange, options, disabled = false, help, 
   const id = `field-${label.toLocaleLowerCase('en').replace(/[^a-z0-9]+/g, '-')}`;
   const helpId = `${id}-help`;
   const description = compactHelp ? help : [help, fieldGuidanceFor(label)].filter(Boolean).join(' ');
-  return <div className="form-field"><label htmlFor={id}>{label}</label><select id={id} value={value} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={[error ? `${id}-error` : null, helpId].filter(Boolean).join(' ')} onChange={(event) => onChange(event.currentTarget.value)}><option value="">Selecione…</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>{error && <span id={`${id}-error`} className="error">{error}</span>}<small id={helpId} className="field-guidance">{description}</small></div>;
+  return <div className="form-field"><label htmlFor={id}>{label}</label><CustomSelect id={id} value={value} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={[error ? `${id}-error` : null, helpId].filter(Boolean).join(' ')} onChange={(event) => onChange(event.currentTarget.value)}><option value="">Selecione…</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</CustomSelect>{error && <span id={`${id}-error`} className="error">{error}</span>}<small id={helpId} className="field-guidance">{description}</small></div>;
 }
 
 function NumberField({ label, value, onChange, min, max, step = 1, unit }: {

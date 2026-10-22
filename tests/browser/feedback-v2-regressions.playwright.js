@@ -1,6 +1,16 @@
 // Execute this function with Playwright against the built application or Vite.
 // Every API call is intercepted. No user configuration or external resource is changed.
 async (page) => {
+  const selectCustom = async (control, value) => {
+    await control.click();
+    await control.locator('..').locator(`.custom-select-options > button[data-value=${JSON.stringify(value)}]`).click();
+  };
+  const customOptionText = async (control, value) => {
+    await control.click();
+    const text = await control.locator('..').locator(`.custom-select-options > button[data-value=${JSON.stringify(value)}]`).textContent();
+    await control.click();
+    return text;
+  };
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   const origin = new URL(page.url()).origin;
   const id = number => `abcdef12-1234-4123-8123-${String(number).padStart(12, '0')}`;
@@ -87,11 +97,11 @@ async (page) => {
   const screenshot = name => page.screenshot({ path: `.playwright-mcp/feedback-v2-${name}.png`, fullPage: true });
   try {
     await navigate(`#principal/configuracao?projectId=${projectId}`);
-    await page.locator('#field-github-project option[value="BOARD_1"]').waitFor({ state: 'attached' });
+    await customOptionText(page.locator('#field-github-project'), 'BOARD_1');
     assert(optionsReads > 0, 'V2-01: initial empty mapping must request options');
     await page.getByLabel('Branch-base', { exact: true }).fill('release/edicao-preservada');
-    await page.getByLabel('GitHub Project', { exact: true }).selectOption('BOARD_1');
-    await page.locator('#field-campo-status option[value="STATUS_fixture"]').waitFor({ state: 'attached' });
+    await selectCustom(page.getByLabel('GitHub Project', { exact: true }), 'BOARD_1');
+    await customOptionText(page.locator('#field-campo-status'), 'STATUS_fixture');
     assert(await page.getByLabel('Branch-base', { exact: true }).inputValue() === 'release/edicao-preservada', 'V2-01: board fetch must preserve the draft');
     assert((await page.locator('.configuration-guidance').last().innerText()).includes('qualquer modo'), 'V2-09: guidance must require mapping for all modes');
     await screenshot('configuration'); passed.push('V2-01, V2-09: quadro vazio carrega, dependências atualizam e edição fica preservada');
@@ -121,8 +131,8 @@ async (page) => {
       currentPlan = undefined; creationState = 'completed'; unknownEffect = false;
       await navigate('#principal/projetos?dialog=create');
       await dialog.locator('#creation-name').fill('teste667');
-      await dialog.locator('#creation-mode').selectOption(mode);
-      if (mode !== 'local') assert(await dialog.locator('#creation-owner-account option:checked').textContent() === 'fixture', 'V2-06: owner must be selected by login');
+      await selectCustom(dialog.locator('#creation-mode'), mode);
+      if (mode !== 'local') assert(await dialog.locator('#creation-owner-account').textContent() === 'fixture', 'V2-06: owner must be selected by login');
       await dialog.getByRole('button', { name: 'Revisar plano', exact: true }).click();
       await dialog.locator('#creation-plan-title').waitFor();
       assert(!(await dialog.innerText()).includes(hash), 'V2-06: plan hashes must be collapsed');
@@ -165,23 +175,23 @@ async (page) => {
     await screenshot('failed'); passed.push('Criação parcial, efeito incerto, conferência e falha de leitura após recarga sem repetir criação');
 
     await navigate('#principal/tentativas');
-    await page.locator(`#attempt-project-filter option[value="${projectId}"]`).waitFor({ state: 'attached' });
-    await page.locator('#attempt-project-filter').selectOption(projectId);
+    await customOptionText(page.locator('#attempt-project-filter'), projectId);
+    await selectCustom(page.locator('#attempt-project-filter'), projectId);
     assert(page.url().includes(`projectId=${projectId}`), 'V2-12: history project selection must update URL context');
     await screenshot('attempts');
     await navigate(`#principal/registros?projectId=${projectId}`);
     await page.getByText('Criação de projeto concluída', { exact: true }).waitFor();
     assert(!(await page.locator('.records-panel').innerText()).includes('Atualização técnica registrada'), 'V2-10: persisted events need readable labels');
-    await page.locator('#diagnostic-scope').selectOption('project');
-    await page.locator('#diagnostic-project').selectOption(projectId);
+    await selectCustom(page.locator('#diagnostic-scope'), 'project');
+    await selectCustom(page.locator('#diagnostic-project'), projectId);
     await page.locator('.diagnostics-panel').getByRole('link', { name: 'Configurar este projeto', exact: true }).first().waitFor();
     await screenshot('records');
-    await page.locator('#diagnostic-scope').selectOption('creation');
-    await page.locator(`#diagnostic-context-choice option[value="${creationId}"]`).waitFor({ state: 'attached' });
-    assert((await page.locator(`#diagnostic-context-choice option[value="${creationId}"]`).textContent()).includes('teste667'), 'V2-12: creations must be selectable by project name');
-    await page.locator('#diagnostic-scope').selectOption('attempt');
-    await page.locator(`#diagnostic-context-choice option[value="${attemptId}"]`).waitFor({ state: 'attached' });
-    assert((await page.locator(`#diagnostic-context-choice option[value="${attemptId}"]`).textContent()).includes('Issue #7'), 'V2-12: attempts must be selectable by issue');
+    await selectCustom(page.locator('#diagnostic-scope'), 'creation');
+    await customOptionText(page.locator('#diagnostic-context-choice'), creationId);
+    assert((await customOptionText(page.locator('#diagnostic-context-choice'), creationId)).includes('teste667'), 'V2-12: creations must be selectable by project name');
+    await selectCustom(page.locator('#diagnostic-scope'), 'attempt');
+    await customOptionText(page.locator('#diagnostic-context-choice'), attemptId);
+    assert((await customOptionText(page.locator('#diagnostic-context-choice'), attemptId)).includes('Issue #7'), 'V2-12: attempts must be selectable by issue');
     passed.push('V2-10, V2-12: eventos conhecidos, diagnóstico acionável e seletores por nome/issue');
 
     await navigate('#principal/fila');
@@ -192,8 +202,8 @@ async (page) => {
     issueSelectionScenario = true;
     await navigate(`#principal/dashboard?projectId=${projectId}`);
     await page.getByRole('button', { name: 'Preparar issue', exact: true }).click();
-    await dialog.locator('#preparation-issue option[value="ISSUE_1"]').waitFor({ state: 'attached' });
-    await dialog.locator('#preparation-issue').selectOption('ISSUE_1');
+    await customOptionText(dialog.locator('#preparation-issue'), 'ISSUE_1');
+    await selectCustom(dialog.locator('#preparation-issue'), 'ISSUE_1');
     await dialog.getByRole('heading', { name: 'Escolhas efetivas', exact: true }).waitFor();
     assert(preparedIssues.at(-1) === 'ISSUE_1', 'Generic preparation must still allow manual selection');
     await dialog.getByRole('button', { name: 'Revisar e autorizar resumo atual', exact: true }).click();
@@ -210,7 +220,7 @@ async (page) => {
       const candidate = page.locator('.dashboard-candidates li').filter({ hasText: `Trabalho ${number}` });
       await candidate.getByRole('button', { name: 'Preparar', exact: true }).click();
       await dialog.getByRole('heading', { name: 'Escolhas efetivas', exact: true }).waitFor();
-      assert(await dialog.locator('#preparation-issue').inputValue() === `ISSUE_${number}`, 'Clicked issue must be selected without a second choice');
+      assert(await dialog.locator('#preparation-issue').getAttribute('data-value') === `ISSUE_${number}`, 'Clicked issue must be selected without a second choice');
       assert(preparedIssues.at(-1) === `ISSUE_${number}`, 'Preparation command must use the clicked issue instead of a cached issue from the same project');
       assert(new URL(page.url()).hash.includes(`issueId=ISSUE_${number}`), 'Issue context must survive navigation');
       await dialog.getByRole('button', { name: 'Fechar diálogo', exact: true }).click();
@@ -219,12 +229,12 @@ async (page) => {
     await page.locator('.dashboard-candidates li').filter({ hasText: 'Trabalho 2' }).getByRole('button', { name: 'Preparar', exact: true }).click();
     await page.reload();
     await dialog.getByRole('heading', { name: 'Escolhas efetivas', exact: true }).waitFor();
-    assert(await dialog.locator('#preparation-issue').inputValue() === 'ISSUE_2', 'Reload must retain the issue selected through the dashboard');
+    assert(await dialog.locator('#preparation-issue').getAttribute('data-value') === 'ISSUE_2', 'Reload must retain the issue selected through the dashboard');
     hideSecondIssue = true;
     await page.reload();
     await dialog.getByRole('heading', { name: 'Escolhas efetivas', exact: true }).waitFor();
-    assert(await dialog.locator('#preparation-issue').inputValue() === 'ISSUE_2', 'A clicked issue outside the first catalog page must remain selected');
-    assert(await dialog.locator('#preparation-issue option:checked').textContent() === 'Trabalho 2', 'The preparation response must supply the selected issue title outside the first page');
+    assert(await dialog.locator('#preparation-issue').getAttribute('data-value') === 'ISSUE_2', 'A clicked issue outside the first catalog page must remain selected');
+    assert(await dialog.locator('#preparation-issue').textContent() === 'Trabalho 2', 'The preparation response must supply the selected issue title outside the first page');
     await screenshot('clicked-issue');
     passed.push('Preparar leva a issue clicada ao diálogo, isola rascunhos por issue e preserva seleção após recarga');
     recoverStartScenario = true;
