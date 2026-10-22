@@ -36,7 +36,7 @@ export function readAttemptPage(db: Database.Database, query: AttemptListQuery):
   const key = "printf('%020d',a.created_at_ms)||':'||a.id";
   const rows = db.prepare<{ account: string | null; project: string | null; result: string | null; ceiling: number; after: string; limit: number },
     AttemptPage['items'][number] & { pageKey: string }>(`SELECT a.id,a.project_id AS projectId,a.issue_id AS issueId,
-    json_extract(a.capture_json,'$.issue.number') AS issueNumber,a.phase,a.result,a.suspension,a.revision,a.created_at_ms AS createdAtMs,a.updated_at_ms AS updatedAtMs,${key} AS pageKey
+    json_extract(a.capture_json,'$.issue.number') AS issueNumber,json_extract(a.capture_json,'$.issue.title') AS issueTitle,a.phase,a.result,a.suspension,a.revision,a.created_at_ms AS createdAtMs,a.updated_at_ms AS updatedAtMs,${key} AS pageKey
     FROM attempts a WHERE a.account_id IS @account AND (@project IS NULL OR a.project_id=@project)
     AND (@result IS NULL OR (@result='active' AND a.result IS NULL) OR a.result=@result) AND a.rowid<=@ceiling
     AND (@after='' OR ${key}<@after) ORDER BY a.created_at_ms DESC,a.id DESC LIMIT @limit`)

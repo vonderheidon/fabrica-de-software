@@ -170,7 +170,7 @@ export function toHttpAttemptListQuery(value: Static<typeof AttemptListQuery>): 
 }
 
 export function toHttpAttemptSummary(value: Static<typeof AttemptSummary>): Static<typeof HttpAttemptSummary> {
-  return { id: value.id, project_id: value.projectId, issue_id: value.issueId, issue_number: value.issueNumber, phase: value.phase, result: value.result, suspension: value.suspension, revision: value.revision, created_at_ms: value.createdAtMs, updated_at_ms: value.updatedAtMs };
+  return { id: value.id, project_id: value.projectId, issue_id: value.issueId, issue_number: value.issueNumber, ...(value.issueTitle === undefined ? {} : { issue_title: value.issueTitle }), phase: value.phase, result: value.result, suspension: value.suspension, revision: value.revision, created_at_ms: value.createdAtMs, updated_at_ms: value.updatedAtMs };
 }
 
 export function toHttpAttemptPage(value: Static<typeof AttemptPage>): Static<typeof HttpAttemptPage> {

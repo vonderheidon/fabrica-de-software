@@ -26,7 +26,8 @@
 .dashboard-result { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; }
 .dashboard-result:last-child { padding-bottom: 0; }
 .dashboard-result small { display: block; margin-top: 5px; font-size: 12px; }
-.result-link { border: 0; background: transparent; padding: 0; border-radius: 2px; font-weight: 650; text-align: left; min-height: 28px; }
+.result-link { border: 0; background: transparent; padding: 0; border-radius: 2px; font-weight: 400; text-align: left; min-height: 28px; }
+.result-link b { font-weight: 650; }
 .result-link:enabled:hover { color: var(--accent); background: transparent; text-decoration: underline; }
 .result-meta { flex: 0 0 auto; display: grid; justify-items: end; gap: 7px; }
 .result-meta time { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }

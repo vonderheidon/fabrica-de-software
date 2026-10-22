@@ -18,7 +18,7 @@ export const IssueHeader = Type.Object({ id: Type.String({ maxLength: 256 }), nu
 export const AttemptListQuery = Type.Object({ ...paging, project_id: Type.Optional(OperationId), result: Type.Optional(Type.Union([Type.Literal('active'), ...['delivered', 'rejected', 'failed', 'cancelled', 'interrupted'].map(v => Type.Literal(v))])) }, closed);
 export type AttemptListQuery = Static<typeof AttemptListQuery>;
 export const AttemptSummary = Type.Object({
-    id: OperationId, project_id: OperationId, issue_id: Type.String(), issue_number: Type.Integer(),
+    id: OperationId, project_id: OperationId, issue_id: Type.String(), issue_number: Type.Integer(), issue_title: Type.Optional(Type.String({ maxLength: 65536 })),
     phase: AttemptStatus.properties.phase, result: AttemptStatus.properties.result, suspension: AttemptStatus.properties.suspension,
     revision: Type.Integer(), created_at_ms: Type.Integer(), updated_at_ms: Type.Integer(),
 }, closed);
