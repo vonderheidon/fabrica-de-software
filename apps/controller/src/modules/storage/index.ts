@@ -174,7 +174,7 @@ export interface Storage {
   getCompletedProjectDeletion(operationId: string): ReturnType<typeof readCompletedProjectDeletion>;
   hasUncertainAccountCleanup(operationId: string): boolean;
   saveTimeDefaults(input: SaveTimeDefaults): StoredOperation;
-  getEvents(query: EventQuery, through?: string): EventPage;
+  getEvents(query: EventQuery, through?: string, order?: 'asc' | 'desc', includeTechnical?: boolean): EventPage;
   getGlobalConfiguration(): Editable<SettingsView>;
   getProject(projectId: string): Editable<ProjectDetail>;
   listProjects(query: CatalogQuery): ProjectPage;
@@ -357,7 +357,7 @@ export function openStorage(options: StorageOptions): Storage {
       },
       hasUncertainAccountCleanup: (id) => guarded(() => connection.transaction(() => hasUncertainAccountCleanup(connection, id))()),
       saveTimeDefaults: (input) => saveTimeDefaults(connection, input),
-      getEvents: (query, through) => readEvents(connection, query, through),
+      getEvents: (query, through, order, includeTechnical) => readEvents(connection, query, through, order, includeTechnical),
       getOperationSummary: query => guarded(() => connection.transaction(() => readOperationSummary(connection, query))()),
       getContextDiagnostics: context => guarded(() => connection.transaction(() => readContextDiagnostics(connection, context))()),
       getDiagnosticContext: context => guarded(() => connection.transaction(() => diagnosticContext(connection, context))()),

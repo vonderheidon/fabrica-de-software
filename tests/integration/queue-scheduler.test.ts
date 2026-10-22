@@ -411,7 +411,7 @@ describe('durable scheduler', () => {
     await f.pipeline.close(); f.storage.close(); removeQueueSchedulerSchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(26); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(27); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getOperation(operationId)?.receipt).toEqual(receipt?.receipt);
       expect(f.db.prepare('SELECT observed_cycle,attempt_id,ready_exit_observed_at_ms,ready_return_observed_at_ms FROM queue_consumptions').get())
         .toEqual({ observed_cycle: 1, attempt_id: first.id, ready_exit_observed_at_ms: null, ready_return_observed_at_ms: null });

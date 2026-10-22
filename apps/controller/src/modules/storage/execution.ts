@@ -47,7 +47,7 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
   function event(p: PassageRow, type: ExecutionEvent['type'], code: ExecutionCode | null): void {
     db.prepare('INSERT INTO passage_events(passage_id,event_type,code,created_at_ms) VALUES (?,?,?,?)').run(p.id, type, code, Date.now());
     db.prepare('UPDATE attempts SET revision=revision+1,updated_at_ms=? WHERE id=?').run(Date.now(), p.attempt_id);
-    attemptEvent(db, p.attempt_id, type);
+    attemptEvent(db, p.attempt_id, type, { round: p.round_number, role: p.role });
   }
   function active(p: PassageRow): void {
     const a = readAttempt(db, p.attempt_id);

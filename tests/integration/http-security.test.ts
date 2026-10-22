@@ -344,11 +344,11 @@ describe('durable operation HTTP boundary', () => {
     }
     const readHeaders = { host, cookie: valid.cookie };
     const first = await app.inject({ url: '/api/v1/events?limit=2', headers: readHeaders });
-    expect(first.json()).toMatchObject({ items: [{ seq: '1' }, { seq: '2' }], has_more: true, event_cursor: '3' });
+    expect(first.json()).toMatchObject({ items: [{ seq: '3' }, { seq: '2' }], has_more: true, event_cursor: '3' });
     const nextCursor: string = first.json().next_cursor;
     expect(nextCursor).not.toBe('2');
     const next = await app.inject({ url: '/api/v1/events?limit=2&cursor='+nextCursor, headers: readHeaders });
-    expect(next.json()).toMatchObject({ items: [{ seq: '3' }], next_cursor: null, has_more: false });
+    expect(next.json()).toMatchObject({ items: [{ seq: '1' }], next_cursor: null, has_more: false });
     const filtered = await app.inject({ url: '/api/v1/events?operation_id='+operationIds[1], headers: readHeaders });
     expect(filtered.json().items).toHaveLength(1);
     expect(filtered.json().items[0].seq).toBe('2');

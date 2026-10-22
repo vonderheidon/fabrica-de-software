@@ -32,7 +32,7 @@ describe('initial storage', () => {
   it('checks effective pragmas and persists only the installation and normative defaults', () => {
     const path = directory();
     const store = open(path, 250);
-    expect(store.getDiagnostics()).toEqual({ foreignKeys: 1, journalMode: 'wal', synchronous: 2, busyTimeoutMs: 250, schemaVersion: 26 });
+    expect(store.getDiagnostics()).toEqual({ foreignKeys: 1, journalMode: 'wal', synchronous: 2, busyTimeoutMs: 250, schemaVersion: 27 });
     const settings = store.getSettings();
     expect(settings).toMatchObject({
       id: 'local', account_id: null, designated_host: hostname(), projects_root: null,

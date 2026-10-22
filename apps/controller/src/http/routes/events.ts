@@ -41,7 +41,7 @@ export function installEventRoutes(
   app.get('/api/v1/events', { schema: { querystring: HttpEventListQuery, response: { 200: HttpEventPage, 400: ErrorResponse, 401: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse } } }, async (request) => {
     const settings = storage.getSettings();
     const scope = createHash('sha256').update(JSON.stringify([settings.installation_id, settings.account_id, request.query.operation_id ?? null,
-      request.query.project_id ?? null, request.query.attempt_id ?? null, 'seq:asc:v2'])).digest('hex');
+      request.query.project_id ?? null, request.query.attempt_id ?? null, request.query.include_technical ?? 'true', 'seq:desc:v4'])).digest('hex');
     let cursor = '0';
     let through: string | undefined;
     if (request.query.cursor) {
@@ -55,7 +55,8 @@ export function installEventRoutes(
       cursor = parts[0]!;
       through = parts[2]!;
     }
-    const page = storage.getEvents({ ...fromHttpEventListQuery(request.query), cursor }, through);
+    const { includeTechnical, ...query } = fromHttpEventListQuery(request.query);
+    const page = storage.getEvents({ ...query, cursor }, through, 'desc', includeTechnical !== 'false');
     return { ...toHttpEventPage(page), next_cursor: page.next_cursor ? Buffer.from(`${page.next_cursor}:${scope}:${page.event_cursor}`).toString('base64url') : null };
   });
   // Fastify's handler deadline includes streaming; allow the bounded SSE lifetime to finish first.

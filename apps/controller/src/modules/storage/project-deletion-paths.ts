@@ -99,7 +99,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     resolve(dataDirectory, 'factory.sqlite'), resolve(dataDirectory, 'controller-lock.sqlite')];
   const settings = readSettings(db);
   const schema = db.prepare<[], { version: number; checksum: string }>('SELECT version,checksum FROM schema_migrations ORDER BY version').all();
-  if (schema.length !== 26 || schema.at(-1)?.version !== 26) blockers.push({
+  if (schema.length !== 27 || schema.at(-1)?.version !== 27) blockers.push({
     reason: 'A versão do inventário de recursos não é suportada nesta conferência.',
     recovery: 'Atualize a política de conferência para o schema instalado.' });
   // Data and install containers cannot themselves be removed. Exclusive leaves

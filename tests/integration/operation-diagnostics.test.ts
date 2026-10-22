@@ -153,6 +153,10 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     expect(view.reports[0]?.diagnostics[1]).toMatchObject({ state: 'passed', facts: { projectId: f.projectId, attemptId } });
     const events = f.storage.getEvents({ projectId: f.projectId, attemptId, operationId: id });
     expect(events.items).toHaveLength(2); expect(events.items.every(e => e.projectId === f.projectId && e.attemptId === attemptId)).toBe(true);
+    const storedIssue = f.db.prepare('SELECT p.name,a.capture_json,a.created_at_ms FROM attempts a JOIN projects p ON p.id=a.project_id WHERE a.id=?').get(attemptId) as { name: string; capture_json: string; created_at_ms: number };
+    const issue = JSON.parse(storedIssue.capture_json).issue;
+    expect(events.items[0]?.context).toMatchObject({ projectName: storedIssue.name, issueNumber: issue.number, issueTitle: issue.title, attemptCreatedAtMs: storedIssue.created_at_ms });
+    expect(f.storage.getEvents({ attemptId }).items.find(event => event.eventType === 'attempt.accepted')?.context?.round).toBe(1);
     expect(f.storage.getOperationSummary({ projectId: f.projectId }).activeAttempt?.id).toBe(attemptId);
     const otherProject = f.register(); expect(() => f.storage.getEvents({ projectId: otherProject, attemptId })).toThrowError(expect.objectContaining({ statusCode: 404 }));
     f.db.prepare("UPDATE factory_settings SET account_id=NULL,automation_enabled=0,revision=revision+1").run();
@@ -160,13 +164,25 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     expect(f.storage.getOperation(id)).toBeNull(); expect(f.storage.getEvents({}).items.some(e => e.operationId === id)).toBe(false);
     expect(f.execution.startPassage).toHaveBeenCalledTimes(1);
   });
+  it('filters technical events before pagination and binds the cursor to that choice', async () => {
+    const f = await httpFixture();
+    for (let i = 0; i < 4; i++) f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults });
+    f.db.prepare("INSERT INTO events(entity_type,entity_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms) SELECT entity_type,entity_id,operation_id,'cleanup-updated',entity_revision+100,'{}',occurred_at_ms FROM events WHERE seq IN (2,4)").run();
+    const first = (await f.app.inject({ url: '/api/v1/events?include_technical=false&limit=1', headers: f.headers })).json();
+    expect(first).toMatchObject({ items: [{ seq: '4' }], has_more: true });
+    const next = await f.app.inject({ url: `/api/v1/events?include_technical=false&limit=1&cursor=${first.next_cursor}`, headers: f.headers });
+    expect(next.json()).toMatchObject({ items: [{ seq: '3' }], has_more: true });
+    expect((await f.app.inject({ url: `/api/v1/events?include_technical=true&cursor=${first.next_cursor}`, headers: f.headers })).statusCode).toBe(400);
+    const all = await f.app.inject({ url: '/api/v1/events?include_technical=true', headers: f.headers });
+    expect(all.json().items.map((event: { seq: string }) => event.seq)).toEqual(['6', '5', '4', '3', '2', '1']);
+  });
   it('keeps a stable event-page ceiling when new events arrive and binds cursors to filters', async () => {
     const f = await httpFixture();
     for (let i = 0; i < 3; i++) f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults });
     const first = (await f.app.inject({ url: '/api/v1/events?limit=1', headers: f.headers })).json<{ next_cursor: string; event_cursor: string }>();
     f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: f.storage.getSettings().time_defaults });
     const next = await f.app.inject({ url: '/api/v1/events?cursor='+first.next_cursor+'&limit=100', headers: f.headers });
-    expect(next.json()).toMatchObject({ items: [{ seq: '2' }, { seq: '3' }], event_cursor: first.event_cursor, has_more: false });
+    expect(next.json()).toMatchObject({ items: [{ seq: '2' }, { seq: '1' }], event_cursor: first.event_cursor, has_more: false });
     expect(f.storage.getEvents({ cursor: first.event_cursor }).items.map(e => e.seq)).toEqual(['4']);
     expect((await f.app.inject({ url: '/api/v1/events?cursor='+first.next_cursor+'&operation_id='+randomUUID(), headers: f.headers })).statusCode).toBe(400);
     const other = await httpFixture();
@@ -261,9 +277,9 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const db = new Database(join(directory, 'factory.sqlite')); applyMigrations(db, loadMigrations().slice(0, 17), () => seedSettings(db, directory));
     const identity = db.prepare('SELECT installation_id FROM factory_settings').get(); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getDiagnostics().schemaVersion).toBe(26); expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(27); expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
     expect(reopened.getContextDiagnostics({ scope: 'host' }).reports).toEqual([]); expect(reopened.getOperationSummary({}).integrationStatus.state).toBe('not_checked');
-    expect(f.storage.getDiagnostics().schemaVersion).toBe(26);
+    expect(f.storage.getDiagnostics().schemaVersion).toBe(27);
   });
 });
 

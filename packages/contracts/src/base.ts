@@ -106,6 +106,11 @@ export const OperationView = Type.Object({
 export type OperationView = Static<typeof OperationView>;
 
 export const ControllerEvent = Type.Object({
+  context: Type.Optional(Type.Object({
+    projectName: Type.Optional(text(1024)), issueNumber: Type.Optional(Type.Integer({ minimum: 1 })),
+    issueTitle: Type.Optional(text(16384)), attemptCreatedAtMs: Type.Optional(timestamp),
+    round: Type.Optional(Type.Integer({ minimum: 1 })), role: Type.Optional(Type.Union([Type.Literal('implementer'), Type.Literal('reviewer')])),
+  }, { additionalProperties: false })),
   seq: Type.String({ pattern: '^[1-9][0-9]*$', maxLength: 20 }),
   entityType: text(128), entityId: text(256), operationId: OperationId,
   eventType: text(128), entityRevision: revision, occurredAtMs: timestamp,
@@ -121,6 +126,7 @@ export const EventQuery = Type.Object({
 }, { additionalProperties: false });
 export type EventQuery = Static<typeof EventQuery>;
 export const EventListQuery = Type.Object({
+  includeTechnical: Type.Optional(Type.Union([Type.Literal('true'), Type.Literal('false')])),
   cursor: Type.Optional(Type.String({ pattern: '^[A-Za-z0-9_-]+$', minLength: 1, maxLength: 256 })),
   limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|100)$' })),
   operationId: Type.Optional(OperationId),

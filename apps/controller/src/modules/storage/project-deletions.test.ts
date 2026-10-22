@@ -51,7 +51,7 @@ afterEach(() => {
 describe('project deletion persistence foundation', () => {
   it('creates three empty STRICT tables and exactly the normative indexes on fresh storage', () => {
     const path = directory(); const storage = open(path); const db = connect(path);
-    expect(storage.getDiagnostics().schemaVersion).toBe(26);
+    expect(storage.getDiagnostics().schemaVersion).toBe(27);
     for (const name of tables) {
       expect(db.prepare(`SELECT * FROM ${name}`).all()).toEqual([]);
       expect(db.prepare('SELECT strict FROM pragma_table_list WHERE name=?').get(name)).toEqual({ strict: 1 });
@@ -78,7 +78,7 @@ describe('project deletion persistence foundation', () => {
     db.prepare("INSERT INTO accounts VALUES ('account','preserved',0,0,0,1)").run();
     const beforeObjects = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
     const beforeLedger = db.prepare('SELECT * FROM schema_migrations ORDER BY version').all();
-    applyMigrations(db, migrations, () => { throw new Error('UNEXPECTED_RESEED'); });
+    applyMigrations(db, migrations.slice(0, 26), () => { throw new Error('UNEXPECTED_RESEED'); });
     expect(db.prepare('SELECT * FROM factory_settings').all()).toEqual(beforeSettings);
     expect(db.prepare('SELECT * FROM projects').all()).toEqual(beforeProject);
     expect(db.prepare('SELECT * FROM project_revisions').all()).toEqual(beforeRevisions);

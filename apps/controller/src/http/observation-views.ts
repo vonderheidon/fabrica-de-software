@@ -149,7 +149,14 @@ export function toHttpCreationView(value: Static<typeof CreationView>): Static<t
 }
 
 export function toHttpControllerEvent(value: Static<typeof ControllerEvent>): Static<typeof HttpControllerEvent> {
-  return { seq: value.seq, entity_type: value.entityType, entity_id: value.entityId, operation_id: value.operationId, event_type: value.eventType, entity_revision: value.entityRevision, occurred_at_ms: value.occurredAtMs, facts: value.facts, ...(value.projectId === undefined ? {} : { project_id: value.projectId }), ...(value.attemptId === undefined ? {} : { attempt_id: value.attemptId }) };
+  return { ...(value.context === undefined ? {} : { context: {
+    ...(value.context.projectName === undefined ? {} : { project_name: value.context.projectName }),
+    ...(value.context.issueNumber === undefined ? {} : { issue_number: value.context.issueNumber }),
+    ...(value.context.issueTitle === undefined ? {} : { issue_title: value.context.issueTitle }),
+    ...(value.context.attemptCreatedAtMs === undefined ? {} : { attempt_created_at_ms: value.context.attemptCreatedAtMs }),
+    ...(value.context.round === undefined ? {} : { round: value.context.round }),
+    ...(value.context.role === undefined ? {} : { role: value.context.role }),
+  } }), seq: value.seq, entity_type: value.entityType, entity_id: value.entityId, operation_id: value.operationId, event_type: value.eventType, entity_revision: value.entityRevision, occurred_at_ms: value.occurredAtMs, facts: value.facts, ...(value.projectId === undefined ? {} : { project_id: value.projectId }), ...(value.attemptId === undefined ? {} : { attempt_id: value.attemptId }) };
 }
 
 export function toHttpEventQuery(value: Static<typeof EventQuery>): Static<typeof HttpEventQuery> {
@@ -161,11 +168,11 @@ export function fromHttpEventQuery(value: Static<typeof HttpEventQuery>): Static
 }
 
 export function toHttpEventListQuery(value: Static<typeof EventListQuery>): Static<typeof HttpEventListQuery> {
-  return { ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }), ...(value.operationId === undefined ? {} : { operation_id: value.operationId }), ...(value.projectId === undefined ? {} : { project_id: value.projectId }), ...(value.attemptId === undefined ? {} : { attempt_id: value.attemptId }) };
+  return { ...(value.includeTechnical === undefined ? {} : { include_technical: value.includeTechnical }), ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }), ...(value.operationId === undefined ? {} : { operation_id: value.operationId }), ...(value.projectId === undefined ? {} : { project_id: value.projectId }), ...(value.attemptId === undefined ? {} : { attempt_id: value.attemptId }) };
 }
 
 export function fromHttpEventListQuery(value: Static<typeof HttpEventListQuery>): Static<typeof EventListQuery> {
-  return { ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }), ...(value.operation_id === undefined ? {} : { operationId: value.operation_id }), ...(value.project_id === undefined ? {} : { projectId: value.project_id }), ...(value.attempt_id === undefined ? {} : { attemptId: value.attempt_id }) };
+  return { ...(value.include_technical === undefined ? {} : { includeTechnical: value.include_technical }), ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }), ...(value.operation_id === undefined ? {} : { operationId: value.operation_id }), ...(value.project_id === undefined ? {} : { projectId: value.project_id }), ...(value.attempt_id === undefined ? {} : { attemptId: value.attempt_id }) };
 }
 
 export function toHttpEventStreamQuery(value: Static<typeof EventStreamQuery>): Static<typeof HttpEventStreamQuery> {

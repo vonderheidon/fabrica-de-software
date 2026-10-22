@@ -65,11 +65,12 @@ export function readCapture(db: Database.Database, id: string): AttemptCapture {
   const capture: unknown = row ? JSON.parse(row.capture_json) : null;
   return readCapturedConfiguration(capture);
 }
-export function attemptEvent(db: Database.Database, id: string, type: string): void {
+export function attemptEvent(db: Database.Database, id: string, type: string, passage?: { round: number; role: 'implementer' | 'reviewer' }): void {
   const row = db.prepare<[string], { project_id: string; operation_id: string; revision: number }>('SELECT project_id,operation_id,revision FROM attempts WHERE id=?').get(id);
   if (!row) throw new StorageError('OPERATION_DATA_INVALID');
-  db.prepare(`INSERT INTO events(entity_type,entity_id,project_id,attempt_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms)
-    VALUES ('attempt',?,?,?,?,?,?,'{}',?)`).run(id, row.project_id, id, row.operation_id, type, row.revision, Date.now());
+  db.prepare(`INSERT INTO events(entity_type,entity_id,project_id,attempt_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms,context_round,context_role)
+    VALUES ('attempt',?,?,?,?,?,?,'{}',?,?,?)`).run(id, row.project_id, id, row.operation_id, type, row.revision, Date.now(),
+      passage?.round ?? db.prepare<[string], { round: number }>('SELECT max(round_number) AS round FROM rounds WHERE attempt_id=?').get(id)?.round ?? null, passage?.role ?? null);
 }
 export function createAttempt(db: Database.Database, input: CreateAttempt): { created: boolean; operation: StoredOperation } {
   return guarded(() => db.transaction(() => {

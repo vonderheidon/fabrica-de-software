@@ -3,6 +3,9 @@ import { loadMigrations } from '../../apps/controller/src/modules/storage/migrat
 
 /** Disposable fixtures only; never used to downgrade an installation. */
 export function removeProjectDeletionSchema(db: Database.Database): void {
+  if (db.pragma('user_version', { simple: true }) === 27) {
+    db.exec('ALTER TABLE events DROP COLUMN context_role; ALTER TABLE events DROP COLUMN context_round; DELETE FROM schema_migrations WHERE version=27; PRAGMA user_version=26;');
+  }
   if (db.pragma('user_version', { simple: true }) === 26) {
     // Restore historical DELETE guards in disposable migration fixtures only.
     const triggers = db.prepare<[], { name: string }>(`SELECT name FROM sqlite_schema WHERE type='trigger'
