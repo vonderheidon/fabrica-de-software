@@ -10,7 +10,7 @@ const hash = 'a'.repeat(64);
 it('builds scoped query strings without changing cursor bytes or navigation identifiers', () => {
   const cursor = 'scope_cursor-1';
   expect(Object.fromEntries(new URLSearchParams(eventListQuery({ projectId: id, attemptId: id, operationId: id }, cursor))))
-    .toEqual({ limit: '25', project_id: id, attempt_id: id, operation_id: id, cursor });
+    .toEqual({ limit: '25', include_technical: 'true', project_id: id, attempt_id: id, operation_id: id, cursor });
   expect(Object.fromEntries(new URLSearchParams(queueQuery(id, cursor))))
     .toEqual({ limit: '25', project_id: id, cursor });
   expect(queueQuery(null, null)).toBe('limit=25');

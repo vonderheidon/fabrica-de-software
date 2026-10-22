@@ -1,7 +1,8 @@
 import type { HttpEventListQuery, HttpQueueCommand, HttpQueueObservation, HttpQueueQuery, HttpCreateScaffold, HttpScaffoldPlanned } from '#contracts';
 
-export function eventListQuery(filters: { projectId: string; attemptId: string; operationId: string }, cursor: string | null): string {
+export function eventListQuery(filters: { projectId: string; attemptId: string; operationId: string }, cursor: string | null, includeTechnical = true): string {
   const query: HttpEventListQuery = { limit: '25',
+    include_technical: String(includeTechnical) as 'true' | 'false',
     ...(filters.projectId ? { project_id: filters.projectId } : {}),
     ...(filters.attemptId ? { attempt_id: filters.attemptId } : {}),
     ...(filters.operationId ? { operation_id: filters.operationId } : {}),

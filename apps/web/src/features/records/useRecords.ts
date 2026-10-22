@@ -4,10 +4,10 @@ import { eventListQuery } from '../../api/observation-requests.js';
 import { HttpError, requestJson } from '../../api/http.js';
 
 export type RecordFilters = { projectId: string; attemptId: string; operationId: string };
-type PageRequest = { cursor: string | null; index: number; stack: Array<string | null>; serial: number };
+type PageRequest = { cursor: string | null; index: number; stack: Array<string | null>; serial: number; scope?: string | undefined };
 type RecordState = { page: EventPage | null; loading: boolean; refreshing: boolean; stale: boolean; error: string | null; requestId: string | null; errorCode: string | null; affectedRequirements: readonly string[]; facts: Readonly<Record<string, string | number | boolean | null>> | null; emptyKind: 'none' | 'no-events' | 'no-matches' | 'unknown' };
 
-export function useRecords(filters: RecordFilters) {
+export function useRecords(filters: RecordFilters, includeTechnical = false) {
   const [request, setRequest] = useState<PageRequest>({ cursor: null, index: 0, stack: [null], serial: 0 });
   const committed = useRef<PageRequest>({ cursor: null, index: 0, stack: [null], serial: 0 });
   const [state, setState] = useState<RecordState>({ page: null, loading: true, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, affectedRequirements: [], facts: null, emptyKind: 'none' });
@@ -20,11 +20,16 @@ export function useRecords(filters: RecordFilters) {
   }, []);
 
   useEffect(() => {
+    const scope = JSON.stringify([filterKey, includeTechnical]);
+    if (request.scope !== scope) {
+      setRequest({ cursor: null, index: 0, stack: [null], serial: request.serial + 1, scope });
+      return;
+    }
     let active = true;
     const controller = new AbortController();
     const hasFilter = Boolean(stableFilters.projectId || stableFilters.attemptId || stableFilters.operationId);
     setState((current) => ({ ...current, loading: current.page === null, refreshing: current.page !== null, stale: current.page !== null }));
-    void requestJson<EventPage>(`/api/v1/events?${eventListQuery(stableFilters, request.cursor)}`, { signal: controller.signal }).then(async (page) => {
+    void requestJson<EventPage>(`/api/v1/events?${eventListQuery(stableFilters, request.cursor, includeTechnical)}`, { signal: controller.signal }).then(async (page) => {
       let emptyKind: RecordState['emptyKind'] = 'none';
       if (page.items.length === 0) {
         if (!hasFilter) emptyKind = 'no-events';
@@ -50,7 +55,7 @@ export function useRecords(filters: RecordFilters) {
         facts: error instanceof HttpError ? error.facts : null }));
     });
     return () => { active = false; controller.abort(); };
-  }, [filterKey, stableFilters, request]);
+  }, [filterKey, stableFilters, request, includeTechnical]);
 
   useEffect(() => {
     const onChange = (): void => refresh();
@@ -65,13 +70,13 @@ export function useRecords(filters: RecordFilters) {
   function nextPage(): void {
     const nextCursor = state.page?.next_cursor;
     if (!state.page?.has_more || !nextCursor || state.loading || state.refreshing) return;
-    setRequest({ cursor: nextCursor, index: committed.current.index + 1, stack: [...committed.current.stack, committed.current.cursor], serial: request.serial + 1 });
+    setRequest({ cursor: nextCursor, index: committed.current.index + 1, stack: [...committed.current.stack, committed.current.cursor], serial: request.serial + 1, scope: request.scope });
   }
 
   function previousPage(): void {
     if (committed.current.index === 0 || state.loading || state.refreshing) return;
     const previous = committed.current.stack[committed.current.index];
-    setRequest({ cursor: previous ?? null, index: committed.current.index - 1, stack: committed.current.stack.slice(0, -1), serial: request.serial + 1 });
+    setRequest({ cursor: previous ?? null, index: committed.current.index - 1, stack: committed.current.stack.slice(0, -1), serial: request.serial + 1, scope: request.scope });
   }
 
   return { ...state, pageIndex: committed.current.index, refresh, nextPage, previousPage, canGoBack: committed.current.index > 0 };

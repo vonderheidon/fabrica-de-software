@@ -269,6 +269,33 @@ export function operatorState(value: string | null | undefined): StateLabel {
 }
 
 const eventLabels: Readonly<Record<string, string>> = {
+  'project.registered': 'Projeto cadastrado', 'project.configuration.updated': 'Configuração do projeto atualizada',
+  'project.deletion.accepted': 'Exclusão do projeto autorizada',
+  'settings.updated': 'Configuração geral atualizada', 'settings.onboarding.updated': 'Configuração inicial atualizada',
+  'settings.account.bound': 'Conta GitHub vinculada', 'settings.account.switched': 'Conta GitHub alterada',
+  'settings.time-defaults.updated': 'Prazos de execução atualizados',
+  'preparation.created': 'Preparação criada', 'preparation.updated': 'Preparação atualizada',
+  'attempt.accepted': 'Início da tentativa aceito', 'attempt.cancel.accepted': 'Cancelamento solicitado',
+  'attempt.failed': 'Tentativa encerrada com falha', 'attempt.rejected': 'Tentativa reprovada',
+  'attempt.authority-observed': 'Permissões da tentativa conferidas',
+  'attempt.revalidate.accepted': 'Revalidação da tentativa solicitada',
+  'attempt.icr-completed': 'Implementação e revisão concluídas', 'attempt.commit-completed': 'Entrega com commit concluída',
+  'attempt.pr-completed': 'Entrega com pull request concluída',
+  'passage-ready': 'Agente pronto para trabalhar', 'question-raised': 'Pergunta do agente recebida',
+  'question-answer-receipt': 'Recebimento da resposta confirmado', 'result-accepted': 'Resultado do agente aceito',
+  'tracking-lost': 'Acompanhamento do agente perdido', 'cleanup-updated': 'Limpeza dos recursos atualizada',
+  'question.answer-recorded': 'Resposta ao agente registrada', 'question.answer-unknown': 'Entrega da resposta sem confirmação',
+  'dispatch.failed': 'Falha ao iniciar o agente', 'active-time.expired': 'Prazo de execução esgotado',
+  'capture.running': 'Captura da versão iniciada', 'capture.captured': 'Versão capturada',
+  'capture.failed': 'Falha ao capturar a versão', 'capture.retry.accepted': 'Nova captura solicitada',
+  'verification.started': 'Verificação da versão iniciada', 'check.completed': 'Check concluído',
+  'review.planned': 'Revisão planejada', 'review.workspace.ready': 'Ambiente da revisão pronto',
+  'review.workspace.partial': 'Preparação do ambiente da revisão incompleta', 'correction.planned': 'Rodada de correção planejada',
+  'diagnostic.interrupted': 'Verificação local interrompida',
+  'publication.complete.accepted': 'Publicação solicitada', 'publication.reconcile.accepted': 'Conferência da publicação solicitada',
+  'publication.authorize-upgrade.accepted': 'Ampliação do modo de entrega autorizada',
+  'effect.intended': 'Ação de entrega preparada', 'effect.sent': 'Ação de entrega enviada',
+  'effect.stage-superseded': 'Etapa de entrega substituída após nova validação',
   'attempt.created': 'Tentativa criada', 'attempt.started': 'Tentativa iniciada', 'attempt.interrupted': 'Tentativa interrompida',
   'attempt.cancel_requested': 'Cancelamento solicitado', 'attempt.cancelled': 'Tentativa cancelada', 'attempt.completed': 'Tentativa concluída',
   'attempt.result_accepted': 'Resultado registrado', 'attempt.delivery_captured': 'Versão capturada', 'attempt.reviewed': 'Revisão registrada',
@@ -287,16 +314,27 @@ const eventLabels: Readonly<Record<string, string>> = {
 
 export function operatorEventLabel(eventType: string): string {
   const normalized = eventType.toLocaleLowerCase('en');
+  if (eventLabels[normalized]) return eventLabels[normalized]!;
+  const transition = /^(workspace|verification|publication|effect)\.(\w+)$/.exec(normalized);
+  if (transition && operatorState(transition[2]).known) {
+    const subjects: Record<string, string> = { workspace: 'Ambiente da tentativa', verification: 'Verificação da versão', publication: 'Publicação', effect: 'Ação de entrega' };
+    return `${subjects[transition[1]!]}: ${operatorState(transition[2]).label}`;
+  }
+  const recovery = /^(resource\.remove|folder\.open|interaction\.open)\.(accepted|confirmed|failed|unknown)$/.exec(normalized);
+  if (recovery) {
+    const subjects: Record<string, string> = { 'resource.remove': 'Remoção de recurso', 'folder.open': 'Abertura da pasta', 'interaction.open': 'Abertura do terminal' };
+    return `${subjects[recovery[1]!]}: ${operatorState(recovery[2]).label}`;
+  }
   const step = /^creation\.(directory|files|git|baseline|registration)\.(not_started|running|confirmed|unknown)$/.exec(normalized);
   if (step) {
     const labels: Record<string, string> = { directory: 'Pasta do projeto', files: 'Arquivos do projeto', git: 'Repositório Git local', baseline: 'Commit inicial', registration: 'Cadastro do projeto' };
     return `${labels[step[1]!]}: ${operatorState(step[2]).label}`;
   }
-  return eventLabels[normalized] ?? 'Atualização registrada';
+  return 'Evento sem descrição disponível';
 }
 
 export function isKnownOperatorEvent(eventType: string): boolean {
-  return operatorEventLabel(eventType) !== 'Atualização registrada';
+  return operatorEventLabel(eventType) !== 'Evento sem descrição disponível';
 }
 
 export function operatorCodeLabel(code: string): string {
