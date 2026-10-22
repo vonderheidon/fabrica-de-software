@@ -1,4 +1,7 @@
 import { copyFileSync, mkdirSync, readdirSync, cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const source = new URL('../apps/controller/src/modules/storage/migrations/', import.meta.url);
 const target = new URL('../dist/apps/controller/src/modules/storage/migrations/', import.meta.url);
@@ -15,6 +18,16 @@ for (const name of ['implementer.v1.json', 'reviewer.v1.json']) {
 }
 cpSync(new URL('../resources/templates/', import.meta.url), new URL('../dist/resources/templates/', import.meta.url), { recursive: true });
 cpSync(new URL('../resources/deletion/', import.meta.url), new URL('../dist/resources/deletion/', import.meta.url), { recursive: true });
+
+if (process.platform === 'win32') {
+  const nativeDirectory = new URL('../dist/resources/native-selection/', import.meta.url);
+  mkdirSync(nativeDirectory, { recursive: true });
+  const compiler = join(process.env.SystemRoot, 'Microsoft.NET', process.arch === 'ia32' ? 'Framework' : 'Framework64', 'v4.0.30319', 'csc.exe');
+  const compiled = spawnSync(compiler, ['/nologo', '/target:exe', '/optimize+', '/reference:System.Windows.Forms.dll',
+    `/out:${fileURLToPath(new URL('picker.exe', nativeDirectory))}`,
+    fileURLToPath(new URL('../resources/native-selection/picker.cs', import.meta.url))], { windowsHide: true, encoding: 'utf8' });
+  if (compiled.error || compiled.status !== 0) throw new Error(`NATIVE_PICKER_BUILD_FAILED: ${compiled.stdout ?? ''}`);
+}
 
 const faviconDefinition = JSON.parse(readFileSync(new URL('../resources/favicon.v1.json', import.meta.url), 'utf8'));
 const faviconBytes = createFaviconIco(faviconDefinition);
