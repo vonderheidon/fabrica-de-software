@@ -16,6 +16,8 @@ import { readUncertainOperations } from '../api/uncertain-operations.js';
 import { useControllerEvents } from './useControllerEvents.js';
 import { useDialogs } from './useDialogs.js';
 import { wrapDialogTabFocus } from './dialog-focus.js';
+import { CloseIcon } from './CloseIcon.js';
+import './styles/dialogs.css';
 import { EventConnectionStatus } from './EventConnectionStatus.js';
 import './styles/event-connection-status.css';
 import { useOnboarding } from '../features/onboarding/useOnboarding.js';
@@ -407,8 +409,8 @@ export function AppShell() {
       </main>
     </div>
     {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
-      <div className={`dialog${dialog === 'profile' ? ' profile-dialog' : ''}${dialog === 'initial-setup' ? ' initial-setup-dialog' : ''}${dialog === 'project-configuration' ? ' project-configuration-dialog' : ''}`} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1} onClickCapture={interceptWizardNavigation}>
-        <div className="line dialog-toolbar"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label={dialog === 'profile' && profileClosePrompt ? 'Voltar à edição do perfil' : 'Fechar diálogo'} onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending || (dialog === 'initial-setup' || dialog === 'project-configuration') && wizardSaving}>×</button></div>
+      <div className={`dialog${dialog === 'profile' ? ' profile-dialog' : ''}${dialog === 'initial-setup' ? ' initial-setup-dialog' : ''}${dialog === 'project-configuration' ? ' project-configuration-dialog' : ''}`} data-dialog={dialog} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1} onClickCapture={interceptWizardNavigation}>
+        <div className="line dialog-toolbar"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label={dialog === 'profile' && profileClosePrompt ? 'Voltar à edição do perfil' : 'Fechar diálogo'} onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending || (dialog === 'initial-setup' || dialog === 'project-configuration') && wizardSaving}><CloseIcon /></button></div>
         <h2 id="dialog-title">{dialog === 'initial-setup' ? wizardDialogTitle : dialog === 'profile' && profileClosePrompt ? 'Descartar alterações do perfil?' : dialog === 'profile' ? (route.params.has('profileId') ? 'Editar perfil' : 'Criar perfil') : dialog === 'diagnostic' ? 'Diagnóstico de acesso' : labelForDialog(dialog)}</h2>
         {dialog === 'project-configuration' ? <>
           {wizardClosePrompt ? <section className="dialog-prompt" aria-labelledby="configuration-close-title">
@@ -498,7 +500,7 @@ function labelForDialog(dialog: DialogId): string {
   const labels: Record<DialogId, string> = {
     register: 'Adicionar existente', create: 'Criar projeto', 'creation-plan': 'Plano de criação', partial: 'Resultado da criação',
     preparation: 'Preparar issue', 'start-confirmation': 'Confirmar início', 'enable-queue': 'Habilitar fila Ready',
-    authority: 'Autoridade do projeto', detail: 'Detalhe da tentativa', decision: 'Responder decisão', stop: 'Parada da tentativa',
+    authority: 'Condições da tentativa', detail: 'Detalhe da tentativa', decision: 'Responder decisão', stop: 'Parada da tentativa',
     delivery: 'Entrega', publication: 'Reconciliação da publicação', diagnostic: 'Diagnóstico', interaction: 'Sessão operacional', profile: 'Perfil',
     'initial-setup': 'Configuração inicial', 'project-configuration': 'Configuração do projeto',
   };

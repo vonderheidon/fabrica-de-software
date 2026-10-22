@@ -340,7 +340,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
   const actionBlockedByConflict = saveState.status === 'conflict';
   const canSave = Boolean(draft && hasValidName && changes.length === 1 && !duplicateName && !uncertainId && !saveInFlightRef.current && !actionBlockedByConflict);
 
-  if (load.status === 'error' && load.identity === identity) return <div className="profile-form-state" role="alert"><p>{load.message}</p><div className="profile-dialog-footer"><button type="button" onClick={onClose}>Cancelar</button><button type="button" onClick={retryConfiguration}>Tentar novamente</button></div></div>;
+  if (load.status === 'error' && load.identity === identity) return <div className="profile-form-state" role="alert"><p>{load.message}</p><div className="profile-dialog-footer dialog-actions"><button type="button" onClick={onClose}>Cancelar</button><button type="button" onClick={retryConfiguration}>Tentar novamente</button></div></div>;
   if (!draft) return <div className="profile-form-state" role="status"><p>{profileLoadError || 'Consultando o perfil e sua configuração atual…'}</p>{profileLoadError && <button type="button" onClick={retryConfiguration}>Consultar novamente</button>}</div>;
 
   return <form className="profile-form" onSubmit={(event) => void save(event)}>
@@ -351,7 +351,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
         {catalog.status === 'error' && <p className="error" role="alert">{catalog.message}</p>}
         {catalog.status === 'error' && baseline && <p className="muted">As escolhas salvas continuam visíveis; você pode salvar alterações apenas de Nome e Orientações.</p>}
         {catalog.status === 'ready' && catalog.data?.state === 'unavailable' && <p className="notice compact-notice" role="status">O catálogo está indisponível. As escolhas salvas permanecem visíveis; você ainda pode alterar nome e orientações.</p>}
-        {catalog.status === 'ready' && catalog.data?.state === 'loaded' && <p className="muted" role="status">Catálogo consultado. Confira as escolhas antes de salvar.</p>}
+        {catalog.status === 'ready' && catalog.data?.state === 'loaded' && <p className="muted" role="status">Modelos disponíveis atualizados.</p>}
       </div>
       <button type="button" onClick={() => void refreshCatalog()} aria-label={catalogRetryLabel ?? 'Consultar catálogo novamente'}>{catalogRetryLabel ?? (catalog.status === 'error' || catalog.data?.state === 'unavailable' ? 'Tentar novamente' : 'Consultar catálogo novamente')}</button>
     </div>
@@ -362,28 +362,30 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
     {changesLastRoleProfile && baseline && <div className="notice compact-notice" role="status"><b>Este é o último perfil vivo de {baseline.profile_type === 'implementer' ? 'Implementador' : 'Revisor'}</b><p>Ao mudar o tipo, esse papel ficará sem perfil e novos inícios poderão ser bloqueados. A alteração continua disponível para salvar; confira os projetos que usam este perfil.</p></div>}
 
     <div className="profile-form-grid">
+      <h3 className="dialog-section-title">Identificação e papel</h3>
       <div className="form-field field-full"><label htmlFor="profile-name">Nome</label>
         <input id="profile-name" value={draft.name} required maxLength={256} aria-describedby={duplicateName ? 'profile-name-error profile-name-help' : 'profile-name-help'} aria-invalid={duplicateName} onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => ({ ...current, name: value })); }} />
         {duplicateName && <small id="profile-name-error" className="error">Já existe um perfil com este nome.</small>}
-        <small id="profile-name-help" className="field-guidance">Identifica o perfil no catálogo. Obrigatório ao criar. Informe texto simples, por exemplo “Implementador principal”. Renomear altera somente a identificação exibida.</small>
+        <small id="profile-name-help" className="field-guidance">Nome usado para escolher este perfil nos projetos.</small>
       </div>
       <div className="form-field field-full"><label htmlFor="profile-type">Tipo</label>
         <select id="profile-type" value={draft.profile_type} disabled={Boolean(profileId) || lockInitialProfileType} aria-describedby="profile-type-help" onChange={(event) => { const value = event.currentTarget.value as ProfileType; updateDraft((current) => ({ ...current, profile_type: value })); }}>
           <option value="implementer">Implementador</option><option value="reviewer">Revisor</option>
         </select>
-        <small id="profile-type-help" className="field-guidance">Define se o perfil atua como Implementador ou Revisor. Obrigatório ao criar e usado para validar as seleções do projeto. Escolha um dos dois papéis exibidos. Alterar o tipo muda quais referências podem usar o perfil e pode deixar um papel sem opção.</small>
+        <small id="profile-type-help" className="field-guidance">Escolha o papel do agente. O tipo permanece fixo após a criação.</small>
       </div>
       <div className="form-field field-full"><label htmlFor="profile-executor">Executor</label>
         <select id="profile-executor" value={draft.executor} disabled aria-describedby="profile-executor-help"><option value="maestri-omp">Maestri / OMP</option></select>
-        <small id="profile-executor-help" className="field-guidance">Indica o executor usado por este perfil. O valor aceito e exibido é Maestri/OMP; nesta entrega o campo é fixo. Ele determina a sessão usada pelas novas passagens.</small>
+        <small id="profile-executor-help" className="field-guidance">As execuções deste perfil usam Maestri / OMP.</small>
       </div>
-      <div className="form-field"><label htmlFor="profile-provider">Provider</label>
+      <h3 className="dialog-section-title">Modelo e execução</h3>
+      <div className="form-field"><label htmlFor="profile-provider">Provedor</label>
         <select id="profile-provider" value={draft.provider} required disabled={!canEditSelections} aria-describedby="profile-provider-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => selectProfileProvider(current, loadedCatalog, value)); }}>
           <option value="">Selecione…</option>
           {draft.provider && !providerExists && <option value={draft.provider}>{draft.provider} · fora do catálogo atual</option>}
           {providers.map(([provider, name]) => <option value={provider} key={provider}>{name}</option>)}
         </select>
-        <small id="profile-provider-help" className="field-guidance">Escolhe o provider disponível no catálogo OMP. Obrigatório para criar ou mudar a combinação. Selecione uma opção consultada. Alterar o provider atualiza os modelos disponíveis e pode limpar escolhas incompatíveis.</small>
+        <small id="profile-provider-help" className="field-guidance">Selecione o provedor para consultar seus modelos disponíveis.</small>
       </div>
       <div className="form-field"><label htmlFor="profile-model">Modelo</label>
         <select id="profile-model" value={draft.model} required disabled={!canEditSelections || !draft.provider} aria-describedby="profile-model-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => selectProfileModel(current, loadedCatalog, value)); }}>
@@ -391,7 +393,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
           {draft.model && !modelExists && <option value={draft.model}>{draft.model} · fora do catálogo atual</option>}
           {models.map((model) => <option value={model.model} key={`${model.provider}:${model.model}`}>{model.model_name}</option>)}
         </select>
-        <small id="profile-model-help" className="field-guidance">Escolhe o modelo dentro do provider selecionado. Obrigatório para criar ou mudar a combinação. Selecione uma opção do catálogo. Alterar o modelo atualiza os esforços disponíveis e pode limpar uma escolha incompatível.</small>
+        <small id="profile-model-help" className="field-guidance">Modelo do provedor selecionado. A troca pode redefinir o esforço.</small>
       </div>
       <div className="form-field"><label htmlFor="profile-effort">Esforço</label>
         <select id="profile-effort" value={draft.effort ?? ''} disabled={!canEditSelections || !currentModel} aria-describedby="profile-effort-help" onChange={(event) => { const value = event.currentTarget.value || null; updateDraft((current) => ({ ...current, effort: value })); }}>
@@ -399,11 +401,12 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
           {draft.effort && !effortExists && <option value={draft.effort}>{draft.effort} · fora do catálogo atual</option>}
           {effortOptions.map((effort) => <option value={effort} key={effort}>{effort}</option>)}
         </select>
-        <small id="profile-effort-help" className="field-guidance">Escolhe o nível de esforço oferecido pelo modelo. Obrigatório quando o catálogo lista níveis; use “Não se aplica” somente quando nenhum nível for oferecido. O valor salvo sem esforço é null. Alterar essa opção afeta novas passagens.</small>
+        <small id="profile-effort-help" className="field-guidance">Nível de raciocínio oferecido pelo modelo. Use “Não se aplica” quando não houver opções.</small>
       </div>
+      <h3 className="dialog-section-title">Orientações</h3>
       <div className="form-field field-full"><label htmlFor="profile-guidance">Orientações opcionais</label>
         <textarea id="profile-guidance" value={draft.guidance} maxLength={8192} aria-describedby="profile-guidance-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => ({ ...current, guidance: value })); }} />
-        <small id="profile-guidance-help" className="field-guidance">Acrescenta instruções para este papel. Opcional; limite de 8.192 caracteres. Use uma frase clara, por exemplo “priorize mudanças pequenas”, sem credenciais. Alterar o texto afeta as passagens futuras que usarem este perfil.</small>
+        <small id="profile-guidance-help" className="field-guidance">Instruções adicionais para as próximas execuções. Até 8.192 caracteres; não inclua credenciais.</small>
       </div>
     </div>
 
@@ -414,7 +417,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
     {saveState.status === 'conflict' && <div className="notice profile-save-error" role="alert"><b>Conflito ao salvar</b><p>{saveState.message}</p>{canApplyConflict && <button type="button" onClick={applyLatestRevision}>{profileId ? 'Aplicar minha edição sobre a revisão atual' : 'Usar a revisão atual e tentar novamente'}</button>}</div>}
     {uncertainId && <div className="notice profile-save-error" role="alert"><b>Gravação ainda não confirmada</b><p>{recoveryMessage}</p><button type="button" onClick={() => void finishUncertainSave()} disabled={saveInFlightRef.current}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void finishUncertainSave(true)} disabled={saveInFlightRef.current}>Reapresentar a mesma operação</button>}</div>}
 
-    <div className="profile-dialog-footer">
+    <div className="profile-dialog-footer dialog-actions">
       <button type="button" onClick={onClose}>Cancelar</button>
       <button type="submit" className="primary" disabled={!canSave}>{saveState.status === 'saving' ? 'Salvando…' : profileId ? 'Salvar alterações' : 'Criar perfil'}</button>
     </div>

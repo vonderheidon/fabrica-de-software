@@ -146,12 +146,12 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
 
   if (deletionRestricted || !projectChecked) return <p role="status">Publicação indisponível. Consulte o cadastro; uma exclusão pendente impede publicar.</p>;
   return <section className="card publication-panel" aria-labelledby="publication-panel-title">
-    <div className="line"><div><span className="eyebrow">Entrega e publicação</span><h3 id="publication-panel-title">Versão e efeitos autorizados</h3></div><button type="button" onClick={onRefresh}>Atualizar estado</button></div>
+    <div className="line"><div><span className="eyebrow">Entrega e publicação</span><h3 id="publication-panel-title">Entrega e ações autorizadas</h3></div><button type="button" onClick={onRefresh}>Atualizar estado</button></div>
     {[summary.commit, summary.push, summary.pull_request].some((effect) => effect?.state === 'failed_known') && <p role="alert">Publicação bloqueada. A versão aprovada foi preservada. Consulte o motivo abaixo e, após resolver o impedimento, use Concluir modo autorizado para continuar os efeitos pendentes.</p>}
     <dl className="preparation-facts">
       <div><dt>Versão selecionada</dt><dd>Versão da tentativa</dd></div>
       <div><dt>Conteúdo aprovado</dt><dd>{summary.review_state === 'approved' ? 'Aprovado para esta versão' : 'Ainda sem aprovação'}</dd></div>
-      <div><dt>Modo capturado</dt><dd>{modeLabel[delivery.authorizations.captured_mode]}</dd></div>
+      <div><dt>Modo inicial</dt><dd>{modeLabel[delivery.authorizations.captured_mode]}</dd></div>
       <div><dt>Modo autorizado</dt><dd>{modeLabel[delivery.authorizations.authorized_mode]}</dd></div>
       <div><dt>Parecer</dt><dd>{summary.review_state === 'approved' ? 'Aprovado para esta versão' : summary.review_state === 'rejected' ? 'Reprovado nesta versão' : 'Pendente'}</dd></div>
       <div><dt>Conclusão do modo</dt><dd>{summary.local_state === 'completed' ? 'Concluída' : 'Pendente'}</dd></div>

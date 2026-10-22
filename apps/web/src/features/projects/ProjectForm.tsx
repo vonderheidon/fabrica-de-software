@@ -17,7 +17,7 @@ import { GitHubSetupPanel } from './GitHubSetupPanel.js';
 import { ProjectsFolderField } from './ProjectsFolderField.js';
 import { MinutesField } from './MinutesField.js';
 import { useGitHubSetup } from './useGitHubSetup.js';
-import { useNativeSelection } from './useNativeSelection.js';
+import { nativeSelectionMessage, useNativeSelection } from './useNativeSelection.js';
 import { FieldHelp, fieldGuidanceFor } from './FieldHelp.js';
 import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 import { ProjectDeletionAction } from './ProjectDeletionAction.js';
@@ -151,21 +151,21 @@ function conflictCurrentValues(draft: EditorDraft, view: EditableView): { label:
   return values;
 }
 
-function TextField({ label, value, onChange, type = 'text', help, error, required = false }: {
-  label: string; value: string; onChange: (value: string) => void; type?: string; help?: string; error?: string | null; required?: boolean;
+function TextField({ label, value, onChange, type = 'text', help, error, compactHelp = false, required = false }: {
+  label: string; value: string; onChange: (value: string) => void; type?: string; help?: string; compactHelp?: boolean; error?: string | null; required?: boolean;
 }) {
   const id = `field-${label.toLocaleLowerCase('en').replace(/[^a-z0-9]+/g, '-')}`;
   const helpId = `${id}-help`;
-  const description = [help, fieldGuidanceFor(label)].filter(Boolean).join(' ');
+  const description = compactHelp ? help : [help, fieldGuidanceFor(label)].filter(Boolean).join(' ');
   return <div className="form-field"><label htmlFor={id}>{label}</label><input id={id} value={value} type={type} required={required} onChange={(event) => onChange(event.currentTarget.value)} aria-invalid={Boolean(error)} aria-describedby={[error ? `${id}-error` : null, helpId].filter(Boolean).join(' ')} />{error && <span id={`${id}-error`} className="error">{error}</span>}<small id={helpId} className="field-guidance">{description}</small></div>;
 }
 
-function SelectField({ label, value, onChange, options, disabled = false, help, error }: {
-  label: string; value: string; onChange: (value: string) => void; options: readonly { value: string; label: string }[]; disabled?: boolean; help?: string; error?: string | null;
+function SelectField({ label, value, onChange, options, disabled = false, help, error, compactHelp = false }: {
+  label: string; value: string; onChange: (value: string) => void; options: readonly { value: string; label: string }[]; disabled?: boolean; help?: string; compactHelp?: boolean; error?: string | null;
 }) {
   const id = `field-${label.toLocaleLowerCase('en').replace(/[^a-z0-9]+/g, '-')}`;
   const helpId = `${id}-help`;
-  const description = [help, fieldGuidanceFor(label)].filter(Boolean).join(' ');
+  const description = compactHelp ? help : [help, fieldGuidanceFor(label)].filter(Boolean).join(' ');
   return <div className="form-field"><label htmlFor={id}>{label}</label><select id={id} value={value} disabled={disabled} aria-invalid={Boolean(error)} aria-describedby={[error ? `${id}-error` : null, helpId].filter(Boolean).join(' ')} onChange={(event) => onChange(event.currentTarget.value)}><option value="">Selecione…</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>{error && <span id={`${id}-error`} className="error">{error}</span>}<small id={helpId} className="field-guidance">{description}</small></div>;
 }
 
@@ -180,6 +180,7 @@ function NumberField({ label, value, onChange, min, max, step = 1, unit }: {
 type RegistrationDraft = { name: string; kind: 'local' | 'github'; location: string; baseBranch: string; commandId: string | null };
 const registrationDraftKey = 'project-registration';
 export function ProjectRegistrationForm({ identity, onRegistered }: { identity: string; onRegistered: (projectId: string) => void }) {
+  const folderSelection = useNativeSelection();
   const [form, setForm] = useState<RegistrationDraft>(() => getDraft<RegistrationDraft>(identity, registrationDraftKey) ?? { name: '', kind: 'local', location: '', baseBranch: 'main', commandId: null });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(ProjectRegistered) | null>(null);
@@ -193,6 +194,11 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
       return next;
     });
   }
+  useEffect(() => {
+    if (folderSelection.state.status === 'selected' && folderSelection.state.kind === 'project_directory' && form.kind === 'local') {
+      updateForm({ location: folderSelection.state.path, commandId: null });
+    }
+  }, [folderSelection.state]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -214,17 +220,20 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
 
   if (result) return <section className="project-form-success" aria-live="polite"><span className="pill">Cadastro confirmado</span><h3>{result.project.name}</h3><p>{result.project.source.kind === 'local' ? 'Origem local registrada. Somente o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.' : 'Origem GitHub registrada.'}</p>{result.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos de execução</b>{result.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}</div>}<button type="button" className="primary" onClick={() => onRegistered(result.project.id)}>Abrir configuração do projeto</button></section>;
 
-  return <form className="feature-form" onSubmit={(event) => void submit(event)} noValidate>
-    <p className="muted">Cadastre uma origem existente para consultar e configurar. O cadastro não clona nem inicia trabalho.</p>
+  const missingFields = [!form.name.trim() && 'nome do projeto', !form.location.trim() && locationLabel.toLocaleLowerCase('pt-BR'), !form.baseBranch.trim() && 'branch-base'].filter(Boolean);
+  return <form className="creation-flow feature-form registration-form" onSubmit={(event) => void submit(event)} noValidate>
+    <p className="creation-intro">Conecte um projeto que você já tem para configurar e acompanhar pela fábrica.</p>
     {failure && <div className="read-state" role="alert"><b>Cadastro não confirmado</b><p>{failure.message}</p><p><strong>Próxima ação:</strong> revise os campos destacados e consulte o estado atual antes de repetir.</p></div>}
-    <div className="form-grid">
-      <TextField label="Nome do projeto" value={form.name} onChange={(value) => updateForm({ name: value, commandId: null })} required error={fieldMessage('name')} />
-      <SelectField label="Tipo de origem" value={form.kind} onChange={(value) => updateForm({ kind: value as 'local' | 'github', commandId: null })} options={[{ value: 'local', label: 'Pasta local existente' }, { value: 'github', label: 'Repositório GitHub' }]} error={fieldMessage('source.kind')} />
-      <TextField label={locationLabel} value={form.location} onChange={(value) => updateForm({ location: value, commandId: null })} required error={fieldMessage('source.location')} help={form.kind === 'local' ? 'A pasta permanece intacta; não é necessário ter remoto configurado.' : 'Use uma URL HTTPS ou SSH sem credenciais embutidas.'} />
-      <TextField label="Branch-base" value={form.baseBranch} onChange={(value) => updateForm({ baseBranch: value, commandId: null })} required error={fieldMessage('base_branch')} />
+    <div className="form-grid creation-form-grid">
+      <div className="creation-group-heading field-full"><h3>Dados do projeto</h3><span>* Obrigatório</span></div>
+      <div className="field-full"><TextField compactHelp label="Nome do projeto" value={form.name} onChange={(value) => updateForm({ name: value, commandId: null })} required error={fieldMessage('name')} help="Nome usado para identificar o projeto na fábrica." /></div>
+      <div className="creation-group-heading creation-repository-heading field-full"><h3>Origem do projeto</h3><span>Local ou GitHub</span></div>
+      <SelectField compactHelp label="Tipo de origem" help="Escolha onde o projeto já está armazenado." value={form.kind} onChange={(value) => updateForm({ kind: value as 'local' | 'github', commandId: null })} options={[{ value: 'local', label: 'Pasta local existente' }, { value: 'github', label: 'Repositório GitHub' }]} error={fieldMessage('source.kind')} />
+      <TextField compactHelp label="Branch-base" help="Branch usada como referência nas preparações." value={form.baseBranch} onChange={(value) => updateForm({ baseBranch: value, commandId: null })} required error={fieldMessage('base_branch')} />
+      <div className="field-full">{form.kind === 'local' ? <div className="registration-folder-field"><label htmlFor="registration-folder">Pasta local existente *</label><div className="registration-folder-row"><input id="registration-folder" value={form.location} readOnly placeholder="Selecione a pasta do projeto" aria-describedby="registration-folder-help" /><button type="button" disabled={busy || folderSelection.state.status === 'selecting'} onClick={() => void folderSelection.select('project_directory')}>{folderSelection.state.status === 'selecting' ? 'Abrindo janela…' : form.location ? 'Trocar pasta' : 'Selecionar pasta'}</button></div><small id="registration-folder-help">Escolha uma pasta que já contenha um repositório Git.</small>{fieldMessage('source.location') && <p className="error" role="alert">{fieldMessage('source.location')}</p>}{folderSelection.state.status !== 'idle' && folderSelection.state.status !== 'selected' && <p role="status">{nativeSelectionMessage(folderSelection.state)}</p>}</div> : <TextField compactHelp label={locationLabel} value={form.location} onChange={(value) => updateForm({ location: value, commandId: null })} required error={fieldMessage('source.location')} help="Use uma URL HTTPS ou SSH sem credenciais embutidas." />}</div>
     </div>
-    {form.kind === 'local' && <div className="notice"><b>Origem local</b><p>O projeto continua consultável mesmo sem remoto. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão identificados antes de qualquer execução.</p></div>}
-    <div className="form-actions"><button type="submit" className="primary" disabled={busy || !form.name.trim() || !form.location.trim() || !form.baseBranch.trim()}>{busy ? 'Cadastrando…' : 'Adicionar existente'}</button></div>
+    <div className="creation-destination-preview"><span>Sobre o cadastro</span><p className="registration-source-note">{form.kind === 'local' ? 'A pasta permanece intacta. As execuções usam apenas o conteúdo commitado no Git.' : 'O cadastro vincula o repositório GitHub; não clona arquivos nem inicia uma execução.'}</p></div>
+    <div className="form-actions creation-form-footer"><p id="registration-guidance">{busy ? 'Aguarde a confirmação do cadastro.' : missingFields.length ? `Preencha: ${missingFields.join(', ')}.` : 'Depois de adicionar, configure os pré-requisitos do projeto.'}</p><button type="submit" className="primary" aria-describedby="registration-guidance" disabled={busy || folderSelection.state.status === 'selecting' || missingFields.length > 0}>{busy ? 'Cadastrando…' : 'Adicionar existente'}</button></div>
   </form>;
 }
 
@@ -642,7 +651,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
       pollingIntervalMs={load.view.settings.time_defaults.polling_interval_ms} onProjectNameChange={setProjectName} /></section>}
 
-    <section className="card form-actions-card"><div className="save-feedback" aria-live="polite">
+    <section className="card form-actions-card dialog-actions"><div className="save-feedback" aria-live="polite">
       {!projectId && (saveState.status === 'idle' || saveState.status === 'saved') && <span className="muted">{same(draft.global, draft.baselineGlobal) ? 'Nenhuma alteração pendente.' : 'Há alterações não salvas.'}</span>}
       {saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}{saveState.status === 'saved' && <><span className="pill">{saveState.message}</span></>}{saveState.status === 'error' && <><span className="error" role="alert">Erro: {saveState.message}</span></>}{saveState.status === 'conflict' && <><span className="conflict-message" role="alert">Conflito: {saveState.message}</span></>}{saveState.status === 'conflict' && !conflictView && <button type="button" onClick={() => void retryConflictRead()}>Consultar dados atuais</button>}{githubSettingsPending && <span role="status">Consulte ou recupere a operação GitHub original antes de salvar outras alterações.</span>}{Object.entries(timeFieldErrors).map(([field, message]) => <span className="error" role="alert" key={field}>{message}</span>)}</div><button type="button" className="primary" disabled={Boolean(configurationLock) || deletionRestricted || saveState.status === 'saving' || githubSettingsPending || Object.keys(timeFieldErrors).length > 0} onClick={() => void save()}>Salvar configuração</button></section>
 

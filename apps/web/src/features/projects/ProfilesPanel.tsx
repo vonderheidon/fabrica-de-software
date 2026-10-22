@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { CloseIcon } from '../../app/CloseIcon.js';
 import type { SettingsSaved, StoredExecutionProfile } from '#contracts';
 import {
   consultConfigurationSave, finishConfigurationSave, hasOriginalConfigurationSave,
@@ -415,8 +416,9 @@ function ProfileDeleteConfirmation({ flow, profiles, busy, returnFocusTarget, on
     if (flow.status === 'confirm' && flow.operationId === null) nameInputRef.current?.focus();
   }, [flow.operationId, flow.profile.id, flow.status]);
   return <dialog ref={dialogRef} className="profile-delete-dialog" aria-labelledby="profile-delete-title" aria-describedby="profile-delete-description" onCancel={(event) => { event.preventDefault(); if (!busy) onCancel(); }}>
+    <div className="line dialog-toolbar"><span className="eyebrow">Exclusão de perfil</span><button type="button" className="close-button" aria-label="Fechar diálogo de exclusão" onClick={onCancel} disabled={busy}><CloseIcon /></button></div>
     <form className="profile-delete-confirmation" onSubmit={onSubmit}>
-    <div><span className="eyebrow">Confirmação de integridade</span><h2 id="profile-delete-title">Excluir “{flow.profile.name}”?</h2><p id="profile-delete-description">Digite o nome completo do perfil para confirmar a exclusão lógica. Perfis usados por projetos atuais ou tentativas ativas terão a exclusão recusada.</p></div>
+    <div><h2 id="profile-delete-title">Excluir “{flow.profile.name}”?</h2><p id="profile-delete-description">Digite o nome para confirmar. Perfis em uso por projetos ou tentativas ativas não podem ser excluídos.</p></div>
     {isLast && <div className="notice compact-notice" role="status"><b>Último perfil de {flow.profile.profile_type === 'implementer' ? 'Implementador' : 'Revisor'}</b><p>Se ele for excluído, novos inícios poderão ser bloqueados até que outro perfil deste papel seja criado.</p></div>}
     {flow.error && <ProfileDeleteBlockers error={flow.error} />}
     {flow.message && !flow.error && <p className={flow.status === 'uncertain' ? 'profile-delete-uncertain' : 'profile-delete-message'} role={flow.status === 'uncertain' ? 'status' : 'alert'}>{flow.message}</p>}
@@ -427,7 +429,7 @@ function ProfileDeleteConfirmation({ flow, profiles, busy, returnFocusTarget, on
       }} aria-describedby="profile-delete-help" />
       <small id="profile-delete-help">Digite exatamente: {flow.profile.name}</small>
     </label>
-    <div className="profile-delete-actions">
+    <div className="profile-delete-actions dialog-actions">
       <button type="button" onClick={onCancel} disabled={busy}>Cancelar</button>
       {flow.status === 'uncertain' && flow.operationId && <button type="button" onClick={onInspect} disabled={busy}>{busy ? 'Consultando…' : 'Consultar exclusão original'}</button>}
       {flow.status === 'uncertain' && flow.canResend && <button type="button" onClick={onResend} disabled={busy}>Reapresentar a mesma exclusão</button>}

@@ -13,7 +13,6 @@ type FormState = {
   destinationRelative: string;
   baseBranch: string;
   creationMode: CreationMode;
-  triageEnabled: boolean;
   ownerId: string;
   remoteName: string;
   visibility: 'private' | 'public';
@@ -21,11 +20,16 @@ type FormState = {
 type CreationLoad = { status: 'loading' } | { status: 'error'; message: string } | { status: 'ready'; view: CreationView; etag: string | null };
 
 const initialForm: FormState = {
-  name: '', templateId: '', destinationRelative: '', baseBranch: 'main', creationMode: 'local', triageEnabled: false,
+  name: '', templateId: '', destinationRelative: '', baseBranch: 'main', creationMode: 'local',
   ownerId: '', remoteName: '', visibility: 'private',
 };
 const modeLabels: Record<CreationMode, string> = {
   local: 'Somente local', remote_no_push: 'Remoto sem push', remote_push: 'Remoto com push',
+};
+const modeDescriptions: Record<CreationMode, string> = {
+  local: 'Cria a pasta e um repositório Git com o commit inicial neste computador.',
+  remote_no_push: 'Também cria e vincula um repositório vazio no GitHub. Os arquivos permanecem somente neste computador.',
+  remote_push: 'Também cria um repositório no GitHub e publica os arquivos do commit inicial na branch escolhida.',
 };
 const stepLabels: Record<string, string> = {
   directory: 'Pasta', files: 'Arquivos do template', git: 'Repositório Git local', baseline: 'Commit inicial', registration: 'Cadastro do projeto',
@@ -160,6 +164,11 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
 
   const modeCapability = options?.creation_modes.find((item) => item.mode === form.creationMode)?.capability;
   const remoteMode = form.creationMode !== 'local';
+  const missingFields = [!form.name.trim() && 'nome do projeto', !form.destinationRelative.trim() && 'pasta do projeto',
+    !form.baseBranch.trim() && 'branch-base', remoteMode && !form.ownerId.trim() && 'proprietário',
+    remoteMode && !form.remoteName.trim() && 'nome do repositório'].filter(Boolean);
+  const destinationPreview = options?.projects_root
+    ? `${options.projects_root.replace(/[\\/]+$/, '')}${options.projects_root.includes('\\') ? '\\' : '/'}${form.destinationRelative.trim() || '(pasta do projeto)'}` : null;
   const currentView = creation.status === 'ready' ? creation.view : null;
   const canReconcile = Boolean(currentView && currentView.creation.state === 'partial' && creation.status === 'ready' && creation.etag &&
     currentView.remote_effects.some((effect) => ['unknown', 'running', 'failed_known'].includes(effect.state)));
@@ -179,7 +188,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     const base: ScaffoldInput = {
       name: current.name.trim(), template_id: template.id, template_digest: template.digest,
       destination_relative: current.destinationRelative.trim(), creation_mode: current.creationMode,
-      base_branch: current.baseBranch.trim(), triage_enabled: current.triageEnabled,
+      base_branch: current.baseBranch.trim(), triage_enabled: true,
     };
     return current.creationMode === 'local' ? base : {
       ...base,
@@ -318,7 +327,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     onOpenProject={onOpenProject} canReconcile={canReconcile} reconciling={reconciling} reconcileUncertain={reconcileUncertain} reconcileNotice={reconcileNotice} onReconcile={() => void reconcile()} onConsultReconcile={() => void consultReconcile()} />;
 
   if (plan) return <section className="creation-flow" aria-labelledby="creation-plan-title">
-    <div className="creation-section-heading"><span className="eyebrow">Revisão sem efeitos</span><h3 id="creation-plan-title">Plano de criação</h3><p>Confira o destino, os arquivos, a configuração de engenharia e os efeitos antes da única confirmação.</p></div>
+    <div className="creation-section-heading"><span className="eyebrow">Antes de criar</span><h3 id="creation-plan-title">Plano de criação</h3><p>Confira o destino, os arquivos e as ações que serão executadas ao criar.</p></div>
     {planError && <div className="read-state" role="alert">{planError}</div>}
     <div className="creation-plan-grid">
       <div><small>Destino</small><code>{plan.plan.destination}</code></div>
@@ -332,45 +341,47 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     <div className="notice creation-engineering"><b>Engenharia incluída</b><p>Tracker {plan.plan.engineering.tracker} · domínio {plan.plan.engineering.domain} · instruções em {plan.plan.engineering.instruction_file} · triagem {plan.plan.engineering.triage_enabled ? 'incluída' : 'desativada'}. Nenhuma skill será instalada nem label criada.</p></div>
     <div className="creation-effect-list"><h4>Efeitos previstos</h4><ul>{plan.plan.effects.map((effect) => <li key={effect}>{stepLabels[effect] ?? effect}</li>)}</ul></div>
     {plan.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos ainda pendentes</b>{plan.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}</div>}
-    <label className="creation-authorization"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.currentTarget.checked)} />Confirmo uma vez este plano e seus efeitos.</label>
+    <label className="creation-authorization"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.currentTarget.checked)} />Confirmo este plano e autorizo as ações listadas.</label>
     {operationNotice && <div className="read-state" role="status">{operationNotice}</div>}
-    <div className="form-actions"><button type="button" onClick={() => { setPlan(null); setAuthorized(false); setPlanError(null); setActiveOperationId(null); onPlanEdit(); }}>Voltar e editar</button>
+    <div className="form-actions dialog-actions"><button type="button" onClick={() => { setPlan(null); setAuthorized(false); setPlanError(null); setActiveOperationId(null); onPlanEdit(); }}>Voltar e editar</button>
       {uncertain && <button type="button" onClick={() => void consultOperation()} disabled={submitting}>{submitting ? 'Consultando…' : 'Consultar operação'}</button>}
       <button type="button" className="primary" disabled={!authorized || submitting || uncertain || modeCapability?.available !== true} onClick={() => void submitCreation()}>{submitting ? 'Enviando uma vez…' : 'Criar projeto'}</button></div>
   </section>;
 
   return <form className="creation-flow feature-form" onSubmit={(event) => void reviewPlan(event)} noValidate>
-    <p className="muted">Crie um projeto em um destino novo, com template versionado, instruções de engenharia e baseline local revisável. A criação não inicia issue, agente ou sessão.</p>
+    <p className="creation-intro">Prepare o espaço do seu próximo projeto. Confira tudo antes de criar.</p>
     {!options && !optionsError && <p role="status" aria-live="polite">Consultando templates e capacidades do host…</p>}
     {optionsError && <div className="read-state" role="alert">{optionsError}<button type="button" onClick={() => { setOptionsError(null); setOptionsReload((value) => value + 1); }}>Consultar novamente</button></div>}
     {operationNotice && <div className="read-state" role="status">{operationNotice}{uncertain && <button type="button" onClick={() => void consultOperation()} disabled={submitting}>{submitting ? 'Consultando…' : 'Consultar operação'}</button>}</div>}
-    <div className="form-grid">
-      <label className="form-field" htmlFor="creation-name">Nome do projeto<input id="creation-name" value={form.name} required onChange={(event) => { const name = event.currentTarget.value; invalidatePlan((current) => ({ ...current, name, ...(!destinationEdited ? { destinationRelative: suggestedPath(name) } : {}), ...(!remoteNameEdited ? { remoteName: suggestedPath(name) } : {}) })); }} /></label>
-      <label className="form-field" htmlFor="creation-template">Template<select id="creation-template" value={form.templateId} required disabled={!options?.templates.length} onChange={(event) => { const templateId = event.currentTarget.value; invalidatePlan((current) => ({ ...current, templateId })); }}><option value="">Selecione…</option>{options?.templates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select>{options?.templates.find((template) => template.id === form.templateId) && <small>{options.templates.find((template) => template.id === form.templateId)?.engineering_summary}</small>}</label>
-      <label className="form-field" htmlFor="creation-destination">Diretório relativo ao destino configurado<input id="creation-destination" value={form.destinationRelative} required onChange={(event) => { const destinationRelative = event.currentTarget.value; setDestinationEdited(true); invalidatePlan((current) => ({ ...current, destinationRelative })); }} />{options?.projects_root && <small>Raiz configurada: <code>{options.projects_root}</code></small>}</label>
-      <label className="form-field" htmlFor="creation-branch">Branch-base<input id="creation-branch" value={form.baseBranch} required onChange={(event) => { const baseBranch = event.currentTarget.value; invalidatePlan((current) => ({ ...current, baseBranch })); }} /></label>
-      <label className="form-field field-full" htmlFor="creation-mode">Modalidade de criação<select id="creation-mode" value={form.creationMode} onChange={(event) => { const creationMode = event.currentTarget.value as CreationMode; invalidatePlan((current) => ({ ...current, creationMode })); }}>{(['local', 'remote_no_push', 'remote_push'] as const).map((mode) => {
+    <div className="form-grid creation-form-grid">
+      <div className="creation-group-heading field-full"><h3>Dados do projeto</h3><span>* Obrigatório</span></div>
+      <label className="form-field" htmlFor="creation-name">Nome do projeto *<input id="creation-name" value={form.name} required onChange={(event) => { const name = event.currentTarget.value; invalidatePlan((current) => ({ ...current, name, ...(!destinationEdited ? { destinationRelative: suggestedPath(name) } : {}), ...(!remoteNameEdited ? { remoteName: suggestedPath(name) } : {}) })); }} /></label>
+      {options && options.templates.length > 1 && <label className="form-field" htmlFor="creation-template">Template *<select id="creation-template" value={form.templateId} required onChange={(event) => { const templateId = event.currentTarget.value; invalidatePlan((current) => ({ ...current, templateId })); }}><option value="">Selecione…</option>{options.templates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</select></label>}
+      <label className="form-field" htmlFor="creation-destination">Pasta do projeto *<input id="creation-destination" placeholder="nome-do-projeto" value={form.destinationRelative} required aria-describedby="creation-destination-preview" onChange={(event) => { const destinationRelative = event.currentTarget.value; setDestinationEdited(true); invalidatePlan((current) => ({ ...current, destinationRelative })); }} /></label>
+      <label className="form-field" htmlFor="creation-branch">Branch-base *<input id="creation-branch" value={form.baseBranch} required onChange={(event) => { const baseBranch = event.currentTarget.value; invalidatePlan((current) => ({ ...current, baseBranch })); }} /></label>
+      {destinationPreview && <div className="creation-destination-preview field-full" id="creation-destination-preview"><span>O projeto será criado em</span><code>{destinationPreview}</code></div>}
+      <div className="creation-group-heading creation-repository-heading field-full"><h3>Repositório</h3><span>Local ou GitHub</span></div>
+      <label className="form-field field-full" htmlFor="creation-mode">Onde guardar o projeto<select id="creation-mode" value={form.creationMode} aria-describedby="creation-mode-help" onChange={(event) => { const creationMode = event.currentTarget.value as CreationMode; invalidatePlan((current) => ({ ...current, creationMode })); }}>{(['local', 'remote_no_push', 'remote_push'] as const).map((mode) => {
         const capability = options?.creation_modes.find((item) => item.mode === mode)?.capability;
         return <option key={mode} value={mode}>{modeLabels[mode]}{capability && !capability.available ? ' · indisponível neste host' : ''}</option>;
-      })}</select>{modeCapability && !modeCapability.available && <small className="error">{modeCapability.reason} {modeCapability.recovery}</small>}</label>
+      })}</select><small id="creation-mode-help">{modeDescriptions[form.creationMode]}</small>{modeCapability && !modeCapability.available && <small className="error">{modeCapability.reason} {modeCapability.recovery}</small>}</label>
       {remoteMode && <>
-        <div className="form-field"><label htmlFor="creation-owner-account">Proprietário do repositório<select id="creation-owner-account" value={form.ownerId === options?.account.id ? form.ownerId : ''} onChange={(event) => { const ownerId = event.currentTarget.value; ownerEditedRef.current = true; invalidatePlan((current) => ({ ...current, ownerId })); }}><option value="">Selecione…</option>{options?.account.id && options.account.login && <option value={options.account.id}>{options.account.login}</option>}</select></label></div>
-        <label className="form-field" htmlFor="creation-remote-name">Nome do repositório remoto<input id="creation-remote-name" value={form.remoteName} onChange={(event) => { const remoteName = event.currentTarget.value; setRemoteNameEdited(true); invalidatePlan((current) => ({ ...current, remoteName })); }} /></label>
+        <div className="form-field"><label htmlFor="creation-owner-account">Proprietário do repositório *<select id="creation-owner-account" required value={form.ownerId === options?.account.id ? form.ownerId : ''} onChange={(event) => { const ownerId = event.currentTarget.value; ownerEditedRef.current = true; invalidatePlan((current) => ({ ...current, ownerId })); }}><option value="">Selecione…</option>{options?.account.id && options.account.login && <option value={options.account.id}>{options.account.login}</option>}</select></label></div>
+        <label className="form-field" htmlFor="creation-remote-name">Nome do repositório remoto *<input id="creation-remote-name" required value={form.remoteName} onChange={(event) => { const remoteName = event.currentTarget.value; setRemoteNameEdited(true); invalidatePlan((current) => ({ ...current, remoteName })); }} /></label>
         <label className="form-field" htmlFor="creation-visibility">Visibilidade<select id="creation-visibility" value={form.visibility} onChange={(event) => { const visibility = event.currentTarget.value as FormState['visibility']; invalidatePlan((current) => ({ ...current, visibility })); }}><option value="private">Privado</option><option value="public">Público</option></select></label>
       </>}
-      <label className="check form-check field-full"><input type="checkbox" checked={form.triageEnabled} onChange={(event) => { const triageEnabled = event.currentTarget.checked; invalidatePlan((current) => ({ ...current, triageEnabled })); }} />Incluir vocabulário de triagem nas instruções de engenharia</label>
     </div>
-    {options && <div className="creation-account-note"><small>Conta observada: <b>{options.account.login ?? 'Não confirmada'}</b></small></div>}
+    {options && remoteMode && <div className="creation-account-note"><small>Conta GitHub conectada: <b>{options.account.login ?? 'Não confirmada'}</b>. O repositório será criado para o proprietário selecionado.</small></div>}
     {options?.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}
     {planError && <div className="read-state" role="alert">{planError}</div>}
-    <div className="form-actions"><button type="submit" className="primary" disabled={!options || planning || uncertain || !form.name.trim() || !form.templateId || !form.destinationRelative.trim() || !form.baseBranch.trim() || (remoteMode && (!form.ownerId.trim() || !form.remoteName.trim())) || modeCapability?.available !== true}>{planning ? 'Preparando plano…' : 'Revisar plano'}</button></div>
+    <div className="form-actions creation-form-footer dialog-actions"><p id="creation-plan-guidance">{missingFields.length ? `Preencha: ${missingFields.join(', ')}.` : !options ? 'Aguarde a consulta das opções de criação.' : uncertain ? 'Consulte a criação sem confirmação antes de continuar.' : modeCapability?.available !== true ? 'Resolva a indisponibilidade desta modalidade para continuar.' : !form.templateId ? 'Selecione um template disponível.' : 'O próximo passo permite revisar o plano antes de criar.'}</p><button type="submit" className="primary" aria-describedby="creation-plan-guidance" disabled={!options || planning || uncertain || missingFields.length > 0 || !form.templateId || modeCapability?.available !== true}>{planning ? 'Preparando plano…' : 'Revisar plano'}</button></div>
   </form>;
 }
 
 function CreationResult({ load, onRefresh, onOpenProject, canReconcile, reconciling, reconcileUncertain, reconcileNotice, onReconcile, onConsultReconcile }: {
   load: CreationLoad; onRefresh: () => void; onOpenProject: (projectId: string) => void; canReconcile: boolean; reconciling: boolean; reconcileUncertain: boolean; reconcileNotice: string; onReconcile: () => void; onConsultReconcile: () => void;
 }) {
-  if (load.status === 'loading') return <section className="creation-flow" aria-busy="true"><p role="status">Consultando a criação pelo identificador persistido…</p></section>;
+  if (load.status === 'loading') return <section className="creation-flow" aria-busy="true"><p role="status">Consultando a criação…</p></section>;
   if (load.status === 'error') return <section className="creation-flow"><div className="read-state" role="alert">{load.message}</div><p>A identidade da criação permanece na URL. Consulte novamente quando o controlador estiver acessível.</p><button type="button" onClick={onRefresh}>Tentar consulta</button></section>;
   const { creation, effects, remote_effects: remoteEffects, confirmed_effects: confirmedEffects, pending_effects: pendingEffects, prerequisites, diagnostics } = load.view;
   const complete = creation.state === 'completed';
@@ -393,6 +404,6 @@ function CreationResult({ load, onRefresh, onOpenProject, canReconcile, reconcil
     {prerequisites.length > 0 && <div className="notice"><b>Antes de iniciar uma issue</b>{prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} projectId={creation.project_id} />)}</div>}
 
     {reconcileNotice && <div className="read-state" role="status">{reconcileNotice}</div>}
-    <div className="form-actions"><button type="button" onClick={onRefresh}>Consultar criação novamente</button>{canReconcile && !reconcileUncertain && <button type="button" onClick={onReconcile} disabled={reconciling}>{reconciling ? 'Conferindo…' : 'Conferir efeitos preservados'}</button>}{reconcileUncertain && <button type="button" onClick={onConsultReconcile} disabled={reconciling}>{reconciling ? 'Consultando…' : 'Consultar conferência'}</button>}{creation.project_id && <button type="button" className="primary" onClick={() => onOpenProject(creation.project_id!)}>Abrir configuração do projeto</button>}</div>
+    <div className="form-actions dialog-actions"><button type="button" onClick={onRefresh}>Consultar criação novamente</button>{canReconcile && !reconcileUncertain && <button type="button" onClick={onReconcile} disabled={reconciling}>{reconciling ? 'Conferindo…' : 'Conferir efeitos preservados'}</button>}{reconcileUncertain && <button type="button" onClick={onConsultReconcile} disabled={reconciling}>{reconciling ? 'Consultando…' : 'Consultar conferência'}</button>}{creation.project_id && <button type="button" className="primary" onClick={() => onOpenProject(creation.project_id!)}>Abrir configuração do projeto</button>}</div>
   </section>;
 }

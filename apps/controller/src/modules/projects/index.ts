@@ -76,6 +76,14 @@ async function canonicalProjectsRoot(directoryBase: string, supplied: string): P
   return directory;
 }
 
+async function readableProjectDirectory(supplied: string): Promise<string> {
+  if (!isAbsolute(supplied) || /[\x00-\x1f\x7f]/.test(supplied) || /^(?:\\\\|\/\/)/.test(supplied)) throw new Error('DIRECTORY_INVALID');
+  const directory = await realpath(supplied);
+  if (!(await stat(directory)).isDirectory()) throw new Error('DIRECTORY_INVALID');
+  await access(directory, constants.R_OK);
+  return directory;
+}
+
 async function canonicalGitHubExecutable(supplied: string): Promise<string> {
   if (!isAbsolute(supplied) || /[\x00-\x1f\x7f]/.test(supplied) || basename(supplied).toLowerCase() !== 'gh.exe' || /^(?:\\\\|\/\/)/.test(supplied)) throw new Error('EXECUTABLE_INVALID');
   const executable = await realpath(supplied);
@@ -139,7 +147,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
   async function selectSetting(input: NativeSelectionRequest, callerSignal?: AbortSignal): Promise<NativeSelectionResult> {
     if (!Value.Check(NativeSelectionRequest, input)) fail(400, 'NATIVE_SELECTION_INVALID', 'Choose a supported native selection.');
     if (activeSelection) throw new OperationError(409, activeSelection.diagnostic ?? 'NATIVE_SELECTION_IN_PROGRESS', selectionConflictMessage);
-    const select = input.kind === 'projects_root' ? selectProjectsDirectory : selectGitHubExecutable;
+    const select = input.kind !== 'gh_executable' ? selectProjectsDirectory : selectGitHubExecutable;
     if (!select) return { state: 'unavailable', kind: input.kind, path: null, diagnostic: 'NATIVE_SELECTION_UNAVAILABLE' };
 
     const controller = new AbortController();
@@ -165,14 +173,16 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       if (controller.signal.aborted) return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_CANCELLED' };
       if (candidate === null) return { state: 'cancelled', kind: input.kind, path: null };
       try {
-        const path = input.kind === 'projects_root'
+        const path = input.kind === 'project_directory'
+          ? await readableProjectDirectory(candidate)
+          : input.kind === 'projects_root'
           ? await canonicalProjectsRoot(directoryBase, candidate)
           : await canonicalGitHubExecutable(candidate);
         if (controller.signal.aborted) return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_CANCELLED' };
         return { state: 'selected', kind: input.kind, path, observed_at_ms: Date.now() };
       } catch {
         return { state: 'unavailable', kind: input.kind, path: null,
-          diagnostic: input.kind === 'projects_root' ? 'PROJECTS_ROOT_UNAVAILABLE' : 'GITHUB_EXECUTABLE_UNAVAILABLE' };
+          diagnostic: input.kind === 'project_directory' ? 'PROJECT_DIRECTORY_UNAVAILABLE' : input.kind === 'projects_root' ? 'PROJECTS_ROOT_UNAVAILABLE' : 'GITHUB_EXECUTABLE_UNAVAILABLE' };
       }
     } catch {
       return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_FAILED' };

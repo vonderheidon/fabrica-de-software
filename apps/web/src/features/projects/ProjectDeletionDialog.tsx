@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { CloseIcon } from '../../app/CloseIcon.js';
 import { isDefiniteDeletionRejection, type DeletionOriginContext, type ProjectDeletionPreview, type ProjectDeletionStatus } from '../../api/project-deletion.js';
 import { wrapDialogTabFocus } from '../../app/dialog-focus.js';
 import { confirmProjectDeletion, recoverUncertainOperation, useProjectDeletionPreview, useProjectDeletionStatus, resumeProjectDeletion } from './useProjectDeletion.js';
@@ -113,7 +114,8 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
       const focusables = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), [href], [tabindex="0"]')).filter((element) => element.getClientRects().length > 0);
       wrapDialogTabFocus({ shiftKey: event.shiftKey, activeElement: document.activeElement as HTMLElement | null, dialog, focusables, activeOutsideDialog: !dialog.contains(document.activeElement), preventDefault: () => event.preventDefault() });
     }}>
-    <h2 id="project-deletion-title" ref={titleRef} tabIndex={-1}>{operationId ? `Acompanhamento da exclusão de “${context.projectName}”` : `Excluir definitivamente “${context.projectName}”?`}</h2>
+    <div className="line dialog-toolbar"><span className="eyebrow">Exclusão de projeto</span><button type="button" className="close-button" aria-label="Fechar diálogo de exclusão" onClick={onClose}><CloseIcon /></button></div>
+    <h2 id="project-deletion-title" ref={titleRef} tabIndex={-1}>{operationId ? `Exclusão de “${context.projectName}”` : `Excluir definitivamente “${context.projectName}”?`}</h2>
     {stale && !operationId && <p role="alert">A configuração salva mudou. Volte à configuração e abra uma nova conferência.</p>}
     <div role="status" aria-live="polite" aria-atomic="true">{phase === 'submitting' ? 'Enviando pedido de exclusão…' : phase === 'uncertain' ? 'Estado da exclusão não confirmado.' : phase === 'accepted' ? deletionProgress(status) : preview.loading ? 'Conferindo a configuração salva…' : ''}</div>
     {phase !== 'accepted' && <>
@@ -126,7 +128,7 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
     {phase === 'preview' && preview.preview && !preview.preview.canConfirm && blockers.length === 0 && <p role="alert">A conferência não permite excluir. Atualize a conferência antes de tentar novamente.</p>}
     {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && <p>Itens já removidos não serão restaurados. Após reiniciar o controlador, pendências seguras serão retomadas; caminhos que exigem nova conferência aguardam Tentar novamente.</p>}
     {operationId && <p>Fechar ou navegar apenas deixa o acompanhamento. O pedido enviado não pode ser cancelado ou desfeito.</p>}
-    <div className="profile-delete-actions">
+    <div className="profile-delete-actions dialog-actions">
       <button type="button" onClick={onClose}>{operationId ? 'Fechar acompanhamento' : 'Voltar à configuração'}</button>
       {(phase === 'preview' || phase === 'stale_preview') && <button type="button" disabled={preview.loading} onClick={() => { setMessage(''); setPhase('preview'); preview.refetch(); }}>Atualizar conferência</button>}
       {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && status.canRetry && <button type="button" disabled={retrying} onClick={() => void resume()}>{retrying ? 'Solicitando retomada…' : 'Tentar novamente'}</button>}

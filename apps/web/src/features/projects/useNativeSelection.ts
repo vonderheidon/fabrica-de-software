@@ -22,19 +22,22 @@ export type NativeSelectionController = {
 
 const initialCandidates: Record<NativeSelectionKind, string | null> = {
   projects_root: null,
+  project_directory: null,
   gh_executable: null,
 };
 
 export function nativeSelectionMessage(state: NativeSelectionState): string | null {
   switch (state.status) {
     case 'idle': return null;
-    case 'selecting': return state.kind === 'projects_root' ? 'Aguardando a seleção da pasta…' : 'Aguardando a seleção do executável…';
-    case 'selected': return state.kind === 'projects_root' ? 'Pasta selecionada como candidata. Ela ainda não foi salva.' : 'Executável selecionado como candidato. Ele ainda não foi validado nem salvo.';
+    case 'selecting': return state.kind !== 'gh_executable' ? 'Aguardando a seleção da pasta…' : 'Aguardando a seleção do executável…';
+    case 'selected': return state.kind !== 'gh_executable' ? 'Pasta selecionada como candidata. Ela ainda não foi salva.' : 'Executável selecionado como candidato. Ele ainda não foi validado nem salvo.';
     case 'cancelled': return 'Seleção cancelada. O valor salvo e a edição atual foram mantidos.';
     case 'concurrent': return state.message;
     case 'expired': return 'A seleção excedeu 125 segundos. O fechamento da janela não foi confirmado; a fábrica não a abrirá novamente sem uma nova ação sua.';
     case 'unavailable': {
-      const explanation = state.diagnostic === 'PROJECTS_ROOT_UNAVAILABLE'
+      const explanation = state.diagnostic === 'PROJECT_DIRECTORY_UNAVAILABLE'
+        ? 'A pasta selecionada não está disponível para leitura. Escolha uma pasta local acessível.'
+        : state.diagnostic === 'PROJECTS_ROOT_UNAVAILABLE'
         ? 'A pasta não pôde ser confirmada para leitura e gravação. Escolha outra pasta e salve novamente.'
         : state.diagnostic === 'GITHUB_EXECUTABLE_UNAVAILABLE'
           ? 'O executável selecionado não pôde ser confirmado. Localize o gh.exe correto e tente novamente.'

@@ -1,0 +1,74 @@
+.dialog[role='dialog'], .profile-delete-dialog[open] {
+  --dialog-padding: 28px;
+  box-sizing: border-box;
+  padding: var(--dialog-padding);
+  background: #fff;
+  color: var(--fg);
+  border: 1px solid #e3e6e9;
+  border-radius: 18px;
+  scroll-padding-block: 80px 140px;
+}
+.dialog > #dialog-title, .profile-delete-dialog[open] h2 { margin: 0 0 12px; font-size: 26px; line-height: 1.25; letter-spacing: -.7px; overflow-wrap: anywhere; }
+.dialog:is([data-dialog='preparation'], [data-dialog='start-confirmation'], [data-dialog='detail']) { width: min(1000px, 100%); }
+.dialog .dialog-toolbar, .profile-delete-dialog .dialog-toolbar { background: #fff; border: 0; padding-block: 8px; margin-bottom: 18px; }
+.dialog .close-button, .profile-delete-dialog .close-button { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 44px; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 10px; border: 0; border-radius: 8px; background: #f3f5f6; color: #626871; }
+.dialog .close-button:enabled:hover, .profile-delete-dialog .close-button:enabled:hover { background: #eef0f3; color: #202326; }
+.dialog h3, .profile-delete-dialog h3 { font-size: 16px; font-weight: 650; line-height: 1.4; letter-spacing: -.2px; }
+.dialog p, .profile-delete-dialog p { line-height: 1.55; }
+.dialog :is(.form-grid, .profile-form-grid) { gap: 18px 22px; align-items: start; }
+.dialog .form-field, .profile-delete-dialog .form-field { margin: 0; min-width: 0; align-content: start; }
+.dialog .form-field > label, .profile-delete-dialog .form-field > label { margin: 0 0 6px; }
+.dialog :is(input:not([type='checkbox']):not([type='radio']), select, textarea), .profile-delete-dialog input:not([type='checkbox']) { box-sizing: border-box; min-height: 44px; border: 1px solid #aeb8c2; border-radius: 8px; padding: 10px 12px; background: #fff; color: #202326; font-size: 14px; }
+.dialog :is(input, select, textarea):enabled:hover, .profile-delete-dialog input:enabled:hover { border-color: #778594; }
+.dialog :is(input, select, textarea):disabled, .profile-delete-dialog input:disabled { background: #eef0f3; color: #626871; border-color: #d6dce2; }
+.dialog .field-guidance, .profile-delete-dialog .form-field small { display: block; margin-top: 6px; font-size: 12px; line-height: 1.5; color: #626871; font-weight: 400; }
+.dialog :is(.form-section, .preparation-section, .attempt-axis-card, .attempt-section, .publication-panel) { padding: 0 0 22px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; box-shadow: none; }
+.dialog :is(.form-section, .preparation-section, .attempt-section) .panel-title { margin-bottom: 18px; }
+.dialog :is(.preparation-facts, .queue-dialog-summary, .creation-plan-grid, .creation-result-grid) { gap: 12px 18px; }
+.dialog .mapping-editor { padding: 18px; border-radius: 10px; background: #f7f8f9; }
+.dialog :is(.notice, .read-state, .queue-error), .profile-delete-dialog .notice { border-radius: 8px; padding: 14px 16px; }
+.dialog :is(.notice, .read-state, .queue-error) > p:first-child { margin-top: 0; }
+.dialog :is(.notice, .read-state, .queue-error) > p:last-child { margin-bottom: 0; }
+.dialog[role="dialog"] .dialog-actions, .profile-delete-dialog[open] .dialog-actions {
+  position: sticky;
+  bottom: calc(-1 * var(--dialog-padding));
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px calc(-1 * var(--dialog-padding)) calc(-1 * var(--dialog-padding));
+  padding: 16px var(--dialog-padding);
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+  background: #fafbfc;
+}
+.dialog[role="dialog"] .dialog-actions > :is(p, .save-feedback) { flex: 1 1 180px; margin: 0; font-size: 13px; }
+.dialog[role="dialog"] .dialog-actions button, .profile-delete-dialog[open] .dialog-actions button { min-height: 44px; white-space: normal; }
+.dialog[role="dialog"] .dialog-actions > [role='status'] { font-size: 12px; }
+.dialog .initial-setup .profile-dialog-footer { position: static; margin: 0; padding: 14px 0 0; background: transparent; }
+.dialog .onboarding-footer { margin-top: 8px; }
+.dialog .onboarding-complete { padding: 22px 0 0; }
+.dialog .onboarding-complete .dialog-actions { justify-self: stretch; }
+.dialog .profile-catalog-row { padding: 12px 14px; border-radius: 8px; background: #f5f7f8; }
+.dialog .profile-form-grid > .dialog-section-title { grid-column: 1 / -1; margin: 6px 0 0; padding-top: 18px; border-top: 1px solid var(--border); }
+.dialog .profile-form-grid > .dialog-section-title:first-child { border: 0; padding-top: 0; margin-top: 0; }
+.dialog .profile-form-grid :is(label[for='profile-type'], label[for='profile-executor']) { margin-bottom: 6px; }
+.dialog .profile-form-grid > .form-field:has(:is(#profile-type, #profile-executor)) { grid-column: auto; }
+.profile-delete-dialog .profile-delete-confirmation { gap: 18px; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.dialog .onboarding-prompt-layer { z-index: 5; }
+.profile-delete-dialog .project-deletion-targets { padding: 14px; border-radius: 8px; background: #f5f7f8; }
+.profile-delete-dialog .project-deletion-targets span { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .dialog[role='dialog'], .profile-delete-dialog[open] { --dialog-padding: 20px; padding: var(--dialog-padding); }
+  .dialog > #dialog-title, .profile-delete-dialog[open] h2 { font-size: 23px; }
+  .dialog :is(.form-grid, .profile-form-grid) { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .dialog[role="dialog"] .dialog-actions, .profile-delete-dialog[open] .dialog-actions { bottom: calc(-1 * var(--dialog-padding)); margin-inline: calc(-1 * var(--dialog-padding)); margin-bottom: calc(-1 * var(--dialog-padding)); padding: 12px var(--dialog-padding); }
+  .dialog[role="dialog"] .dialog-actions > button, .profile-delete-dialog[open] .dialog-actions > button { flex: 1 1 130px; }
+  .dialog[role="dialog"] .dialog-actions > p { flex-basis: 100%; }
+  .dialog .profile-catalog-row { align-items: stretch; flex-direction: column; gap: 8px; }
+  .dialog .onboarding-footer-secondary { flex: 1 1 100%; }
+}

@@ -28,6 +28,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
   };
   async function plan(input: ScaffoldInput): Promise<ScaffoldPlanned> {
     if (!Value.Check(ScaffoldInput, input) || !input.name.trim()) throw new OperationError(400, 'SCAFFOLD_INPUT_INVALID', 'Scaffold choices are invalid.');
+    input = { ...input, triageEnabled: true };
     if ((input.creationMode === 'local') === Boolean(input.remote)) throw new OperationError(400,'SCAFFOLD_INPUT_INVALID','Remote choices are required only for remote modalities.');
     if (input.creationMode !== 'local' && (!github.inspectScaffoldRemote || !github.createScaffoldRepository || !github.reconcileScaffoldRepository || !workspaces.executeScaffoldGit || !workspaces.reconcileScaffoldGit)) throw new OperationError(409,'CREATION_MODE_UNAVAILABLE','The authorized remote scaffold adapters are unavailable.');
     try { validateScaffoldBranch(input.baseBranch); }

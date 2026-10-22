@@ -239,10 +239,9 @@ export function InitialSetupDialog({
 
   if (completed) return <div className="onboarding-complete" role="status" aria-live="polite">
     <span className="onboarding-complete-mark" aria-hidden="true">✓</span>
-    <span className="eyebrow">Configuração inicial</span>
-    <h3>Configuração inicial concluída</h3>
-    <p>As etapas foram confirmadas pelo controlador. Você já pode conhecer o catálogo dos projetos.</p>
-    <button type="button" className="primary" onClick={onGoProjects}>Ir para Projetos</button>
+    <h3>Tudo pronto</h3>
+    <p>Tudo configurado. Você já pode cadastrar seus projetos.</p>
+    <div className="dialog-actions"><button type="button" className="primary" onClick={onGoProjects}>Ir para Projetos</button></div>
   </div>;
 
   const currentStep = steps.find((step) => step.id === activeStep) ?? steps[0]!;
@@ -252,7 +251,7 @@ export function InitialSetupDialog({
 
   return <div className="initial-setup">
     <div className={`onboarding-content${showExitPrompt ? ' onboarding-content-blocked' : ''}`} aria-hidden={showExitPrompt}>
-    <div className="onboarding-intro"><span className="eyebrow">Primeiro acesso</span><h3>Vamos preparar a fábrica</h3><p>Confirme o GitHub, escolha a pasta e configure os dois perfis. Cada etapa avança após confirmação do controlador.</p></div>
+    <div className="onboarding-intro"><span className="eyebrow">Primeiro acesso</span><h3>Vamos preparar a fábrica</h3><p>Conecte o GitHub, escolha a pasta e configure os perfis de execução.</p></div>
     <ol className="onboarding-stepper" aria-label="Etapas da configuração inicial">
       {steps.map((step, index) => {
         const active = activeStep === step.id;
@@ -335,11 +334,11 @@ export function InitialSetupDialog({
     {onboarding.operation.status === 'uncertain' && <UncertainOperationFeedback operation={onboarding.operation} onRecover={onboarding.recover} />}
     {onboarding.load.error && settings && <div className="notice onboarding-read-error" role="alert"><p>A consulta mais recente falhou; os dados exibidos continuam sendo da última leitura confirmada. {onboarding.load.error.message}</p><button type="button" onClick={() => void onboarding.refresh()} disabled={onboarding.load.refreshing}>Tentar atualizar</button></div>}
 
-    <div className="onboarding-footer">
+    <div className="onboarding-footer dialog-actions">
       <div className="onboarding-footer-secondary">
         <button type="button" onClick={onRequestClose} disabled={saving}>Fechar por enquanto</button>
         <button type="button" className="quiet-button" onClick={suppress} disabled={operationBusy || hasUnsaved}>Não exibir novamente</button>
-        {hasUnsaved && <small className="muted">Salve ou descarte as alterações locais antes de registrar a supressão.</small>}
+        {hasUnsaved && <small className="muted">Salve ou descarte as alterações antes de ocultar este assistente.</small>}
       </div>
       <div className="onboarding-step-actions">
         {activeStep === 'projects_root' && <button type="button" onClick={() => requestStep('github')} disabled={!canVisitStep('github') || operationBusy}>Voltar</button>}

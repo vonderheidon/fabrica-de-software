@@ -208,7 +208,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           {!effectiveDeliveryId && <option value="">Versão planejada ou não capturada</option>}
           {roundItems.map(asRecord).filter((item) => String(item.round) === selectedRoundValue && typeof item.delivery_id === 'string').map((item) => <option key={String(item.delivery_id)} value={String(item.delivery_id)}>Versão {item.content_identity ? 'capturada' : 'pendente'}</option>)}
         </select>
-      </label><button type="button" onClick={() => setReload((value) => value + 1)}>Atualizar tentativa</button>{attempt.result && <button type="button" className="primary" onClick={() => onRetry(attempt)}>Nova tentativa</button>}</div>
+      </label></div>
 
       <section className="attempt-axis-card card"><h3>Estado operacional</h3><dl className="preparation-facts"><div><dt>Etapa</dt><dd><OperatorState value={attempt.phase} /></dd></div><div><dt>Resultado final</dt><dd>{attempt.result ? <OperatorState value={attempt.result} /> : 'Ainda não concluído'}</dd></div><div><dt>Suspensão</dt><dd>{attempt.suspension ? operatorCodeLabel(attempt.suspension) : 'Nenhuma'}</dd></div><div><dt>Acompanhamento</dt><dd><OperatorState value={attempt.tracking} /></dd></div><div><dt>Limpeza</dt><dd>{cleanupLabel(attempt.cleanup)}</dd></div><div><dt>Publicação</dt><dd><OperatorState value={attempt.publication.local_state} /></dd></div><div><dt>Modo capturado</dt><dd>{deliveryModeLabel(attempt.publication.mode)}</dd></div></dl>
         {attempt.diagnostic && <OperatorDiagnosticCard code={attempt.diagnostic} state="blocked" cause={attempt.diagnostic} recovery="Atualize a tentativa e consulte Registros e diagnóstico antes de uma nova ação." />}
@@ -282,7 +282,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         {deliveryState === 'not-captured' && <p className="muted">Esta rodada ainda não tem uma versão capturada.</p>}
         {deliveryState === 'error' && <div className="queue-error" role="alert"><p>{deliveryError}</p><p><strong>Próxima ação:</strong> atualize a tentativa e consulte novamente a versão selecionada.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar versão novamente</button></div>}
         {delivery && <><dl className="preparation-facts"><div><dt>Captura</dt><dd><OperatorState value={delivery.delivery.capture_state} /></dd></div><div><dt>Integridade da verificação</dt><dd>{delivery.verification ? <OperatorState value={delivery.verification.state} /> : 'Checks não executados'}</dd></div></dl>
-          {delivery.delivery.diagnostic && <div className="queue-error" role="alert"><b>{operatorCodeLabel(delivery.delivery.diagnostic)}</b><p>Consulte a versão e os detalhes técnicos antes de repetir uma ação.</p></div>}
+          {delivery.delivery.diagnostic && <div className="queue-error" role="alert"><b>{operatorCodeLabel(delivery.delivery.diagnostic)}</b><p>Confira o estado desta versão antes de repetir uma ação.</p></div>}
           {delivery.delivery.capture_state === 'failed' && captureRetryEligible && <div className="attempt-recovery-actions"><p>Falha técnica elegível. O retry reutiliza somente o resultado e a passagem já registrados.</p><button type="button" onClick={() => actions.retryCaptureFor(delivery.delivery.producer_passage_id)} disabled={!attemptEtag || actions.busy}>Repetir captura</button></div>}
           {delivery.delivery.capture_state === 'failed' && !captureRetryEligible && <p className="muted" role="status">A captura falhou, mas não há confirmação atual de todos os requisitos para repetir. Atualize a tentativa e a versão.</p>}
           {delivery.delivery.warnings.map((warning) => <div className="notice attempt-capture-warning" key={`${warning.passage_id}:${warning.path}:${warning.reason}`}><b>Arquivo declarado excluído da captura</b><p className="mono">{warning.path}</p><p>{warning.reason === 'DECLARED_NEW_FILE_IGNORED' ? 'O Implementador declarou este arquivo novo, mas ele está ignorado e não entrou na versão capturada.' : 'O caminho foi excluído pela regra de nomes de arquivos conhecidos como segredo.'}</p></div>)}
@@ -318,6 +318,11 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         </section>;
       })}</section>
     </>}
+    <div className="dialog-actions">
+      <p>Fechar este detalhe não altera o estado da tentativa.</p>
+      <button type="button" onClick={() => setReload((value) => value + 1)}>Atualizar tentativa</button>
+      {attempt?.result && <button type="button" className="primary" onClick={() => onRetry(attempt)}>Nova tentativa</button>}
+    </div>
   </section>;
 }
 
@@ -336,7 +341,7 @@ function renderRecord(section: DetailSection, item: DetailItem, index: number, e
   const visibleKeys = ['round', 'role', 'state', 'result', 'status', 'verdict', 'declared_verdict', 'blocking', 'category', 'exit_code', 'duration_ms', 'passed', 'kind'];
   const artifacts = Array.isArray(record.artifacts) ? record.artifacts as Artifact[] : [];
   const textFields = ['text', 'problem', 'evidence', 'expected', 'resolution', 'description', 'comment'];
-  return <article className="attempt-record" key={recordId ?? `${section}-${index}`}><h4>{heading}</h4><dl>{visibleKeys.filter((key) => record[key] !== null && record[key] !== undefined).map((key) => <div key={key}><dt>{operatorFactLabel(key)}</dt><dd>{operatorVisibleFactValue(key, record[key])}</dd></div>)}</dl>
+  return <article className="attempt-record" key={`${section}:${recordId ?? 'record'}:${index}`}><h4>{heading}</h4><dl>{visibleKeys.filter((key) => record[key] !== null && record[key] !== undefined).map((key) => <div key={key}><dt>{operatorFactLabel(key)}</dt><dd>{operatorVisibleFactValue(key, record[key])}</dd></div>)}</dl>
     {visibleKeys.filter((key) => ['state', 'status', 'phase', 'result', 'tracking', 'verdict', 'declared_verdict', 'capture_state', 'active_limit_state'].includes(key) && typeof record[key] === 'string' && !operatorState(record[key] as string).known).map((key) => <UnknownState key={key} value={String(record[key])} />)}
 
     {typeof record.text === 'string' && <p>{record.text}</p>}

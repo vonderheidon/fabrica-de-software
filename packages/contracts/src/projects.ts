@@ -100,7 +100,7 @@ export const SettingsUpdate = Type.Object({
   account_binding: Type.Optional(AccountBinding),
 }, closed);
 export type SettingsUpdate = Static<typeof SettingsUpdate>;
-export const NativeSelectionRequest = Type.Object({ kind: Type.Union([Type.Literal('projects_root'), Type.Literal('gh_executable')]) }, closed);
+export const NativeSelectionRequest = Type.Object({ kind: Type.Union([Type.Literal('projects_root'), Type.Literal('project_directory'), Type.Literal('gh_executable')]) }, closed);
 export type NativeSelectionRequest = Static<typeof NativeSelectionRequest>;
 export const NativeSelectionResult = Type.Union([
   Type.Object({ state: Type.Literal('selected'), kind: NativeSelectionRequest.properties.kind, path: text(4096), observed_at_ms: timestamp }, closed),
