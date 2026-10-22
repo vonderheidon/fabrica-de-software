@@ -66,13 +66,20 @@ describe('controller verification and external evidence', () => {
   it('keeps historical runs on the same tree with bounded pagination and captured commands despite later project changes', async () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain(); await f.run();
     const previous = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
+    await f.run();
+    f.storage.interruptAttempts();
+    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.a.id);
+    expect(f.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
     const c = f.storage.getConfiguration(f.projectId); const { id: _id, project_id: _p, revision: _r, created_at_ms: _t, ...configuration } = c.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: c.etag, projectId: f.projectId, body: { project_changes: { checks: [] } }, configuration: { ...configuration, checks: [] }, globalChanges: {} });
-    await f.run();
+    await expect(f.run()).rejects.toMatchObject({ code: 'VERIFICATION_NOT_ALLOWED' });
     const first = f.storage.getCheckHistory(f.binding.deliveryVersion, { limit: '1' }); expect(first.hasMore).toBe(true);
     const second = f.storage.getCheckHistory(f.binding.deliveryVersion, { cursor: first.nextCursor!, limit: '100' });
     expect(second.entries).toHaveLength(3); expect(second.entries.filter(c => c.runNumber === 1)).toEqual(previous);
     expect(f.runner).toHaveBeenCalledTimes(4);
+    expect([...first.entries, ...second.entries].map(check => check.command)).toEqual(
+      expect.arrayContaining(definitions.map(check => check.command)),
+    );
     expect(() => f.storage.getCheckHistory(randomUUID(), { cursor: first.nextCursor! })).toThrow();
     expect(() => f.db.prepare("UPDATE checks SET command='changed'").run()).toThrow();
     expect(() => f.db.prepare('DELETE FROM artifacts').run()).toThrow(); expect(f.db.pragma('foreign_key_check')).toEqual([]);

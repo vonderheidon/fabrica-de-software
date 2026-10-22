@@ -18,8 +18,14 @@ function saveProfileChanges(f: Awaited<ReturnType<typeof attemptFixture>>, chang
 }
 
 async function createCapturedAttempt(f: Awaited<ReturnType<typeof attemptFixture>>): Promise<string> {
-  const prepared = await f.prepare();
-  const preparation = prepared.saved.view.preparation;
+  removeProjectProfileDefaults(f);
+  const saved = await f.preparations.createPreparation(f.projectId, {
+    issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {
+      implementer_profile: { kind: 'reference', id: f.profile.id, revision: f.profile.revision },
+      reviewer_profile: { kind: 'reference', id: f.reviewerProfile.id, revision: f.reviewerProfile.revision },
+    },
+  }, { operationId: randomUUID(), expectedRevision: undefined });
+  const preparation = saved.view.preparation;
   const settings = f.storage.getSettings();
   const configuration = f.storage.getConfiguration(f.projectId);
   if (!preparation.issue || !preparation.base_sha || !preparation.criteria_preview.executable || !settings.account_id) {
@@ -40,10 +46,13 @@ async function createCapturedAttempt(f: Awaited<ReturnType<typeof attemptFixture
     tools: f.tools,
   };
   const accepted = f.storage.createAttempt({
-    command: { operationId: randomUUID(), expectedRevision: prepared.saved.etag, body: prepared.body },
+    command: { operationId: randomUUID(), expectedRevision: saved.etag, body: {
+      preparationId: preparation.id, preparationRevision: preparation.revision,
+      authorizedSummaryHash: preparation.summary_hash, authorized: true,
+    } },
     capture,
     configurationETag: configuration.etag,
-    preparationETag: prepared.saved.etag,
+    preparationETag: saved.etag,
   });
   return accepted.operation.resource.id;
 }
@@ -251,7 +260,6 @@ describe('execution profile lifecycle and serialized references', () => {
       const unrelated = f.storage.getGlobalConfiguration().view.profiles.find((profile) => profile.name === 'Same model, different identity');
       if (!unrelated) throw new Error('PROFILE_CREATE_FAILED');
       const attemptId = await createCapturedAttempt(f);
-      removeProjectProfileDefaults(f);
       expect(() => saveProfileChanges(f, [{ action: 'delete', id: unrelated.id }])).not.toThrow();
       const activeStates = [
         { phase: 'preparing', suspension: null },
@@ -284,7 +292,6 @@ describe('execution profile lifecycle and serialized references', () => {
     try {
       const attemptId = await createCapturedAttempt(f);
       const before = f.storage.getAttemptCapture(attemptId);
-      removeProjectProfileDefaults(f);
       saveProfileChanges(f, [{ action: 'update', id: f.profile.id, changes: { profile_type: 'reviewer' } }]);
       const after = f.storage.getAttemptCapture(attemptId);
       expect(after).toEqual(before);

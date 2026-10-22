@@ -111,6 +111,9 @@ it('keeps list cursors stable with equal timestamps and new inserts and rejects 
 it('reads real check definitions and artifact metadata without accessing log bytes', async () => {
   const f = await fixture(false);
   // Configure a new attempt before its capture, preserving the first attempt's captured configuration.
+  f.storage.interruptAttempts();
+  f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+  expect(f.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
   const config = f.storage.getConfiguration(f.projectId);
   const { id: _id,project_id: _projectId,revision: _revision,created_at_ms: _created,...configuration } = config.view.configuration;
   const checks = [{ id: 'test',command: 'node --version',cwd_relative: '.' }];
