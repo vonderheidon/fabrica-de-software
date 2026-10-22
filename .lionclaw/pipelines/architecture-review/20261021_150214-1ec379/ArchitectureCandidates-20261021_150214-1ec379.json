@@ -1,0 +1,94 @@
+{
+  "runId": "20261021_150214-1ec379",
+  "recommendedCandidateId": "C4",
+  "selectedCandidateId": null,
+  "candidates": [
+    {
+      "id": "C1",
+      "title": "Leitura de checks e artefatos em um Module deep",
+      "files": [
+        "apps/controller/src/modules/storage/queries.ts",
+        "apps/controller/src/modules/storage/verification.ts",
+        "apps/controller/src/modules/storage/index.ts",
+        "apps/controller/src/modules/pipeline/start.ts"
+      ],
+      "problem": "A expansão de checks em artefatos está em dois caminhos: readDetailPage (queries.ts:98) consulta IDs por check e chama readArtifact por artefato; readCheckHistory (verification.ts:125-128) repete esse percurso. readArtifact ainda lê a entrega e confere o vínculo com o check (101-108). A quantidade de consultas cresce com checks e artefatos e a regra de montagem tem Locality dividida. Isso é evidência estrutural de trabalho repetido, sem latência medida.",
+      "proposedDirection": "Aprofundar o Module de leitura de checks para concentrar seleção, expansão em lote e validação dos vínculos dentro do snapshot existente. Reutilizar essa Implementation no detalhe e no histórico, preservando ordenação, paginação, erros e metadados; conteúdo dos arquivos continua sob demanda. Não definir uma Interface final nesta fase.",
+      "benefits": {
+        "locality": "Montagem e invariantes de checks/artefatos passam a ter um único lugar de manutenção.",
+        "leverage": "Detalhe, histórico e chamadores do pipeline recebem leituras completas sem coordenar expansão por item.",
+        "testing": "Usar a Interface como superfície de teste para igualdade dos resultados, vínculos inválidos, páginas e crescimento do número de consultas com muitos artefatos."
+      },
+      "payoff": "high",
+      "risk": "low",
+      "whyNow": "Há dois percursos concretos com a mesma expansão, e a mudança pode ser delimitada a leituras. AC-29 exige medir histórico e persistência, sem guardar conteúdo do projeto."
+    },
+    {
+      "id": "C2",
+      "title": "Projeções de operação e histórico com custo concentrado",
+      "files": [
+        "apps/controller/src/modules/storage/operation-summary.ts",
+        "apps/controller/src/modules/storage/queries.ts",
+        "apps/controller/src/modules/storage/diagnostics.ts",
+        "apps/controller/src/modules/storage/index.ts"
+      ],
+      "problem": "readOperationSummary compõe tentativa ativa, contagem, últimos resultados por issue, candidatos e diagnósticos (operation-summary.ts:27-49). A seleção dos últimos resultados usa NOT EXISTS e desempate; lista e resumo extraem número de issue de capture_json. readAttemptPage combina filtros opcionais e chave calculada printf para continuação (queries.ts:32-45). As políticas de projeção e seus custos estão repartidos entre leituras, embora Storage já assegure snapshots. Não foi comprovado que JSON ou os planos atuais sejam gargalos.",
+      "proposedDirection": "Aprofundar o Module de projeções persistidas para concentrar seleção de resumos e sua estratégia de consulta, mantendo capturas históricas e invariantes. Investigar planos e volumes antes de escolher ajustes de SQL, índices ou projeções escalares; evitar cache com invalidação nova sem evidência. Não definir Interface final.",
+      "benefits": {
+        "locality": "Regras de escopo, desempate e seleção de resumos ficam próximas da estratégia que controla seu custo.",
+        "leverage": "Dashboard e listagens mantêm leituras leves sem conhecer capturas, filtros SQL ou planos.",
+        "testing": "Pela Interface, preservar último resultado por issue, conta/projeto, empates, continuidade e event_cursor; medir latência e tamanho com histórico crescente e caches volumosos, conforme AC-29."
+      },
+      "payoff": "high",
+      "risk": "medium",
+      "whyNow": "É o percurso direto de listagens e resumo operacional citado no mapa. O ganho depende de medição e análise de planos antes de qualquer mudança de persistência."
+    },
+    {
+      "id": "C3",
+      "title": "Contexto local da fila lido como conjunto",
+      "files": [
+        "apps/controller/src/modules/projects/queue.ts",
+        "apps/controller/src/modules/storage/queue-cycles.ts",
+        "apps/controller/src/modules/storage/index.ts",
+        "apps/controller/src/modules/pipeline/start.ts"
+      ],
+      "problem": "queue.observe carrega configurações por projeto (queue.ts:30-40) e, para cada item, combina getQueueCycle, getAttempt ou getLatestIssueAttempt (126-128). Os métodos de Storage são leituras separadas; latestIssueAttempt também lê settings (queue-cycles.ts:7-11). O chamador conhece a composição entre ciclo consumido, tentativa ativa e fallback histórico. dispatchQueueCandidate faz duas observações deliberadas (start.ts:156-164); eliminá-las indiscriminadamente mudaria a revalidação.",
+      "proposedDirection": "Aprofundar o Module de leitura do contexto local da fila para reunir ciclos e referências de tentativas por conjunto observado, concentrando a regra de fallback e seu custo. Preservar observação remota atual, isolamento por projeto, backoff e consumo atômico; não transformar observação de exibição em autoridade. Não definir Interface final nem adicionar Adapter sem variação real.",
+      "benefits": {
+        "locality": "A composição do histórico local da fila sai do laço de itens e fica junto das regras persistidas de ciclo.",
+        "leverage": "O chamador avalia elegibilidade sem coordenar consultas locais por item.",
+        "testing": "Pela Interface, comparar fila anterior e nova com ciclos consumidos, retorno a Ready, contas e projetos distintos; medir consultas por conjunto e preservar provas de revalidação do início."
+      },
+      "payoff": "medium",
+      "risk": "medium",
+      "whyNow": "Há crescimento explícito de consultas locais por item em um percurso de polling. A latência remota pode dominar; medir parcelas local e remota antes de priorizar implementação."
+    },
+    {
+      "id": "C4",
+      "title": "Reduzir consultas de observação por tela, fila e etapa, com baseline",
+      "files": [
+        "apps/web/src/features/queue/useQueue.ts",
+        "apps/web/src/features/operations/DashboardPanel.tsx",
+        "apps/web/src/features/operations/useOperation.ts",
+        "apps/web/src/features/operations/useActiveAttempt.ts",
+        "apps/web/src/features/attempts/AttemptListPanel.tsx",
+        "apps/controller/src/modules/projects/queue.ts",
+        "apps/controller/src/modules/github/client.ts",
+        "apps/controller/src/modules/github/transport.ts",
+        "apps/controller/src/modules/pipeline/start.ts",
+        "apps/controller/src/modules/publication/index.ts",
+        "apps/controller/src/http/routes/queue.ts"
+      ],
+      "problem": "Gatilhos de observação e custo das leituras estão distribuídos. useQueue reage a qualquer evento do controlador, resync e timer (52-68); Dashboard ativa operação, tentativa ativa e fila (32-35). useOperation e useActiveAttempt escutam todos os eventos e possuem timeouts de 15 segundos com dependências diferentes (41-53), sem serem intervalos recorrentes simples. queue.observe consulta cada issue com concorrência de até três (115-122). client.readIssueContext expande responsáveis, blockers, memberships e campos por membership (134-173); o modo queue já evita comentários e reutiliza o header. Cache de exibição já existe e sua chave inclui event_cursor (queue.ts:340-355). Pipeline observa fila e autoridade/escopo por caminhos próprios (start.ts:149-207). Isso revela oportunidades de investigar repetição e custo por finalidade, não comprova um gargalo.",
+      "proposedDirection": "Aprofundar os Modules de observação existentes para reduzir chamadas redundantes e tempo de resposta comprovados por cenário. Primeiro atribuir cada leitura ao gatilho e à finalidade (exibição, polling, revalidação de escopo, autorização de execução/publicação); depois aplicar apenas ajustes sustentados pelo baseline, como filtrar eventos pertinentes, reunir atualizações coincidentes ou reduzir expansão remota desnecessária para a finalidade. Concentrar regras de atualização e completude nos Modules que as possuem. Não remover revalidações obrigatórias nem reutilizar cache de exibição como autorização; não definir Interface final ou criar Seam/Adapter hipotético.",
+      "benefits": {
+        "locality": "Política de atualização, escopo, completude e repetição ficam explícitos nos Modules donos das leituras, reduzindo conhecimento espalhado entre telas, fila e etapas.",
+        "leverage": "Chamadores obtêm observação adequada à finalidade sem repetir coordenação de atualizações ou pedir contexto remoto além do necessário.",
+        "testing": "A Interface é a superfície de teste: contagem de chamadas por finalidade, latência por cenário, atualização após evento pertinente, ausência de refresh desnecessário e rejeição de autorização após mudanças remotas."
+      },
+      "payoff": "high",
+      "risk": "medium",
+      "whyNow": "É o candidato diretamente alinhado à intenção de reduzir quantidade de consultas e tempo de resposta incluindo GitHub, telas e etapas. O baseline decide a primeira fatia; não é uma autorização de refatoração geral."
+    }
+  ]
+}

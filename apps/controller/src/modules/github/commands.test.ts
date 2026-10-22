@@ -3,7 +3,10 @@ import { PassThrough } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createGhRunner, observeGhVersion, queryLimits } from './transport.js';
+import { collect, createGhRunner, GraphQLReader, observeGhVersion, queryLimits } from './transport.js';
+import { checked } from './client.js';
+import { IssueMembership } from '#contracts';
+import { valuesQuery } from './queries.js';
 import { createGitReader } from '../workspaces/git.js';
 import { createWorkspaces } from '../workspaces/index.js';
 import { createGitHub } from './index.js';
@@ -98,6 +101,51 @@ describe('native CLI invocation with fake processes', () => {
     await vi.advanceTimersByTimeAsync(queryLimits.timeoutMs);
     await assertion;
     expect(timed.killed).toBe(true);
+  });
+  it('accepts three field pages with an explicit grouped ceiling and retains the default ceiling', async () => {
+    const context = { kind: 'windows_keyring' as const, executable: join(tmpdir(), 'gh.exe'), cwd: tmpdir() };
+    // Raw value IDs are used for pagination identity but are not bounded by the decoded membership DTO.
+    const nodes = Array.from({ length: 100 }, (_, index) => ({
+      __typename: 'ProjectV2ItemFieldSingleSelectValue', id: `${index}-${'A'.repeat(15_000)}`,
+      name: 'Ready', optionId: 'ready', field: { id: 'status' },
+    }));
+    const connection = { nodes, pageInfo: { hasNextPage: false, endCursor: null } };
+    const wire = (data: unknown) => `HTTP/2.0 200 Response\r\ncontent-type: application/json\r\n\r\n${JSON.stringify({ data })}`;
+    const single = wire({ node: { fieldValues: connection } });
+    const grouped = wire({ nodes: ['item-a', 'item-b', 'item-c'].map(id => ({ id, __typename: 'ProjectV2Item', fieldValues: connection })) });
+    expect(Buffer.byteLength(single)).toBeLessThan(queryLimits.responseBytes);
+    expect(Buffer.byteLength(grouped)).toBeGreaterThan(queryLimits.responseBytes);
+    expect(Buffer.byteLength(single) * 3).toBeLessThan(queryLimits.operationBytes);
+    const reader = new GraphQLReader(createGhRunner(context)).scope();
+    for (const id of ['item-a', 'item-b', 'item-c']) {
+      const child = new FakeChild(); commands.spawn.mockReturnValue(child);
+      const pending = collect(reader, valuesQuery, { id }, data => (data.node as { fieldValues: unknown }).fieldValues,
+        node => checked(IssueMembership.properties.statusValues.items, {
+          fieldId: (node.field as { id: string }).id, optionId: node.optionId, name: node.name,
+        }));
+      child.emit('spawn'); child.stdout.write(single); child.emit('close', 0);
+      const response = await pending;
+      expect(response.state).toBe('complete'); expect(response.data).toHaveLength(100);
+    }
+    const child = new FakeChild(); commands.spawn.mockReturnValue(child);
+    const groupedQuery = valuesQuery
+      .replace('FactoryItemValues($id:ID!,$cursor:String)', 'FactoryGroupedValues($ids:[ID!]!,$cursor:String)')
+      .replace('node(id:$id)', 'nodes(ids:$ids)')
+      .replace('... on ProjectV2Item {', '__typename id ... on ProjectV2Item {');
+    const pending = reader.query(groupedQuery, { ids: ['item-a', 'item-b', 'item-c'], cursor: null });
+    child.emit('spawn'); child.stdout.write(grouped);
+    expect(await pending).toMatchObject({ state: 'unavailable', data: null, diagnostics: [{ code: 'CLI_UNAVAILABLE' }] });
+    expect(child.killed).toBe(true);
+    const allowed = new FakeChild(); commands.spawn.mockReturnValue(allowed);
+    const accepted = reader.query(groupedQuery, { ids: ['item-a', 'item-b', 'item-c'], cursor: null }, undefined, 3);
+    allowed.emit('spawn'); allowed.stdout.write(grouped); allowed.emit('close', 0);
+    expect(await accepted).toMatchObject({ state: 'complete' });
+    expect(allowed.killed).toBe(false);
+    const oversized = new FakeChild(); commands.spawn.mockReturnValue(oversized);
+    const rejected = reader.query(groupedQuery, { ids: ['item-a', 'item-b', 'item-c'] }, undefined, 3);
+    oversized.emit('spawn'); oversized.stdout.write(Buffer.alloc(queryLimits.responseBytes * 3 + 1));
+    expect(await rejected).toMatchObject({ state: 'unavailable', data: null });
+    expect(oversized.killed).toBe(true);
   });
   it('runs Git without optional index writes, lazy fetch, shell, prompts or redirected repository selectors', async () => {
     vi.stubEnv('GIT_DIR', 'synthetic-other-repository');

@@ -154,13 +154,34 @@ export function createClient(rootReader: GraphQLReader) {
     }));
     const parts: GitHubQueryResult<unknown>[] = [header, assignees, comments, blockers, memberships];
     const populated: IssueMembership[] = [];
+    const firstPages = new Map<string, GitHubQueryResult<Record<string, unknown>>>();
     for (const membership of memberships.data ?? []) {
+      if (queueHeader && !firstPages.has(membership.itemId)) {
+        const offset = (memberships.data ?? []).indexOf(membership);
+        const group = (memberships.data ?? []).slice(offset, offset + 3);
+        if (group.length > 1) {
+          const response = await reader.query(queries.groupedValuesQuery, { ids: group.map(item => item.itemId) }, undefined, group.length === 3 ? 3 : 2);
+          for (const item of group) {
+            let first: GitHubQueryResult<Record<string, unknown>> = { ...response, data: null };
+            if (response.data) {
+              try {
+                const nodes = response.data.nodes;
+                if (!Array.isArray(nodes) || nodes.length !== group.length) throw new Error('RESPONSE_INVALID');
+                const matches = nodes.filter(node => node !== null && object(node).id === item.itemId);
+                if (matches.length !== 1 || object(matches[0]).__typename !== 'ProjectV2Item') throw new Error('RESPONSE_INVALID');
+                first = { ...response, data: { node: matches[0] } };
+              } catch { first = result('unavailable', null, [...response.diagnostics.map(entry => entry.code), 'RESPONSE_INVALID'], response.retryAtMs); }
+            }
+            firstPages.set(item.itemId, first);
+          }
+        }
+      }
       const fields = await collect(reader, queries.valuesQuery, { id: membership.itemId }, (data) => child(data, 'node', 'fieldValues'), (node) => {
         if (node.__typename === 'ProjectV2ItemFieldNumberValue') return { kind: 'number' as const,
           field: checked(IssueMembership.properties.numberValues.items, { fieldId: object(node.field).id, value: node.number }) };
         if (node.__typename !== 'ProjectV2ItemFieldSingleSelectValue') return null;
         return { kind: 'select' as const, field: checked(IssueMembership.properties.statusValues.items, { fieldId: object(node.field).id, optionId: node.optionId, name: node.name }) };
-      }, (node) => ['ProjectV2ItemFieldSingleSelectValue', 'ProjectV2ItemFieldNumberValue'].includes(String(node.__typename)) ? string(node.id) : null);
+      }, (node) => ['ProjectV2ItemFieldSingleSelectValue', 'ProjectV2ItemFieldNumberValue'].includes(String(node.__typename)) ? string(node.id) : null, firstPages.get(membership.itemId));
       parts.push(fields);
       populated.push({ ...membership,
         statusValues: (fields.data ?? []).flatMap((entry) => entry?.kind === 'select' ? [entry.field] : []),

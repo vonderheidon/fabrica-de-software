@@ -22,3 +22,8 @@ export const commentsQuery = issueConnection('FactoryComments', 'comments', 'id 
 export const blockersQuery = issueConnection('FactoryBlockers', 'blockedBy', 'id number title url state');
 export const membershipsQuery = `query FactoryMemberships($id:ID!,$cursor:String) { node(id:$id) { ... on Issue { projectItems(first:100,after:$cursor,includeArchived:true) { nodes { id isArchived project { id } } ${page} } } } }`;
 export const valuesQuery = `query FactoryItemValues($id:ID!,$cursor:String) { node(id:$id) { ... on ProjectV2Item { fieldValues(first:100,after:$cursor) { nodes { __typename ... on ProjectV2ItemFieldSingleSelectValue { id name optionId field { ... on ProjectV2SingleSelectField { id } } } ... on ProjectV2ItemFieldNumberValue { id number field { ... on ProjectV2Field { id } } } } ${page} } } } }`;
+export const groupedValuesQuery = valuesQuery
+  .replace('FactoryItemValues($id:ID!,$cursor:String)', 'FactoryGroupedValues($ids:[ID!]!)')
+  .replace('node(id:$id)', 'nodes(ids:$ids)')
+  .replace('... on ProjectV2Item {', 'id __typename ... on ProjectV2Item {')
+  .replace('first:100,after:$cursor', 'first:100');

@@ -1,0 +1,150 @@
+{
+  "runId": "20261021_150214-1ec379",
+  "candidateId": "C4",
+  "rootCause": "A política de observação tem Locality dividida: os hooks decidem pertinência e agendamento, a fila decide escopo/cache, o client decide expansão remota e pipeline/publicação decidem frescor para autoridade. As Interfaces existentes não encapsulam conjuntamente essas decisões por finalidade, de modo que avaliar ou reduzir repetição exige coordenar vários Modules e preservar manualmente diferenças semânticas. A fricção estrutural está comprovada; gargalo, redundância efetiva em runtime e ganho de desempenho permanecem sem baseline.",
+  "evidence": [
+    {
+      "path": "apps/web/src/features/queue/useQueue.ts",
+      "lines": "22-68",
+      "finding": "O hook coordena pedido, cancelamento, versão, eventos gerais, resync e timer; onUpdated ignora o conteúdo e o projeto do evento.",
+      "impact": "A pertinência da atualização não fica encapsulada numa política por finalidade/escopo; eventos distintos podem iniciar novas leituras. AbortController web não prova cancelamento remoto."
+    },
+    {
+      "path": "apps/web/src/features/operations/useOperation.ts",
+      "lines": "22-52",
+      "finding": "Pedido /operation e listeners gerais possuem coordenação própria; timeout depende de event_cursor.",
+      "impact": "Alterar atualização exige manter política própria. Timeout é rearmado por dependências, não intervalo recorrente garantido."
+    },
+    {
+      "path": "apps/web/src/features/operations/useActiveAttempt.ts",
+      "lines": "23-53",
+      "finding": "Pedido de tentativa ativa repete coordenação de carregamento, listeners e timeout, dependendo de revision.",
+      "impact": "As mesmas famílias de eventos acionam outra leitura com regra temporal diferente; testes de atualização precisam considerar ambas."
+    },
+    {
+      "path": "apps/web/src/features/operations/DashboardPanel.tsx",
+      "lines": "32-45",
+      "finding": "Dashboard monta três hooks ativos e a ação manual coordena refresh dos três e do catálogo.",
+      "impact": "O call site conhece a composição de atualização; um evento geral é recebido por três observadores, embora isso não prove três consultas remotas."
+    },
+    {
+      "path": "apps/web/src/features/attempts/AttemptListPanel.tsx",
+      "lines": "36-70",
+      "finding": "Lista já filtra eventos por tentativa/projeto ou presença na página e mantém outro efeito para consulta.",
+      "impact": "Há uma política concreta de pertinência separada dos hooks gerais; não se pode unificar gatilhos ignorando diferenças de escopo."
+    },
+    {
+      "path": "apps/controller/src/modules/projects/queue.ts",
+      "lines": "30-49",
+      "finding": "observe carrega catálogo/configuração por projeto, identidade remota e tentativa ativa antes de produzir a fila.",
+      "impact": "A observação envolve custos locais e remotos; contagem HTTP isolada não atribui custo por dependência."
+    },
+    {
+      "path": "apps/controller/src/modules/projects/queue.ts",
+      "lines": "92-128",
+      "finding": "Por projeto, lê itens e detalhes; percorre issues em até três workers e consulta ciclo/tentativa por item.",
+      "impact": "O custo cresce com projetos e itens. A concorrência limita simultaneidade, não volume; a leitura local também participa do percurso."
+    },
+    {
+      "path": "apps/controller/src/modules/projects/queue.ts",
+      "lines": "320-357",
+      "finding": "save usa observe para revalidação; read coalesce por settings.etag, event_cursor e consulta, com até oito entradas e validade de até dez segundos para resultado completo.",
+      "impact": "Já existe cache de exibição. Cursor diferente impede compartilhar a entrada anterior; deduplicar autoridade com esse cache mudaria a garantia atual."
+    },
+    {
+      "path": "apps/controller/src/modules/github/client.ts",
+      "lines": "134-191",
+      "finding": "purpose queue reutiliza header e omite comentários/body, mas expande assignees, blockers, memberships e campos de cada membership sequencialmente.",
+      "impact": "Uma chamada lógica queue pode gerar 4+M queries com uma página por conexão e M memberships, em percurso válido completo. Otimização exige preservar completude; contexto completo não tem custo idêntico."
+    },
+    {
+      "path": "apps/controller/src/modules/github/transport.ts",
+      "lines": "177-198",
+      "finding": "GraphQLReader injeta runner/relógio, compartilha throttle e cria orçamento por scope; query pode retornar antes de enviar.",
+      "impact": "Contar chamadas lógicas ou entradas em query superestima envios quando há bloqueio; baseline deve observar runner/onSend e distinguir custo acumulado de caminho crítico."
+    },
+    {
+      "path": "apps/controller/src/modules/github/transport.ts",
+      "lines": "244-277",
+      "finding": "collect chama query por página, deduplica IDs e recusa paginação inconsistente ou limite excedido.",
+      "impact": "Cardinalidade de páginas muda custo e completude; remover expansão sem preservar estados parciais altera a semântica."
+    },
+    {
+      "path": "apps/controller/src/modules/pipeline/start.ts",
+      "lines": "149-207",
+      "finding": "Despacho tem relógio/trava próprios e duas observações separadas por recordQueueObservations; tick também observa autoridade e escopo.",
+      "impact": "A finalidade e a ordem são relevantes. Suprimir a segunda leitura ou fundir polling indiscriminadamente pode autorizar com observação anterior à mudança local/remota."
+    },
+    {
+      "path": "apps/controller/src/modules/publication/index.ts",
+      "lines": "30-83",
+      "finding": "Autoridade lê snapshot, conta, issue completa, Project e repositório, registra com stamp e repete uma vez se a observação ficou stale.",
+      "impact": "A política de autoridade é distinta da exibição. Reduções precisam manter rejeição de mudança de responsável, conta, Status e configuração."
+    },
+    {
+      "path": "apps/controller/src/http/routes/queue.ts",
+      "lines": "12-22",
+      "finding": "GET delega a getQueue e retorna ETag; PUT segue saveQueue e trata conflito com resumo atualizado.",
+      "impact": "A Interface HTTP já separa consulta e comando. O ETag da resposta não demonstra que custo remoto foi evitado nem autoriza reutilizar leitura em comando."
+    },
+    {
+      "path": "apps/controller/src/modules/github/github.test.ts",
+      "lines": "15-25",
+      "finding": "Fixture fornece GhRunner em memória e registra query/variables antes de devolver respostas controladas.",
+      "impact": "Existe Seam real para contabilizar queries sem rede; não é necessário introduzir outro port para esse baseline."
+    },
+    {
+      "path": "tests/integration/queue-scheduler.test.ts",
+      "lines": "65-100",
+      "finding": "Testes distinguem read compartilhado de observe, validade do cache/configuração e pico de três leituras de issue.",
+      "impact": "A fronteira de autoridade e a limitação de concorrência já têm verificações explícitas; aprofundamento deve preservá-las. Leitura estática não comprova que passam hoje."
+    },
+    {
+      "path": "apps/web/src/features/operations/DashboardPanel.test.ts",
+      "lines": "12-27",
+      "finding": "Testes lidos cobrem upcomingCandidates por elegibilidade, ordem e limite.",
+      "impact": "Esse arquivo não prova comportamento dos hooks, timers ou contagem de pedidos do Dashboard; isso requer cenário de UI distinto."
+    }
+  ],
+  "dependencyCategories": [
+    {
+      "dependency": "Seleção de eventos, montagem/ordenação e políticas em memória",
+      "category": "in-process",
+      "testStrategy": "Testar pela Interface com eventos e tempo controlados; comparar gatilhos pertinentes, resync e atualizações coincidentes. Mesclar computação pura quando aumentar Locality; sem adapter."
+    },
+    {
+      "dependency": "Storage/SQLite e configuração local",
+      "category": "local-substitutable",
+      "testStrategy": "Usar banco temporário real e fixtures isoladas; preservar revisões, cursor, consumo e snapshots; contar execuções SQL e latência. Não foi verificado adapter em memória de Storage nem se recomenda criá-lo."
+    },
+    {
+      "dependency": "Controlador próprio acessado pela web em HTTP/SSE",
+      "category": "remote-owned",
+      "testStrategy": "Interface de transporte web existente com adapter HTTP; cenário controlado pode fornecer adapter em memória e depois validar navegador/controlador real. Segundo adapter aqui é recomendação futura, não evidência de implementação."
+    },
+    {
+      "dependency": "GitHub por GH CLI/GraphQL",
+      "category": "external",
+      "testStrategy": "Manter porta injetada existente QueueGitHub/GhRunner e mock; registrar envios por página, respostas parciais, throttling e mudanças entre observação e autorização. Prova externa separada apenas com autorização."
+    },
+    {
+      "dependency": "Relógio e timers do host/navegador",
+      "category": "local-substitutable",
+      "testStrategy": "Controlar relógio/timers no teste; GraphQLReader já injeta now e scheduler usa spy de Date.now (queue-scheduler.test.ts:75-87). Não criar adapter de produção extra apenas para simular tempo."
+    }
+  ],
+  "currentSeams": [
+    "QueueGitHub injetado em createQueue (projects/queue.ts:9-19), exercitado por mocks no scheduler (tests/integration/queue-scheduler.test.ts:20-34): separa observação remota da montagem local.",
+    "GhRunner e relógio em GraphQLReader (github/transport.ts:177-191): adapter de produção executa GH por spawn (105-135), adapter de teste responde em memória (github/github.test.ts:15-25). Dois adapters observados: Seam real.",
+    "read/observe/save (projects/queue.ts:320-357): separa cache/coalescência de exibição da observação atual usada por autoridade; é separação semântica, não proposta de novo port.",
+    "purpose queue (github/client.ts:175-189): variação existente de completude/expansão dentro do mesmo adapter, não segundo adapter.",
+    "PublicationDependencies (publication/index.ts:11-19) injeta GitHub, Storage e coordenação; sua observação preserva stamp e diagnóstico (30-83)."
+  ],
+  "missingSeams": [
+    "Política interna de pertinência e agendamento por finalidade/escopo para observadores web: hooks ignoram evento e lista já aplica filtro (evidências 1-5). Uma Interface interna testável poderia absorver seleção de gatilhos e coordenação; não exige port nem adapter novo.",
+    "Atribuição de observações por finalidade/gatilho até o envio remoto: hooks, observe, polling e autoridade têm coordenação própria (evidências 1-13). Nos trechos lidos não há contexto comum que permita comparar toda a cadeia. É lacuna diagnóstica localizada, não afirmação de ausência global de telemetria.",
+    "Contrato interno mais localizado de expansão necessária por finalidade: queue solicita purpose, client escolhe omissões e ainda expande todas as memberships (evidências 7-9). A necessidade de restringir a um Project é hipótese a medir e validar, não Seam obrigatório já aprovado."
+  ],
+  "testingImpact": "A Interface deve ser a superfície de teste do futuro Module aprofundado. Há substituições reais para GitHub e testes de cache/autoridade/concorrência, mas provar atualização por evento exige cenário que exercite hooks, HTTP, fila e runner com tempo/cardinalidades fixos; testes de upcomingCandidates não cobrem isso. Manutenção atravessa políticas de frescor diferentes. O crescimento de consultas por issue/membership/página é estrutural; nenhuma latência ou regressão de performance foi medida.",
+  "riskOfNoChange": "Novas telas/eventos/finalidades podem multiplicar leituras e tornar a política de atualização mais difícil de manter; expansão remota crescente pode pressionar latência, orçamento de queries e rate limit. A consequência mais sensível de otimização sem diagnóstico é compartilhar observação de exibição com autoridade ou perder completude, aceitando estado antigo. São riscos derivados da estrutura, sem frequência de bugs, degradação real ou ganho quantificados."
+}

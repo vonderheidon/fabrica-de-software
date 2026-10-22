@@ -7,6 +7,9 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 import { complete } from '../fixtures/attempt.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { removePublicationSchema } from '../fixtures/publication-schema.js';
+import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
+import { observationWire } from '../fixtures/observation-wire.js';
+import { BackendMeasurement } from '../fixtures/backend-measurement.js';
 
 const fixtures: PublicationFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
@@ -89,15 +92,37 @@ it('blocks completion before approval and rejects an unauthorized delivery mode 
   expect(f.issue.comments).toEqual([]);
 });
 
-it.each(['closed_issue','missing_project','owner_changed','field_option_removed','remote_changed','partial_read'])('blocks the current publication gate for %s and preserves approval', async scenario => {
+it.each(['closed_issue','missing_project','owner_changed','field_option_removed','remote_changed','partial_read','account','assignee','status','configuration'])('preserves publication authority after grouped display for %s', async scenario => {
   const f = await fixture(); await f.implement(); const writes = f.mutateEffect.mock.calls.length;
+  f.issue.memberships.push(...['extra-a', 'extra-b'].map(itemId => ({ ...structuredClone(f.issue.memberships[0]!), itemId, projectId: itemId })));
+  let grouped = 0;
+  const remote = observationWire({ issues: new Map([[f.issue.id, f.issue]]), projects: new Map([[f.project.project.id, f.project]]),
+    items: new Map([[f.project.project.id, [{ id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true }]]]),
+    pages: 1, account: () => 'ACCOUNT_test' }, new BackendMeasurement(), { afterSend: async operation => { if (operation === 'GroupedValues') grouped++; } });
+  const queue = createQueue({ storage: f.storage, github: remote, hostName: 'test-host' });
+  const display = await queue.read({ projectId: f.projectId }); expect(display.observation.complete).toBe(true);
+  expect(grouped).toBe(1);
+  expect((await queue.read({ projectId: f.projectId })).etag).toBe(display.etag); expect(grouped).toBe(1);
   if (scenario === 'closed_issue') f.issue.state = 'CLOSED';
   if (scenario === 'missing_project') f.issue.memberships = [];
   if (scenario === 'owner_changed') f.project.project.owner.id = 'OTHER';
   if (scenario === 'field_option_removed') f.project.singleSelectFields[0]!.options.pop();
   if (scenario === 'remote_changed') f.github.getRepository.mockResolvedValue(complete({ ...f.issue.repository,id: 'OTHER' }));
   if (scenario === 'partial_read') vi.mocked(f.github.getIssueContextById).mockResolvedValue({ state: 'partial',data: f.issue,diagnostics: [],retryAtMs: null });
-  await f.approve(); expect(f.status().result).toBeNull(); expect(f.issue.comments).toEqual([]); expect(f.mutateEffect).toHaveBeenCalledTimes(writes);
+  if (scenario === 'account') vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));
+  if (scenario === 'assignee') f.issue.assignees = [];
+  if (scenario === 'status') f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
+  if (scenario === 'configuration') {
+    const current = f.storage.getConfiguration(f.projectId);
+    const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
+    const changes = { base_branch: 'different' };
+    expect(() => f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
+      body: { project_changes: changes }, configuration: { ...configuration, ...changes }, globalChanges: {} })).toThrow(expect.objectContaining({ code: 'PROJECT_CONFIGURATION_LOCKED' }));
+    expect(f.storage.getConfiguration(f.projectId).etag).toBe(current.etag);
+    expect(f.mutateEffect).toHaveBeenCalledTimes(writes);
+    return;
+  }
+  await f.approve(); expect(f.status().result).toBe(scenario === 'assignee' ? 'cancelled' : null); expect(f.issue.comments).toEqual([]); expect(f.mutateEffect).toHaveBeenCalledTimes(writes);
   expect(f.storage.getReview(f.status().deliveryId!)?.state).toBe('approved');
 });
 

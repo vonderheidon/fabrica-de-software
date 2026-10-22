@@ -12,7 +12,7 @@ export interface GitHubContext extends GitHubHostAccess {
   executable: string;
 }
 export interface CommandResponse { exitCode: number; stdout: string }
-export type GhRunner = (input: string, onSend?: () => void) => Promise<CommandResponse>;
+export type GhRunner = (input: string, onSend?: () => void, responseBytes?: number) => Promise<CommandResponse>;
 export const queryLimits = Object.freeze({ timeoutMs: 15_000, responseBytes: 4_194_304, pages: 100, pageSize: 100, operationQueries: 250, operationBytes: 16_777_216 });
 
 export class GitHubRunnerError extends Error {
@@ -102,7 +102,7 @@ export async function observeGhVersion(context?: GitHubContext, timeoutMs: numbe
 }
 
 export function createGhRunner(context: GitHubContext): GhRunner {
-  return (input, onSend) => new Promise((resolve, reject) => {
+  return (input, onSend, responseBytes = queryLimits.responseBytes) => new Promise((resolve, reject) => {
     if (context.kind !== 'windows_keyring' || !isAbsolute(context.executable) || !isAbsolute(context.cwd)) {
       reject(new Error('CONTEXT_UNAVAILABLE'));
       return;
@@ -120,7 +120,7 @@ export function createGhRunner(context: GitHubContext): GhRunner {
     child.stdin.on('error', fail);
     child.stdout.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > queryLimits.responseBytes) fail();
+      if (size > responseBytes) fail();
       else chunks.push(chunk);
     });
     // stderr can contain credentials, request fragments or raw provider errors. Never expose or persist it.
@@ -182,13 +182,13 @@ export class GraphQLReader {
     return new GraphQLReader(this.run, this.now, this.throttle, { queries: queryLimits.operationQueries, bytes: queryLimits.operationBytes });
   }
 
-  async query(query: string, variables: Record<string, unknown>, onSend?: () => void): Promise<GitHubQueryResult<Record<string, unknown>>> {
+  async query(query: string, variables: Record<string, unknown>, onSend?: () => void, responsePages: 1 | 2 | 3 = 1): Promise<GitHubQueryResult<Record<string, unknown>>> {
     if (!this.run) return result('context_unavailable', null, ['CONTEXT_UNAVAILABLE']);
     if (this.now() < this.throttle.retryAtMs) return result('rate_limited', null, ['RATE_LIMITED'], this.throttle.retryAtMs);
     if (this.budget && (this.budget.queries <= 0 || this.budget.bytes <= 0)) return result('unavailable', null, ['QUERY_LIMIT']);
     if (this.budget) this.budget.queries--;
     let response: CommandResponse;
-    try { response = await this.run(JSON.stringify({ query, variables }), onSend); }
+    try { response = await this.run(JSON.stringify({ query, variables }), onSend, queryLimits.responseBytes * responsePages); }
     catch (error) {
       if (error instanceof GitHubRunnerError && error.code === 'CONTEXT_UNAVAILABLE') return result('context_unavailable', null, ['CONTEXT_UNAVAILABLE']);
       return result('unavailable', null, ['CLI_UNAVAILABLE']);
@@ -241,14 +241,14 @@ export class GraphQLReader {
   }
 }
 
-export async function collect<T>(reader: GraphQLReader, query: string, variables: Record<string, unknown>, select: (data: Record<string, unknown>) => unknown, decode: (node: Record<string, unknown>) => T, identity: (node: Record<string, unknown>) => string | null = (node) => string(node.id)): Promise<GitHubQueryResult<T[]>> {
+export async function collect<T>(reader: GraphQLReader, query: string, variables: Record<string, unknown>, select: (data: Record<string, unknown>) => unknown, decode: (node: Record<string, unknown>) => T, identity: (node: Record<string, unknown>) => string | null = (node) => string(node.id), firstPage?: GitHubQueryResult<Record<string, unknown>>): Promise<GitHubQueryResult<T[]>> {
   const items: T[] = [];
   let cursor: string | null = null;
   const seen = new Set<string>();
   const ids = new Set<string>();
   const notes: GitHubDiagnostic['code'][] = [];
   for (let page = 0; page < queryLimits.pages; page++) {
-    const response = await reader.query(query, { ...variables, cursor });
+    const response = page === 0 && firstPage ? firstPage : await reader.query(query, { ...variables, cursor });
     notes.push(...response.diagnostics.map((entry) => entry.code));
     if (!response.data) return result(items.length ? 'partial' : response.state, items.length ? items : null, notes, response.retryAtMs);
     try {

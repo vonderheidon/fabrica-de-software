@@ -1,0 +1,587 @@
+{
+  "runId": "20261021_150214-1ec379",
+  "summary": "Fábrica local que transforma issues GitHub em tentativas de implementação, checks, revisão independente e entrega, coordenando Maestri/OMP e conteúdo Git. A UI React conversa por HTTP/JSON e SSE com um controlador Node.js/Fastify; SQLite guarda estado operacional e referências, enquanto Git mantém o conteúdo das versões de entrega.",
+  "domainVocabulary": [
+    {
+      "term": "Projeto",
+      "meaning": "Cadastro que associa origem Git, identidade e configurações; distinto de GitHub Project."
+    },
+    {
+      "term": "Kanban monitorado",
+      "meaning": "GitHub Project associado ao cadastro para selecionar e acompanhar issues."
+    },
+    {
+      "term": "Fila Ready",
+      "meaning": "Issues prontas com único responsável igual à conta da esteira e ciclo automático ainda não consumido."
+    },
+    {
+      "term": "Preparação",
+      "meaning": "Escolhas editáveis e resumo revalidável antes de autorizar uma tentativa."
+    },
+    {
+      "term": "Tentativa",
+      "meaning": "Execução identificada de uma issue com captura de configuração e ambiente próprios."
+    },
+    {
+      "term": "Rodada",
+      "meaning": "Ciclo de implementação, verificação e revisão dentro de uma tentativa."
+    },
+    {
+      "term": "Passagem",
+      "meaning": "Trabalho de um papel em uma rodada, vinculado a resultado estruturado."
+    },
+    {
+      "term": "Perfil de execução",
+      "meaning": "Executor, provider, modelo, esforço e orientação reutilizáveis por papel."
+    },
+    {
+      "term": "Versão de entrega",
+      "meaning": "Identidade imutável do conteúdo capturado em Git e submetido a checks/revisão."
+    },
+    {
+      "term": "ICR",
+      "meaning": "Implementação, checks e revisão independente, sem commit de entrega."
+    },
+    {
+      "term": "Publicação",
+      "meaning": "Efeitos posteriores à aprovação técnica, conforme modo autorizado."
+    },
+    {
+      "term": "Operação",
+      "meaning": "Comando rastreável com identidade, estado e recibo persistidos."
+    },
+    {
+      "term": "Interrupção",
+      "meaning": "Perda de acompanhamento; não comprova parada física dos recursos."
+    },
+    {
+      "term": "Cancelamento",
+      "meaning": "Revogação de continuidade, separada da confirmação da limpeza."
+    }
+  ],
+  "modules": [
+    {
+      "id": "web",
+      "name": "Interface web",
+      "path": "apps/web/src",
+      "role": "Renderiza navegação por hash, diálogos e jornadas de projetos, configuração, fila e tentativas. Entry point main.tsx monta AppShell.",
+      "callers": [
+        "Operador no navegador"
+      ],
+      "dependencies": [
+        "web-transport",
+        "contracts"
+      ],
+      "risk": "medium",
+      "layer": "frontend",
+      "kind": "ui"
+    },
+    {
+      "id": "web-transport",
+      "name": "Transporte e observação web",
+      "path": "apps/web/src/api",
+      "role": "Interface requestJson/requestText mantém sessão e CSRF; preserva ETag e traduz erros. O Module de observação em app/controller-events.ts consome SSE e solicita ressincronização.",
+      "callers": [
+        "web"
+      ],
+      "dependencies": [
+        "http",
+        "contracts"
+      ],
+      "risk": "medium",
+      "layer": "frontend",
+      "kind": "adapter"
+    },
+    {
+      "id": "host",
+      "name": "Composição do host",
+      "path": "scripts/start-host.mjs",
+      "role": "Compõe caminhos nativos e contexto herdado; chama startController. main.ts adquire lock, abre storage, valida execução e conecta os Modules antes de listen em loopback.",
+      "callers": [
+        "npm start"
+      ],
+      "dependencies": [
+        "http",
+        "storage",
+        "github",
+        "workspaces",
+        "execution",
+        "pipeline",
+        "verification",
+        "projects",
+        "deletion"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "adapter"
+    },
+    {
+      "id": "http",
+      "name": "Interface HTTP local",
+      "path": "apps/controller/src/http",
+      "role": "createApp instala segurança, sessão, contratos, arquivos web e rotas versionadas; converte DTOs públicos e delega comandos e consultas. Expõe eventos paginados e SSE.",
+      "callers": [
+        "web-transport",
+        "host"
+      ],
+      "dependencies": [
+        "contracts",
+        "projects",
+        "pipeline",
+        "storage",
+        "queries",
+        "diagnostics",
+        "deletion"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "adapter"
+    },
+    {
+      "id": "projects",
+      "name": "Projetos e configuração",
+      "path": "apps/controller/src/modules/projects",
+      "role": "createProjects governa cadastro, configuração global/por projeto, perfis, seleções nativas e opções. O mesmo pacote contém preparação, observação da fila e scaffold, descritos como Modules próprios abaixo.",
+      "callers": [
+        "http",
+        "host"
+      ],
+      "dependencies": [
+        "contracts",
+        "storage",
+        "github",
+        "workspaces",
+        "execution",
+        "queue"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "preparations",
+      "name": "Preparações",
+      "path": "apps/controller/src/modules/projects/preparations.ts",
+      "role": "Interface createPreparations é composta com storage, github e workspaces; oferece criação, leitura e revalidação do resumo usado por startAttempt. O corpo interno não foi aprofundado.",
+      "callers": [
+        "http",
+        "pipeline",
+        "host"
+      ],
+      "dependencies": [
+        "storage",
+        "github",
+        "workspaces"
+      ],
+      "risk": "medium",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "queue",
+      "name": "Fila Ready",
+      "path": "apps/controller/src/modules/projects/queue.ts",
+      "role": "Observa identidade, Projects e issues; produz elegibilidade, ordenação e backoff. read mantém observação para exibição; save e scheduler exigem observação atual. Não despacha sozinho.",
+      "callers": [
+        "projects",
+        "pipeline",
+        "host"
+      ],
+      "dependencies": [
+        "contracts",
+        "storage",
+        "github"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "scaffold",
+      "name": "Criação de projetos",
+      "path": "apps/controller/src/modules/projects/scaffold.ts",
+      "role": "Planeja criação com template/digest, destino e modalidade; coordena trabalho assíncrono, efeitos duráveis e reconciliação. Consulta recursos distribuídos de engenharia.",
+      "callers": [
+        "http"
+      ],
+      "dependencies": [
+        "contracts",
+        "storage",
+        "github",
+        "workspaces",
+        "resources/templates"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "pipeline",
+      "name": "Coordenação das tentativas",
+      "path": "apps/controller/src/modules/pipeline",
+      "role": "createPipeline coordena início, polling, revalidação de escopo, captura, checks, revisão, correção, perguntas e encerramento. Composição inclui recuperação e publicação; callbacks de resultados promovem o fluxo.",
+      "callers": [
+        "http",
+        "host",
+        "storage.onResultAccepted",
+        "timer interno"
+      ],
+      "dependencies": [
+        "contracts",
+        "storage",
+        "preparations",
+        "queue",
+        "execution",
+        "workspaces",
+        "verification",
+        "publication",
+        "github"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "engine"
+    },
+    {
+      "id": "execution",
+      "name": "Execução Maestri/OMP",
+      "path": "apps/controller/src/modules/execution",
+      "role": "Interface Execution oferece preflight, catálogo, início/continuação de passagem, perguntas, cancelamento e interação. Adapter Maestri/OMP combina contexto nativo, canal, bootstrap e persistência injetada; resultados estruturados são validados.",
+      "callers": [
+        "pipeline",
+        "host",
+        "projects",
+        "diagnostics"
+      ],
+      "dependencies": [
+        "contracts",
+        "ExecutionPersistence fornecida por storage",
+        "Maestri",
+        "OMP",
+        "resources/roles"
+      ],
+      "risk": "high",
+      "layer": "external",
+      "kind": "adapter"
+    },
+    {
+      "id": "workspaces",
+      "name": "Conteúdo e ambientes Git",
+      "path": "apps/controller/src/modules/workspaces",
+      "role": "Interface createWorkspaces compõe inspeção, clone por tentativa, captura, diff, retenção, materialização de checks/revisão, publicação Git, scaffold e inspeção/remoção de alvos. GitContext e capacidades do host são Seams explícitos.",
+      "callers": [
+        "host",
+        "projects",
+        "preparations",
+        "scaffold",
+        "pipeline",
+        "verification",
+        "publication",
+        "deletion"
+      ],
+      "dependencies": [
+        "contracts",
+        "github",
+        "Git",
+        "filesystem",
+        "recursos nativos Windows"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "adapter"
+    },
+    {
+      "id": "verification",
+      "name": "Verificações e evidências",
+      "path": "apps/controller/src/modules/verification",
+      "role": "Materializa a versão para checks, confere diretórios, executa checks e registra conclusões. Carrega artefatos sob demanda com conferência de integridade e escopo.",
+      "callers": [
+        "pipeline",
+        "publication",
+        "host"
+      ],
+      "dependencies": [
+        "storage",
+        "workspaces",
+        "filesystem",
+        "executor de checks"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "publication",
+      "name": "Publicação e autoridade",
+      "path": "apps/controller/src/modules/publication",
+      "role": "Revalida conta, issue, responsável e posição no Kanban; coordena efeitos conforme modo ICR, commit ou PR. Registra intenções e confirmações, reconcilia efeitos incertos e aceita aumento explícito de modo.",
+      "callers": [
+        "pipeline"
+      ],
+      "dependencies": [
+        "contracts",
+        "storage",
+        "github",
+        "workspaces",
+        "verification"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "storage",
+      "name": "Persistência SQLite",
+      "path": "apps/controller/src/modules/storage",
+      "role": "Interface Storage reúne configuração, tentativas, passagens, entregas, checks, revisão, perguntas, efeitos, fila, exclusão e consultas. openStorage usa better-sqlite3, migrations e operações transacionais; fornece ExecutionPersistence e notificações de resultado.",
+      "callers": [
+        "host",
+        "http",
+        "projects",
+        "preparations",
+        "queue",
+        "scaffold",
+        "pipeline",
+        "verification",
+        "publication",
+        "diagnostics",
+        "deletion",
+        "queries"
+      ],
+      "dependencies": [
+        "contracts",
+        "better-sqlite3",
+        "migrations SQL",
+        "filesystem"
+      ],
+      "risk": "high",
+      "layer": "data",
+      "kind": "store"
+    },
+    {
+      "id": "github",
+      "name": "Integração GitHub",
+      "path": "apps/controller/src/modules/github",
+      "role": "createGitHub compõe leitura GraphQL via GH CLI, resolução de executável/autenticação, efeitos e scaffold remoto. Autorizações e contexto de host são injetados; presença de executável não comprova acesso.",
+      "callers": [
+        "host",
+        "projects",
+        "preparations",
+        "queue",
+        "scaffold",
+        "pipeline",
+        "publication",
+        "diagnostics",
+        "workspaces"
+      ],
+      "dependencies": [
+        "contracts",
+        "GH CLI",
+        "GitHub GraphQL"
+      ],
+      "risk": "high",
+      "layer": "external",
+      "kind": "adapter"
+    },
+    {
+      "id": "deletion",
+      "name": "Exclusão de projetos",
+      "path": "apps/controller/src/modules/projects/deletion.ts",
+      "role": "createDeletionCoordinator coordena claim, reconferência de alvos, progresso, remoção e finalização persistida. Recupera trabalhos registrados na inicialização; a remoção prossegue independente da conexão HTTP.",
+      "callers": [
+        "host",
+        "http",
+        "projects/project-deletions.ts"
+      ],
+      "dependencies": [
+        "storage.deletionWorker",
+        "workspaces"
+      ],
+      "risk": "high",
+      "layer": "main",
+      "kind": "engine"
+    },
+    {
+      "id": "queries",
+      "name": "Consultas de operação e histórico",
+      "path": "apps/controller/src/modules/queries",
+      "role": "Interface createQueries projeta chamadas de lista/detalhe de tentativas, entregas e operação diretamente para Storage. A Implementation lida com delegação; a consistência dos snapshots pertence a storage.",
+      "callers": [
+        "http"
+      ],
+      "dependencies": [
+        "contracts",
+        "storage"
+      ],
+      "risk": "low",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "diagnostics",
+      "name": "Diagnóstico contextual",
+      "path": "apps/controller/src/modules/diagnostics",
+      "role": "Coordena observações explícitas de configuração, identidade, contexto Maestri e registros de recursos; persiste intenção e resultado e limita trabalho pendente.",
+      "callers": [
+        "http"
+      ],
+      "dependencies": [
+        "contracts",
+        "storage",
+        "github",
+        "projects",
+        "execution"
+      ],
+      "risk": "medium",
+      "layer": "main",
+      "kind": "service"
+    },
+    {
+      "id": "contracts",
+      "name": "Contratos compartilhados",
+      "path": "packages/contracts/src",
+      "role": "Exporta schemas e tipos do domínio e DTOs HTTP por famílias. A Interface compartilhada é consumida pelo controlador e pela web; a regra estática restringe este pacote a schemas/tipos.",
+      "callers": [
+        "web",
+        "web-transport",
+        "http e Modules do controlador"
+      ],
+      "dependencies": [
+        "TypeBox"
+      ],
+      "risk": "medium",
+      "layer": "shared",
+      "kind": "util"
+    }
+  ],
+  "flows": [
+    {
+      "id": "startup",
+      "name": "Inicialização local",
+      "steps": [
+        "npm start executa scripts/start-host.mjs, que compõe contexto Windows e quatro caminhos EXE: Git, Maestri, OMP e PowerShell.",
+        "startController resolve configuração, adquire lock e abre storage; compõe github, workspaces e execution.",
+        "Preflight de execution e validação dos recursos precedem createPipeline/createApp; o coordenador de exclusão recupera trabalhos registrados.",
+        "O controlador escuta no endereço configurado, com porta padrão de produto 4310; fechamento revoga coordenação e libera persistência/lock."
+      ]
+    },
+    {
+      "id": "manual-attempt",
+      "name": "Preparação até entrega revisada",
+      "steps": [
+        "A web envia comandos pela Interface HTTP, com sessão, CSRF e revisão esperada; a preparação fornece resumo para autorização.",
+        "pipeline.startAttempt recupera operação idempotente, revalida configuração, autoridade, perfis e resumo; storage.createAttempt confirma captura/intenção antes do despacho.",
+        "workspaces.prepareAttempt cria ambiente próprio e execution.startPassage inicia Implementador com perfil e critérios capturados.",
+        "Resultado aceito por ExecutionPersistence aciona storage.onResultAccepted; pipeline captura conteúdo Git e chama verification.verifyDelivery.",
+        "pipeline materializa revisão independente e inicia Revisor; rejeição pode abrir correção na sessão de implementação e nova versão, dentro dos limites.",
+        "Aprovação aciona publication.publishApproved; os efeitos seguem o modo autorizado."
+      ]
+    },
+    {
+      "id": "automatic-queue",
+      "name": "Despacho automático da fila",
+      "steps": [
+        "Timer do pipeline chama tick, observa limites, autoridade e escopo e consulta queue.observe respeitando polling/backoff.",
+        "Observações válidas alimentam os ciclos duráveis em storage; nova consulta seleciona candidato elegível quando a automação está ligada.",
+        "O scheduler cria preparação e usa o mesmo startAttempt do início manual, incluindo identidade do ciclo para consumo atômico."
+      ]
+    },
+    {
+      "id": "publication",
+      "name": "Publicação e reconciliação",
+      "steps": [
+        "publication revalida autoridade atual e versão/evidências aprovadas.",
+        "storage guarda intenção e claim dos efeitos; workspaces executa commit/push quando pertinentes e github executa efeitos remotos conforme modo.",
+        "Recibos confirmados permitem avançar; efeitos running/unknown são reconciliados por observação antes de continuidade.",
+        "Conclusão local e projeção de estado no Kanban permanecem fatos separados."
+      ]
+    },
+    {
+      "id": "observation",
+      "name": "Observação da operação pela web",
+      "steps": [
+        "main.tsx monta AppShell; jornadas consultam JSON e preservam metadados de revisão via transporte web.",
+        "Rotas delegam resumos/detalhes para queries ou Storage e projetam DTOs públicos.",
+        "O observador web obtém event_cursor e abre /api/v1/events/stream; valida frames e deduplica sequência.",
+        "Eventos e resync solicitam atualização de leituras; recuperação da sessão não repete automaticamente mutações."
+      ]
+    },
+    {
+      "id": "project-creation",
+      "name": "Criação de projeto",
+      "steps": [
+        "scaffold.plan valida escolhas, catálogo/digest, destino, conta e modalidade e produz plano.",
+        "A criação aceita intenção durável e agenda trabalho com workspaces e, nas modalidades remotas, github.",
+        "Etapas e efeitos são registrados; reconciliação consulta efeitos incertos antes de registrar conclusão."
+      ]
+    },
+    {
+      "id": "project-deletion",
+      "name": "Exclusão durável de projeto",
+      "steps": [
+        "A Interface HTTP encaminha o pedido ao Module de exclusão e à persistência correspondente.",
+        "createDeletionCoordinator reivindica trabalho e reconfere inventário, bloqueios e identidade dos alvos por workspaces.",
+        "Remoções registram progresso; nova conferência exige ausência antes da finalização SQL.",
+        "Falha preserva progresso e estado pendente/reconfirmação; recuperação na inicialização não equivale a restaurar sessões de agentes."
+      ]
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "hotspot-1",
+      "title": "Coordenação e continuidade das tentativas",
+      "paths": [
+        "apps/controller/src/modules/pipeline/start.ts",
+        "apps/controller/src/modules/pipeline/recovery.ts",
+        "apps/controller/src/modules/publication/index.ts"
+      ],
+      "reason": "Timer, callbacks de resultados, tarefas pendentes, cancelamento, revisão/correção e autoridade cruzam persistência e IO assíncrono. Ordenação e estados de falha fazem parte da Interface e merecem triagem conjunta.",
+      "suggestedNextPhase": "target-triage"
+    },
+    {
+      "id": "hotspot-2",
+      "title": "Interface transacional e projeções persistidas",
+      "paths": [
+        "apps/controller/src/modules/storage/index.ts",
+        "apps/controller/src/modules/storage/migrations",
+        "apps/controller/src/modules/storage/execution.ts",
+        "apps/controller/src/modules/storage/effects.ts"
+      ],
+      "reason": "Storage reúne muitas famílias de estado, recibos, idempotência, revisões e notificações. A correção depende das relações e transações por trás da Interface; não foi feita auditoria de todos os SQLs.",
+      "suggestedNextPhase": "target-triage"
+    },
+    {
+      "id": "hotspot-3",
+      "title": "Lifecycle Maestri/OMP e resultados oficiais",
+      "paths": [
+        "apps/controller/src/modules/execution/adapters/maestri-omp",
+        "apps/controller/src/modules/execution/index.ts"
+      ],
+      "reason": "Passagens vivas, bootstrap, canal, handshake de perfil, resultado validado, resposta humana e parada incerta interagem com registros duráveis. A separação entre coordenação revogada e parada comprovada exige aprofundamento.",
+      "suggestedNextPhase": "target-triage"
+    },
+    {
+      "id": "hotspot-4",
+      "title": "Exclusão com identidade de alvos e progresso durável",
+      "paths": [
+        "apps/controller/src/modules/projects/deletion.ts",
+        "apps/controller/src/modules/storage/project-deletion-worker.ts",
+        "apps/controller/src/modules/storage/project-deletions.ts",
+        "apps/controller/src/modules/workspaces/deletion.ts",
+        "resources/deletion/windows-reference.cs"
+      ],
+      "reason": "Inventário, geração do worker, reconferência anterior a cada remoção, caminhos Windows e finalização SQL participam de um mesmo fluxo. O mapa observou o coordenador e a composição, sem comprovar as garantias nativas.",
+      "suggestedNextPhase": "target-triage"
+    }
+  ],
+  "unknowns": [
+    "Mapeamento estático top-level, sem execução de testes, build, navegador, providers, Maestri/OMP, GitHub ou operações Git com efeitos. Não constitui aceite AC/INT.",
+    "Fontes: README.md, SPEC.md e INTEGRACAO-MAESTRI-OMP.md foram consultados em trechos; GLOSSARY.md, package.json, composição e Interfaces centrais foram lidos. Saídas extensas tiveram cortes; não houve leitura integral de toda a documentação.",
+    "Arquivos versionados foram lidos por git show HEAD e comparados com git diff HEAD nas árvores analisadas, sem diferenças. CodeGraph forneceu trechos atuais de main.ts, AppShell.tsx e controller-events.ts. git status mostrou .lionclaw/ e discovery-notes.md não versionados; seu conteúdo não foi usado.",
+    "Não foram encontrados ADRs ou CONTEXT entre os caminhos versionados listados; documentos não versionados/ignorados não foram inventariados integralmente.",
+    "O README descreve launcher com cinco caminhos EXE; scripts/start-host.mjs lido exige quatro e descobre GH posteriormente. O fluxo do mapa segue a Implementation; a divergência documental não foi resolvida.",
+    "prepare/recovery/capture/publication internos de workspaces, SQLs individuais, implementações nativas Windows, extensão/canal Wire e todas as jornadas web não foram auditados por inteiro. Dependências desses agrupamentos representam composição/imports e usos visíveis, não um grafo exaustivo de chamadas.",
+    "resources/roles e resources/templates foram identificados pelos chamadores, sem auditoria integral de seus conteúdos; docs/, ensaios-fabrica/ e testes foram reconhecidos como suporte e evidências, sem serem tratados como Implementation de produção.",
+    "risk é indicação qualitativa de complexidade para triagem; não representa vulnerabilidade confirmada. Layer e kind são classificações do mapa; kind=service é apenas o valor exigido pelo schema.",
+    "Depth, Leverage, Locality e deletion test não foram medidos. A Interface é a superfície de teste; a cobertura real de seus tipos, invariantes, modos de erro, ordenação e configuração permanece para aprofundamento."
+  ]
+}

@@ -25,6 +25,28 @@ function fixture(responses: CommandResponse[]) {
 }
 
 describe('GitHub identity and query diagnostics', () => {
+  it('groups queue field pages by identity, retaining independent cursors, values and failures', async () => {
+    const header = http({ data: { node: { __typename: 'Issue', id: 'I_group', number: 17, title: 'Title', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository } } });
+    const ids = ['item-a', 'item-b', 'item-c'];
+    const prefix = () => [header, http({ data: { node: { assignees: page([]) } } }), http({ data: { node: { blockedBy: page([]) } } }),
+      http({ data: { node: { projectItems: page(ids.map(id => ({ id, isArchived: false, project: { id: 'PVT_1' } }))) } } })];
+    const value = (id: string) => ({ __typename: 'ProjectV2ItemFieldNumberValue', id, number: 7, field: { id: 'number' } });
+    const nodes = ids.map(id => ({ id, __typename: 'ProjectV2Item', fieldValues: page([value(id)], `${id}-cursor`) }));
+    const valid = fixture([...prefix(), http({ data: { nodes: [...nodes].reverse() } }), ...ids.map(id => http({ data: { node: { fieldValues: page([value(`${id}-next`)]) } } }))]);
+    const response = await valid.client.getIssueContextById('I_group', { purpose: 'queue' });
+    expect(response.state).toBe('complete');
+    expect((response.data as IssueContext).memberships.map(m => [m.itemId, m.numberValues?.length])).toEqual(ids.map(id => [id, 2]));
+    expect(valid.calls.slice(5).map(call => call.variables)).toEqual(ids.map(id => ({ id, cursor: `${id}-cursor` })));
+    for (const broken of [null, { ...nodes[1], id: 'item-a' }, { ...nodes[1], __typename: 'Issue' }]) {
+      const failed = fixture([...prefix(), http({ data: { nodes: [nodes[0], broken, nodes[2]] } }), http({ data: { node: { fieldValues: page([]) } } }), http({ data: { node: { fieldValues: page([]) } } })]);
+      expect(await failed.client.getIssueContextById('I_group', { purpose: 'queue' })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'RESPONSE_INVALID' }] });
+    }
+    const partial = fixture([...prefix(), http({ data: { nodes }, errors: [{ type: 'FORBIDDEN' }] })]);
+    expect(await partial.client.getIssueContextById('I_group', { purpose: 'queue' })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'REFERENCE_INACCESSIBLE' }] });
+    expect(partial.calls).toHaveLength(5);
+    const continuationFailure = fixture([...prefix(), http({ data: { nodes } }), http({}, 403), http({ data: { node: { fieldValues: page([]) } } }), http({ data: { node: { fieldValues: page([]) } } })]);
+    expect(await continuationFailure.client.getIssueContextById('I_group', { purpose: 'queue' })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'ACCESS_DENIED' }] });
+  });
   it('resolves an issue by exact textual node ID and verifies the identity after the full query', async () => {
     const header = http({ data: { node: { __typename: 'Issue', id: 'I_exact', number: 17, repository: { name: wireRepository.name, owner: { login: account.login } } } } });
     const issue = (id: string) => http({ data: { repository: { issueOrPullRequest: { __typename: 'Issue', id, number: 17, title: 'Title', body: 'Goal', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository } } } });

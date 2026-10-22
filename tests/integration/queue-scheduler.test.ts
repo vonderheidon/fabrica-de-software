@@ -14,6 +14,8 @@ import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attem
 import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
 import { toHttpQueueObservation } from '../../apps/controller/src/http/observation-views.js';
 import { QueuePanel } from '../../apps/web/src/features/queue/QueuePanel.js';
+import { observationWire } from '../fixtures/observation-wire.js';
+import { BackendMeasurement } from '../fixtures/backend-measurement.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) { await f.pipeline.close(); await f.close(); } });
@@ -38,6 +40,40 @@ function command(observation: QueueObservation, enabled: boolean): QueueCommand 
 }
 
 describe('authorized queue changes', () => {
+  it.each(['none', 'account', 'assignee', 'status', 'criteria', 'configuration'] as const)(
+    'keeps two fresh dispatch observations after grouped display and revalidates %s before effects', async change => {
+      const { f, automation } = await fixture(); await f.pipeline.close();
+      f.issue.memberships.push(...['extra-a', 'extra-b'].map(itemId => ({ ...structuredClone(f.issue.memberships[0]!), itemId, projectId: itemId })));
+      const meter = new BackendMeasurement();
+      const remote = observationWire({ issues: new Map([[f.issue.id, f.issue]]), projects: new Map([[f.project.project.id, f.project]]),
+        items: new Map([[f.project.project.id, (await f.github.listProjectItems(f.project.project.id)).data!]]), pages: 1,
+        account: () => 'ACCOUNT_test' }, meter);
+      const queue = createQueue({ storage: f.storage, github: remote, hostName: 'test-host' });
+      const warm = await queue.read({}); expect(warm.items[0]?.eligible).toBe(true);
+      const trace: string[] = [];
+      const record = f.storage.recordQueueObservations.bind(f.storage);
+      vi.spyOn(f.storage, 'recordQueueObservations').mockImplementation(input => { trace.push('record'); return record(input); });
+      const observe = vi.fn(async (query: Parameters<typeof queue.observe>[0]) => { trace.push('observe'); return queue.observe(query); });
+      const mutate = () => {
+        if (change === 'account') vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));
+        if (change === 'assignee') f.issue.assignees = [];
+        if (change === 'status') f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
+        if (change === 'criteria') f.issue.body += '\n- Newly added acceptance criterion';
+        if (change === 'configuration') automation(f.projectId, false);
+      };
+      const preparations = { ...f.preparations, getPreparation: async (id: string) => {
+        const prepared = await f.preparations.getPreparation(id); mutate(); return prepared;
+      } };
+      f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue: { observe } });
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(trace.slice(0, 3)).toEqual(['observe', 'record', 'observe']);
+      expect(observe).toHaveBeenCalledTimes(2);
+      expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(change === 'none' ? 1 : 0);
+      expect(f.execution.startPassage).toHaveBeenCalledTimes(change === 'none' ? 1 : 0);
+      expect(f.storage.listAttempts({}).items).toHaveLength(change === 'none' ? 1 : 0);
+      expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: change === 'none' ? 1 : 0 });
+    },
+  );
   it('explains a global pause and authorizes only confirmed projects while another enabled project is incomplete', async () => {
     const { f, queue, automation } = await fixture(false);
     const other = f.storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
@@ -54,8 +90,8 @@ describe('authorized queue changes', () => {
     }));
     expect(html).toContain('Fila global pausada');
     expect(html).toContain('Projeto pendente');
-    expect(html).toContain('Aguardando habilitação da fila');
-    expect(html).toContain('Os candidatos confirmados dos demais projetos continuam disponíveis');
+    expect(html).toContain('Aguardando habilitação');
+    expect(html).toContain('Os candidatos confirmados dos demais continuam disponíveis');
     expect(html).toContain('class="primary">Habilitar fila</button>');
     expect(html).not.toContain('PROJECT_NOT_READY');
     const saved = await queue.save(command(observed.observation, true), { operationId: randomUUID(), expectedRevision: observed.etag });
@@ -334,14 +370,29 @@ describe('durable scheduler', () => {
 
   it('keeps a consumed residual Ready cycle after cancellation, response loss and reopening, then records only an observed eligible return', async () => {
     const { f } = await fixture(); const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    await f.pipeline.close();
+    f.issue.memberships.push(...['extra-a', 'extra-b'].map(itemId => ({ ...structuredClone(f.issue.memberships[0]!), itemId, projectId: itemId })));
+    let grouped = 0;
+    const remote = observationWire({ issues: new Map([[f.issue.id, f.issue]]), projects: new Map([[f.project.project.id, f.project]]),
+      items: new Map([[f.project.project.id, (await f.github.listProjectItems(f.project.project.id)).data!]]), pages: 1,
+      account: () => 'ACCOUNT_test' }, new BackendMeasurement(), { afterSend: async operation => { if (operation === 'GroupedValues') grouped++; } });
+    const displayQueue = createQueue({ storage: f.storage, github: remote, hostName: 'test-host' });
+    await displayQueue.read({}); expect(grouped).toBe(1);
+    f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue: displayQueue });
     await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
+    const commandsBefore = { workspace: f.workspaces.prepareAttempt.mock.calls.length, passage: vi.mocked(f.execution.startPassage).mock.calls.length };
+    expect(commandsBefore).toEqual({ workspace: 1, passage: 1 });
     expect(f.storage.getOperation(f.storage.getAttempt(first.id).operationId)?.resource.id).toBe(first.id);
     f.persistence.recordCancellation(first.id, randomUUID()); await f.pipeline.close(); f.storage.close();
     const reopened = openStorage({ dataDirectory: f.directory });
-    const queue = createQueue({ storage: reopened, github: f.github, hostName: 'test-host' });
+    const queue = createQueue({ storage: reopened, github: remote, hostName: 'test-host' });
     const pipeline = createPipeline({ ...f.dependencies, storage: reopened, queue });
     try {
+      const beforeReads = grouped;
       await pipeline.tick(); expect(reopened.listAttempts({}).items).toHaveLength(1);
+      expect(grouped).toBeGreaterThan(beforeReads);
+      expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(commandsBefore.workspace);
+      expect(f.execution.startPassage).toHaveBeenCalledTimes(commandsBefore.passage);
       f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG'; clock.mockReturnValue(base + 15_001); await pipeline.tick();
       f.issue.memberships[0]!.statusValues[0]!.optionId = 'READY'; f.issue.assignees = []; clock.mockReturnValue(base + 30_002); await pipeline.tick();
       expect(reopened.getQueueCycle('ACCOUNT_test', f.projectId, f.issue.id)?.cycleNumber).toBe(1);
