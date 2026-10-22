@@ -60,6 +60,15 @@ async function observeStartCatalog(execution: Execution, logFailure: (code: stri
   }
 }
 
+async function authorityReady(observation: Promise<boolean>): Promise<boolean> {
+  try { return await observation; }
+  catch (error) {
+    // A stale read grants no authority; let the caller retain its existing continuation.
+    if (error instanceof OperationError && error.code === 'AUTHORITY_OBSERVATION_STALE') return false;
+    throw error;
+  }
+}
+
 export function createPipeline(deps: PipelineDependencies) {
   const { storage, execution, preparations, workspaces } = deps;
   const pending = new Set<Promise<void>>(); const abort = new AbortController(); let closed = false;
@@ -192,7 +201,7 @@ export function createPipeline(deps: PipelineDependencies) {
     if (deps.github && Date.now() - lastScopePoll >= storage.getSettings().time_defaults.polling_interval_ms) {
       scopePolling = true; lastScopePoll = Date.now();
       try {
-        if (publication) for (const id of storage.getAuthorityCandidates()) await publication.observeAuthority(id);
+        if (publication) for (const id of storage.getAuthorityCandidates()) await authorityReady(publication.observeAuthority(id));
         for (const [id, next] of waitingForAuthority) {
           const a = storage.getAttempt(id);
           if (a.result) waitingForAuthority.delete(id);
@@ -219,7 +228,7 @@ export function createPipeline(deps: PipelineDependencies) {
     if (closed) return;
     const observed = storage.getDelivery(deliveryId);
     if (observed.verification && ['running', 'error'].includes(observed.verification.state)) return;
-    if (publication && !await publication.observeAuthority(observed.delivery.attemptId,'inReview')) {
+    if (publication && !await authorityReady(publication.observeAuthority(observed.delivery.attemptId,'inReview'))) {
       waitingForAuthority.set(observed.delivery.attemptId,() => review(deliveryId)); return;
     }
     const claimed = storage.beginReview(deliveryId); if (!claimed) return;
@@ -228,7 +237,7 @@ export function createPipeline(deps: PipelineDependencies) {
   async function launchReview(claimed: NonNullable<ReturnType<Storage['beginReview']>>): Promise<void> {
     const deliveryId = claimed.deliveryId;
     try {
-      if (publication && !await publication.projectStage(claimed.attemptId, 'inReview')) {
+      if (publication && !await authorityReady(publication.projectStage(claimed.attemptId, 'inReview'))) {
         waitingForAuthority.set(claimed.attemptId,() => launchReview(claimed)); return;
       }
       if (!workspaces.materializeReview) throw new CaptureError('REVIEW_MATERIALIZATION_UNAVAILABLE');
@@ -237,7 +246,7 @@ export function createPipeline(deps: PipelineDependencies) {
       const cwd = await workspaces.materializeReview(delivery, claimed.id);
       storage.recordReviewWorkspace(deliveryId, true, null);
       const launch = async (): Promise<void> => {
-        if (publication && !await publication.observeAuthority(delivery.attemptId,'inReview')) {
+        if (publication && !await authorityReady(publication.observeAuthority(delivery.attemptId,'inReview'))) {
           waitingForAuthority.set(delivery.attemptId,launch); return;
         }
         const current = storage.getAttempt(delivery.attemptId);
@@ -265,7 +274,7 @@ export function createPipeline(deps: PipelineDependencies) {
   async function correct(deliveryId: string): Promise<void> {
     if (closed) return;
     const attemptId = storage.getDelivery(deliveryId).delivery.attemptId;
-    if (publication && !await publication.observeAuthority(attemptId,'inProgress')) {
+    if (publication && !await authorityReady(publication.observeAuthority(attemptId,'inProgress'))) {
       waitingForAuthority.set(attemptId,() => correct(deliveryId)); return;
     }
     let plan;
@@ -281,7 +290,7 @@ export function createPipeline(deps: PipelineDependencies) {
   async function launchCorrection(plan: NonNullable<ReturnType<Storage['beginCorrection']>>): Promise<void> {
     const deliveryId = plan.review.deliveryId;
     try {
-      if (publication && !await publication.projectStage(plan.review.attemptId, 'inProgress')) {
+      if (publication && !await authorityReady(publication.projectStage(plan.review.attemptId, 'inProgress'))) {
         waitingForAuthority.set(plan.review.attemptId,() => launchCorrection(plan)); return;
       }
       const capture = storage.getAttemptCapture(plan.review.attemptId);
@@ -322,7 +331,7 @@ export function createPipeline(deps: PipelineDependencies) {
   async function verifyAndReview(deliveryId: string): Promise<void> {
     if (closed || !deps.verification) return;
     const id = storage.getDelivery(deliveryId).delivery.attemptId;
-    if (publication && !await publication.observeAuthority(id)) {
+    if (publication && !await authorityReady(publication.observeAuthority(id))) {
       waitingForAuthority.set(id,() => verifyAndReview(deliveryId)); return;
     }
     await deps.verification.verifyDelivery(deliveryId,signalFor(id));
@@ -342,7 +351,7 @@ export function createPipeline(deps: PipelineDependencies) {
   async function dispatch(id: string): Promise<void> {
     const status = storage.getAttempt(id); const capture = storage.getAttemptCapture(id);
     if (closed || status.suspension || status.result) return;
-    if (publication && !await publication.observeAuthority(id)) { waitingForAuthority.set(id,() => dispatch(id)); return; }
+    if (publication && !await authorityReady(publication.observeAuthority(id))) { waitingForAuthority.set(id,() => dispatch(id)); return; }
     storage.recordWorkspace(id, 'starting', false, null);
     const workspace = await workspaces.prepareAttempt({ attemptId: id, issueNumber: capture.issue.number,
       source: capture.configuration.configuration.source, baseSha: capture.baseSha });
@@ -355,7 +364,7 @@ export function createPipeline(deps: PipelineDependencies) {
     // Revalidate authority again after clone; never silently adopt a new base or new summary.
     await preparations.revalidateSummary({ preparationId: capture.preparationId, preparationRevision: capture.preparationRevision, authorizedSummaryHash: capture.summaryHash });
     const launch = async (): Promise<void> => {
-      if (publication && !await publication.projectStage(id, 'inProgress')) { waitingForAuthority.set(id,launch); return; }
+      if (publication && !await authorityReady(publication.projectStage(id, 'inProgress'))) { waitingForAuthority.set(id,launch); return; }
       const current = storage.getAttempt(id);
       if (closed || current.result || current.suspension) return;
       const passage = storage.executionPersistence().getPassage({ passageId: status.passageId });
