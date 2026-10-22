@@ -16,10 +16,10 @@
 .dashboard-facts > div { padding: 12px 0 0; }
 .dashboard-facts dd { font-size: 14px; font-weight: 600; }
 .dashboard-facts dt { font-size: 12px; }
-.dashboard-grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-areas: 'active blockers' 'results queue' 'projects projects'; gap: 20px; }
+.dashboard-grid { grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); grid-template-areas: 'active results' 'blockers results' 'queue results' 'projects projects'; gap: 20px; }
 .dashboard-active { grid-area: active; }
 .dashboard-blockers { grid-area: blockers; }
-.dashboard-results { grid-area: results; }
+.dashboard-results { grid-area: results; align-self: stretch; }
 .dashboard-queue { grid-area: queue; }
 .dashboard-projects { grid-area: projects; }
 .dashboard-panels .empty-inline { margin: 0; padding: 8px 0; line-height: 1.6; }
