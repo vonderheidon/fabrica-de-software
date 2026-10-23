@@ -1,7 +1,17 @@
-import { expect, it } from 'vitest';
-import { mkdir, mkdtemp, rmdir, symlink, unlink } from 'node:fs/promises';
+import { expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, rmdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { nativeDeletionInspectionPlatform } from './deletion.js';
+
+const { unsafeAncestors } = vi.hoisted(() => ({ unsafeAncestors: new Set<string>() }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  return { ...original, lstat: async (path: string, options?: { bigint?: boolean }) => {
+    const stat = await original.lstat(path, options?.bigint ? { bigint: true } : { bigint: false });
+    if (unsafeAncestors.has(path)) stat.isSymbolicLink = () => true;
+    return stat;
+  } };
+});
 
 it('recognizes absence below an uncreated managed container without inventing ancestors', async () => {
   const cache = resolve('.cache');
@@ -14,13 +24,16 @@ it('recognizes absence below an uncreated managed container without inventing an
   } finally { await rmdir(base); }
 });
 
-it('does not confuse an ancestor link with an absent managed container', async () => {
+it('does not confuse an ancestor reported as a link with an absent managed container (controlled lstat)', async () => {
   const cache = resolve('.cache');
   await mkdir(cache, { recursive: true });
   const base = await mkdtemp(join(cache, 'absence-proof-'));
   const link = join(base, 'link');
   try {
-    await symlink(base, link, process.platform === 'win32' ? 'junction' : 'dir');
+    // Real junction creation belongs to the opt-in native proof suite. Keep the
+    // safety branch deterministic here without requiring OS link privileges.
+    await mkdir(link);
+    unsafeAncestors.add(link);
     await expect(nativeDeletionInspectionPlatform().observe(join(link, 'missing'))).rejects.toThrow('DELETION_ANCESTOR_UNSAFE');
-  } finally { await unlink(link); await rmdir(base); }
+  } finally { unsafeAncestors.delete(link); await rmdir(link); await rmdir(base); }
 });

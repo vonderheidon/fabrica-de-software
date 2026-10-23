@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { lstat, mkdir, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { observeWindowsReference, removeWindowsReference } from '../../apps/controller/src/modules/workspaces/windows-reference.js';
-import { createDeletionInspector, windowsReferenceDeletionPlatform } from '../../apps/controller/src/modules/workspaces/deletion.js';
+import { createDeletionInspector, nativeDeletionInspectionPlatform, windowsReferenceDeletionPlatform } from '../../apps/controller/src/modules/workspaces/deletion.js';
 
 const fixtures: string[] = [];
 const cache = resolve('.cache');
@@ -34,6 +34,13 @@ async function expectRenameBlocked(source: string, destination: string) {
 }
 
 describe.skipIf(process.platform !== 'win32')('Windows handle reference platform (mandatory host qualification)', () => {
+  it('rejects an actual ancestor junction in the Node observation adapter', async () => {
+    const f = await fixture();
+    const linked = join(f.base, 'node-ancestor-link');
+    await symlink(f.outside, linked, 'junction');
+    await expect(nativeDeletionInspectionPlatform().observe(join(linked, 'missing'))).rejects.toThrow('DELETION_ANCESTOR_UNSAFE');
+    expect(await readFile(join(f.outside, 'preserve.txt'), 'utf8')).toBe('shared and sibling data');
+  });
   it('protects ancestors of an absent target without claiming to reserve its empty name', async () => {
     const f = await fixture();
     const missing = join(f.base, 'missing');
