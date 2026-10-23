@@ -1,0 +1,586 @@
+{
+  "project": {
+    "id": "c843209117d1116188fcc53d2afdae4c",
+    "name": "Reestruturação das verificações da fábrica",
+    "description": "AUTORIZAÇÃO ATUAL: começar somente pelo levantamento e definição do comportamento. Não implementar nem avançar além dos checkpoints de aprovação do usuário. Objetivo: reorganizar as verificações JÁ EXISTENTES da Nova Fábrica: prontidão global em Configuração; verificações específicas nas superfícies correspondentes de projeto, preparação, tentativa e criação; remover o seletor de contexto da superfície de diagnóstico; manter Registros exclusivamente como histórico. Evitar avisos duplicados e preservar a validação antes de executar. Não acrescentar funcionalidades não solicitadas, novas verificações, automações, infraestrutura ou fluxos de recuperação. Antes de propor mudanças, inventariar verificações existentes, onde aparecem, gatilhos, bloqueios e fontes de verdade. Ler SPEC.md, INTEGRACAO-MAESTRI-OMP.md, GLOSSARY.md e instruções pertinentes; usar repo-graph/CodeGraph para orientação e confirmar arquivos atuais. Definir mapa atual -> destino e critérios de aceite observáveis, preservando semântica de bloqueios e contratos existentes. Lacunas que mudem comportamento, escopo ou risco devem ser apresentadas ao usuário; detalhes técnicos dentro desse escopo podem ser resolvidos autonomamente. Não alterar LionClaw. Não fazer staging, commit, push, publicação nem efeitos externos. Repositório canônico, sem cópias/worktrees/floors. Git conferido: HEAD 3efa162, commits anteriores presentes; única alteração local preexistente em apps/web/src/features/records/RecordsPanel.tsx corrige Consultando registrosâ€¦ para Consultando registros…; preservar essa alteração. Não confundir essa correção com autorização de implementação da reestruturação.",
+    "path": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software",
+    "stack": [],
+    "config": {
+      "max_rounds_per_sprint": 3,
+      "use_playwright": true,
+      "evaluator_agent_id": "harness-evaluator",
+      "planner_agent_id": "harness-planner"
+    }
+  },
+  "sprints": [
+    {
+      "id": "sprint-001",
+      "index": 0,
+      "name": "Consolidar inventário e contrato de comportamento",
+      "description": "Entregar somente o levantamento documental e o mapa verificável da reorganização. A fundação de backend, contratos e persistência já existe e deve ser inventariada, sem scaffold ou implementação. As sprints seguintes são planejamento futuro condicionado à aprovação humana correspondente.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "Fastify",
+        "SQLite"
+      ],
+      "features": [
+        {
+          "id": "feat-001",
+          "name": "Inventário das verificações existentes",
+          "description": "Registrar fontes, superfícies, gatilhos, checks suportados, bloqueios, ações e limites das verificações existentes.",
+          "acceptance_criteria": [
+            "O inventário cobre Configuração global, projeto, preparação, tentativa, entrega, criação, Dashboard e Registros, com caminho e símbolo atuais de cada consumidor relevante.",
+            "Cada verificação identifica origem da decisão, gatilho manual ou consulta, efeito permitido, escopo e ações existentes; preparação não recebe escopo diagnostics.",
+            "A existência de SPEC.md e dos documentos indicados é conferida; fonte ausente ou análise truncada é registrada sem reconstrução nem aprovação inferida.",
+            "Nenhum código, contrato, schema, dependência ou dado operacional é alterado; alterações locais preexistentes são identificadas e preservadas."
+          ]
+        },
+        {
+          "id": "feat-002",
+          "name": "Mapa de destinos e rastreabilidade",
+          "description": "Consolidar o comportamento atual e esperado, incluindo E1 a E4 e as provas necessárias para cada superfície.",
+          "acceptance_criteria": [
+            "O mapa associa RF-01 a RF-39, RNF-01 a RNF-12 e todos os critérios de US-01 a US-10 às sprints futuras e aos cenários de validação.",
+            "O mapa registra um controle por ação/check no contexto responsável, a retirada de diagnóstico de Registros e a ausência de execução centralizada no Dashboard.",
+            "docs/Docs20261022_160728/SPEC_PROGRESS.md registra caminhos exatos dos componentes, hooks, contratos e testes consultados, comandos efetivamente configurados, baseline observada e pendências de aprovação.",
+            "A conclusão documental não registra aprovação da SPEC, Database, Security, Design Lock ou avanço de fase; implementação permanece condicionada à autorização humana.",
+            "A matriz inclui cada item da SPEC 5.1–5.3 e os cenários transversais de segurança: fonte/teste/caso existente, sprint responsável, evidência disponível e lacuna de comprovação; N/A mantém a justificativa normativa. Não confundir teste localizado com teste executado, nem criar controles ou testes redundantes."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "AGENTS.md",
+          "GLOSSARY.md",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "apps/web/src/features/records/RecordsPanel.tsx",
+          "apps/controller/src/http/routes/operation.ts",
+          "apps/controller/src/http/routes/projects.ts",
+          "tests/diagnostic-receipt-rendering.test.ts",
+          "package.json",
+          "package-lock.json",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "useDiagnostics",
+          "HttpDiagnosticContext",
+          "HttpDiagnosticsView",
+          "OperatorDiagnosticCard",
+          "ProjectConfigurationForm",
+          "supportedChecks"
+        ],
+        "architecture_notes": "Usar a SPEC fornecida como entrada e localizar PRD20261022_160728.md, stories-requisitos20261022_160728.md e discovery20261022_160728.md sem presumir seus caminhos. Usar CodeGraph primeiro somente se houver .codegraph; confirmar arquivos atuais. Não usar GitNexus, CUA ou desktop commander. Não executar pipeline, operações externas ou Git de escrita. O estado Git informado é histórico e deve ser conferido em modo somente leitura. Não há trabalho novo de banco ou backend. Registrar conflitos normativos concretos para decisão humana. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-002",
+      "index": 1,
+      "name": "Preservar contexto, observações e consulta da operação original",
+      "description": "Após aprovação explícita para implementar, entregar as garantias locais de apresentação e continuidade necessárias às superfícies proprietárias, preservando contratos e acompanhamento existentes.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-003",
+          "name": "Isolamento de contexto e estado anterior",
+          "description": "Garantir que leituras e conclusões pertençam ao objeto, conta, revisão e ciclo de vida originais, com distinção entre leitura atual e relatório anterior.",
+          "acceptance_criteria": [
+            "Testes com respostas invertidas e fechamento/reabertura comprovam que mudança de objeto, conta ou revisão impede resultado antigo de aparecer como atual.",
+            "Atualização ou falha de leitura preserva resultado anterior identificado; ausência de observação e leitura parcial não recebem indicação de pronto.",
+            "Após verificar, fechar, alterar a revisão e reabrir o mesmo objeto, o relatório persistido permanece anterior e distinto da leitura atual.",
+            "Um bloqueio corrigido desaparece dos impedimentos atuais; seu relatório continua acessível como anterior, com data e estado."
+          ]
+        },
+        {
+          "id": "feat-004",
+          "name": "Continuidade da correlação sem reenvio",
+          "description": "Preservar a consulta da operação aceita ou incerta durante o ciclo de vida da página, incluindo fechamento e reabertura.",
+          "acceptance_criteria": [
+            "Fechar/reabrir uma superfície durante operação aceita ou incerta mantém Consultar resultado vinculado ao identificador original e produz somente um POST da verificação.",
+            "Falha ou perda da resposta e indisponibilidade do recibo preservam a correlação e permitem consultar a mesma operação, sem reenvio automático.",
+            "Após recarga, cenários com correlação recuperável pelas leituras existentes consultam a operação original; cenários sem recuperação explicam a limitação sem afirmar conclusão ou reenviar.",
+            "Aceitação, andamento, incerteza e falha da consulta são distinguíveis; consulta não apaga erro da ação original ou de salvamento.",
+            "Conferir evidências existentes do wrapper e segurança HTTP: sessão ausente/revogada, renovação de leitura uma vez em 401, mutação sem replay em 401 e nenhum replay em 403; registrar caso, resultado ou lacuna na matriz da seção 5, preservando a operação original."
+          ]
+        },
+        {
+          "id": "feat-005",
+          "name": "Composição de avisos atuais e históricos",
+          "description": "Entregar apresentação consistente de condições equivalentes, com linguagem operacional e preservação das restrições independentes.",
+          "acceptance_criteria": [
+            "Fixtures com mesma causa, contexto e próxima ação exibem no máximo um aviso detalhado atual; ocorrências históricas equivalentes aparecem como resumos anteriores com data e estado.",
+            "Mesmo código em objetos diferentes e causas independentes com textos semelhantes permanecem distinguíveis.",
+            "Avisos de bloqueio, sucesso, erro e incerteza apresentam linguagem do operador sem códigos, IDs internos, recibos ou fatos técnicos brutos.",
+            "Nenhum DTO, protocolo, armazenamento persistente, TTL, polling de prontidão ou regra paralela de autorização/elegibilidade é introduzido."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "docs/Docs20261022_160728/SPEC_PROGRESS.md",
+          "tests/diagnostic-receipt-rendering.test.ts",
+          "tests/github-diagnostics-rendering.test.ts",
+          "apps/controller/src/http/routes/operation.ts",
+          "apps/controller/src/http/app.ts",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "useDiagnostics",
+          "refresh",
+          "verify",
+          "retryReceipt",
+          "OperationAccepted",
+          "OperatorDiagnosticCard",
+          "operator-language",
+          "requestJson",
+          "requestJsonWithMetadata"
+        ],
+        "architecture_notes": "Consultar os caminhos atuais registrados na sprint-001 para useDiagnostics, operator-language, OperatorSupport e drafts. A localização e o reuso mínimo são decisões do Coder; não criar abstração compartilhada obrigatória. Preservar operação, conta e revisão originais mesmo quando o resultado só puder ser apresentado como anterior. E4 exige continuidade em memória durante a sessão da página, sem recuperação durável nova. Não iniciar esta sprint sem aprovação humana registrada. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-003",
+      "index": 2,
+      "name": "Localizar prontidão na Configuração global",
+      "description": "Apresentar condições e ações globais nas seções responsáveis, consumindo as garantias da sprint anterior e preservando rascunhos, conta e confirmação da pasta.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-006",
+          "name": "Condições globais junto dos controles",
+          "description": "Localizar GitHub/conta, pasta, perfis e observação Maestri/OMP nas respectivas seções de Configuração.",
+          "acceptance_criteria": [
+            "US-01 CA 1 a 5 são cobertos por testes de renderização: estados de conta distinguíveis, pasta junto do campo e um aviso de ausência total de perfis com acesso a Perfis.",
+            "A observação Maestri/OMP explicita seu caráter pontual e não afirma execução de provider ou disponibilidade de MCP.",
+            "Não há seletor técnico de contexto e condições independentes permanecem visíveis.",
+            "Rascunho não salvo não aparece como validado por consulta da configuração persistida."
+          ]
+        },
+        {
+          "id": "feat-007",
+          "name": "Ações globais únicas e preservação do formulário",
+          "description": "Disponibilizar verificar, atualizar leitura e consultar resultado original nos destinos globais aprovados.",
+          "acceptance_criteria": [
+            "Há um controle compartilhado de configuration junto de pasta/perfis e um controle de maestri_context junto da integração; os resultados aparecem nas seções responsáveis.",
+            "Verificar status do GitHub permanece único; consulta de identidade não vincula nem troca conta e confirmação da pasta permanece ação distinta.",
+            "Atualizar leitura e consultar resultado usam o contexto global e preservam rascunho, erro de salvamento e conflito ETag/revisão.",
+            "Abrir ou navegar pelas seções produz zero POSTs de diagnóstico e zero efeitos de vínculo, troca de conta ou execução.",
+            "Superfícies desta sprint: Configuração global e acesso a Perfis. Executar prova Playwright MCP/Chrome com assets reconstruídos e recarregados da versão sob prova, em desktop e mobile: todos os controles e acessos afetados operáveis por teclado, foco visível, foco preservado ao atualizar e retorno ao disparador ao fechar diálogos; manter layout aprovado. Registrar viewport, versão/assets, cenário e evidência no diretório documental desta execução. Ferramenta indisponível ou cenário não executado mantém a prova e a entrega pendentes, sem dispensa implícita. Usar cenários controlados sem providers, recrutamento ou publicação.",
+            "Registrar nesta sprint as provas de comportamento, renderização, linguagem e contadores RNF-01/RNF-02 pertinentes à superfície, incluindo evidência existente ou lacuna do checklist da seção 5; a consolidação final reutiliza essas provas, sem testes redundantes."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "docs/Docs20261022_160728/SPEC_PROGRESS.md",
+          "apps/controller/src/http/routes/projects.ts",
+          "apps/controller/src/http/routes/operation.ts",
+          "tests/github-diagnostics-rendering.test.ts",
+          "tests/diagnostic-receipt-rendering.test.ts",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "ProjectConfigurationForm",
+          "GitHubSetupPanel",
+          "ProjectsFolderField",
+          "ProfilesPanel",
+          "useConfiguration",
+          "useDiagnostics",
+          "SettingsView",
+          "SettingsSaved"
+        ],
+        "architecture_notes": "Consultar os caminhos exatos inventariados na sprint-001 e as garantias entregues na sprint-002. Cobrir RF-01 a RF-05, RF-31 a RF-39 e E1 a E4 no contexto global. Preservar layout aprovado, seletores nativos existentes e CSS por superfície; nenhuma nova dependência. Não remover ainda o painel de Registros antes de todas as superfícies proprietárias estarem prontas. A prova de UI desta superfície é executável nesta sprint via Playwright MCP/Chrome (use_playwright=true); sua indisponibilidade mantém a entrega pendente. Aplicar RNF-06 e registrar provas por superfície antes da consolidação. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-004",
+      "index": 3,
+      "name": "Localizar condições do projeto e da preparação",
+      "description": "Reorganizar pendências junto dos campos e da issue selecionada, preservando elegibilidade, configuração efetiva, edição de checks e gates de início.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-008",
+          "name": "Condições e ações próprias do projeto",
+          "description": "Apresentar origem/remoto, quadro/Status e associação de papéis junto dos campos correspondentes.",
+          "acceptance_criteria": [
+            "US-02 CA 1 a 7 são cobertos: condições aparecem junto dos campos, existência global de perfis difere da associação no projeto e informativos não viram bloqueios.",
+            "Um único controle configuration atende às condições próprias; atualizar e consultar resultado original usam o projeto aberto sem seletor técnico.",
+            "Condições globais oferecem acesso à Configuração ou Perfis; catálogo mantém apenas resumo e acesso ao projeto.",
+            "Rascunhos, conflitos entre abas, exclusão pendente e locks de tentativa/publicação preservam os comportamentos existentes."
+          ]
+        },
+        {
+          "id": "feat-009",
+          "name": "Condições para iniciar junto da preparação",
+          "description": "Localizar falhas de consulta, critérios e divergências no seletor ou resumo apropriado, sem criar diagnóstico de preparação.",
+          "acceptance_criteria": [
+            "Consulta parcial/indisponível aparece junto da seleção e mantém nova consulta; falhas equivalentes de acesso não geram aviso genérico redundante.",
+            "A apresentação preserva fechamento, tipo, repositório, assignee, quadro, Status, bloqueadores, leitura incompleta e exceção de nova tentativa fora de Ready.",
+            "Divergências de remoto/base, arquivo do repositório, revisão e perfil aparecem na configuração efetiva; critérios não executáveis ficam junto dos critérios, sem adoção silenciosa.",
+            "Habilitação de Iniciar permanece igual; revalidação de issue/executor é informativa e o pipeline continua recusando início inválido mesmo após diagnóstico global favorável, sem preflight manual obrigatório.",
+            "Impedimentos globais aparecem na preparação somente como resumo contextual com acesso à correção em Configuração ou Perfis, sem relatório global completo; revalidação de issue/executor permanece informativa (US-03 CA 6; RF-15)."
+          ]
+        },
+        {
+          "id": "feat-010",
+          "name": "Preservação da definição de checks e da captura",
+          "description": "Manter a configuração funcional dos checks e a imutabilidade da configuração capturada por tentativas em andamento.",
+          "acceptance_criteria": [
+            "Comando, diretório relativo e timeout continuam editáveis na seção Checks do projeto pelo fluxo existente.",
+            "Consulta de prontidão não altera valores editados nem confirma salvamento.",
+            "Teste de regressão comprova que alteração posterior da configuração não modifica a captura de uma tentativa existente.",
+            "Superfícies desta sprint: configuração do projeto, editor de checks e preparação bloqueada. Executar prova Playwright MCP/Chrome com assets reconstruídos e recarregados da versão sob prova, em desktop e mobile: todos os controles e acessos afetados operáveis por teclado, foco visível, foco preservado ao atualizar e retorno ao disparador ao fechar diálogos; manter layout aprovado. Registrar viewport, versão/assets, cenário e evidência no diretório documental desta execução. Ferramenta indisponível ou cenário não executado mantém a prova e a entrega pendentes, sem dispensa implícita. Usar cenários controlados sem providers, recrutamento ou publicação.",
+            "Registrar nesta sprint as provas de comportamento, renderização, linguagem e contadores RNF-01/RNF-02 pertinentes à superfície, incluindo evidência existente ou lacuna do checklist da seção 5; a consolidação final reutiliza essas provas, sem testes redundantes."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "docs/Docs20261022_160728/SPEC_PROGRESS.md",
+          "apps/controller/src/http/routes/preparations.ts",
+          "apps/controller/src/http/routes/projects.ts",
+          "tests/integration/preparations.test.ts",
+          "tests/integration/operation-diagnostics.test.ts",
+          "tests/integration/verification.test.ts",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "ProjectConfigurationForm",
+          "PreparationDialog",
+          "IssueOptionsNotice",
+          "ProjectDeletionPendingNotice",
+          "assessIssueReadiness",
+          "PreparationView",
+          "ConfigurationView",
+          "useDiagnostics"
+        ],
+        "architecture_notes": "Consultar os caminhos de ProjectForm.tsx, configuration-reads.ts, preparations.ts, github/client.ts e pipeline/start.ts registrados na sprint-001. Reutilizar a continuidade e o isolamento da sprint-002 e os destinos globais da sprint-003. Cobrir RF-06 a RF-17, RF-20 e US-09/US-10 aplicáveis. O termo repositório arquivado é o estado de arquivamento do repositório, sem nova condição de domínio. Nenhuma regra de elegibilidade deve ser reimplementada na UI. A prova de UI desta superfície é executável nesta sprint via Playwright MCP/Chrome (use_playwright=true); sua indisponibilidade mantém a entrega pendente. Aplicar RNF-06 e registrar provas por superfície antes da consolidação. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-005",
+      "index": 4,
+      "name": "Separar autoridade, recursos e versão na tentativa",
+      "description": "Reorganizar o detalhe da tentativa e preservar seleção de rodada/entrega, ações e evidências da versão correspondente.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-011",
+          "name": "Condições operacionais da tentativa",
+          "description": "Localizar autoridade e recursos junto do estado, Parada, ambiente e ações nativas pertinentes.",
+          "acceptance_criteria": [
+            "Diagnóstico geral e autoridade equivalentes geram um aviso detalhado; restrições de autoridade, recursos e versão com ações distintas permanecem separadas.",
+            "Acompanhamento perdido, recursos incertos, ownership não confirmado e ausência de observação aparecem nas ações pertinentes.",
+            "Verificar recursos, atualizar leitura e consultar resultado original usam a tentativa aberta e mantêm somente checks/capacidades existentes.",
+            "Leitura de recursos registrados não afirma parada física, acesso ao conteúdo ou nova capacidade; condições globais apontam para Configuração.",
+            "A suspensão existente da tentativa aparece junto do estado operacional ou da ação pertinente, distinta de autoridade e recursos quando causa ou próxima ação diferirem, sem nova regra de bloqueio ou recuperação (RF-18)."
+          ]
+        },
+        {
+          "id": "feat-012",
+          "name": "Resultados e artefatos da versão selecionada",
+          "description": "Preservar associação dos checks, revisão, artefatos e publicação à rodada e entrega selecionadas.",
+          "acceptance_criteria": [
+            "Trocar rodada/entrega, inclusive com respostas invertidas, nunca apresenta checks, artefatos ou aprovação de outra versão como pertencentes à seleção atual.",
+            "Paginação e acesso autorizado aos artefatos continuam vinculados à entrega correspondente.",
+            "Regressões comprovam que checks, revisão e publicação exigem a mesma identidade de conteúdo e correção gera outra rodada/versão.",
+            "Diagnóstico favorável não libera início/publicação quando identidade diverge ou autoridade foi revogada.",
+            "Superfícies desta sprint: tentativa, suspensão, recursos e seleção de rodada/entrega. Executar prova Playwright MCP/Chrome com assets reconstruídos e recarregados da versão sob prova, em desktop e mobile: todos os controles e acessos afetados operáveis por teclado, foco visível, foco preservado ao atualizar e retorno ao disparador ao fechar diálogos; manter layout aprovado. Registrar viewport, versão/assets, cenário e evidência no diretório documental desta execução. Ferramenta indisponível ou cenário não executado mantém a prova e a entrega pendentes, sem dispensa implícita. Usar cenários controlados sem providers, recrutamento ou publicação.",
+            "Registrar nesta sprint as provas de comportamento, renderização, linguagem e contadores RNF-01/RNF-02 pertinentes à superfície, incluindo evidência existente ou lacuna do checklist da seção 5; a consolidação final reutiliza essas provas, sem testes redundantes.",
+            "Mapear e conferir evidência existente do download autorizado: text/plain, CSP sandbox, attachment e nosniff, sem ampliar acesso; associar à seção 5 e registrar lacunas reais."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "docs/Docs20261022_160728/SPEC_PROGRESS.md",
+          "apps/controller/src/http/routes/attempts.ts",
+          "apps/controller/src/http/routes/deliveries.ts",
+          "apps/controller/src/http/routes/recovery.ts",
+          "apps/controller/src/http/routes/publication.ts",
+          "tests/integration/verification.test.ts",
+          "tests/integration/operation-diagnostics.test.ts",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "AttemptDetailDialog",
+          "useAttempt",
+          "useDelivery",
+          "useAttemptActions",
+          "useDiagnostics",
+          "OperationAccepted",
+          "selected_delivery_id",
+          "content_identity"
+        ],
+        "architecture_notes": "Consultar os caminhos de diagnostics, storage/operation-summary.ts, verification e storage/verification.ts registrados na sprint-001. Aplicar as garantias da sprint-002 e os acessos da sprint-003. Cobrir US-04, US-05 e RF-18 a RF-22. Preservar headers, recibos e capacidades das ações existentes; consulta da operação original não reenvia nem reconcilia publicação. A prova de UI desta superfície é executável nesta sprint via Playwright MCP/Chrome (use_playwright=true); sua indisponibilidade mantém a entrega pendente. Aplicar RNF-06 e registrar provas por superfície antes da consolidação. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-006",
+      "index": 5,
+      "name": "Localizar condições e consolidar efeitos da criação",
+      "description": "Reorganizar formulário, plano e resultado da criação, preservando autorização exata, estados e proveniência dos efeitos.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-013",
+          "name": "Pré-requisitos e ações no contexto da criação",
+          "description": "Apresentar condições de scaffold, destino, Git, identidade e modalidade remota no formulário/plano ou resultado correspondente.",
+          "acceptance_criteria": [
+            "Pré-requisitos existentes aparecem antes da autorização/execução e não alteram plano, hash, efeitos autorizados ou capacidades.",
+            "O diagnóstico de criação oferece somente checks suportados e nunca exige ou solicita maestri_context.",
+            "Verificar recursos, atualizar leitura e consultar resultado original permanecem junto das etapas/efeitos com contexto implícito e continuidade ao reabrir.",
+            "Consultar ou navegar gera zero criações, repetições de efeitos ou reconciliações implícitas; condições globais oferecem acesso à correção."
+          ]
+        },
+        {
+          "id": "feat-014",
+          "name": "Efeitos únicos e conclusão independente da prontidão posterior",
+          "description": "Consolidar a apresentação de efeitos equivalentes e distinguir resultado da criação das pendências para iniciar issue.",
+          "acceptance_criteria": [
+            "O mesmo efeito nas fontes local e remota aparece uma vez na apresentação e nas etapas pendentes; efeitos independentes permanecem representados.",
+            "Falha, parcialidade e incerteza mantêm etapas, ações existentes e estados distinguíveis, sem alterar dados ou proveniência persistidos.",
+            "Criação concluída com pré-requisitos posteriores pendentes permanece concluída e oferece acesso à configuração do projeto.",
+            "Testes preservam erro da ação original, consulta indisponível e resultado anterior sem segundo envio.",
+            "Superfícies desta sprint: formulário/plano e resultado parcial da criação. Executar prova Playwright MCP/Chrome com assets reconstruídos e recarregados da versão sob prova, em desktop e mobile: todos os controles e acessos afetados operáveis por teclado, foco visível, foco preservado ao atualizar e retorno ao disparador ao fechar diálogos; manter layout aprovado. Registrar viewport, versão/assets, cenário e evidência no diretório documental desta execução. Ferramenta indisponível ou cenário não executado mantém a prova e a entrega pendentes, sem dispensa implícita. Usar cenários controlados sem providers, recrutamento ou publicação.",
+            "Registrar nesta sprint as provas de comportamento, renderização, linguagem e contadores RNF-01/RNF-02 pertinentes à superfície, incluindo evidência existente ou lacuna do checklist da seção 5; a consolidação final reutiliza essas provas, sem testes redundantes."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "docs/Docs20261022_160728/SPEC_PROGRESS.md",
+          "apps/controller/src/http/routes/scaffold.ts",
+          "apps/controller/src/http/routes/operation.ts",
+          "tests/diagnostic-receipt-rendering.test.ts",
+          "tests/integration/operation-diagnostics.test.ts",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "ProjectCreationDialog",
+          "CreationResult",
+          "visibleEffects",
+          "HttpScaffoldOptions",
+          "HttpScaffoldPlanned",
+          "HttpCreationView",
+          "onOpenProject",
+          "useDiagnostics"
+        ],
+        "architecture_notes": "Consultar os caminhos exatos de scaffold.ts e dos componentes registrados na sprint-001. Consumir as garantias da sprint-002 e os destinos das sprints-003/004. Cobrir US-06 e RF-23 a RF-27. Agrupamento é somente visual; não alterar effects, remote_effects, etapas ou autorização persistidos. Não executar criação real ou publicação para obter prova visual. A prova de UI desta superfície é executável nesta sprint via Playwright MCP/Chrome (use_playwright=true); sua indisponibilidade mantém a entrega pendente. Aplicar RNF-06 e registrar provas por superfície antes da consolidação. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-007",
+      "index": 6,
+      "name": "Concluir histórico e resumos com provas por superfície",
+      "description": "Após disponibilizar todos os destinos, retirar diagnóstico operacional de Registros e consolidar resumos do Dashboard, comprovando estas superfícies nesta sprint.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-015",
+          "name": "Registros exclusivamente como histórico",
+          "description": "Retirar controles operacionais de diagnóstico e preservar histórico, eventos e navegação existentes.",
+          "acceptance_criteria": [
+            "Registros não renderiza seletor de contexto, seleção de checks, Atualizar diagnóstico ou Verificar selecionados e não consome useDiagnostics.",
+            "Filtros de projeto/tentativa/operação, eventos técnicos, acesso aos objetos e paginação mantêm funcionamento; mudança de filtro não reutiliza cursor anterior.",
+            "Eventos de verificações persistidos continuam consultáveis e nenhuma realocação exclui eventos, relatórios ou recibos.",
+            "A expectativa de diagnostic-receipt-rendering acompanha uma superfície proprietária; teste específico comprova a retirada dos controles de Registros e ausência de verificações por consulta."
+          ]
+        },
+        {
+          "id": "feat-016",
+          "name": "Dashboard com resumo e destino responsável",
+          "description": "Consolidar pendências equivalentes de onboarding, impedimentos e fila em resumos com navegação apropriada.",
+          "acceptance_criteria": [
+            "Pendências equivalentes das três origens não repetem cartões detalhados; causas independentes continuam distinguíveis.",
+            "Resumo global aponta para Configuração ou Perfis, condição do projeto para seu projeto e condição da tentativa para sua tentativa.",
+            "Observação antiga de integração não é apresentada como garantia atual.",
+            "Dashboard não possui seletor ou execução centralizada de diagnóstico; navegação preserva zero novas verificações ou efeitos.",
+            "Superfícies desta sprint: Registros, filtros/paginação e Dashboard com navegação aos destinos. Executar prova Playwright MCP/Chrome com assets reconstruídos e recarregados da versão sob prova, em desktop e mobile: todos os controles e acessos afetados operáveis por teclado, foco visível, foco preservado ao atualizar e retorno ao disparador ao fechar diálogos; manter layout aprovado. Registrar viewport, versão/assets, cenário e evidência no diretório documental desta execução. Ferramenta indisponível ou cenário não executado mantém a prova e a entrega pendentes, sem dispensa implícita. Usar cenários controlados sem providers, recrutamento ou publicação.",
+            "Registrar nesta sprint as provas de comportamento, renderização, linguagem e contadores RNF-01/RNF-02 pertinentes à superfície, incluindo evidência existente ou lacuna do checklist da seção 5; a consolidação final reutiliza essas provas, sem testes redundantes."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "docs/Docs20261022_160728/SPEC_PROGRESS.md",
+          "apps/web/src/features/records/RecordsPanel.tsx",
+          "apps/controller/src/http/routes/events.ts",
+          "apps/controller/src/http/routes/operation.ts",
+          "tests/diagnostic-receipt-rendering.test.ts",
+          "tests/github-diagnostics-rendering.test.ts",
+          "tests/integration/operation-diagnostics.test.ts",
+          "tests/integration/preparations.test.ts",
+          "tests/integration/verification.test.ts",
+          "package.json",
+          "package-lock.json",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "RecordsPanel",
+          "useRecords",
+          "RecordFilters",
+          "DashboardPanel",
+          "HttpEventPage",
+          "HttpOperationSummary",
+          "OperatorDiagnosticCard"
+        ],
+        "architecture_notes": "Consultar o inventário da sprint-001 e os caminhos/resultados efetivos de todas as sprints anteriores em SPEC_PROGRESS.md. Preservar a correção preexistente em RecordsPanel.tsx. RF-28 só deve ser concluído depois dos destinos de RF-39. Usar npm.cmd run typecheck, npm.cmd run lint, npm.cmd test e npm.cmd run build conforme configuração conferida. use_playwright=true: executar prova Playwright MCP/Chrome de Registros e Dashboard; ausência de ferramenta mantém a entrega pendente. Não ampliar ensaios reais, chamar providers, recrutar terminais, publicar, fazer staging, commit ou push. A prova de UI desta superfície é executável nesta sprint via Playwright MCP/Chrome (use_playwright=true); sua indisponibilidade mantém a entrega pendente. Aplicar RNF-06 e registrar provas por superfície antes da consolidação. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-008",
+      "index": 7,
+      "name": "Consolidar evidências e pendências da versão entregue",
+      "description": "Fechamento menor: conferir rastreabilidade e validade das provas distribuídas, sem implementação funcional adicional nem aprovação automática.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "TypeScript",
+        "React",
+        "CSS",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-017",
+          "name": "Comprovação final e registro dos limites",
+          "description": "Consolidar evidências produzidas por superfície e conferir completude e limites, sem acumular novamente suas execuções.",
+          "acceptance_criteria": [
+            "Consolidar resultados de npm.cmd run typecheck, npm.cmd run lint, npm.cmd test e npm.cmd run build configurados, executando a verificação final pertinente à versão entregue; reutilizar evidências válidas por superfície e repetir somente quando alterações ou falhas justificarem. Registrar falhas reais e contadores RNF-01/RNF-02 e uma intenção por operação.",
+            "A matriz final identifica evidência verificável ou pendência para todos os critérios US-01 a US-10, RF-01 a RF-39, RNF-01 a RNF-12, E1 a E4 e cada item/cenário da SPEC 5.1–5.3, com arquivo/caso, resultado, versão, sprint responsável e justificativas N/A. Nenhuma pendência obrigatória permite conclusão integral.",
+            "A conferência de escopo confirma zero alterações de schema, migrations, endpoints, contratos públicos, dependências ou regras de autorização/elegibilidade; campos funcionais de checks e eventos/artefatos autorizados permanecem disponíveis.",
+            "Conferir provas Playwright MCP/Chrome das sprints-003 a 007, cobrindo Configuração, projeto, preparação bloqueada, tentativa, criação parcial, Registros e Dashboard em desktop/mobile com teclado e foco e assets atuais. Evidência invalidada por mudança posterior exige nova prova pertinente. Ausência de ferramenta ou prova mantém a entrega pendente, sem dispensa implícita, alteração do LionClaw ou aprovação de avanço.",
+            "O checklist de segurança reutiliza provas existentes pertinentes e registra lacunas concretas, sem novos controles ou testes redundantes: sessão/cookie/revogação; 401 leitura uma vez e mutação sem replay; 403 sem replay; Host/Origin/CSRF; limites/Retry-After, schemas/revisões, logs/segredos protegidos; autorização/escopo, idempotência, autoridade, efeitos por consulta, contexto/rascunhos, histórico, linguagem, versão e proteções de artefatos. N/A de RLS, webhooks e upload é preservado conforme SPEC."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "docs/Docs20261022_160728/SPEC_PROGRESS.md",
+          "apps/web/src/features/records/RecordsPanel.tsx",
+          "apps/controller/src/http/routes/events.ts",
+          "apps/controller/src/http/routes/operation.ts",
+          "tests/diagnostic-receipt-rendering.test.ts",
+          "tests/github-diagnostics-rendering.test.ts",
+          "tests/integration/operation-diagnostics.test.ts",
+          "tests/integration/preparations.test.ts",
+          "tests/integration/verification.test.ts",
+          "package.json",
+          "package-lock.json",
+          "docs/Docs20261022_160728/SPEC20261022_160728.md"
+        ],
+        "key_interfaces": [
+          "RecordsPanel",
+          "useRecords",
+          "RecordFilters",
+          "DashboardPanel",
+          "HttpEventPage",
+          "HttpOperationSummary",
+          "OperatorDiagnosticCard"
+        ],
+        "architecture_notes": "Consumir as provas das sprints-002 a 007 e a baseline da sprint-001. Conferir cada item da SPEC seção 5, inclusive N/A, sem criar controle de segurança ou teste redundante. Conferir assets e versão das provas visuais; ausência de Playwright MCP/Chrome mantém entrega pendente. Nenhuma dispensa implícita, alteração do LionClaw, integração real, efeito externo ou aprovação de avanço. Toda documentação e evidência desta execução permanece em docs/Docs20261022_160728/; SPEC_PROGRESS.md citado neste plano significa o arquivo nesse diretório, a produzir na sprint-001. Evidências são futuras até execução autorizada."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 1
+    }
+  ],
+  "metadata": {
+    "version": 1,
+    "created_at": "2026-10-22T21:37:05.676Z",
+    "total_sprints": 7,
+    "total_features": 17
+  }
+}

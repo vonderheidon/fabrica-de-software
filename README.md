@@ -1,6 +1,6 @@
 # Nova fábrica de software
 
-Controlador local com persistência, proteção HTTP, operações consultáveis, cadastro/catálogo de projetos e configuração global/por projeto com perfis exatos e revisões imutáveis. O contrato de produto permanece em [SPEC.md](SPEC.md); a cobertura das sprints e as interfaces disponíveis estão em [SPEC_PROGRESS.md](SPEC_PROGRESS.md).
+Controlador local com persistência, proteção HTTP, operações consultáveis, cadastro/catálogo de projetos e configuração global/por projeto com perfis exatos e revisões imutáveis. A cobertura das sprints e as interfaces disponíveis estão em [SPEC_PROGRESS.md](SPEC_PROGRESS.md).
 
 ## Requisitos e instalação
 
@@ -68,7 +68,7 @@ npm run test:distribution
 
 O pacote completo é gerado em uma pasta nova `build/Fábrica distribuição-<id>`, com dependências de produção, bundle, migrations, contratos e recursos. É específico ao SO/arquitetura/ABI nativa registrados em `distribution.json`. Consulte o [manual de operação e recuperação](docs/operation/README.md) para preparar o terminal-âncora, atualizar e recuperar pendências.
 
-Dentro de um terminal Maestri autorizado, execute `npm.cmd start -- <git.exe> <gh.exe> <maestri.exe> <omp.exe> <powershell.exe>`, usando os cinco caminhos absolutos entre aspas. O launcher usa o ambiente realmente herdado, sem descoberta pelo PATH, elevação, login ou credenciais em argumentos. Pré-voo Maestri real, lock, configuração, migrations e recursos válidos precedem scheduler/HTTP. Sem contexto válido, o startup falha; executar `main.js` sem composição já não inicia servidor degradado. `startController(hostContext)` continua sendo a composição confiável para autorizações/capacidades nativas delimitadas.
+Dentro de um terminal Maestri autorizado, execute `npm.cmd start -- <git.exe> <maestri.exe> <omp.exe> <powershell.exe>`, usando os quatro caminhos absolutos entre aspas, nessa ordem. O GitHub CLI é detectado e configurado pela aplicação, sem argumento no comando de inicialização. O launcher usa o ambiente realmente herdado, sem descoberta pelo PATH dos quatro executáveis informados, elevação, login ou credenciais em argumentos. Pré-voo Maestri real, lock, configuração, migrations e recursos válidos precedem scheduler/HTTP. Sem contexto válido, o startup falha; executar `main.js` sem composição já não inicia servidor degradado. `startController(hostContext)` continua sendo a composição confiável para autorizações/capacidades nativas delimitadas.
 
 O processo executa JavaScript compilado em `dist/`. Recursos resolvem por runtime. O health check técnico é `GET http://127.0.0.1:4310/api/v1/health`, com resposta `{ "status": "ok" }`; verifica SQLite sem comprovar provider/MCP. Ctrl+C/SIGTERM revoga sessões/canais e coordenação, encerra esperas e fecha HTTP/banco/lock. Restart conserva histórico e interrompe trabalho incompleto sem restaurar agentes. O smoke de distribuição usa pré-voo controlado; não é prova de Maestri/OMP real.
 

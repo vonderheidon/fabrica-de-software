@@ -1,0 +1,571 @@
+{
+  "id": "00000000-0000-4000-8000-000000000001",
+  "a": "00000000-0000-4000-8000-000000000002",
+  "b": "00000000-0000-4000-8000-000000000003",
+  "attemptA": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "project_id": "00000000-0000-4000-8000-000000000001",
+    "operation_id": "00000000-0000-4000-8000-000000000001",
+    "passage_id": "00000000-0000-4000-8000-000000000001",
+    "result_receipt_id": null,
+    "event_cursor": "1",
+    "phase": "verifying",
+    "result": null,
+    "suspension": "HUMAN_DECISION",
+    "tracking": "tracked",
+    "round": 2,
+    "revision": 1,
+    "delivery_id": "00000000-0000-4000-8000-000000000002",
+    "pending_question_id": null,
+    "expected_account_id": "account",
+    "issue": {
+      "id": "issue",
+      "number": 1,
+      "title": "Teste de versões",
+      "url": "https://github.com/test/test/issues/1"
+    },
+    "selected_delivery_id": "00000000-0000-4000-8000-000000000002",
+    "selected_round": 1,
+    "publication": {
+      "mode": "icr",
+      "review_state": null,
+      "local_state": "pending",
+      "confirmed_effects": 0,
+      "pending_effects": 0,
+      "unknown_effects": 0,
+      "complete_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "measurements": {
+      "active_time": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "human_wait": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "cost": {
+        "state": "measured",
+        "value": 0,
+        "unit": "USD"
+      },
+      "active_limit": {
+        "state": "not_configured"
+      },
+      "question_ttl": {
+        "state": "not_configured"
+      },
+      "active_limit_state": "unavailable",
+      "active_expired_at_ms": null,
+      "passages": [],
+      "pending_requirements": []
+    },
+    "cleanup": "uncertain",
+    "authority": {
+      "reason": "ACCOUNT_CHANGED",
+      "recovery": "Corrija a conta na Configuração.",
+      "observed_at_ms": 1,
+      "expected_status_id": null,
+      "observed_status_id": null
+    },
+    "diagnostic": "ACCOUNT_CHANGED",
+    "capabilities": {
+      "cancel": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "complete_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "revalidate": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "details": null
+  },
+  "attemptB": {
+    "id": "00000000-0000-4000-8000-000000000001",
+    "project_id": "00000000-0000-4000-8000-000000000001",
+    "operation_id": "00000000-0000-4000-8000-000000000001",
+    "passage_id": "00000000-0000-4000-8000-000000000001",
+    "result_receipt_id": null,
+    "event_cursor": "1",
+    "phase": "verifying",
+    "result": null,
+    "suspension": "HUMAN_DECISION",
+    "tracking": "tracked",
+    "round": 2,
+    "revision": 1,
+    "delivery_id": "00000000-0000-4000-8000-000000000003",
+    "pending_question_id": null,
+    "expected_account_id": "account",
+    "issue": {
+      "id": "issue",
+      "number": 1,
+      "title": "Teste de versões",
+      "url": "https://github.com/test/test/issues/1"
+    },
+    "selected_delivery_id": "00000000-0000-4000-8000-000000000003",
+    "selected_round": 2,
+    "publication": {
+      "mode": "icr",
+      "review_state": null,
+      "local_state": "pending",
+      "confirmed_effects": 0,
+      "pending_effects": 0,
+      "unknown_effects": 0,
+      "complete_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "measurements": {
+      "active_time": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "human_wait": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "cost": {
+        "state": "measured",
+        "value": 0,
+        "unit": "USD"
+      },
+      "active_limit": {
+        "state": "not_configured"
+      },
+      "question_ttl": {
+        "state": "not_configured"
+      },
+      "active_limit_state": "unavailable",
+      "active_expired_at_ms": null,
+      "passages": [],
+      "pending_requirements": []
+    },
+    "cleanup": "uncertain",
+    "authority": {
+      "reason": "ACCOUNT_CHANGED",
+      "recovery": "Corrija a conta na Configuração.",
+      "observed_at_ms": 1,
+      "expected_status_id": null,
+      "observed_status_id": null
+    },
+    "diagnostic": "ACCOUNT_CHANGED",
+    "capabilities": {
+      "cancel": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "complete_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "revalidate": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "details": null
+  },
+  "deliveryA": {
+    "delivery": {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "attempt_id": "00000000-0000-4000-8000-000000000001",
+      "producer_passage_id": "00000000-0000-4000-8000-000000000001",
+      "round": 1,
+      "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "capture_state": "captured",
+      "git_ref": "refs/factory/deliveries/00000000-0000-4000-8000-000000000002",
+      "repository_relative": "git/00000000-0000-4000-8000-000000000001.git",
+      "content_identity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "has_delta": true,
+      "diagnostic": null,
+      "captured_at_ms": 1,
+      "revision": 1,
+      "warnings": []
+    },
+    "verification": null,
+    "event_cursor": "1",
+    "issue": {
+      "id": "issue",
+      "number": 1,
+      "title": "Teste de versões",
+      "url": "https://github.com/test/test/issues/1"
+    },
+    "attempt": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "project_id": "00000000-0000-4000-8000-000000000001",
+      "operation_id": "00000000-0000-4000-8000-000000000001",
+      "passage_id": "00000000-0000-4000-8000-000000000001",
+      "result_receipt_id": null,
+      "event_cursor": "1",
+      "phase": "verifying",
+      "result": null,
+      "suspension": "HUMAN_DECISION",
+      "tracking": "tracked",
+      "round": 2,
+      "revision": 1,
+      "delivery_id": "00000000-0000-4000-8000-000000000002",
+      "pending_question_id": null,
+      "expected_account_id": "account",
+      "issue": {
+        "id": "issue",
+        "number": 1,
+        "title": "Teste de versões",
+        "url": "https://github.com/test/test/issues/1"
+      },
+      "selected_delivery_id": "00000000-0000-4000-8000-000000000002",
+      "selected_round": 1,
+      "publication": {
+        "mode": "icr",
+        "review_state": null,
+        "local_state": "pending",
+        "confirmed_effects": 0,
+        "pending_effects": 0,
+        "unknown_effects": 0,
+        "complete_capability": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "reconcile_capability": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        }
+      },
+      "measurements": {
+        "active_time": {
+          "state": "measured",
+          "value": 0,
+          "unit": "ms"
+        },
+        "human_wait": {
+          "state": "measured",
+          "value": 0,
+          "unit": "ms"
+        },
+        "cost": {
+          "state": "measured",
+          "value": 0,
+          "unit": "USD"
+        },
+        "active_limit": {
+          "state": "not_configured"
+        },
+        "question_ttl": {
+          "state": "not_configured"
+        },
+        "active_limit_state": "unavailable",
+        "active_expired_at_ms": null,
+        "passages": [],
+        "pending_requirements": []
+      },
+      "cleanup": "uncertain",
+      "authority": {
+        "reason": "ACCOUNT_CHANGED",
+        "recovery": "Corrija a conta na Configuração.",
+        "observed_at_ms": 1,
+        "expected_status_id": null,
+        "observed_status_id": null
+      },
+      "diagnostic": "ACCOUNT_CHANGED",
+      "capabilities": {
+        "cancel": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "complete_publication": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "reconcile_publication": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "revalidate": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        }
+      },
+      "details": null
+    },
+    "measurements": {
+      "active_time": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "human_wait": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "cost": {
+        "state": "measured",
+        "value": 0,
+        "unit": "USD"
+      },
+      "active_limit": {
+        "state": "not_configured"
+      },
+      "question_ttl": {
+        "state": "not_configured"
+      },
+      "active_limit_state": "unavailable",
+      "active_expired_at_ms": null,
+      "passages": [],
+      "pending_requirements": []
+    },
+    "cleanup": "uncertain",
+    "authorizations": {
+      "captured_mode": "icr",
+      "authorized_mode": "icr",
+      "requires_current_gate": true
+    },
+    "review": null,
+    "publication": {
+      "mode": "icr",
+      "review_state": null,
+      "local_state": "pending",
+      "confirmed_effects": 0,
+      "pending_effects": 0,
+      "unknown_effects": 0,
+      "complete_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "capabilities": {
+      "diff": {
+        "available": true
+      },
+      "complete_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "details": null
+  },
+  "deliveryB": {
+    "delivery": {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "attempt_id": "00000000-0000-4000-8000-000000000001",
+      "producer_passage_id": "00000000-0000-4000-8000-000000000001",
+      "round": 2,
+      "base_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "capture_state": "captured",
+      "git_ref": "refs/factory/deliveries/00000000-0000-4000-8000-000000000003",
+      "repository_relative": "git/00000000-0000-4000-8000-000000000001.git",
+      "content_identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "commit_sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "has_delta": true,
+      "diagnostic": null,
+      "captured_at_ms": 1,
+      "revision": 1,
+      "warnings": []
+    },
+    "verification": null,
+    "event_cursor": "1",
+    "issue": {
+      "id": "issue",
+      "number": 1,
+      "title": "Teste de versões",
+      "url": "https://github.com/test/test/issues/1"
+    },
+    "attempt": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "project_id": "00000000-0000-4000-8000-000000000001",
+      "operation_id": "00000000-0000-4000-8000-000000000001",
+      "passage_id": "00000000-0000-4000-8000-000000000001",
+      "result_receipt_id": null,
+      "event_cursor": "1",
+      "phase": "verifying",
+      "result": null,
+      "suspension": "HUMAN_DECISION",
+      "tracking": "tracked",
+      "round": 2,
+      "revision": 1,
+      "delivery_id": "00000000-0000-4000-8000-000000000003",
+      "pending_question_id": null,
+      "expected_account_id": "account",
+      "issue": {
+        "id": "issue",
+        "number": 1,
+        "title": "Teste de versões",
+        "url": "https://github.com/test/test/issues/1"
+      },
+      "selected_delivery_id": "00000000-0000-4000-8000-000000000003",
+      "selected_round": 2,
+      "publication": {
+        "mode": "icr",
+        "review_state": null,
+        "local_state": "pending",
+        "confirmed_effects": 0,
+        "pending_effects": 0,
+        "unknown_effects": 0,
+        "complete_capability": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "reconcile_capability": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        }
+      },
+      "measurements": {
+        "active_time": {
+          "state": "measured",
+          "value": 0,
+          "unit": "ms"
+        },
+        "human_wait": {
+          "state": "measured",
+          "value": 0,
+          "unit": "ms"
+        },
+        "cost": {
+          "state": "measured",
+          "value": 0,
+          "unit": "USD"
+        },
+        "active_limit": {
+          "state": "not_configured"
+        },
+        "question_ttl": {
+          "state": "not_configured"
+        },
+        "active_limit_state": "unavailable",
+        "active_expired_at_ms": null,
+        "passages": [],
+        "pending_requirements": []
+      },
+      "cleanup": "uncertain",
+      "authority": {
+        "reason": "ACCOUNT_CHANGED",
+        "recovery": "Corrija a conta na Configuração.",
+        "observed_at_ms": 1,
+        "expected_status_id": null,
+        "observed_status_id": null
+      },
+      "diagnostic": "ACCOUNT_CHANGED",
+      "capabilities": {
+        "cancel": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "complete_publication": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "reconcile_publication": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        },
+        "revalidate": {
+          "available": false,
+          "reason": "Autoridade revogada"
+        }
+      },
+      "details": null
+    },
+    "measurements": {
+      "active_time": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "human_wait": {
+        "state": "measured",
+        "value": 0,
+        "unit": "ms"
+      },
+      "cost": {
+        "state": "measured",
+        "value": 0,
+        "unit": "USD"
+      },
+      "active_limit": {
+        "state": "not_configured"
+      },
+      "question_ttl": {
+        "state": "not_configured"
+      },
+      "active_limit_state": "unavailable",
+      "active_expired_at_ms": null,
+      "passages": [],
+      "pending_requirements": []
+    },
+    "cleanup": "uncertain",
+    "authorizations": {
+      "captured_mode": "icr",
+      "authorized_mode": "icr",
+      "requires_current_gate": true
+    },
+    "review": null,
+    "publication": {
+      "mode": "icr",
+      "review_state": null,
+      "local_state": "pending",
+      "confirmed_effects": 0,
+      "pending_effects": 0,
+      "unknown_effects": 0,
+      "complete_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_capability": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "capabilities": {
+      "diff": {
+        "available": true
+      },
+      "complete_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      },
+      "reconcile_publication": {
+        "available": false,
+        "reason": "Autoridade revogada"
+      }
+    },
+    "details": null
+  }
+}

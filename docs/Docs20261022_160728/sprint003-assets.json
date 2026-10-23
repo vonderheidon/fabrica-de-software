@@ -1,0 +1,109 @@
+{
+  "recordedAt": "2026-10-22T23:03:48.796Z",
+  "runtime": "v24.22.0",
+  "browser": {
+    "status": "passed",
+    "tool": "Playwright MCP browser_run_code_unsafe",
+    "version": "155.0.8059.86",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+    "executedViewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "loadedAssets": [
+      {
+        "url": "http://localhost:4310/assets/index-xhqW-JG1.js",
+        "bytes": 1005283,
+        "sha256": "1b80888f649e31c839a8a12a6fe75018e855ad41766ee1825727e730173152cd"
+      },
+      {
+        "url": "http://localhost:4310/assets/index-Dm67tbx6.css",
+        "bytes": 81925,
+        "sha256": "31e6eb824fc6a292fdeea1c6b85cb08c577fcd3965d8f61a73197d652dafc87b"
+      }
+    ],
+    "scenarios": "sprint003-browser-result.json",
+    "journey": "sprint003-browser.playwright.js",
+    "screenshots": [
+      "sprint003-desktop-configuration.png",
+      "sprint003-desktop-dialog.png",
+      "sprint003-desktop-profiles.png",
+      "sprint003-mobile-configuration.png",
+      "sprint003-mobile-dialog.png",
+      "sprint003-mobile-profiles.png"
+    ],
+    "limitations": "Controlled API responses; no operational database, provider, recruitment, native picker or publication. Synthetic SSE reconnect state and intentional HTTP 412 are expected."
+  },
+  "buildAssets": [
+    {
+      "path": "dist/web/index.html",
+      "bytes": 541,
+      "sha256": "e228635961efad03be81c34f1b6a8698ddc193c762fec00e3e57876ff1895efa"
+    },
+    {
+      "path": "dist/web/assets/index-Dm67tbx6.css",
+      "bytes": 81925,
+      "sha256": "31e6eb824fc6a292fdeea1c6b85cb08c577fcd3965d8f61a73197d652dafc87b"
+    },
+    {
+      "path": "dist/web/assets/index-xhqW-JG1.js",
+      "bytes": 1005283,
+      "sha256": "1b80888f649e31c839a8a12a6fe75018e855ad41766ee1825727e730173152cd"
+    }
+  ],
+  "technicalRevalidation": {
+    "build": "passed",
+    "typecheck": "passed",
+    "lint": "passed",
+    "diffCheck": "passed",
+    "tests": {
+      "passed": 45,
+      "failed": 0,
+      "report": "validacao-sprint003-browser-reteste.json"
+    }
+  },
+  "previousBrowserAttempt": {
+    "status": "pending",
+    "reason": "Playwright MCP is available but Chrome initialization fails: Browser is already in use; server requests --isolated, unavailable in exposed tool parameters",
+    "executedViewports": [],
+    "plannedViewports": [
+      {
+        "width": 1440,
+        "height": 1000
+      },
+      {
+        "width": 390,
+        "height": 844
+      }
+    ],
+    "loadedAssets": null,
+    "attempts": [
+      {
+        "tool": "browser_navigate",
+        "result": "Browser is already in use",
+        "scenarioExecuted": false
+      },
+      {
+        "tool": "browser_close",
+        "result": "Browser is already in use",
+        "scenarioExecuted": false
+      },
+      {
+        "tool": "browser_tabs",
+        "result": "Browser is already in use",
+        "scenarioExecuted": false
+      },
+      {
+        "tool": "browser_run_code_unsafe",
+        "result": "Browser is already in use",
+        "scenarioExecuted": false
+      }
+    ]
+  }
+}

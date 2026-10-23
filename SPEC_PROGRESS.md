@@ -3023,3 +3023,36 @@ Rollback permanece o plano delimitado da sprint-006: drenar/descartar instância
 - Medições finais: dez processos aprovados em `.cache/observation-comparison-final-runs/results.json`, com cinco amostras por modo/cenário e cinco provas AC-29. `node scripts/summarize-observation-comparison.mjs` executado com sucesso, conferindo hashes antes de gerar o relatório. A saída anterior hardcoded do runner foi ajustada para informar a pasta efetivamente usada; os dados anteriores não foram sobrescritos.
 
 Sprint-007 executada e pacote entregue ao checkpoint do usuário. Provas controladas e UI real com API sintética concluídas nos limites descritos; C4-04 não recebe aceite geral de latência/desempenho, e integração GitHub real não foi medida. Não simula aprovação, Design Lock, avanço de fase ou revisão independente final. Nenhum commit/push/publicação foi realizado.
+
+## Sprint 001 - Consolidar inventário e contrato de comportamento [CONCLUIDA]
+- Inventário das verificações existentes: Registrar fontes, superfícies, gatilhos, checks suportados, bloqueios, ações e limites das verificações existentes.
+- Mapa de destinos e rastreabilidade: Consolidar o comportamento atual e esperado, incluindo E1 a E4 e as provas necessárias para cada superfície.
+
+## Sprint 002 - Preservar contexto, observações e consulta da operação original [CONCLUIDA]
+- Isolamento de contexto e estado anterior: Garantir que leituras e conclusões pertençam ao objeto, conta, revisão e ciclo de vida originais, com distinção entre leitura atual e relatório anterior.
+- Continuidade da correlação sem reenvio: Preservar a consulta da operação aceita ou incerta durante o ciclo de vida da página, incluindo fechamento e reabertura.
+- Composição de avisos atuais e históricos: Entregar apresentação consistente de condições equivalentes, com linguagem operacional e preservação das restrições independentes.
+
+## Sprint 003 - Localizar prontidão na Configuração global [CONCLUIDA]
+- Condições globais junto dos controles: Localizar GitHub/conta, pasta, perfis e observação Maestri/OMP nas respectivas seções de Configuração.
+- Ações globais únicas e preservação do formulário: Disponibilizar verificar, atualizar leitura e consultar resultado original nos destinos globais aprovados.
+
+## Sprint 004 - Localizar condições do projeto e da preparação [CONCLUIDA]
+- Condições e ações próprias do projeto: Apresentar origem/remoto, quadro/Status e associação de papéis junto dos campos correspondentes.
+- Condições para iniciar junto da preparação: Localizar falhas de consulta, critérios e divergências no seletor ou resumo apropriado, sem criar diagnóstico de preparação.
+- Preservação da definição de checks e da captura: Manter a configuração funcional dos checks e a imutabilidade da configuração capturada por tentativas em andamento.
+
+## Sprint 005 - Separar autoridade, recursos e versão na tentativa [CONCLUIDA]
+- Condições operacionais da tentativa: Localizar autoridade e recursos junto do estado, Parada, ambiente e ações nativas pertinentes.
+- Resultados e artefatos da versão selecionada: Preservar associação dos checks, revisão, artefatos e publicação à rodada e entrega selecionadas.
+
+## Sprint 006 - Localizar condições e consolidar efeitos da criação [CONCLUIDA]
+- Pré-requisitos e ações no contexto da criação: Apresentar condições de scaffold, destino, Git, identidade e modalidade remota no formulário/plano ou resultado correspondente.
+- Efeitos únicos e conclusão independente da prontidão posterior: Consolidar a apresentação de efeitos equivalentes e distinguir resultado da criação das pendências para iniciar issue.
+
+## Sprint 007 - Concluir histórico e resumos com provas por superfície [CONCLUIDA]
+- Registros exclusivamente como histórico: Retirar controles operacionais de diagnóstico e preservar histórico, eventos e navegação existentes.
+- Dashboard com resumo e destino responsável: Consolidar pendências equivalentes de onboarding, impedimentos e fila em resumos com navegação apropriada.
+
+## Sprint 008 - Consolidar evidências e pendências da versão entregue [CONCLUIDA]
+- Comprovação final e registro dos limites: Consolidar evidências produzidas por superfície e conferir completude e limites, sem acumular novamente suas execuções.

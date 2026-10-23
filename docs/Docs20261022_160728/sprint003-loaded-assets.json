@@ -1,0 +1,15 @@
+{
+  "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+  "assets": [
+    {
+      "url": "http://localhost:4310/assets/index-xhqW-JG1.js",
+      "bytes": 1005283,
+      "sha256": "1b80888f649e31c839a8a12a6fe75018e855ad41766ee1825727e730173152cd"
+    },
+    {
+      "url": "http://localhost:4310/assets/index-Dm67tbx6.css",
+      "bytes": 81925,
+      "sha256": "31e6eb824fc6a292fdeea1c6b85cb08c577fcd3965d8f61a73197d652dafc87b"
+    }
+  ]
+}
