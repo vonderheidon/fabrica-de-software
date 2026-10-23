@@ -1,35 +1,45 @@
-.records-panel { gap: 20px; align-items: start; }
+.records-panel { gap: 18px; align-items: start; grid-template-columns: minmax(0, 1fr); max-width: 1200px; }
 .records-panel h2 { margin: 0; font-size: 18px; font-weight: 650; }
 .records-panel .eyebrow { display: block; margin-bottom: 7px; font-size: 10px; }
 .records-panel button { min-height: 40px; padding: 9px 14px; border-radius: 7px; font-size: 12px; font-weight: 600; }
 .records-panel .panel-title { align-items: center; gap: 16px; }
 .records-panel .muted { font-size: 12px; line-height: 1.6; }
-.records-panel .records-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 1fr); align-items: center; gap: 24px; }
+.records-panel .records-filters { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(380px, 1.3fr); align-items: center; gap: 18px 28px; padding: 20px 24px; }
 .records-filters .panel-title { margin: 0; }
 .records-filters .panel-title p { margin: 8px 0 0; }
-.records-filter-controls { display: flex; align-items: end; gap: 12px; min-width: 0; }
+.records-filter-controls { display: flex; align-items: center; gap: 12px 18px; min-width: 0; }
 .records-filter-controls > .form-field { flex: 1; min-width: 0; margin: 0; }
 .records-filter-controls > button { flex-shrink: 0; }
-.records-panel .records-filters label { margin: 0 0 8px; }
+.records-panel .records-filters label { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+.records-panel .custom-select-trigger, .records-reference-filters input { min-height: 40px; padding: 9px 12px; font-size: 13px; }
+.records-reference-filters { grid-column: 1 / -1; border-top: 1px solid var(--border); padding-top: 14px; }
+.records-reference-filters > summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 500; }
+.records-reference-filters > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.records-reference-filters form { margin-top: 16px; }
+.records-reference-filters .form-grid { gap: 16px; margin-bottom: 12px; }
+.records-reference-filters .form-field { margin: 0; }
 .records-panel .custom-select-trigger { background: #fff; }
 .records-panel .records-events { padding: 0; overflow: hidden; }
 .records-events > .panel-title { padding: 22px 24px; margin: 0; flex-wrap: wrap; }
 .records-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .records-events > .muted, .records-events > .stale-note, .records-events > .queue-error, .records-events > .empty-inline { margin: 0 24px 18px; }
-.records-panel .record-event { grid-template-columns: 112px minmax(0, 1fr); gap: 20px; padding: 18px 24px; border-top: 1px solid var(--border); border-bottom: 0; }
+.records-panel .record-event { grid-template-columns: 90px minmax(0, 1fr); gap: 20px; padding: 14px 24px; border-top: 1px solid var(--border); border-bottom: 0; }
 .records-panel .record-event:hover { background: #fafbfc; }
 .records-panel .record-event time { display: grid; align-content: start; gap: 5px; padding: 0; font: 12px var(--font); font-variant-numeric: tabular-nums; }
 .record-event time small { font-size: 11px; }
 .record-event b { font-size: 13px; line-height: 1.6; font-weight: 600; }
 .record-event b + .muted { display: block; margin-top: 5px; }
 .record-event-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-.record-event-content { min-width: 0; overflow-wrap: anywhere; }
+.record-event-content { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 24px; min-width: 0; overflow-wrap: anywhere; }
+.record-event-content > b, .record-event-origin, .record-event-context { grid-column: 1; }
+.record-event-content > .record-event-actions { grid-column: 2; grid-row: 1 / span 3; align-self: center; justify-content: flex-end; gap: 4px 14px; max-width: 260px; }
 .record-event-origin { margin: 5px 0; font-size: 12px; line-height: 1.6; }
 .record-event-context { margin: 3px 0 6px; }
 .record-event-actions { align-items: center; }
 .record-event-actions > a { font-size: 12px; font-weight: 600; padding-block: 8px; }
 .records-filter-controls { flex-wrap: wrap; }
-.records-panel .records-technical { flex-basis: 100%; font-size: 12px; margin: 0; }
+.records-panel .records-technical { flex-basis: auto; min-height: 40px; font-size: 12px; font-weight: 400; margin: 20px 0 0; gap: 8px; }
+.records-panel .records-technical input { width: 16px; height: 16px; min-height: 0; flex: 0 0 16px; margin: 0; padding: 0; }
 .records-panel .record-event button.inline-link { min-height: 32px; margin: 4px 0 0; padding: 4px 0; text-align: left; }
 .records-panel .records-pagination { padding: 16px 24px; background: #fafbfc; }
 .records-panel .records-pagination span { font-size: 11px; font-variant-numeric: tabular-nums; }
@@ -43,7 +53,6 @@
 .diagnostic-footer > p { margin: 0; }
 .diagnostic-footer .diagnostic-actions { margin: 0; flex-shrink: 0; }
 @media (min-width: 1280px) {
-  .records-panel { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
   .records-panel .records-filters { grid-column: 1 / -1; }
   .records-panel .diagnostics-panel > .panel-title { flex-wrap: wrap; }
   .records-panel .records-context, .records-panel .diagnostic-checks { grid-template-columns: minmax(0, 1fr); }
@@ -51,12 +60,15 @@
   .diagnostic-footer { align-items: stretch; flex-direction: column; }
   .diagnostic-footer .diagnostic-actions { flex-wrap: wrap; }
 }
-@media (max-width: 800px) {
+@media (max-width: 1050px) {
+  .record-event-content { grid-template-columns: minmax(0, 1fr); }
+  .record-event-content > .record-event-actions { grid-column: 1; grid-row: auto; justify-content: flex-start; max-width: none; }
   .records-panel .records-filters { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   .records-panel .records-context { grid-template-columns: minmax(0, 1fr); }
   .diagnostic-footer { align-items: stretch; flex-direction: column; }
 }
 @media (max-width: 600px) {
+  .records-panel .records-technical { margin-top: 0; }
   .records-panel > .card { padding: 20px; }
   .records-panel .records-events { padding: 0; }
   .records-events > .panel-title { padding: 20px; }

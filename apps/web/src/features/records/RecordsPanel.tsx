@@ -19,11 +19,11 @@ export function RecordsPanel({ filters, onFilterChange }: Props) {
     <section className="card records-filters">
       <div className="panel-title"><span className="eyebrow">Histórico da operação</span><h2>Filtrar registros</h2><p className="muted">Acompanhe os eventos de todos os projetos ou selecione um projeto.</p></div>
       <div className="records-filter-controls">
-      <label className="form-check records-technical"><input type="checkbox" checked={includeTechnical} onChange={(event) => setIncludeTechnical(event.currentTarget.checked)} />Incluir eventos técnicos</label>
       <ProjectPicker id="records-project-choice" value={filters.projectId} onChange={(projectId) => applyFilters({ projectId, attemptId: '', operationId: '' })} />
+      <label className="form-check records-technical"><input type="checkbox" checked={includeTechnical} onChange={(event) => setIncludeTechnical(event.currentTarget.checked)} />Incluir eventos técnicos</label>
       {(filters.projectId || filters.attemptId || filters.operationId) && <button type="button" onClick={() => applyFilters({ projectId: '', attemptId: '', operationId: '' })}>Limpar filtros</button>}
       </div>
-      <details><summary>Filtros de tentativa e operação</summary><form onSubmit={event => { event.preventDefault(); applyFilters({ ...filters, attemptId: references.attemptId, operationId: references.operationId }); }}><div className="form-grid">
+      <details className="records-reference-filters"><summary>Filtros de tentativa e operação</summary><form onSubmit={event => { event.preventDefault(); applyFilters({ ...filters, attemptId: references.attemptId, operationId: references.operationId }); }}><div className="form-grid">
         <div className="form-field"><label htmlFor="records-attempt">Referência da tentativa</label><input id="records-attempt" value={references.attemptId} onChange={event => setReferences({ ...references, attemptId: event.currentTarget.value })} /></div>
         <div className="form-field"><label htmlFor="records-operation">Referência da operação</label><input id="records-operation" value={references.operationId} onChange={event => setReferences({ ...references, operationId: event.currentTarget.value })} /></div>
       </div><button type="submit">Aplicar referências</button></form></details>
