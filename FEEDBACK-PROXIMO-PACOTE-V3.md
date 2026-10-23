@@ -84,6 +84,19 @@ Decisão registrada em 22/10/2026: o modo escolhido define a entrega inicial, ma
 
 - Como definir o repositório local de destino nos projetos cadastrados somente por URL. Os modos com integração local precisam desse destino, sem presumir uma pasta do usuário.
 
+## Nomes descritivos de branches e commits
+
+Decisão registrada em 22/10/2026. Registro para o próximo pacote, sem iniciar implementação nem renomear branches ou reescrever commits existentes.
+
+- Usar o mesmo tipo e a mesma descrição da tarefa nos nomes de branches e nas mensagens de commit. Substituir nomes como `factory/1/0252c7ae-6470-4f54-9c5a-8d0868a8c324` e mensagens genéricas como `feat: deliver issue #1` por nomes que expliquem a entrega.
+- Padrão da branch: `<tipo>/<numero-da-issue>-<descricao-em-kebab-case>`. Exemplo: `feat/1-adicionar-login`; para correção, `fix/12-corrigir-filtro-de-projetos`.
+- Padrão do commit: `<tipo>: <descricao> (#<numero-da-issue>)`. Exemplos: `feat: adicionar login (#1)` e `fix: corrigir filtro de projetos (#12)`.
+- Escolher o tipo conforme a natureza da alteração, como `feat`, `fix`, `refactor`, `docs`, `test`, `perf` ou `chore`, sem classificar toda entrega como `feat`. Escrever a descrição em português, de forma curta e específica, baseada no trabalho efetivamente entregue.
+- Normalizar a descrição da branch em letras minúsculas, sem acentos, com palavras separadas por hífens e respeitando as restrições de referências Git. Não usar UUID como descrição principal da tarefa.
+- Em colisões entre tentativas diferentes, preservar a branch existente e acrescentar um sufixo curto e estável à nova branch. Na retomada da mesma entrega, reutilizar a branch já registrada, sem criar outra por causa de mudança no título da issue.
+- Aplicar o padrão às novas branches de tarefa e aos commits de entrega dos modos previstos neste pacote, inclusive na continuação da entrega. Preservar referências imutáveis, rastreabilidade e prevenção de efeitos duplicados.
+- Validar tipos diferentes, títulos com acentos ou caracteres inválidos para branches, colisões entre tentativas e retomadas. Não renomear branches publicadas nem reescrever o histórico existente como parte dessa mudança.
+
 ## Arquivos gerenciados agrupados por projeto
 
 Decisão registrada em 22/10/2026. Registro para o próximo pacote, sem iniciar implementação ou mover arquivos durante o pipeline em execução.
