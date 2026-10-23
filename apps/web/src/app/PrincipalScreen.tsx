@@ -279,7 +279,7 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
       params.delete('attemptId'); params.delete('deliveryId'); params.delete('roundId'); params.delete('dialog');
       window.location.hash = buildHash('tentativas', params);
     }} onPrepareRetry={(attemptId, projectId) => onOpenDialog('preparation', document.activeElement as HTMLElement, { projectId, previousAttemptId: attemptId })} onDetail={(attemptId, projectId) => {
-      const params = new URLSearchParams(route.params); params.set('attemptId', attemptId); params.set('projectId', projectId); params.delete('deliveryId'); params.delete('roundId'); params.set('dialog', 'detail'); window.location.hash = buildHash('tentativas', params);
+      onOpenDialog('detail', document.activeElement as HTMLElement, { attemptId, projectId });
     }} />}
   </>;
 }

@@ -10,8 +10,8 @@ export function IssueOptionsNotice({ issues, projectId, onReload }: {
 }) {
   if (issues.completeness === 'complete') return null;
   const prerequisites = issues.prerequisites.filter((item) => item.code !== 'ISSUE_REVALIDATION_REQUIRED');
-  const accessUnavailable = issues.diagnostics.some((item) => accessCodes.has(item.code));
-  const diagnostics = [...new Map([...prerequisites, ...issues.diagnostics.filter((item) => !accessCodes.has(item.code))]
+  const accessUnavailable = [...prerequisites, ...issues.diagnostics].some((item) => accessCodes.has(item.code));
+  const diagnostics = [...new Map([...prerequisites, ...issues.diagnostics].filter((item) => !accessCodes.has(item.code))
     .map((item) => [item.code, item])).values()];
   return <div className="notice" role="status">
     <b>{issues.completeness === 'partial' ? 'A consulta das issues está incompleta' : 'Não foi possível consultar as issues do quadro'}</b>

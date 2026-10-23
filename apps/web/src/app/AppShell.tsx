@@ -203,6 +203,10 @@ export function AppShell() {
       const returnTarget = returnFocusRef.current;
       returnFocusRef.current = null;
       if (returnTarget?.isConnected) returnTarget.focus();
+      else if (returnTarget?.dataset.attemptTrigger) {
+        const replacement = appRef.current?.querySelector<HTMLElement>(`[data-attempt-trigger="${CSS.escape(returnTarget.dataset.attemptTrigger)}"]`);
+        (replacement ?? appRef.current?.querySelector<HTMLElement>('.nav-link[aria-current="page"]'))?.focus();
+      }
       else appRef.current?.querySelector<HTMLElement>('.nav-link[aria-current="page"]')?.focus();
       return;
     }

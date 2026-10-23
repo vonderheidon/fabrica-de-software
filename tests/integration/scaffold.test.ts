@@ -103,7 +103,9 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const input = await choices(f); const first = await f.scaffold.plan(input); const second = await f.scaffold.plan(input);
     expect(Value.Check(ScaffoldPlanned,first)).toBe(true); expect(first).toEqual(second);
     expect(first.plan).toMatchObject({ destination: join(f.projectsRoot,'new-project'), ownerId: null, engineering: { tracker: 'github', installsSkills: false, createsLabels: false }, account: { id: 'fixture-user' } });
-    expect(first.plan.files.map(f => f.path)).toContain('AGENTS.md'); expect(first.plan.files.some(f => f.path.includes('triage-labels'))).toBe(false);
+    expect(first.plan.files.map(f => f.path)).toContain('AGENTS.md');
+    expect(first.plan.engineering.triageEnabled).toBe(true);
+    expect(first.plan.files.map(f => f.path)).toContain('docs/agents/triage-labels.md');
     expect(existsSync(first.plan.destination)).toBe(false); expect(f.calls).toEqual([]); expect(f.storage.getEvents({})).toEqual(before);
     expect(f.acquireGuard).not.toHaveBeenCalled();
   });

@@ -24,6 +24,8 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
   const commandIds = useRef(new Map<string, string>());
   const active = useRef(true);
   const refreshSequence = useRef(0);
+  const snapshotIdentity = `${attemptId}:${deliveryId ?? ''}`;
+  const [loadedIdentity, setLoadedIdentity] = useState('');
 
   const refresh = useCallback(async (): Promise<void> => {
     const sequence = ++refreshSequence.current;
@@ -35,6 +37,7 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
         deliveryId ? requestJson<ProducerResult>(`/api/v1/deliveries/${encodeURIComponent(deliveryId)}/producer-result`).catch(() => null) : Promise.resolve(null),
       ]);
       if (!isCurrent()) return;
+      setLoadedIdentity(snapshotIdentity);
       setState(current => ({ ...current, resources, producerResult, error: null }));
       const plans: Snapshot['plans'] = {};
       const folders: Snapshot['folders'] = {};
@@ -158,5 +161,5 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
         : state.operation.accepted ? 'accepted' : 'uncertain'
     : null;
 
-  return { ...state, refresh, cancel, retryCaptureFor, requestRemoval, openFolder, openTerminal, copyReference, cancelStatus };
+  return { ...state, ...(loadedIdentity === snapshotIdentity ? {} : emptySnapshot()), refresh, cancel, retryCaptureFor, requestRemoval, openFolder, openTerminal, copyReference, cancelStatus };
 }

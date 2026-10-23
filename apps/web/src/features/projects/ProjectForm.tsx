@@ -22,6 +22,8 @@ import { nativeSelectionMessage, useNativeSelection } from './useNativeSelection
 import { FieldHelp, fieldGuidanceFor } from './FieldHelp.js';
 import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 import { ProjectDeletionAction } from './ProjectDeletionAction.js';
+import { GlobalConditions, GlobalVerification, useGlobalDiagnostics } from './GlobalReadiness.js';
+import { ProjectConditions, ProjectVerification, useProjectDiagnostics } from './ProjectReadiness.js';
 
 type EditableView = EditableConfigurationView;
 type EditableProfile = ExecutionProfile & { id?: string };
@@ -239,6 +241,8 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
 }
 
 export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateChange }: { projectId: string | null; onDraftStateChange?: (dirty: boolean, saving: boolean) => void; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
+  const globalDiagnostic = useGlobalDiagnostics(projectId === null);
+  const projectDiagnostic = useProjectDiagnostics(projectId);
   const identity = projectId ?? 'global-settings';
   const deletionRestricted = useProjectDeletionRestriction(projectId);
   const identityRef = useRef(identity);
@@ -583,8 +587,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       setup={githubSetup}
       selection={nativeSelection}
       disabled={saveState.status === 'saving' || githubSettingsPending}
+      conditions={<GlobalConditions diagnostic={globalDiagnostic} section="github" />}
     />}
-    {!projectId && <section className="card form-section settings-operation"><div className="panel-title"><h2>Operação local</h2><p className="muted">Pasta e padrões para novos projetos e tentativas. Gerencie os papéis de execução em <a href="#principal/perfis">Perfis</a>.</p></div><div className="form-grid">
+    {!projectId && <section className="card form-section settings-operation"><div className="panel-title"><h2>Operação local</h2></div><div className="form-grid">
       <ProjectsFolderField
         persistedValue={settings?.projects_root ?? null}
         value={draft.global.projects_root}
@@ -595,6 +600,9 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         saveError={projectsRootSaveError}
         disabled={saveState.status === 'saving' || githubSettingsPending}
       />
+      <div className="field-full"><GlobalConditions diagnostic={globalDiagnostic} section="folder" /></div>
+      <div className="field-full"><h3>Perfis de execução</h3>{load.view.profile_counts.all > 0 && <p>Perfis ativos: {load.view.profile_counts.implementer} Implementador · {load.view.profile_counts.reviewer} Revisor.</p>}<GlobalConditions diagnostic={globalDiagnostic} section="profiles" /><a href="#principal/perfis">Gerenciar Perfis</a></div>
+      <div className="field-full"><GlobalConditions diagnostic={globalDiagnostic} section="configuration" /><GlobalVerification diagnostic={globalDiagnostic} check="configuration" /></div>
       <div className="field-full settings-group-title"><h3>Tempos de acompanhamento</h3></div>
       <MinutesField id="polling-interval-minutes" label="Intervalo de consulta" value={draft.global.time_defaults.polling_interval_ms} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, polling_interval_ms: value })} onValidityChange={(message) => updateTimeFieldValidity('polling_interval_ms', message)} />
       <MinutesField id="passage-active-time-minutes" label="Tempo ativo por passagem" value={draft.global.time_defaults.passage_active_time_ms} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, passage_active_time_ms: value })} onValidityChange={(message) => updateTimeFieldValidity('passage_active_time_ms', message)} />
@@ -602,6 +610,8 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       <ConfiguredLimitField label="Definir prazo para perguntas" value={draft.global.time_defaults.question_ttl} onValidityChange={(message) => updateTimeFieldValidity('question_ttl', message)} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, question_ttl: value })} />
       <Checkbox label="Automação global habilitada" checked={draft.global.automation_enabled} onChange={(value) => updateGlobal('automation_enabled', value)} />
     </div></section>}
+
+    {!projectId && <section className="card form-section" aria-labelledby="global-integration-heading"><h2 id="global-integration-heading">Integração Maestri/OMP</h2><GlobalConditions diagnostic={globalDiagnostic} section="integration" /><GlobalVerification diagnostic={globalDiagnostic} check="maestri_context" /></section>}
 
     {conflictView && conflictETagRef.current && <button type="button" onClick={() => {
       const etag = conflictETagRef.current;
@@ -624,8 +634,10 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         <SelectField label="Tipo da origem" value={draft.project.source.kind} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: value as 'local' | 'github', location: current.source.location } }))} options={[{ value: 'local', label: 'Local' }, { value: 'github', label: 'GitHub' }]} />
         <TextField label="Localização da origem" value={draft.project.source.location} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: current.source.kind, location: value } }))} />
         <TextField label="Branch-base" value={draft.project.base_branch} onChange={(value) => updateProject((current) => ({ ...current, base_branch: value }))} />
+        <ProjectConditions diagnostic={projectDiagnostic} section="origin" projectId={projectId} />
         <SelectField label="Perfil implementador" value={implementerProfileAvailable ? draft.project.implementer_profile_id ?? '' : ''} onChange={(value) => updateProject((current) => ({ ...current, implementer_profile_id: value || null }))} options={implementerProfiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
         <SelectField label="Perfil revisor" value={reviewerProfileAvailable ? draft.project.reviewer_profile_id ?? '' : ''} onChange={(value) => updateProject((current) => ({ ...current, reviewer_profile_id: value || null }))} options={reviewerProfiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
+        <ProjectConditions diagnostic={projectDiagnostic} section="profiles" projectId={projectId} />
         <NumberField label="Limite de correções" value={draft.project.correction_limit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correction_limit: Math.max(0, Math.min(5, value)) }))} />
         <SelectField label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit' }, { value: 'pr', label: 'Pull request' }]} />
         <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
@@ -642,11 +654,17 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         <a className="button-link" href="#principal/perfis">Abrir Perfis Globais</a>
       </div>}
       <ProjectMappingEditor configuration={draft.project} options={currentOptions} optionsError={currentOptionsError} onChange={updateProject} onLoadMore={() => void loadMoreOptions()} />
+      <ProjectConditions diagnostic={projectDiagnostic} section="mapping" projectId={projectId} />
       <div className="checks-editor"><div className="line panel-title"><div><span className="eyebrow">Validação</span><h3>Checks</h3></div><button type="button" onClick={() => updateProject((current) => ({ ...current, checks: [...current.checks, { id: crypto.randomUUID(), command: '', cwd_relative: '.' }] }))} disabled={draft.project.checks.length >= 50}>Adicionar check</button></div>
         {draft.project.checks.map((check, index) => <fieldset className="check-card" key={check.id}><legend>Check {index + 1}</legend><div className="form-grid"><TextField label={`Comando do check ${index + 1}`} value={check.command} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, command: value } : item) }))} /><TextField label={`cwd relativo do check ${index + 1}`} value={check.cwd_relative} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, cwd_relative: value } : item) }))} help="Deve permanecer relativo ao ambiente da tentativa." /><NumberField label={`Timeout do check ${index + 1}`} value={check.timeout_ms ?? 60000} min={1} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, timeout_ms: value } : item) }))} unit="ms" /></div><button type="button" className="danger-button" onClick={() => updateProject((current) => ({ ...current, checks: current.checks.filter((item) => item.id !== check.id) }))}>Remover check</button></fieldset>)}
       </div>
       {draft.project.source.kind === 'local' && <div className="notice"><b>Origem local</b><p>Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.</p></div>}
       </fieldset>
+      <ProjectConditions diagnostic={projectDiagnostic} section="global" projectId={projectId} />
+      <ProjectConditions diagnostic={projectDiagnostic} section="configuration" projectId={projectId} />
+      <ProjectConditions diagnostic={projectDiagnostic} section="issue" projectId={projectId} />
+      <ProjectConditions diagnostic={projectDiagnostic} section="information" projectId={projectId} />
+      <ProjectVerification diagnostic={projectDiagnostic} />
     </section>}
     {projectId && isConfigurationView(load.view) && <section className="card project-danger-zone"><div><h3>Exclusão do projeto</h3><p>Remova o cadastro e os dados locais após conferir o que será perdido. Os recursos do GitHub serão preservados.</p></div><ProjectDeletionAction key={`${projectId}:${accountId ?? ''}`} projectId={projectId} projectRevision={load.view.configuration.revision}
       installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}

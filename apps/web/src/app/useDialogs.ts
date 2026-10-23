@@ -13,6 +13,7 @@ export function useDialogs(route: HashRoute) {
     if (!dialogIds.some((allowed) => allowed === id)) return;
     const params = new URLSearchParams(window.location.hash.split('?')[1] ?? '');
     params.set('dialog', id);
+    if (id === 'detail') { params.delete('deliveryId'); params.delete('roundId'); }
     params.delete('issueId');
     if (id === 'preparation') {
       params.delete('attemptId');

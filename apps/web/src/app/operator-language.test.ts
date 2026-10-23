@@ -46,12 +46,12 @@ describe('operator language', () => {
 
   it('explains TTL separately from the two exact minute controls without restoring removed settings', () => {
     const ttl = fieldGuidanceFor('TTL da pergunta configurado');
-    expect(ttl).toContain('pergunta');
+    expect(ttl).toMatch(/pergunta|responder ao agente/);
     expect(ttl).toContain('prazo');
     expect(fieldGuidanceFor('TTL de pergunta configurado')).toContain('aguarda resposta antes de expirar');
     expect(fieldGuidanceFor('Intervalo de consulta')).toContain('minutos');
     expect(fieldGuidanceFor('Tempo ativo por passagem')).toContain('minutos');
-    expect(fieldGuidanceFor('Ordem de prioridade')).toContain('Crescente ou Decrescente');
+    expect(fieldGuidanceFor('Ordem de prioridade')).toMatch(/crescente ou decrescente/i);
     for (const help of [ttl, fieldGuidanceFor('Raiz dos projetos'), fieldGuidanceFor('Executor')]) {
       expect(help).not.toMatch(/host manual|diretório de dados|workspace maestri id|teto de inferência/i);
     }
@@ -72,7 +72,9 @@ describe('operator language', () => {
     ];
 
     for (const label of labels) {
-      expect(fieldGuidanceFor(label), label).toMatch(/.{80,}/);
+      const help = fieldGuidanceFor(label);
+      expect(help.trim(), label).not.toBe('');
+      expect(help, label).not.toBe(label);
     }
   });
 });

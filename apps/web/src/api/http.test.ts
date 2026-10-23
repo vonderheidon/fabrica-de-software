@@ -4,6 +4,21 @@ afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); });
 const session = () => new Response(JSON.stringify({ csrf_token: 'A'.repeat(43), instance_id: 'abcdef12-1234-4123-8123-123456789012' }));
 
 describe('common public HTTP contracts', () => {
+  it.each(['json', 'text'] as const)('renews and retries a %s read only once after 401', async (format) => {
+    const denied = () => new Response(JSON.stringify({ code: 'SESSION_REQUIRED' }), { status: 401 });
+    const fetch = vi.fn().mockResolvedValueOnce(session()).mockResolvedValueOnce(denied()).mockResolvedValueOnce(session()).mockResolvedValueOnce(denied());
+    vi.stubGlobal('fetch', fetch);
+    const { requestJson, requestText } = await import('./http.js');
+    await expect((format === 'json' ? requestJson : requestText)('/api/v1/settings')).rejects.toMatchObject({ status: 401 });
+    expect(fetch.mock.calls.map(([path]) => path)).toEqual(['/api/v1/session', '/api/v1/settings', '/api/v1/session', '/api/v1/settings']);
+  });
+  it.each(['GET', 'POST'] as const)('never renews or replays a %s request after 403', async (method) => {
+    const fetch = vi.fn().mockResolvedValueOnce(session()).mockResolvedValueOnce(new Response(JSON.stringify({ code: 'CSRF_INVALID' }), { status: 403 }));
+    vi.stubGlobal('fetch', fetch);
+    const { requestJson } = await import('./http.js');
+    await expect(requestJson('/api/v1/diagnostics?scope=host', { method })).rejects.toMatchObject({ status: 403 });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it('reads snake_case errors and preserves correlation, field errors, facts and recovery', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(session()).mockResolvedValueOnce(new Response(JSON.stringify({
       code: 'BLOCKED', message: 'Revise a configuração.', request_id: 'request-1', operation_id: 'abcdef12-1234-4123-8123-123456789012',

@@ -29,8 +29,7 @@ export function ProjectsFolderField({ persistedValue, value, capability, selecti
     </div>
     <p id="projects-root-help" className="field-guidance">Pasta local para novos projetos. Alterá-la não move os existentes. Exemplo: C:\Projetos.</p>
     {!capability.available && <div className="notice" role="status"><p>A seleção assistida de pasta está indisponível nesta sessão.</p></div>}
-    <p className="projects-folder-saved-value"><span className="eyebrow">Pasta salva</span><span className="mono">{persistedValue ?? 'Ainda não configurada'}</span></p>
-    {differsFromSaved && <p className="selection-message" role="status">A edição atual ainda não foi salva. O valor salvo acima permanece ativo.</p>}
+    {differsFromSaved && <><p className="projects-folder-saved-value"><span className="eyebrow">Pasta salva</span><span className="mono">{persistedValue ?? 'Ainda não configurada'}</span></p><p className="selection-message" role="status">A edição atual ainda não foi salva. A pasta salva permanece ativa.</p></>}
     {message && <p className={selectionStateIsWarning(currentSelection) ? 'selection-message selection-message-warning' : 'selection-message'} role={selectionStateIsWarning(currentSelection) ? 'alert' : 'status'}>{message}</p>}
     {candidate && <div className="projects-folder-candidate">
       <p><span className="eyebrow">{candidate === persistedValue ? 'Pasta já salva' : 'Candidata da seleção'}</span><span className="mono">{candidate}</span></p>

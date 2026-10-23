@@ -4,7 +4,7 @@ const stateLabels: Readonly<Record<string, string>> = {
   accepted: 'Aceita', running: 'Em andamento', succeeded: 'Concluída', failed: 'Falhou', failed_known: 'Falha confirmada', unknown: 'Sem confirmação',
   uncertain: 'Incerta', unavailable: 'Indisponível', pending: 'Pendente', ready: 'Pronta', blocked: 'Impedida',
   passed: 'Aprovada', approved: 'Aprovado', rejected: 'Reprovada', delivered: 'Entregue', not_applicable: 'Não se aplica', not_requested: 'Não solicitado',
-  observed: 'Observada', complete: 'Completa', partial: 'Parcial', active: 'Ativa', inactive: 'Inativa',
+  observed: 'Observada', captured: 'Capturada', complete: 'Completa', partial: 'Parcial', active: 'Ativa', inactive: 'Inativa',
   draft: 'Rascunho', preparing: 'Preparando ambiente', implementation: 'Implementação', implementing: 'Implementação', implementer: 'Implementador', reviewer: 'Revisor',
   in_progress: 'Em andamento', in_review: 'Em revisão', verifying: 'Verificação', reviewing: 'Revisão', correcting: 'Correção',
   publishing: 'Publicação', finished: 'Encerrada', interrupted: 'Interrompida', open: 'Aberta', closed: 'Fechada',
@@ -16,6 +16,12 @@ const stateLabels: Readonly<Record<string, string>> = {
 };
 
 const codeLabels: Readonly<Record<string, string>> = {
+  ISSUE_CLOSED: 'Issue fechada', NOT_AN_ISSUE: 'O item não é uma issue executável',
+  READ_INCOMPLETE: 'Leitura incompleta', REPOSITORY_MISMATCH: 'Repositório diferente do projeto',
+  PROJECT_MEMBERSHIP_MISSING: 'Vínculo da issue ao quadro não confirmado', STATUS_MISMATCH: 'Status diferente do esperado', OPEN_BLOCKERS: 'Dependências abertas',
+  ISSUE_TITLE_REQUIRED: 'Informe o título da issue', ISSUE_OBJECTIVE_REQUIRED: 'Informe o objetivo da issue',
+  CRITERIA_LIST_INVALID: 'Revise a lista de critérios de aceite', CRITERION_ID_INVALID: 'Corrija a identificação dos critérios',
+  CRITERION_ID_DUPLICATED: 'Use identificadores distintos para os critérios', CRITERION_TEXT_INVALID: 'Revise o texto dos critérios',
   SCAFFOLD_GIT_IDENTITY_REQUIRED: 'Configure seu nome e e-mail no Git antes de criar o projeto',
   CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: 'Descrição do repositório sem confirmação; consulte novamente a criação',
   CREATION_REMOTE_DESCRIPTION_CHANGED: 'Descrição alterada no GitHub; preserve o texto e confira a criação',
@@ -47,6 +53,23 @@ const codeLabels: Readonly<Record<string, string>> = {
 };
 
 const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; nextAction: string }>> = {
+  ACCOUNT_CHANGED: { title: 'Conta ativa diferente da vinculada', cause: 'A conta GitHub observada mudou em relação à conta vinculada à preparação.', nextAction: 'Confira a conta ativa e o vínculo em Configuração; depois, consulte a preparação novamente.' },
+  ISSUE_CLOSED: { title: 'Issue fechada', cause: 'A issue selecionada está fechada no GitHub.', nextAction: 'Selecione uma issue aberta ou revise seu estado no GitHub e consulte novamente.' },
+  NOT_AN_ISSUE: { title: 'Item não executável', cause: 'O item selecionado não é uma issue executável; pode ser um rascunho ou pull request.', nextAction: 'Selecione uma issue vinculada ao quadro configurado.' },
+  READ_INCOMPLETE: { title: 'Leitura incompleta', cause: 'A consulta não confirmou todos os dados necessários da issue e do quadro.', nextAction: 'Consulte as issues novamente antes de iniciar.' },
+  REPOSITORY_MISMATCH: { title: 'Repositório diferente', cause: 'A issue pertence a um repositório diferente do configurado no projeto.', nextAction: 'Confira a origem do projeto e selecione uma issue do repositório correspondente.' },
+  ISSUE_CONTEXT_INVALID: { title: 'Issue não confirmada', cause: 'A identidade ou o repositório da issue selecionada não foi confirmado.', nextAction: 'Confira o projeto e consulte a issue novamente.' },
+  PROJECT_MEMBERSHIP_MISSING: { title: 'Vínculo ao quadro não confirmado', cause: 'A issue não tem um vínculo ativo confirmado com o quadro configurado.', nextAction: 'Confira o quadro, o arquivamento do item e o vínculo da issue no GitHub. Depois, consulte novamente.' },
+  STATUS_MISMATCH: { title: 'Status diferente do esperado', cause: 'O Status da issue não corresponde ao esperado para este início.', nextAction: 'Confira o Status no GitHub e o mapeamento do projeto. A nova tentativa preserva a exceção existente de início fora de Ready.' },
+  OPEN_BLOCKERS: { title: 'Dependências abertas', cause: 'A issue tem bloqueadores ainda abertos no GitHub.', nextAction: 'Resolva os bloqueadores e consulte a issue novamente.' },
+  REMOTE_MISMATCH: { title: 'Base local e remota divergentes', cause: 'As referências local e remota observadas não apontam para a mesma base.', nextAction: 'Confira a origem e a branch-base; consulte novamente sem substituir a base silenciosamente.' },
+  REPOSITORY_ARCHIVED: { title: 'Repositório arquivado', cause: 'O repositório GitHub da issue está arquivado.', nextAction: 'Revise o arquivamento no GitHub antes de preparar uma nova execução.' },
+  PROJECT_CONFIGURATION_CHANGED: { title: 'Configuração do projeto alterada', cause: 'A preparação está vinculada a outra revisão da configuração do projeto.', nextAction: 'Confira a configuração efetiva e salve novamente a preparação antes de autorizar.' },
+  PROFILE_REFERENCE_CHANGED: { title: 'Referência de perfil alterada', cause: 'O perfil escolhido foi alterado ou não está mais disponível na revisão selecionada.', nextAction: 'Confira o perfil efetivo e selecione uma referência atual, sem substituir a escolha automaticamente.' },
+  PROFILE_TYPE_MISMATCH: { title: 'Perfil de outro papel', cause: 'O tipo do perfil escolhido não corresponde ao papel da preparação.', nextAction: 'Selecione um perfil ativo do papel correspondente.' },
+  PROJECT_PROFILE_TYPE_MISMATCH: { title: 'Associação de perfil incompatível', cause: 'Um perfil associado ao projeto não corresponde ao papel esperado.', nextAction: 'Corrija a associação na configuração deste projeto.' },
+  PROJECT_OWNER_MISMATCH: { title: 'Proprietário do quadro divergente', cause: 'O proprietário observado não corresponde ao quadro configurado.', nextAction: 'Confira o quadro e seu proprietário na configuração deste projeto.' },
+  STATUS_MAPPING_INVALID: { title: 'Mapeamento de Status inválido', cause: 'O campo ou uma das opções de Status configuradas não foi confirmado no quadro.', nextAction: 'Atualize as opções e confira os quatro valores de Status na configuração deste projeto.' },
   SCAFFOLD_GIT_IDENTITY_REQUIRED: { title: 'Autoria do commit inicial ausente', cause: 'O Git deste computador não tem nome e e-mail configurados para o commit inicial.', nextAction: 'Configure seu nome e e-mail no Git e crie novamente o projeto. Nenhum arquivo foi criado.' },
   CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: { title: 'Descrição sem confirmação', cause: 'O repositório foi criado, mas a atualização da descrição não foi confirmada.', nextAction: 'Consulte os efeitos preservados para conferir a descrição, sem recriar o repositório.' },
   CREATION_REMOTE_DESCRIPTION_CHANGED: { title: 'Descrição alterada no GitHub', cause: 'A descrição foi editada após a criação e foi preservada.', nextAction: 'Confira a descrição no GitHub antes de prosseguir com a criação.' },

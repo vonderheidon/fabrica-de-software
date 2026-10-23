@@ -1,3 +1,4 @@
+import { AttemptConditions } from './AttemptConditions.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptSelection } from './execution-requests.js';
@@ -10,7 +11,7 @@ import { useAttemptActions } from './useAttemptActions.js';
 import { useDelivery } from './useDelivery.js';
 import { PublicationDialog } from './PublicationDialog.js';
 import { formatMinuteValue } from '../projects/time-minutes.js';
-import { OperatorDiagnosticCard, OperatorState, UnknownState } from '../../app/OperatorSupport.js';
+import { OperatorState, UnknownState } from '../../app/OperatorSupport.js';
 import { operatorCodeLabel, operatorErrorMessage, operatorFactLabel, operatorState, operatorVisibleFactValue } from '../../app/operator-language.js';
 
 const sections: readonly DetailSection[] = ['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources'];
@@ -65,10 +66,10 @@ function formatActiveLimit(value: AttemptDetail["measurements"]["active_limit"])
 }
 
 export function AttemptDetailDialog({ attemptId, selectedRound, selectedDeliveryId, onSelectionChange, onRetry }: DetailProps) {
-  const [sectionStates, setSectionStates] = useState<Record<DetailSection, SectionState>>(emptySections);
+  const [storedSectionStates, setSectionStates] = useState<Record<DetailSection, SectionState>>(emptySections);
   const [reload, setReload] = useState(0);
-  const [diff, setDiff] = useState<DiffState>({ loading: false, value: null, error: null, errorDetails: null });
-  const [evidence, setEvidence] = useState<Record<string, EvidenceState>>({});
+  const [storedDiff, setDiff] = useState<DiffState>({ loading: false, value: null, error: null, errorDetails: null });
+  const [storedEvidence, setEvidence] = useState<Record<string, EvidenceState>>({});
 
   const selectedQuery = useMemo(() => {
     const query = new URLSearchParams();
@@ -76,15 +77,24 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     const value = query.toString();
     return value ? `?${value}` : '';
   }, [selectedRound, selectedDeliveryId]);
-  const { attempt, etag: attemptEtag, error: attemptError } = useAttempt(attemptId, selectedQuery, reload);
+  const { attempt, selectionCurrent, etag: attemptEtag, error: attemptError } = useAttempt(attemptId, selectedQuery, reload);
   const attemptMatchesRound = !selectedRound || String(attempt?.selected_round) === selectedRound;
-  const effectiveDeliveryId = selectedDeliveryId ?? (attemptMatchesRound ? attempt?.selected_delivery_id : null) ?? null;
+  const effectiveDeliveryId = selectedDeliveryId ?? (selectionCurrent && attemptMatchesRound ? attempt?.selected_delivery_id : null) ?? null;
   const { delivery, status: deliveryState, error: deliveryError } = useDelivery(effectiveDeliveryId, reload + (attempt?.revision ?? 0));
   const actions = useAttemptActions(attemptId, attempt, attemptEtag, effectiveDeliveryId, delivery?.delivery.capture_state === 'failed');
   const [confirmedResources, setConfirmedResources] = useState<Record<string, string>>({});
   const refreshDetail = useCallback(() => setReload((value) => value + 1), []);
   const sectionIdentity = `${attemptId}:${selectedRound ?? ''}:${effectiveDeliveryId ?? ''}`;
   const sectionIdentityRef = useRef('');
+  const selection = useMemo(() => ({ identity: sectionIdentity }), [sectionIdentity]);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const isCurrentSelection = () => selectionRef.current === selection;
+  const visible = sectionIdentityRef.current === sectionIdentity;
+  const sectionStates = visible ? storedSectionStates : emptySections();
+  const diff = visible ? storedDiff : { loading: false, value: null, error: null, errorDetails: null };
+  const evidence = visible ? storedEvidence : {};
+  useEffect(() => { selectionRef.current = selection; return () => { if (selectionRef.current === selection) selectionRef.current = { identity: '' }; }; }, [selection]);
   useEffect(() => { setDiff({ loading: false, value: null, error: null, errorDetails: null }); setEvidence({}); }, [effectiveDeliveryId]);
 
   useEffect(() => {
@@ -120,9 +130,9 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         const requestController = controllers[index];
         if (!requestController) return;
         const { data } = await requestJsonWithMetadata<AttemptDetail>(`/api/v1/attempts/${encodeURIComponent(attemptId)}?${sectionQuery(section)}`, { signal: requestController.signal });
-        if (active) setSectionStates((current) => ({ ...current, [section]: { page: data.details, error: null, errorDetails: null, loading: false } }));
+        if (active && isCurrentSelection()) setSectionStates((current) => ({ ...current, [section]: { page: data.details, error: null, errorDetails: null, loading: false } }));
       } catch (reason: unknown) {
-        if (!active || (reason instanceof DOMException && reason.name === 'AbortError')) return;
+        if (!active || !isCurrentSelection() || (reason instanceof DOMException && reason.name === 'AbortError')) return;
         setSectionStates((current) => ({ ...current, [section]: { ...sectionStateFor(current, section), error: reason instanceof HttpError ? reason.message : 'Não foi possível carregar esta seção.', errorDetails: sectionErrorDetails(reason), loading: false } }));
       }
     }));
@@ -137,6 +147,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     const query = new URLSearchParams({ section, limit: '25', cursor });
     setAttemptSelection(query, selectedRound, effectiveDeliveryId);
     void requestJsonWithMetadata<AttemptDetail>(`/api/v1/attempts/${encodeURIComponent(attemptId)}?${query}`).then(({ data }) => {
+      if (!isCurrentSelection()) return;
       const nextPage = data.details;
       if (!nextPage) return;
       setSectionStates((state) => {
@@ -144,7 +155,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         if (!page) return state;
         return { ...state, [section]: { page: { ...nextPage, items: [...page.items, ...nextPage.items] }, error: null, errorDetails: null, loading: false } };
       });
-    }).catch((reason: unknown) => setSectionStates((state) => ({ ...state, [section]: { ...sectionStateFor(state, section), error: reason instanceof HttpError ? reason.message : 'Não foi possível continuar esta seção.', errorDetails: sectionErrorDetails(reason), loading: false } })));
+    }).catch((reason: unknown) => { if (!isCurrentSelection()) return; setSectionStates((state) => ({ ...state, [section]: { ...sectionStateFor(state, section), error: reason instanceof HttpError ? reason.message : 'Não foi possível continuar esta seção.', errorDetails: sectionErrorDetails(reason), loading: false } })); });
   }
 
   function retrySection(section: DetailSection): void {
@@ -154,8 +165,9 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     const query = new URLSearchParams({ section, limit: '25' });
     setAttemptSelection(query, selectedRound, effectiveDeliveryId);
     void requestJsonWithMetadata<AttemptDetail>(`/api/v1/attempts/${encodeURIComponent(attemptId)}?${query}`).then(({ data }) => {
+      if (!isCurrentSelection()) return;
       setSectionStates((state) => ({ ...state, [section]: { page: data.details, loading: false, error: null, errorDetails: null } }));
-    }).catch((reason: unknown) => setSectionStates((state) => ({ ...state, [section]: { ...sectionStateFor(state, section), error: reason instanceof HttpError ? reason.message : 'Não foi possível carregar esta seção.', errorDetails: sectionErrorDetails(reason), loading: false } })));
+    }).catch((reason: unknown) => { if (!isCurrentSelection()) return; setSectionStates((state) => ({ ...state, [section]: { ...sectionStateFor(state, section), error: reason instanceof HttpError ? reason.message : 'Não foi possível carregar esta seção.', errorDetails: sectionErrorDetails(reason), loading: false } })); });
   }
 
   function loadDiff(cursor?: string): void {
@@ -164,18 +176,21 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     const query = new URLSearchParams({ limit: '25' });
     if (cursor) query.set('cursor', cursor);
     void requestJsonWithMetadata<DeliveryDiff>(`/api/v1/deliveries/${encodeURIComponent(effectiveDeliveryId)}/diff?${query}`).then(({ data }) => {
+      if (!isCurrentSelection()) return;
       setDiff((current) => ({ loading: false, error: null, errorDetails: null, value: current.value && cursor ? { ...data, entries: [...current.value.entries, ...data.entries] } : data }));
-    }).catch((reason: unknown) => setDiff((current) => ({ ...current, loading: false, error: reason instanceof HttpError && reason.code === 'DELIVERY_INTEGRITY_FAILED'
+    }).catch((reason: unknown) => { if (!isCurrentSelection()) return; setDiff((current) => ({ ...current, loading: false, error: reason instanceof HttpError && reason.code === 'DELIVERY_INTEGRITY_FAILED'
       ? 'A integridade da versão capturada falhou; o diff foi recusado.'
-      : reason instanceof HttpError ? reason.message : 'Não foi possível carregar o diff da versão.', errorDetails: sectionErrorDetails(reason) })));
+      : reason instanceof HttpError ? reason.message : 'Não foi possível carregar o diff da versão.', errorDetails: sectionErrorDetails(reason) })); });
   }
 
   async function loadEvidence(artifact: Artifact): Promise<void> {
     setEvidence((current) => ({ ...current, [artifact.id]: { loading: true, text: current[artifact.id]?.text ?? null, error: null, errorDetails: null } }));
     try {
       const text = await requestText(`/api/v1/artifacts/${encodeURIComponent(artifact.id)}`);
+      if (!isCurrentSelection()) return;
       setEvidence((current) => ({ ...current, [artifact.id]: { loading: false, text, error: null, errorDetails: null } }));
     } catch (reason: unknown) {
+      if (!isCurrentSelection()) return;
       const message = reason instanceof HttpError && reason.code === 'ARTIFACT_INTEGRITY_FAILED' ? 'A integridade desta evidência falhou; o conteúdo foi recusado.'
         : reason instanceof HttpError && reason.code === 'ARTIFACT_MISSING' ? 'A evidência não está disponível.'
           : reason instanceof HttpError ? reason.message : 'Não foi possível carregar a evidência.';
@@ -195,7 +210,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attemptError && <div className="queue-error" role="alert"><h3>Falha ao consultar esta tentativa</h3><p>{attemptError}</p><p><strong>Próxima ação:</strong> consulte novamente antes de agir sobre os dados anteriores.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar novamente</button></div>}
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
-      <div className="attempt-detail-heading"><div className="eyebrow">Detalhe da tentativa</div><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Registros e diagnóstico</a></div></div>
+      <div className="attempt-detail-heading"><div className="eyebrow">Detalhe da tentativa</div><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
       <div className="attempt-version-controls"><div className="form-field"><label htmlFor="attempt-round">Rodada
         </label><CustomSelect id="attempt-round" value={selectedRoundValue} onChange={(event) => {
           const value = event.currentTarget.value;
@@ -212,8 +227,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       </div></div>
 
       <section className="attempt-axis-card card"><h3>Estado operacional</h3><dl className="preparation-facts"><div><dt>Etapa</dt><dd><OperatorState value={attempt.phase} /></dd></div><div><dt>Resultado final</dt><dd>{attempt.result ? <OperatorState value={attempt.result} /> : 'Ainda não concluído'}</dd></div><div><dt>Suspensão</dt><dd>{attempt.suspension ? operatorCodeLabel(attempt.suspension) : 'Nenhuma'}</dd></div><div><dt>Acompanhamento</dt><dd><OperatorState value={attempt.tracking} /></dd></div><div><dt>Limpeza</dt><dd>{cleanupLabel(attempt.cleanup)}</dd></div><div><dt>Publicação</dt><dd><OperatorState value={attempt.publication.local_state} /></dd></div><div><dt>Modo capturado</dt><dd>{deliveryModeLabel(attempt.publication.mode)}</dd></div></dl>
-        {attempt.diagnostic && <OperatorDiagnosticCard code={attempt.diagnostic} state="blocked" cause={attempt.diagnostic} recovery="Atualize a tentativa e consulte Registros e diagnóstico antes de uma nova ação." />}
-        {attempt.authority?.reason && <OperatorDiagnosticCard code={attempt.authority.reason} state="blocked" cause={attempt.authority.reason} recovery={attempt.authority.recovery} />}
+        <AttemptConditions attempt={attempt} />
 
         <div className="attempt-recovery-actions">
           <button type="button" className="danger" onClick={actions.cancel} disabled={!attempt.capabilities.cancel.available || actions.busy || actions.cancelStatus !== null} title={attempt.capabilities.cancel.available ? undefined : attempt.capabilities.cancel.reason ?? 'Cancelamento indisponível'}>Solicitar cancelamento</button>
@@ -226,6 +240,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
       {actions.resources && <section className="attempt-axis-card card" aria-labelledby="attempt-resources-title">
         <div className="line"><h3 id="attempt-resources-title">Parada, ambiente e ações nativas</h3><button type="button" onClick={() => void actions.refresh()}>Atualizar capacidades</button></div>
+        <AttemptConditions attempt={attempt} resources />
         {actions.cancelStatus && <div className={actions.cancelStatus === 'cleanup-uncertain' ? 'queue-error' : 'notice'} role="status">
           <b>{actions.cancelStatus === 'accepted' ? 'Pedido de cancelamento aceito' : actions.cancelStatus === 'stopped' ? 'Parada dos terminais comprovada' : actions.cancelStatus === 'cleanup-uncertain' ? 'Limpeza incerta' : 'Estado do pedido de parada incerto'}</b>
           <p>{actions.cancelStatus === 'accepted' ? 'A aceitação registra o pedido. A parada física ainda está sendo observada.' : actions.cancelStatus === 'stopped' ? 'Todos os terminais registrados estão confirmados como parados.' : actions.cancelStatus === 'failed' ? 'A operação de cancelamento falhou; consulte o diagnóstico e o estado atual antes de qualquer novo comando.' : actions.cancelStatus === 'cleanup-uncertain' ? 'O controlador não confirmou a limpeza física. O trabalho e os recursos permanecem registrados.' : 'Consulte a operação e os recursos; o pedido não será reenviado automaticamente.'}</p>
@@ -293,7 +308,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           </div>}</>}
       </section>
 
-      {delivery && <PublicationDialog
+      {delivery && <PublicationDialog key={delivery.delivery.id}
         projectId={attempt.project_id}
         attemptId={attemptId}
         attemptEtag={attemptEtag}
@@ -311,7 +326,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           {sectionState.error && <div className="queue-error" role="alert"><b>Não foi possível carregar esta seção</b><p>{sectionState.error}</p><p><strong>Próxima ação:</strong> consulte novamente esta rodada e versão.</p><button type="button" onClick={() => retrySection(section)} disabled={sectionState.loading}>Tentar carregar novamente</button></div>}
           {section === 'reviews' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'A revisão não foi realizada porque esta rodada ainda não tem uma versão capturada.' : 'Esta versão ainda não tem parecer de revisão.'}</p>}
           {section === 'findings' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">A revisão desta versão não registrou achados.</p>}
-          {section === 'criteria' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">Critérios indisponíveis: esta versão ainda não foi capturada.</p>}
+          {section === 'criteria' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'Critérios indisponíveis: esta versão ainda não foi capturada.' : 'Nenhum critério foi retornado para esta versão.'}</p>}
           {sectionState.page && sectionState.page.items.length > 0 && <div className="attempt-record-list">{sectionState.page.items.map((item, index) => section === 'questions'
             ? <QuestionDecisionCard key={String(asRecord(item).id ?? index)} attemptId={attemptId} summary={item as { id: string; state: Question["state"] }} />
             : renderRecord(section, item, index, evidence, loadEvidence))}</div>}

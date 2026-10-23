@@ -1,4 +1,5 @@
 import { CustomSelect } from '../../app/CustomSelect.js';
+import type { ReactNode } from 'react';
 import type { GitHubSetupOptions, SettingsView } from '#contracts';
 import type { NativeSelectionController } from './useNativeSelection.js';
 import { nativeSelectionMessage } from './useNativeSelection.js';
@@ -6,7 +7,8 @@ import type { GitHubSettingsOperation, GitHubSetupController } from './useGitHub
 import { FieldHelp } from './FieldHelp.js';
 import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 
-export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, disabled = false }: {
+export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, disabled = false, conditions }: {
+  conditions?: ReactNode;
   settings: SettingsView;
   settingsEtag: string;
   setup: GitHubSetupController;
@@ -20,7 +22,6 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
   const checking = setup.verification.status === 'idle' || setup.verification.status === 'checking';
   const linkedAccount = options?.linked_account?.id === settings.settings.account_id ? options?.linked_account : null;
   const linkedLogin = linkedAccount ? `@${linkedAccount.login}` : !settings.settings.account_id ? 'Nenhuma conta vinculada' : checking ? 'Consultando conta…' : 'Vínculo salvo; consulta não confirmada';
-  const observedLogin = options?.observed_account ? `@${options.observed_account.login}` : checking ? 'Consultando autenticação…' : verificationError ? 'Não foi possível consultar' : 'Nenhuma conta ativa confirmada';
   const accountMismatch = Boolean(options?.linked_account && options.observed_account && options.linked_account.id !== options.observed_account.id);
   const settingsMismatch = options !== null && (options.linked_account?.id ?? null) !== settings.settings.account_id;
   const operationBusy = setup.accountOperation.status === 'saving' || setup.executableOperation.status === 'saving' || disabled;
@@ -42,15 +43,14 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
         {setup.verification.status === 'checking' ? 'Verificando…' : 'Verificar status'}
       </button>
     </div>
-    <p className="muted">Usa a autenticação do GitHub CLI neste computador. Alterar o vínculo exige uma ação explícita.</p>
 
-    {setup.verification.status === 'checking' && <p role="status">Atualizando status da conta…</p>}
     {verificationError && <div className="notice" role="alert"><b>Status do GitHub não confirmado</b><p>{verificationError.message}</p><p>A falha desta consulta não altera nem apaga o resultado de uma gravação.</p></div>}
     {verificationStale && <div className="notice" role="status"><b>Observação anterior à configuração atual</b><p>Atualize a configuração e verifique o status novamente antes de vincular ou trocar a conta.</p></div>}
 
     <div className="github-account-summary github-factory-account" aria-live="polite">
       <div><span className="eyebrow">Vinculada à fábrica</span><strong>{linkedLogin}</strong></div>
     </div>
+    {conditions}
     {accountMismatch && <div className="notice" role="alert">
       <b>Conta ativa diferente da vinculada</b>
       <p>A fábrica está vinculada a <strong>@{options?.linked_account?.login}</strong>, enquanto o GitHub CLI observa <strong>@{options?.observed_account?.login}</strong>. Verificar status atualiza somente a observação; a troca é uma ação separada.</p>
@@ -58,24 +58,6 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
     {settingsMismatch && !verificationStale && <div className="notice" role="alert"><b>A configuração mudou durante a consulta</b><p>Releia a configuração e verifique o status antes de vincular uma conta.</p></div>}
 
     {options && <>
-      <details className="github-connection-details"><summary>Detalhes da conexão</summary>
-      <p><strong>Conta ativa neste computador:</strong> {observedLogin}</p>
-      <div className="github-executable-summary">
-        <span className="eyebrow">GitHub CLI</span>
-        {options.executable.state === 'observed'
-          ? <p><strong>Executável validado:</strong> <span className="mono">{options.executable.path}</span> · versão {options.executable.version}</p>
-          : <p><strong>Executável:</strong> {options.executable.state === 'not_found' ? 'não localizado' : 'indisponível'}</p>}
-      </div>
-
-      {options.accounts.length > 0 && <div className="github-account-list">
-        <span className="eyebrow">Contas observadas em github.com</span>
-        <ul>{options.accounts.map((account) => <li key={account.login}>
-          <strong>@{account.login}</strong><span>{account.active ? 'Ativa' : 'Inativa'}</span>
-          <span>{account.valid ? 'Autenticação válida' : 'Autenticação precisa de atenção'}</span>
-          <span>{account.eligible ? 'Elegível para vínculo' : account.active && account.valid ? 'Identidade não confirmada' : 'Não elegível para vínculo'}</span>
-        </li>)}</ul>
-      </div>}
-      </details>
       {options.retry_at_ms !== null && <p className="notice" role="status">A próxima consulta GitHub está prevista para {new Date(options.retry_at_ms).toLocaleString('pt-BR')}.</p>}
 
       {setup.eligibleAccounts.length > 0 && <details className="github-binding-details"><summary>{settings.settings.account_id ? 'Gerenciar vínculo da conta' : 'Vincular uma conta'}</summary><div className="form-grid github-binding-controls">

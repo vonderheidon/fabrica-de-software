@@ -3,8 +3,9 @@ import { useActiveAttempt } from './useActiveAttempt.js';
 import { useOperation } from './useOperation.js';
 import { useQueue } from '../queue/useQueue.js';
 import type { OnboardingController } from '../onboarding/useOnboarding.js';
-import { OperatorDiagnosticCard, UnknownState } from '../../app/OperatorSupport.js';
-import { operatorState } from '../../app/operator-language.js';
+import { UnknownState } from '../../app/OperatorSupport.js';
+import { dashboardConditions, conditionDestination } from './dashboard-conditions.js';
+import { diagnosticCopyFor, operatorState } from '../../app/operator-language.js';
 
 type Props = {
   projects: ProjectPage | null;
@@ -15,6 +16,11 @@ type Props = {
   onPrepare: (projectId: string, issueId: string, trigger: HTMLElement) => void;
   onAttempt: (attemptId: string, projectId: string) => void;
 };
+
+export function ProjectPrerequisiteStatus({ prerequisites }: { prerequisites: ProjectPage['items'][number]['prerequisites'] }) {
+  const pending = prerequisites.filter((item) => item.code !== 'EXECUTION_REVALIDATION_REQUIRED').length;
+  return <span className={pending ? 'project-pending' : 'success'}>{pending ? `${pending} ${pending === 1 ? 'pré-requisito pendente' : 'pré-requisitos pendentes'}` : 'Sem impedimentos registrados'}</span>;
+}
 
 export function upcomingCandidates(items: readonly HttpQueueItem[]): HttpQueueItem[] {
   return items.filter((item) => item.eligible || (item.ready_eligible && item.reasons.length > 0 && item.reasons.every((reason) => reason === 'AUTOMATION_DISABLED'))).slice(0, 5);
@@ -34,17 +40,24 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
   const active = useActiveAttempt(true);
   const queue = useQueue(null, true);
   const summary = operation.data;
+  const refreshing = operation.loading || operation.refreshing || active.loading || active.refreshing || projectsLoad.loading || queue.load.status === 'loading';
   const queueObservation = queue.load.observation;
   const candidates = upcomingCandidates(queueObservation?.page.items ?? []);
   const queueFailure = queue.load.status === 'error' ? { message: queue.load.message, requestId: queue.load.requestId }
     : queue.load.status === 'loading' ? queue.load.previousError : null;
   const onboardingView = onboarding.load.snapshot?.settings.onboarding;
 
+  const conditions = dashboardConditions([
+    ...(summary?.impediments.filter(item => item.state !== 'passed').map(item => ({ ...item, previous: operation.stale || operation.refreshing })) ?? []),
+    ...(onboardingView?.prerequisites.map(item => ({ code: item.code, cause: item.message, recovery: item.recovery, previous: Boolean(onboarding.load.error) || onboarding.load.refreshing })) ?? []),
+    ...(queueObservation?.diagnostics.map(item => ({ code: item.code, cause: item.message, recovery: item.recovery, previous: Boolean(queueFailure), ...((item.code.startsWith('PROJECT_') && queueObservation.scope.project_ids.length === 1) ? { facts: { project_id: queueObservation.scope.project_ids[0]! } } : {}) })) ?? []),
+  ]);
+
   return <div className="dashboard-panels" aria-label="Resumo operacional">
     <section className="card dashboard-context-card">
-      <div className="line panel-title"><div><span className="eyebrow">Visão geral</span><h2>Operação</h2></div><div className="row"><a href="#principal/configuracao">Configuração</a><button type="button" onClick={() => { operation.refresh(); active.refresh(); queue.resetPages(); onRefreshProjects(); }} disabled={operation.loading || operation.refreshing || active.loading || active.refreshing || projectsLoad.loading || queue.load.status === 'loading'}>Atualizar painel</button></div></div>
+      <div className="line panel-title"><div><span className="eyebrow">Visão geral</span><h2>Operação</h2></div><div className="row"><a href="#principal/configuracao">Configuração</a><button type="button" onClick={() => { if (refreshing) return; operation.refresh(); active.refresh(); queue.resetPages(); onRefreshProjects(); }} aria-disabled={refreshing}>Atualizar painel</button></div></div>
       <RequestNote loading={operation.loading} refreshing={operation.refreshing} error={operation.error} stale={operation.stale} label="conta e operação" />
-      {summary && <dl className="dashboard-facts"><div><dt>Conta GitHub</dt><dd>{summary.account.login ?? (summary.account.id ? 'Login ainda não consultado' : 'Sem vínculo confirmado')}</dd></div><div><dt>Automação</dt><dd>{summary.automation.dispatch_paused ? 'Pausada' : summary.automation.enabled ? 'Habilitada' : 'Desabilitada'}</dd></div><div><dt>Conexão com Maestri</dt><dd>{summary.integration_status.state === 'observed' ? operatorState(summary.integration_status.observation?.state).label : 'Ainda não consultada'}{summary.integration_status.state === 'observed' && summary.integration_status.observation && !operatorState(summary.integration_status.observation.state).known && <UnknownState value={summary.integration_status.observation.state} />}</dd></div></dl>}
+{summary && <dl className="dashboard-facts"><div><dt>Conta GitHub</dt><dd>{summary.account.login ?? (summary.account.id ? 'Login ainda não consultado' : 'Sem vínculo confirmado')}</dd></div><div><dt>Automação</dt><dd>{summary.automation.dispatch_paused ? 'Pausada' : summary.automation.enabled ? 'Habilitada' : 'Desabilitada'}</dd></div><div><dt>Última observação Maestri</dt><dd>{summary.integration_status.state === 'observed' ? operatorState(summary.integration_status.observation?.state).label : 'Ainda não consultada'}{summary.integration_status.state === 'observed' && summary.integration_status.observation && !operatorState(summary.integration_status.observation.state).known && <UnknownState value={summary.integration_status.observation.state} />}</dd></div></dl>}
     </section>
 
     {!onboardingView && onboarding.load.loading && <section className="card onboarding-dashboard-card" role="status"><div><span className="eyebrow">Configuração inicial</span><h2>Consultando o progresso salvo…</h2></div></section>}
@@ -60,12 +73,6 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
       </div>
       <button type="button" className="primary" data-initial-setup-trigger onClick={(event) => onOpenSetup(event.currentTarget)}>Continuar configuração</button>
     </section>}
-    {onboardingView && onboardingView.completed_at_ms !== null && onboardingView.prerequisites.length > 0 && <section className="card onboarding-dashboard-card onboarding-dashboard-followup" aria-labelledby="onboarding-followup-title">
-      <div><span className="eyebrow">Configuração inicial concluída</span><h2 id="onboarding-followup-title">Pendências da operação</h2>
-        <ul className="compact-list">{onboardingView.prerequisites.map((item) => <li key={item.code}><OperatorDiagnosticCard code={item.code} state="blocked" cause={item.message} recovery={item.recovery} /><a href={item.code.toLocaleLowerCase('en').includes('profile') ? '#principal/perfis' : '#principal/configuracao'}>Abrir {item.code.toLocaleLowerCase('en').includes('profile') ? 'Perfis' : 'Configuração'}</a></li>)}</ul>
-      </div>
-    </section>}
-
     <div className="dashboard-grid">
       <section className="card dashboard-active">
         <div className="line panel-title"><div><span className="eyebrow">Agora</span><h2>Tentativa ativa</h2></div></div>
@@ -74,14 +81,13 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
       </section>
 
       <section className="card dashboard-blockers">
-        <div className="line panel-title"><div><span className="eyebrow">Bloqueios</span><h2>Impedimentos atuais</h2></div><a href="#principal/registros">Diagnóstico</a></div>
-        <RequestNote loading={operation.loading} refreshing={operation.refreshing} error={operation.error} stale={operation.stale} empty={summary && summary.impediments.length === 0 ? 'Nenhum impedimento observado nesta consulta.' : undefined} label="impedimentos" />
-        {summary?.impediments.map((item, index) => <div key={`${item.check}:${item.code}:${index}`}><OperatorDiagnosticCard code={item.code} state={item.state} cause={item.cause} recovery={item.recovery} />{item.facts.attempt_id && <button type="button" onClick={() => onAttempt(item.facts.attempt_id!, item.facts.project_id ?? '')}>Abrir tentativa</button>}</div>)}
+        <div className="line panel-title"><div><span className="eyebrow">Bloqueios</span><h2>Impedimentos atuais</h2></div><a href="#principal/configuracao">Configuração</a></div>
+        <RequestNote loading={operation.loading} refreshing={operation.refreshing} error={operation.error} stale={operation.stale} empty={summary && conditions.length === 0 ? 'Nenhum impedimento observado nesta consulta.' : undefined} label="impedimentos" />
+        {conditions.map((item, index) => { const destination = conditionDestination(item); const copy = diagnosticCopyFor(item.code, 'blocked', item.cause, item.recovery); return <div className="dashboard-record" key={index}><p>{item.previous && <strong>Leitura anterior · </strong>}{copy.cause}</p><a href={destination.href}>{destination.label}</a></div>; })}
       </section>
 
       <section className="card dashboard-queue">
         <div className="line panel-title"><div><span className="eyebrow">A seguir</span><h2>Próximos candidatos</h2></div><a href="#principal/fila">Abrir fila</a></div>
-        {queueObservation?.diagnostics.filter(item => ['GLOBAL_AUTOMATION_PAUSED', 'PROJECT_QUEUE_BLOCKED', 'PROJECT_NOT_READY', 'PROJECT_MAPPING_INVALID'].includes(item.code)).map(item => <OperatorDiagnosticCard key={`${item.code}:${item.message}`} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}
         <RequestNote loading={queue.load.status === 'loading' && !queueObservation && !queueFailure} refreshing={queue.load.status === 'loading' && Boolean(queueObservation)} error={queueFailure?.message ?? null} stale={Boolean(queueObservation) && (queue.load.status === 'error' || Boolean(queueFailure))} empty={queueObservation?.complete && candidates.length === 0 ? 'Nenhuma issue pronta nesta página da fila.' : undefined} label="candidatos" />
         {queueObservation && <>{queueObservation.complete !== true && <p className="notice compact-notice">A consulta está incompleta; a lista não confirma ausência de candidatos.</p>}{queue.pageNotice && <p className="stale-note" role="status">{queue.pageNotice}</p>}<ul className="dashboard-candidates">{candidates.map((candidate) => { const status = operatorState(candidate.status); return <li key={`${candidate.project_id}:${candidate.item_id}`}><div><b>{candidate.title ?? `Issue #${candidate.number ?? 'sem número'}`}</b><small>{candidate.project_name} · {status.label} · {candidate.eligible ? 'elegível nesta consulta' : 'Issue pronta · automação do projeto desabilitada'}</small>{!status.known && <UnknownState value={candidate.status ?? ''} />}</div>{candidate.issue_id && <button type="button" onClick={(event) => onPrepare(candidate.project_id, candidate.issue_id!, event.currentTarget)}>Preparar</button>}</li>; })}</ul><small className="muted">Elegíveis na fila: {queueObservation.eligible_total ?? 'não confirmado'} · Última atualização {queueObservation.observed_at_ms ? new Date(queueObservation.observed_at_ms).toLocaleTimeString('pt-BR') : 'não realizada'}</small></>}
       </section>
@@ -97,7 +103,7 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
       <section className="card dashboard-projects">
         <div className="line panel-title"><h2>Projetos recentes</h2><a href="#principal/projetos">Ver projetos</a></div>
         <RequestNote loading={projectsLoad.loading && !projects} refreshing={projectsLoad.refreshing} error={projectsLoad.error?.message ?? null} stale={projectsLoad.stale} empty={projectsLoad.empty ? 'Nenhum projeto cadastrado.' : undefined} label="projetos" />
-        {projects?.items.slice(0, 4).map((project) => <div className="event" key={project.id}><div><b>{project.name}</b><p>{project.base_branch}</p></div><span className={project.prerequisites.length ? 'project-pending' : 'success'}>{project.prerequisites.length ? `${project.prerequisites.length} ${project.prerequisites.length === 1 ? 'pré-requisito pendente' : 'pré-requisitos pendentes'}` : 'Configuração disponível'}</span></div>)}
+        {projects?.items.slice(0, 4).map((project) => <div className="event" key={project.id}><div><b>{project.name}</b><p>{project.base_branch}</p></div><ProjectPrerequisiteStatus prerequisites={project.prerequisites} /></div>)}
       </section>
     </div>
   </div>;

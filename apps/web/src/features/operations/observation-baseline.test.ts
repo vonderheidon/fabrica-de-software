@@ -75,7 +75,7 @@ async function useful(tab: string): Promise<void> {
   const refreshLabel = tab === 'dashboard' ? 'Atualizar painel' : tab === 'fila' ? 'Revalidar fila' : 'Atualizar';
   for (let elapsed = 0; elapsed < 100; elapsed++) {
     const refresh = [...container.querySelectorAll('button')].find(button => button.textContent === refreshLabel);
-    if (container.textContent?.includes(expected) && refresh && !refresh.disabled) return;
+    if (container.textContent?.includes(expected) && refresh && !refresh.disabled && refresh.getAttribute('aria-disabled') !== 'true') return;
     await tick(1);
   }
   throw new Error('NO_USEFUL_DOM_WITHIN_SYNTHETIC_WINDOW');
@@ -301,7 +301,7 @@ it('preserves attempt page and ID actions, then discards pending work on project
   await finish(matching('/api/v1/projects?').at(-1)!, catalog);
   await finish(matching('/api/v1/projects/').at(-1)!, { project: catalog.items[0] });
   await finish(matching('/api/v1/attempts').at(-1)!, { ...page, items: [attempt()], has_more: true, next_cursor: 'attempt-next' });
-  await click('Consultar'); expect(window.location.hash).toContain(attemptA);
+  await click('Consultar'); expect(openDialog).toHaveBeenCalledWith('detail', expect.anything(), { attemptId: attemptA, projectId: projectA });
   await click('Próxima'); const previousProject = matching('/api/v1/attempts').at(-1)!;
   expect(previousProject.route).toContain('cursor=attempt-next'); expect(container.textContent).toContain('#1');
   await render('tentativas', `projectId=${projectB}`); expect(previousProject.aborted).toBe(true);

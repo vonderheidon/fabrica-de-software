@@ -65,6 +65,7 @@ describe('controller verification and external evidence', () => {
   });
   it('keeps historical runs on the same tree with bounded pagination and captured commands despite later project changes', async () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain(); await f.run();
+    const originalCapture = structuredClone(f.storage.getAttemptCapture(f.a.id));
     const previous = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
     await f.run();
     f.storage.interruptAttempts();
@@ -72,6 +73,7 @@ describe('controller verification and external evidence', () => {
     expect(f.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
     const c = f.storage.getConfiguration(f.projectId); const { id: _id, project_id: _p, revision: _r, created_at_ms: _t, ...configuration } = c.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: c.etag, projectId: f.projectId, body: { project_changes: { checks: [] } }, configuration: { ...configuration, checks: [] }, globalChanges: {} });
+    expect(f.storage.getAttemptCapture(f.a.id)).toEqual(originalCapture);
     await expect(f.run()).rejects.toMatchObject({ code: 'VERIFICATION_NOT_ALLOWED' });
     const first = f.storage.getCheckHistory(f.binding.deliveryVersion, { limit: '1' }); expect(first.hasMore).toBe(true);
     const second = f.storage.getCheckHistory(f.binding.deliveryVersion, { cursor: first.nextCursor!, limit: '100' });
@@ -190,6 +192,7 @@ describe('controller verification and external evidence', () => {
     const response = await app.inject({ url, headers }); expect(response.statusCode).toBe(200); expect(response.body).toContain('<script>');
     expect(response.headers['content-type']).toContain('text/plain'); expect(response.headers['x-content-type-options']).toBe('nosniff');
     expect(response.headers['content-disposition']).toContain('attachment'); expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['content-security-policy']).toBe("default-src 'none'; sandbox");
     expect((await app.inject({ url: `${url}?path=../../file`, headers })).statusCode).toBe(400);
     const path = join(f.directory, 'artifacts', artifact.pathRelative); const bytes = await readFile(path);
     await writeFile(path, Buffer.alloc(bytes.length, 65));

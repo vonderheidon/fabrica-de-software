@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { HttpQueueItem } from '#contracts';
-import { upcomingCandidates } from './DashboardPanel.js';
+import { ProjectPrerequisiteStatus, upcomingCandidates } from './DashboardPanel.js';
+
+it('does not count execution revalidation as a pending project prerequisite', () => {
+  const html = renderToStaticMarkup(createElement(ProjectPrerequisiteStatus, { prerequisites: [{ code: 'EXECUTION_REVALIDATION_REQUIRED', message: 'Revise antes de iniciar.', recovery: 'Prepare a execução.' }] }));
+  expect(html).toContain('Sem impedimentos registrados');
+  expect(html).not.toContain('project-pending');
+});
+
+it.each([1, 2])('counts %i real project impediments alongside execution revalidation', (count) => {
+  const prerequisites = [{ code: 'EXECUTION_REVALIDATION_REQUIRED', message: 'Revise antes de iniciar.', recovery: 'Prepare a execução.' },
+    ...Array.from({ length: count }, (_, i) => ({ code: `PROFILE_REQUIRED_${i}`, message: 'Perfil ausente.', recovery: 'Selecione um perfil.' }))];
+  const html = renderToStaticMarkup(createElement(ProjectPrerequisiteStatus, { prerequisites }));
+  expect(html).toContain(count === 1 ? '1 pré-requisito pendente' : '2 pré-requisitos pendentes');
+  expect(html).toContain('project-pending');
+});
 
 const issue: HttpQueueItem = {
   project_id: 'abcdef12-1234-4123-8123-123456789012', project_name: 'Projeto', item_id: 'item', kind: 'issue',

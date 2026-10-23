@@ -30,9 +30,9 @@
 .global-settings-editor .github-account-summary > div { background: #f7f8f9; border: 0; padding: 14px 16px; gap: 8px; }
 .global-settings-editor .github-account-summary .eyebrow { font-size: 11px; text-transform: none; letter-spacing: 0; }
 .global-settings-editor .github-account-summary strong { font-size: 15px; font-weight: 600; }
-.github-connection-details, .github-binding-details { border-top: 1px solid var(--border); padding-top: 14px; }
-.github-connection-details > summary, .github-binding-details > summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 4px 0; }
-.github-connection-details[open] > summary, .github-binding-details[open] > summary { margin-bottom: 14px; }
+.github-binding-details { border-top: 1px solid var(--border); padding-top: 14px; }
+.github-binding-details > summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 4px 0; }
+.github-binding-details[open] > summary { margin-bottom: 14px; }
 .global-settings-editor .github-binding-controls { align-items: start; }
 .global-settings-editor .github-binding-action { gap: 7px; }
 .global-settings-editor .github-binding-action > span { font-size: 12px; font-weight: 600; }
