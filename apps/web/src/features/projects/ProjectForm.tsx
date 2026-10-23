@@ -579,6 +579,11 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
   ));
 
   return <div className={`configuration-editor${projectId ? '' : ' global-settings-editor'}`}>
+    {!projectId && <section className="settings-overview" aria-labelledby="settings-overview-title"><div className="settings-overview-heading"><div><span className="eyebrow">Configuração salva</span><h2 id="settings-overview-title">Operação desta instalação</h2></div><a href="#principal/registros">Ver registros</a></div><dl className="settings-overview-facts">
+      <div><dt>Automação global</dt><dd>{load.view.settings.automation_enabled ? 'Habilitada' : 'Pausada'}</dd></div>
+      <div><dt>Perfis de execução</dt><dd>{load.view.profile_counts.implementer} Implementador · {load.view.profile_counts.reviewer} Revisor</dd></div>
+      <div><dt>Pasta de projetos</dt><dd>{load.view.settings.projects_root ? 'Definida' : 'Não definida'}</dd></div>
+    </dl><p>Resumo dos valores salvos. As verificações de cada seção confirmam as condições de uso.</p></section>}
     {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p><div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
     {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Seu rascunho continua aberto. Os valores abaixo vêm da configuração atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
     {globalSettingsView && globalSettingsEtag && <GitHubSetupPanel
@@ -589,7 +594,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       disabled={saveState.status === 'saving' || githubSettingsPending}
       conditions={<GlobalConditions diagnostic={globalDiagnostic} section="github" />}
     />}
-    {!projectId && <section className="card form-section settings-operation"><div className="panel-title"><h2>Operação local</h2></div><div className="form-grid">
+    {!projectId && <section className="card form-section settings-operation"><div className="panel-title"><span className="eyebrow">Ambiente local</span><h2>Pasta e perfis</h2><p>Local dos projetos e papéis disponíveis para novas execuções.</p></div><div className="form-grid">
       <ProjectsFolderField
         persistedValue={settings?.projects_root ?? null}
         value={draft.global.projects_root}
@@ -601,17 +606,18 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         disabled={saveState.status === 'saving' || githubSettingsPending}
       />
       <div className="field-full"><GlobalConditions diagnostic={globalDiagnostic} section="folder" /></div>
-      <div className="field-full"><h3>Perfis de execução</h3>{load.view.profile_counts.all > 0 && <p>Perfis ativos: {load.view.profile_counts.implementer} Implementador · {load.view.profile_counts.reviewer} Revisor.</p>}<GlobalConditions diagnostic={globalDiagnostic} section="profiles" /><a href="#principal/perfis">Gerenciar Perfis</a></div>
+      <div className="field-full settings-profiles"><div className="settings-section-heading"><h3>Perfis de execução</h3><a href="#principal/perfis">Gerenciar Perfis</a></div><dl className="settings-profile-counts"><div><dt>Implementador</dt><dd>{load.view.profile_counts.implementer}</dd></div><div><dt>Revisor</dt><dd>{load.view.profile_counts.reviewer}</dd></div></dl><GlobalConditions diagnostic={globalDiagnostic} section="profiles" /></div>
       <div className="field-full"><GlobalConditions diagnostic={globalDiagnostic} section="configuration" /><GlobalVerification diagnostic={globalDiagnostic} check="configuration" /></div>
-      <div className="field-full settings-group-title"><h3>Tempos de acompanhamento</h3></div>
+    </div></section>}
+    {!projectId && <section className="card form-section settings-execution"><div className="panel-title"><span className="eyebrow">Execução</span><h2>Automação e acompanhamento</h2><p>Padrões compartilhados pelas próximas execuções.</p></div>
+      <Checkbox label="Automação global habilitada" checked={draft.global.automation_enabled} onChange={(value) => updateGlobal('automation_enabled', value)} />
+      <details className="settings-disclosure" open={Object.keys(timeFieldErrors).length > 0}><summary>Tempos e prazo das perguntas</summary><div className="form-grid">
       <MinutesField id="polling-interval-minutes" label="Intervalo de consulta" value={draft.global.time_defaults.polling_interval_ms} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, polling_interval_ms: value })} onValidityChange={(message) => updateTimeFieldValidity('polling_interval_ms', message)} />
       <MinutesField id="passage-active-time-minutes" label="Tempo ativo por passagem" value={draft.global.time_defaults.passage_active_time_ms} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, passage_active_time_ms: value })} onValidityChange={(message) => updateTimeFieldValidity('passage_active_time_ms', message)} />
-      <div className="field-full settings-group-title"><h3>Perguntas e automação</h3></div>
       <ConfiguredLimitField label="Definir prazo para perguntas" value={draft.global.time_defaults.question_ttl} onValidityChange={(message) => updateTimeFieldValidity('question_ttl', message)} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, question_ttl: value })} />
-      <Checkbox label="Automação global habilitada" checked={draft.global.automation_enabled} onChange={(value) => updateGlobal('automation_enabled', value)} />
-    </div></section>}
+    </div></details></section>}
 
-    {!projectId && <section className="card form-section" aria-labelledby="global-integration-heading"><h2 id="global-integration-heading">Integração Maestri/OMP</h2><GlobalConditions diagnostic={globalDiagnostic} section="integration" /><GlobalVerification diagnostic={globalDiagnostic} check="maestri_context" /></section>}
+    {!projectId && <section className="card form-section settings-integration" aria-labelledby="global-integration-heading"><div className="panel-title"><span className="eyebrow">Executor</span><h2 id="global-integration-heading">Integração Maestri/OMP</h2></div><GlobalConditions diagnostic={globalDiagnostic} section="integration" /><GlobalVerification diagnostic={globalDiagnostic} check="maestri_context" /></section>}
 
     {conflictView && conflictETagRef.current && <button type="button" onClick={() => {
       const etag = conflictETagRef.current;
