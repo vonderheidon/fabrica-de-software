@@ -1,5 +1,12 @@
 # Feedback para o próximo pacote - V3
 
+## Autorização operacional para testes da implementação
+
+Decisão registrada em 23/10/2026.
+
+- Quando a implementação deste pacote for iniciada, o agente responsável tem autorização para usar o terminal Shell #5 do Maestri para subir o servidor da fábrica na porta 4310 e executar os testes necessários, sem pedir nova confirmação para esse uso.
+- Essa autorização operacional não inicia a implementação nem o pipeline; aplica-se à execução quando autorizada.
+
 ## Detecção automática das ferramentas na configuração inicial
 
 Decisão registrada em 22/10/2026. Ajuste documental para o próximo pacote, sem iniciar implementação ou alterar o pipeline em execução.
@@ -166,6 +173,19 @@ Decisão registrada em 22/10/2026. Otimizar as rodadas preservando uma sessão d
 - A aprovação final deve abranger todos os critérios na versão atual e exigir ausência de achados bloqueantes pendentes. A revisão concentrada nas mudanças não autoriza transportar automaticamente uma aprovação anterior quando as alterações afetarem sua validade.
 - Essa continuidade vale durante a tentativa ativa; não implica restaurar automaticamente conversas após reinício. Se a sessão ou seu acompanhamento se perder, explicitar a interrupção e seguir os mecanismos de recuperação autorizados, sem aparentar retomada confirmada.
 - Validar a retomada real das duas sessões no Maestri/OMP, a atualização correta do ambiente de revisão e os vínculos de rodada e versão, incluindo correções sucessivas e perda de acompanhamento. Distinguir essas provas dos testes controlados.
+
+### Reutilização dos terminais Maestri entre tentativas
+
+Decisão registrada em 23/10/2026. Reutilizar os terminais destinados ao Implementador e ao Revisor, iniciando sessões novas do OMP para cada nova tentativa. Complementa a continuidade das sessões durante as correções da mesma tentativa. Registro para o próximo pacote, sem iniciar implementação ou alterar execuções em andamento.
+
+- Distinguir terminal Maestri, sessão OMP e tentativa: o terminal pode ser reutilizado entre tentativas; a sessão e o contexto de uma tentativa não são transferidos para outra.
+- Antes de iniciar um papel, localizar e conferir o terminal correspondente da fábrica no Maestri. Se não existir, criá-lo; se existir e estiver disponível, reutilizá-lo, evitando acumular terminais a cada nova tentativa. Não adotar terminais manuais do operador.
+- Em cada nova tentativa, iniciar uma sessão nova do OMP no ambiente próprio daquela tentativa, sem restaurar a conversa anterior. Preservar a separação entre Implementador e Revisor e registrar os novos vínculos de sessão, tentativa, papel, rodada e versão, sem atribuir resultados ou autoridade antigos à nova execução.
+- Durante as rodadas de correção da mesma tentativa, manter as sessões e seu contexto conforme as regras desta seção, incluindo a atualização conferida do ambiente separado do Revisor.
+- Após reiniciar o controlador, reencontrar e conferir os terminais existentes no Maestri, preservando sua identificação por papel. Recuperar a identificação do terminal não restaura automaticamente a conversa, o acompanhamento ou a autoridade da tentativa interrompida; o terminal só pode receber uma nova tentativa após a conferência de disponibilidade.
+- Não ocupar nem reiniciar um terminal que ainda esteja executando trabalho ou cujo estado seja incerto. Preservar a execução existente e apresentar o impedimento concreto, sem presumir disponibilidade pela ausência do vínculo em memória do controlador.
+- Terminal aberto e ocioso após a entrega não deve, por si só, manter a configuração do projeto bloqueada. Preservar os bloqueios necessários durante execução ativa, publicação em andamento ou efeitos incertos. Separar disponibilidade para reutilização de confirmação de parada necessária à remoção de ambientes.
+- Validar no Maestri/OMP real a criação inicial, a reutilização dos terminais com sessões novas em outra tentativa, a preservação de contexto nas correções, o reencontro após reinício, o impedimento de ocupar terminais ativos ou incertos e a liberação da configuração após a entrega sem publicação pendente. Distinguir essas provas dos testes controlados.
 
 ## Melhorias no ciclo de implementação e revisão
 
