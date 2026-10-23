@@ -53,6 +53,29 @@ async function mount() {
 function button(label: string) { const node = [...container.querySelectorAll('button')].find((node) => node.textContent === label); if (!node) throw new Error(`Missing ${label}`); return node; }
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; document.body.replaceChildren(); vi.clearAllMocks(); calls.length = 0; vi.unstubAllGlobals(); });
 
+it('keeps publication completion separate from uncertain effects', async () => {
+  await mount();
+  const previous = metadata.getMockImplementation()!;
+  let unknown = 0;
+  metadata.mockImplementation((path: string) => {
+    if (path.includes('/deliveries/')) {
+      const data = delivery(path.includes(b) ? b : a);
+      data.publication = { ...data.publication, local_state: 'completed', review_state: 'approved', unknown_effects: unknown };
+      return Promise.resolve({ data, etag: '"1"' });
+    }
+    return previous(path);
+  });
+  await show(b);
+  expect(container.querySelector('#publication-panel-title')?.textContent).toBe('Entrega concluída');
+  expect(container.textContent).not.toContain('A reconciliação não está disponível');
+  const receipts = [...container.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Detalhes da publicação e recibos');
+  expect(receipts?.open).toBe(false);
+  unknown = 1;
+  await show(a);
+  expect(container.querySelector('#publication-panel-title')?.textContent).toBe('Entrega pendente');
+  expect(container.textContent).toContain('1 sem confirmação');
+});
+
 it('opens with no effects, consolidates authority and preserves separate suspension/resources', async () => {
   await mount();
   expect(calls.every((call) => call.method === 'GET')).toBe(true);
@@ -60,10 +83,10 @@ it('opens with no effects, consolidates authority and preserves separate suspens
   expect(container.textContent).toContain('não comprova parada física');
   const authorityTitle = diagnosticCopyFor('ACCOUNT_CHANGED', 'blocked', 'ACCOUNT_CHANGED', '').title;
   expect(container.textContent!.split(authorityTitle)).toHaveLength(2);
-  expect([...container.querySelectorAll('button')].filter((node) => node.textContent === 'Verificar recursos')).toHaveLength(1);
+  expect([...container.querySelectorAll('button')].filter((node) => node.textContent === 'Verificar situação')).toHaveLength(1);
   expect(button('Solicitar cancelamento').disabled).toBe(true);
   expect([...container.querySelectorAll('button')].some((node) => node.textContent === 'Concluir modo autorizado')).toBe(false);
-  await act(async () => button('Verificar recursos').click());
+  await act(async () => button('Verificar situação').click());
   const post = request.mock.calls.find(([, init]) => init?.method === 'POST');
   expect(post?.[0]).toBe(`/api/v1/diagnostics?scope=attempt&id=${id}`);
   expect(JSON.parse(post?.[1].body)).toEqual({ checks: ['resources'] });

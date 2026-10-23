@@ -72,6 +72,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
   const upgrades = (summary.upgrades ?? []).filter((upgrade) => modeOrder.indexOf(upgrade.target_mode) > modeOrder.indexOf(authorizedMode));
   const controls = delivery.capabilities;
   const summaryMatchesAuthorization = summary.mode === authorizedMode;
+  const completed = summaryMatchesAuthorization && summary.local_state === 'completed' && summary.pending_effects === 0 && summary.unknown_effects === 0;
   const canComplete = summaryMatchesAuthorization && controls.complete_publication.available && armedCompletion === effectFingerprint;
   const canReconcile = controls.reconcile_publication.available;
 
@@ -146,9 +147,19 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
 
   if (deletionRestricted || !projectChecked) return <p role="status">Publicação indisponível. Consulte o cadastro; uma exclusão pendente impede publicar.</p>;
   return <section className="card publication-panel" aria-labelledby="publication-panel-title">
-    <div className="line"><div><span className="eyebrow">Entrega e publicação</span><h3 id="publication-panel-title">Entrega e ações autorizadas</h3></div><button type="button" onClick={onRefresh}>Atualizar estado</button></div>
+    <div className={`delivery-result ${completed ? 'delivery-result-complete' : ''}`}>
+      <div className="delivery-result-heading"><div><span className="eyebrow">Resultado da versão selecionada</span><h3 id="publication-panel-title">{completed ? 'Entrega concluída' : 'Entrega pendente'}</h3></div>
+        {summary.pull_request?.receipt?.url && <a className="delivery-result-link" href={summary.pull_request.receipt.url} target="_blank" rel="noreferrer">Ver PR <span aria-hidden="true">↗</span></a>}
+      </div>
+      <dl className="delivery-result-facts">
+        <div><dt>Entrega</dt><dd>{authorizedMode === 'pr' ? 'Commit + Push + PR' : authorizedMode === 'commit' ? 'Commit local' : 'Ambiente da tentativa'}</dd></div>
+        <div><dt>Checks</dt><dd>{delivery.verification ? effectStateLabel(delivery.verification.state) : 'Não executados'}</dd></div>
+        <div><dt>Revisão</dt><dd>{summary.review_state === 'approved' ? 'Aprovada' : summary.review_state === 'rejected' ? 'Reprovada' : 'Pendente'}</dd></div>
+      </dl>
+    </div>
+    {(summary.pending_effects > 0 || summary.unknown_effects > 0) && <p role="status">{summary.pending_effects} efeitos pendentes · {summary.unknown_effects} sem confirmação. Consulte os detalhes antes de continuar.</p>}
     {[summary.commit, summary.push, summary.pull_request].some((effect) => effect?.state === 'failed_known') && <p role="alert">Publicação bloqueada. A versão aprovada foi preservada. Consulte o motivo abaixo e, após resolver o impedimento, use Concluir modo autorizado para continuar os efeitos pendentes.</p>}
-    <dl className="preparation-facts">
+    <details className="attempt-disclosure"><summary>Detalhes da publicação e recibos</summary><dl className="preparation-facts">
       <div><dt>Versão selecionada</dt><dd>Versão da tentativa</dd></div>
       <div><dt>Conteúdo aprovado</dt><dd>{summary.review_state === 'approved' ? 'Aprovado para esta versão' : 'Ainda sem aprovação'}</dd></div>
       <div><dt>Modo inicial</dt><dd>{modeLabel[delivery.authorizations.captured_mode]}</dd></div>
@@ -175,7 +186,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
 
       </article>)}
       {effects.length === 0 && <p className="muted">Nenhum efeito foi consultado para esta versão.</p>}
-    </div>
+    </div></details>
 
     {!summaryMatchesAuthorization && <div className="queue-error" role="alert"><p>O resumo da publicação e o modo autorizado diferem. Atualize a tentativa e a versão antes de iniciar qualquer efeito.</p><button type="button" onClick={onRefresh}>Atualizar dados selecionados</button></div>}
     {error && <div className="queue-error" role="alert"><p>{error}</p><button type="button" onClick={() => { setError(null); onRefresh(); }}>Atualizar antes de revisar</button></div>}
@@ -198,9 +209,8 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
       <label className="check"><input type="checkbox" checked={armedCompletion === effectFingerprint} onChange={(event) => setArmedCompletion(event.currentTarget.checked ? effectFingerprint : null)} />Confirmo o início somente dos efeitos pendentes deste modo e versão.</label>
       <button type="button" className="primary" disabled={!canComplete || !attemptEtag || actionState === 'accepted' || actionState === 'running' || actionState === 'unknown'} onClick={() => void send('complete')}>Concluir modo autorizado</button>
     </div>}
-    {!controls.complete_publication.available && <div className="notice"><p>A conclusão ainda não está disponível porque há pré-requisitos pendentes.</p></div>}
+    {!controls.complete_publication.available && summary.local_state !== 'completed' && <div className="notice"><p>{controls.complete_publication.reason ?? 'A conclusão ainda não está disponível porque há pré-requisitos pendentes.'}</p></div>}
     {canReconcile && <button type="button" onClick={() => void send('reconcile')} disabled={actionState === 'accepted' || actionState === 'running' || actionState === 'unknown'}>Reconciliar efeitos desta versão</button>}
-    {!canReconcile && <div className="notice"><p>A reconciliação não está disponível neste momento.</p></div>}
     {action && <div className={actionState === 'unknown' || actionState === 'failed' ? 'queue-error' : 'notice'} role="status">
       <b>{actionLabel} · {effectStateLabel(actionState ?? 'unknown')}</b>
       <p>{action.accepted ? 'Aceitação recebida.' : 'Resposta sem confirmação; consulte o resultado original antes de qualquer nova ação.'}</p>

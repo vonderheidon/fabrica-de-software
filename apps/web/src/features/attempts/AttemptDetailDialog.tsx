@@ -210,7 +210,17 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attemptError && <div className="queue-error" role="alert"><h3>Falha ao consultar esta tentativa</h3><p>{attemptError}</p><p><strong>Próxima ação:</strong> consulte novamente antes de agir sobre os dados anteriores.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar novamente</button></div>}
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
-      <div className="attempt-detail-heading"><div className="eyebrow">Detalhe da tentativa</div><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
+      <div className="attempt-detail-heading"><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
+      {delivery && <PublicationDialog key={delivery.delivery.id}
+        projectId={attempt.project_id}
+        attemptId={attemptId}
+        attemptEtag={attemptEtag}
+        delivery={delivery}
+        effects={(sectionStateFor(sectionStates, 'effects').page?.items ?? []).filter(isEffectView)}
+        onRefresh={refreshDetail}
+      />}
+
+      {attempt.result && actions.resources && actions.resources.entries.some(resource => resource.kind === 'terminal' && !resource.removed && resource.stop_state !== 'confirmed') && <aside className="attempt-terminal-notice" role="status"><div><h3>Encerramento dos terminais pendente</h3><p>Parada de {actions.resources.entries.filter(resource => resource.kind === 'terminal' && !resource.removed && resource.stop_state !== 'confirmed').length} terminais sem confirmação.</p></div><button type="button" onClick={() => { const summary = document.getElementById("attempt-environment"); const details = summary?.closest("details"); if (details) details.open = true; summary?.scrollIntoView({ block: "nearest" }); summary?.focus(); }}>Consultar ambiente e terminais</button></aside>}
       <div className="attempt-version-controls"><div className="form-field"><label htmlFor="attempt-round">Rodada
         </label><CustomSelect id="attempt-round" value={selectedRoundValue} onChange={(event) => {
           const value = event.currentTarget.value;
@@ -226,20 +236,51 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         </CustomSelect>
       </div></div>
 
-      <section className="attempt-axis-card card"><h3>Estado operacional</h3><dl className="preparation-facts"><div><dt>Etapa</dt><dd><OperatorState value={attempt.phase} /></dd></div><div><dt>Resultado final</dt><dd>{attempt.result ? <OperatorState value={attempt.result} /> : 'Ainda não concluído'}</dd></div><div><dt>Suspensão</dt><dd>{attempt.suspension ? operatorCodeLabel(attempt.suspension) : 'Nenhuma'}</dd></div><div><dt>Acompanhamento</dt><dd><OperatorState value={attempt.tracking} /></dd></div><div><dt>Limpeza</dt><dd>{cleanupLabel(attempt.cleanup)}</dd></div><div><dt>Publicação</dt><dd><OperatorState value={attempt.publication.local_state} /></dd></div><div><dt>Modo capturado</dt><dd>{deliveryModeLabel(attempt.publication.mode)}</dd></div></dl>
+      <details className="attempt-axis-card card attempt-disclosure" open={!attempt.result || Boolean(attempt.suspension || attempt.diagnostic || attempt.authority?.reason)}><summary>Estado da tentativa</summary><dl className="preparation-facts"><div><dt>{attempt.result ? 'Resultado final' : 'Etapa atual'}</dt><dd><OperatorState value={attempt.result ?? attempt.phase} /></dd></div>{attempt.suspension && <div><dt>Suspensão</dt><dd>{operatorCodeLabel(attempt.suspension)}</dd></div>}</dl>
         <AttemptConditions attempt={attempt} />
 
-        <div className="attempt-recovery-actions">
+        {!attempt.result && <div className="attempt-recovery-actions">
           <button type="button" className="danger" onClick={actions.cancel} disabled={!attempt.capabilities.cancel.available || actions.busy || actions.cancelStatus !== null} title={attempt.capabilities.cancel.available ? undefined : attempt.capabilities.cancel.reason ?? 'Cancelamento indisponível'}>Solicitar cancelamento</button>
           <span className="muted">Fechar este diálogo não cancela a tentativa.</span>
-        </div>
-      </section>
+        </div>}
+      </details>
 
       {Object.entries(actions.actionErrors).map(([key, message]) => <div className="queue-error" role="alert" key={key}><p>{message}</p><p>{key.startsWith('copy:') ? 'A falha permanece visível até uma nova tentativa de cópia.' : 'A falha permanece visível até uma nova tentativa desta ação ser aceita.'}</p></div>)}
-      {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Atualizar capacidades</button></div>}
+      {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Consultar ambiente novamente</button></div>}
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
-      {actions.resources && <section className="attempt-axis-card card" aria-labelledby="attempt-resources-title">
-        <div className="line"><h3 id="attempt-resources-title">Parada, ambiente e ações nativas</h3><button type="button" onClick={() => void actions.refresh()}>Atualizar capacidades</button></div>
+      <details className="attempt-axis-card card attempt-disclosure"><summary>Ver alterações da entrega</summary>
+        {deliveryState === 'loading' && <p role="status">Consultando a versão selecionada…</p>}
+        {deliveryState === 'not-captured' && <p className="muted">Esta rodada ainda não tem uma versão capturada.</p>}
+        {deliveryState === 'error' && <div className="queue-error" role="alert"><p>{deliveryError}</p><p><strong>Próxima ação:</strong> atualize a tentativa e consulte novamente a versão selecionada.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar versão novamente</button></div>}
+        {delivery && <><dl className="preparation-facts"><div><dt>Captura</dt><dd><OperatorState value={delivery.delivery.capture_state} /></dd></div><div><dt>Integridade da verificação</dt><dd>{delivery.verification ? <OperatorState value={delivery.verification.state} /> : 'Checks não executados'}</dd></div></dl>
+          {delivery.delivery.diagnostic && <div className="queue-error" role="alert"><b>{operatorCodeLabel(delivery.delivery.diagnostic)}</b><p>Confira o estado desta versão antes de repetir uma ação.</p></div>}
+          {delivery.delivery.capture_state === 'failed' && captureRetryEligible && <div className="attempt-recovery-actions"><p>Falha técnica elegível. O retry reutiliza somente o resultado e a passagem já registrados.</p><button type="button" onClick={() => actions.retryCaptureFor(delivery.delivery.producer_passage_id)} disabled={!attemptEtag || actions.busy}>Repetir captura</button></div>}
+          {delivery.delivery.capture_state === 'failed' && !captureRetryEligible && <p className="muted" role="status">A captura falhou, mas não há confirmação atual de todos os requisitos para repetir. Atualize a tentativa e a versão.</p>}
+          {delivery.delivery.warnings.map((warning) => <div className="notice attempt-capture-warning" key={`${warning.passage_id}:${warning.path}:${warning.reason}`}><b>Arquivo declarado excluído da captura</b><p className="mono">{warning.path}</p><p>{warning.reason === 'DECLARED_NEW_FILE_IGNORED' ? 'O Implementador declarou este arquivo novo, mas ele está ignorado e não entrou na versão capturada.' : 'O caminho foi excluído pela regra de nomes de arquivos conhecidos como segredo.'}</p></div>)}
+          {currentCaptured && <div className="attempt-diff"><div className="line"><h4>Diff</h4><button type="button" onClick={() => loadDiff()} disabled={diff.loading || diff.value !== null}>{diff.loading ? 'Carregando diff…' : diff.value ? 'Diff carregado' : 'Carregar diff'}</button></div>
+            {diff.error && <div className="queue-error" role="alert"><p>{diff.error}</p><p><strong>Próxima ação:</strong> atualize a versão e consulte o diff novamente.</p><button type="button" onClick={() => loadDiff(diff.value?.next_cursor ?? undefined)}>Tentar novamente</button></div>}
+            {diff.value && <>{diff.value.entries.map((entry) => <article className="attempt-diff-entry" key={`${entry.path}:${entry.status}`}><b>{diffStatusLabel(entry.status)} · {entry.path}</b>{entry.old_path && <p>Origem do renome: {entry.old_path}</p>}{entry.binary ? <p className="muted">Arquivo binário; conteúdo não exibido.</p> : entry.unsupported ? <p className="muted">Patch indisponível para esta codificação.</p> : entry.patch && <pre>{entry.patch}</pre>}</article>)}{diff.value.entries.length === 0 && <p className="muted">A versão não contém diferenças listáveis.</p>}{diff.value.has_more && <button type="button" onClick={() => loadDiff(diff.value?.next_cursor ?? undefined)} disabled={diff.loading}>Carregar próxima parte do diff</button>}</>}
+          </div>}</>}
+      </details>
+
+      <details className="attempt-axis-card card attempt-disclosure" open={Boolean(attempt.pending_question_id) || sections.some(section => Boolean(sectionStateFor(sectionStates, section).error))}><summary>Validação e histórico da versão</summary><section className="attempt-detail-sections" aria-label="Inspeção por rodada e versão">{sections.map((section) => {
+        const sectionState = sectionStateFor(sectionStates, section);
+        return <details className="card attempt-section attempt-disclosure" key={section} open={section === 'questions' && Boolean(attempt.pending_question_id) || Boolean(sectionState.error)}><summary>{labels[section]} <span className="muted">{sectionState.page?.items.length ?? '…'}{sectionState.page?.has_more ? '+' : ''}</span></summary>
+          <div className="line">{section === 'criteria' && deliveryState === 'not-captured' && <span className="pill neutral">Sem versão</span>}</div>
+          {sectionState.loading && !sectionState.page && <p className="muted" role="status">Consultando {(labels[section] ?? section).toLocaleLowerCase('pt-BR')}…</p>}
+          {sectionState.loading && sectionState.page && <p className="stale-note" role="status">Atualizando; os registros da mesma versão continuam visíveis.</p>}
+          {sectionState.error && <div className="queue-error" role="alert"><b>Não foi possível carregar esta seção</b><p>{sectionState.error}</p><p><strong>Próxima ação:</strong> consulte novamente esta rodada e versão.</p><button type="button" onClick={() => retrySection(section)} disabled={sectionState.loading}>Tentar carregar novamente</button></div>}
+          {section === 'reviews' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'A revisão não foi realizada porque esta rodada ainda não tem uma versão capturada.' : 'Esta versão ainda não tem parecer de revisão.'}</p>}
+          {section === 'findings' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">A revisão desta versão não registrou achados.</p>}
+          {section === 'criteria' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'Critérios indisponíveis: esta versão ainda não foi capturada.' : 'Nenhum critério foi retornado para esta versão.'}</p>}
+          {sectionState.page && sectionState.page.items.length > 0 && <div className="attempt-record-list">{sectionState.page.items.map((item, index) => section === 'questions'
+            ? <QuestionDecisionCard key={String(asRecord(item).id ?? index)} attemptId={attemptId} summary={item as { id: string; state: Question["state"] }} />
+            : renderRecord(section, item, index, evidence, loadEvidence))}</div>}
+          {sectionState.page?.has_more && <div className="attempt-section-pagination"><span>Mais registros nesta seção</span><button type="button" onClick={() => loadMore(section)} disabled={sectionState.loading}>{sectionState.loading ? 'Carregando…' : 'Carregar continuação'}</button></div>}
+        </details>;
+      })}</section></details>
+      {actions.resources && <details className="attempt-axis-card card attempt-disclosure"><summary id="attempt-environment">Ambiente e terminais <span className="muted">{actions.resources.entries.length} recursos · limpeza {cleanupLabel(attempt.cleanup).toLocaleLowerCase('pt-BR')}</span></summary>
+        <div className="line"><h3 id="attempt-resources-title">Recursos da tentativa</h3><button type="button" onClick={() => void actions.refresh()}>Atualizar recursos</button></div>
         <AttemptConditions attempt={attempt} resources />
         {actions.cancelStatus && <div className={actions.cancelStatus === 'cleanup-uncertain' ? 'queue-error' : 'notice'} role="status">
           <b>{actions.cancelStatus === 'accepted' ? 'Pedido de cancelamento aceito' : actions.cancelStatus === 'stopped' ? 'Parada dos terminais comprovada' : actions.cancelStatus === 'cleanup-uncertain' ? 'Limpeza incerta' : 'Estado do pedido de parada incerto'}</b>
@@ -249,7 +290,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           const plan = actions.plans[resource.id];
           const folder = actions.folders[resource.id];
           const interaction = actions.interactions[resource.passage_id];
-          const terminalLabel = resource.stop_state === 'confirmed' ? 'Parada comprovada' : resource.stop_state === 'uncertain' ? 'Parada sem confirmação' : resource.stop_state === 'requested' ? 'Parada solicitada' : resource.launch_state === 'ready' ? 'Em execução' : `Inicialização: ${operatorState(resource.launch_state).label}`;
+          const terminalLabel = resource.stop_state === 'confirmed' ? 'Parada comprovada' : resource.stop_state === 'uncertain' ? 'Parada sem confirmação' : resource.stop_state === 'requested' ? 'Parada solicitada' : resource.launch_state === 'ready' ? resource.kind === 'terminal' ? 'Parada não solicitada' : 'Disponível' : `Inicialização: ${operatorState(resource.launch_state).label}`;
           return <article className="attempt-resource" key={resource.id}>
             <div className="line"><div><h4>{resource.kind === 'terminal' ? 'Terminal Maestri' : 'Ambiente de implementação'}</h4><span className="muted">{resource.removed ? 'Removido' : resource.owned ? terminalLabel : 'Vínculo do recurso sem confirmação'}</span></div></div>
             {resource.diagnostic && <div className="notice"><b>{operatorCodeLabel(resource.diagnostic)}</b><p>Consulte o estado dos recursos antes de repetir qualquer ação.</p></div>}
@@ -277,7 +318,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           </article>;
         })}
         {actions.resources.entries.length === 0 && <p className="muted">Nenhum recurso próprio foi registrado para esta tentativa.</p>}
-      </section>}
+      </details>}
       {actions.operation && <div className={actions.operation.uncertain || actions.operation.view?.state === 'failed' ? 'queue-error' : 'notice'} role="status">
         <b>{actions.operation.kind === 'cancel' ? actions.cancelStatus === 'stopped' ? 'Parada comprovada' : actions.cancelStatus === 'cleanup-uncertain' ? 'Limpeza incerta' : actions.cancelStatus === 'accepted' ? 'Pedido de cancelamento aceito' : 'Pedido de cancelamento em consulta'
           : actions.operation.kind === 'capture' ? 'Repetição da captura' : actions.operation.kind === 'remove' ? 'Remoção do ambiente' : actions.operation.kind === 'open-terminal' ? 'Abertura do terminal' : 'Abertura da pasta'} · {operationStateLabel(actions.operation.view?.state ?? (actions.operation.accepted ? 'accepted' : 'unknown'))}</b>
@@ -287,52 +328,12 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         {actions.operation.kind === 'cancel' && <p>A aceitação da operação não confirma parada física.</p>}
       </div>}
 
-      <section className="attempt-axis-card card"><h3>Tempo e limites</h3><dl className="preparation-facts"><div><dt>Tempo ativo</dt><dd>{formatMeasured(attempt.measurements.active_time)}</dd></div><div><dt>Espera por resposta humana</dt><dd>{formatMeasured(attempt.measurements.human_wait)}</dd></div><div><dt>Custo observado</dt><dd>{formatMeasured(attempt.measurements.cost)}</dd></div><div><dt>Limite de tempo ativo</dt><dd>{formatActiveLimit(attempt.measurements.active_limit)}</dd></div><div><dt>Prazo da pergunta (TTL)</dt><dd>{formatLimit(attempt.measurements.question_ttl)}</dd></div><div><dt>Estado do limite de tempo</dt><dd><OperatorState value={attempt.measurements.active_limit_state} /></dd></div>{attempt.measurements.active_expired_at_ms !== null && <div><dt>Expirou em</dt><dd>{new Date(attempt.measurements.active_expired_at_ms).toLocaleString('pt-BR')}</dd></div>}</dl>
+      <details className="attempt-axis-card card attempt-disclosure"><summary>Tempos e limites</summary><dl className="preparation-facts"><div><dt>Tempo ativo</dt><dd>{formatMeasured(attempt.measurements.active_time)}</dd></div><div><dt>Espera por resposta humana</dt><dd>{formatMeasured(attempt.measurements.human_wait)}</dd></div><div><dt>Custo observado</dt><dd>{formatMeasured(attempt.measurements.cost)}</dd></div><div><dt>Limite de tempo ativo</dt><dd>{formatActiveLimit(attempt.measurements.active_limit)}</dd></div><div><dt>Prazo da pergunta (TTL)</dt><dd>{formatLimit(attempt.measurements.question_ttl)}</dd></div><div><dt>Estado do limite de tempo</dt><dd><OperatorState value={attempt.measurements.active_limit_state} /></dd></div>{attempt.measurements.active_expired_at_ms !== null && <div><dt>Expirou em</dt><dd>{new Date(attempt.measurements.active_expired_at_ms).toLocaleString('pt-BR')}</dd></div>}</dl>
         <p className="muted">O TTL define por quanto tempo uma pergunta do agente aguarda resposta antes de expirar. É separado do intervalo de consulta e do tempo ativo da passagem.</p>
 
         {attempt.measurements.passages.map((passage) => <div className="attempt-subline" key={passage.passage_id}><p>{passage.role === 'implementer' ? 'Implementador' : 'Revisor'} · rodada {passage.round} · atividade {formatMeasured(passage.active_time)} · espera humana {formatMeasured(passage.human_wait)} · limite <OperatorState value={passage.active_limit_state} /></p></div>)}
-      </section>
+      </details>
 
-      <section className="attempt-axis-card card"><h3>Versão selecionada</h3>
-        {deliveryState === 'loading' && <p role="status">Consultando a versão selecionada…</p>}
-        {deliveryState === 'not-captured' && <p className="muted">Esta rodada ainda não tem uma versão capturada.</p>}
-        {deliveryState === 'error' && <div className="queue-error" role="alert"><p>{deliveryError}</p><p><strong>Próxima ação:</strong> atualize a tentativa e consulte novamente a versão selecionada.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar versão novamente</button></div>}
-        {delivery && <><dl className="preparation-facts"><div><dt>Captura</dt><dd><OperatorState value={delivery.delivery.capture_state} /></dd></div><div><dt>Integridade da verificação</dt><dd>{delivery.verification ? <OperatorState value={delivery.verification.state} /> : 'Checks não executados'}</dd></div></dl>
-          {delivery.delivery.diagnostic && <div className="queue-error" role="alert"><b>{operatorCodeLabel(delivery.delivery.diagnostic)}</b><p>Confira o estado desta versão antes de repetir uma ação.</p></div>}
-          {delivery.delivery.capture_state === 'failed' && captureRetryEligible && <div className="attempt-recovery-actions"><p>Falha técnica elegível. O retry reutiliza somente o resultado e a passagem já registrados.</p><button type="button" onClick={() => actions.retryCaptureFor(delivery.delivery.producer_passage_id)} disabled={!attemptEtag || actions.busy}>Repetir captura</button></div>}
-          {delivery.delivery.capture_state === 'failed' && !captureRetryEligible && <p className="muted" role="status">A captura falhou, mas não há confirmação atual de todos os requisitos para repetir. Atualize a tentativa e a versão.</p>}
-          {delivery.delivery.warnings.map((warning) => <div className="notice attempt-capture-warning" key={`${warning.passage_id}:${warning.path}:${warning.reason}`}><b>Arquivo declarado excluído da captura</b><p className="mono">{warning.path}</p><p>{warning.reason === 'DECLARED_NEW_FILE_IGNORED' ? 'O Implementador declarou este arquivo novo, mas ele está ignorado e não entrou na versão capturada.' : 'O caminho foi excluído pela regra de nomes de arquivos conhecidos como segredo.'}</p></div>)}
-          {currentCaptured && <div className="attempt-diff"><div className="line"><h4>Diff</h4><button type="button" onClick={() => loadDiff()} disabled={diff.loading || diff.value !== null}>{diff.loading ? 'Carregando diff…' : diff.value ? 'Diff carregado' : 'Carregar diff'}</button></div>
-            {diff.error && <div className="queue-error" role="alert"><p>{diff.error}</p><p><strong>Próxima ação:</strong> atualize a versão e consulte o diff novamente.</p><button type="button" onClick={() => loadDiff(diff.value?.next_cursor ?? undefined)}>Tentar novamente</button></div>}
-            {diff.value && <>{diff.value.entries.map((entry) => <article className="attempt-diff-entry" key={`${entry.path}:${entry.status}`}><b>{diffStatusLabel(entry.status)} · {entry.path}</b>{entry.old_path && <p>Origem do renome: {entry.old_path}</p>}{entry.binary ? <p className="muted">Arquivo binário; conteúdo não exibido.</p> : entry.unsupported ? <p className="muted">Patch indisponível para esta codificação.</p> : entry.patch && <pre>{entry.patch}</pre>}</article>)}{diff.value.entries.length === 0 && <p className="muted">A versão não contém diferenças listáveis.</p>}{diff.value.has_more && <button type="button" onClick={() => loadDiff(diff.value?.next_cursor ?? undefined)} disabled={diff.loading}>Carregar próxima parte do diff</button>}</>}
-          </div>}</>}
-      </section>
-
-      {delivery && <PublicationDialog key={delivery.delivery.id}
-        projectId={attempt.project_id}
-        attemptId={attemptId}
-        attemptEtag={attemptEtag}
-        delivery={delivery}
-        effects={(sectionStateFor(sectionStates, 'effects').page?.items ?? []).filter(isEffectView)}
-        onRefresh={refreshDetail}
-      />}
-
-      <section className="attempt-detail-sections" aria-label="Inspeção por rodada e versão">{sections.map((section) => {
-        const sectionState = sectionStateFor(sectionStates, section);
-        return <section className="card attempt-section" key={section} aria-labelledby={`attempt-section-${section}`}>
-          <div className="line"><h3 id={`attempt-section-${section}`}>{labels[section]}</h3>{section === 'criteria' && deliveryState === 'not-captured' && <span className="pill neutral">Sem versão</span>}</div>
-          {sectionState.loading && !sectionState.page && <p className="muted" role="status">Consultando {(labels[section] ?? section).toLocaleLowerCase('pt-BR')}…</p>}
-          {sectionState.loading && sectionState.page && <p className="stale-note" role="status">Atualizando; os registros da mesma versão continuam visíveis.</p>}
-          {sectionState.error && <div className="queue-error" role="alert"><b>Não foi possível carregar esta seção</b><p>{sectionState.error}</p><p><strong>Próxima ação:</strong> consulte novamente esta rodada e versão.</p><button type="button" onClick={() => retrySection(section)} disabled={sectionState.loading}>Tentar carregar novamente</button></div>}
-          {section === 'reviews' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'A revisão não foi realizada porque esta rodada ainda não tem uma versão capturada.' : 'Esta versão ainda não tem parecer de revisão.'}</p>}
-          {section === 'findings' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">A revisão desta versão não registrou achados.</p>}
-          {section === 'criteria' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'Critérios indisponíveis: esta versão ainda não foi capturada.' : 'Nenhum critério foi retornado para esta versão.'}</p>}
-          {sectionState.page && sectionState.page.items.length > 0 && <div className="attempt-record-list">{sectionState.page.items.map((item, index) => section === 'questions'
-            ? <QuestionDecisionCard key={String(asRecord(item).id ?? index)} attemptId={attemptId} summary={item as { id: string; state: Question["state"] }} />
-            : renderRecord(section, item, index, evidence, loadEvidence))}</div>}
-          {sectionState.page?.has_more && <div className="attempt-section-pagination"><span>Mais registros nesta seção</span><button type="button" onClick={() => loadMore(section)} disabled={sectionState.loading}>{sectionState.loading ? 'Carregando…' : 'Carregar continuação'}</button></div>}
-        </section>;
-      })}</section>
     </>}
     <div className="dialog-actions">
       <p>Fechar este detalhe não altera o estado da tentativa.</p>
@@ -363,7 +364,7 @@ function renderRecord(section: DetailSection, item: DetailItem, index: number, e
     {typeof record.text === 'string' && <p>{record.text}</p>}
     {textFields.filter((key) => key !== 'text' && typeof record[key] === 'string').map((key) => <div key={key}><b>{operatorFactLabel(key)}</b><p>{String(record[key])}</p></div>)}
     {section === 'criteria' && <div className="attempt-evidence-columns">{(['producer', 'reviewer'] as const).map((evidenceRole) => { const text = evidenceText(record[evidenceRole]); return text ? <div key={evidenceRole}><b>{evidenceRole === 'producer' ? 'Evidência do Implementador' : 'Evidência do Revisor'}</b><p>{text}</p></div> : null; })}</div>}
-    {artifacts.map((artifact) => { const value = evidence[artifact.id]; return <div className="attempt-artifact" key={artifact.id}><p><b>Evidência técnica disponível</b></p><button type="button" onClick={() => void loadEvidence(artifact)} disabled={value?.loading}>{value?.loading ? 'Carregando evidência…' : value?.text !== null && value?.text !== undefined ? 'Recarregar evidência' : 'Abrir evidência'}</button>{value?.error && <div className="error" role="alert"><p>{value.error}</p></div>}{value?.text !== null && value?.text !== undefined && <pre className="attempt-artifact-content">{value.text}</pre>}</div>; })}
+    {artifacts.map((artifact) => { const value = evidence[artifact.id]; return <div className="attempt-artifact" key={artifact.id}><p><b>{section === 'checks' ? 'Saída do check' : 'Arquivo de evidência'}</b></p><button type="button" onClick={() => void loadEvidence(artifact)} disabled={value?.loading}>{value?.loading ? 'Carregando evidência…' : value?.text !== null && value?.text !== undefined ? 'Recarregar evidência' : 'Abrir evidência'}</button>{value?.error && <div className="error" role="alert"><p>{value.error}</p></div>}{value?.text !== null && value?.text !== undefined && <pre className="attempt-artifact-content">{value.text}</pre>}</div>; })}
   </article>;
 }
 
@@ -373,10 +374,6 @@ function cleanupLabel(state: AttemptDetail["cleanup"]): string {
 
 function operationStateLabel(state: string | undefined): string {
   return operatorState(state).label.toLocaleLowerCase('pt-BR');
-}
-
-function deliveryModeLabel(mode: string): string {
-  return ({ icr: 'ICR', commit: 'ICR + Commit local', pr: 'ICR + Commit local + Pull request' } as const)[mode as 'icr' | 'commit' | 'pr'] ?? 'Modo desconhecido';
 }
 
 function diffStatusLabel(status: string): string {

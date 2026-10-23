@@ -323,6 +323,36 @@ td:first-child, th:first-child { padding-left: 0; }
 .attempt-pagination span, .attempt-section-pagination span { color: var(--muted); font-size: 12px; text-align: center; }
 .attempt-detail-heading h3 { margin: 8px 0; font-size: 20px; }
 .attempt-detail-heading a { font-size: 12px; }
+.attempt-detail-heading { padding-bottom: 4px; }
+.attempt-detail-heading .row { gap: 18px; }
+.attempt-detail .publication-panel { padding-top: 0; }
+.delivery-result { padding: 20px 22px; border: 1px solid var(--border); border-radius: 10px; background: #f7f8f9; }
+.delivery-result-complete { background: #f4f8f5; border-color: #dbe7dd; }
+.delivery-result-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.delivery-result-heading h3 { margin: 6px 0 0; font-size: 23px; line-height: 1.25; letter-spacing: -.5px; }
+.delivery-result-complete h3 { color: #28543c; }
+.delivery-result-heading .eyebrow { color: var(--muted); font-size: 10px; letter-spacing: 1px; }
+.delivery-result-link { display: inline-flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 9px 14px; border: 1px solid #cfdbd2; border-radius: 7px; color: #28543c; background: #fff; font-size: 12px; font-weight: 600; text-decoration: none; }
+.delivery-result-link:hover { background: #eaf2ec; }
+.delivery-result-facts { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 18px; margin: 20px 0 0; padding-top: 16px; border-top: 1px solid #dbe3dd; }
+.delivery-result-facts > div { min-width: 0; }
+.delivery-result-facts dt { margin-bottom: 5px; font-size: 11px; color: var(--muted); }
+.delivery-result-facts dd { margin: 0; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.publication-panel > .attempt-disclosure > summary { color: var(--muted); font-size: 12px; font-weight: 500; }
+.attempt-terminal-notice { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 14px 16px; border-left: 3px solid #c49a55; border-radius: 4px; background: #faf7f1; }
+.attempt-terminal-notice h3 { margin: 0 0 5px; font-size: 13px; }
+.attempt-terminal-notice p { margin: 0; color: var(--muted); font-size: 12px; }
+.attempt-terminal-notice button { flex-shrink: 0; font-size: 12px; }
+.attempt-detail .attempt-version-controls { grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr); padding: 0 0 16px; }
+@media (max-width: 650px) {
+  .delivery-result { padding: 16px; }
+  .delivery-result-heading { gap: 12px; align-items: flex-start; }
+  .delivery-result-heading h3 { font-size: 20px; }
+  .delivery-result-facts { grid-template-columns: 1fr 1fr; gap: 16px; }
+  .delivery-result-facts > div:first-child { grid-column: 1 / -1; }
+  .attempt-terminal-notice { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .attempt-detail .attempt-version-controls { grid-template-columns: 1fr; }
+}
 .attempt-version-controls { display: grid; grid-template-columns: minmax(120px, .5fr) minmax(180px, 1fr) auto auto; align-items: end; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
 .attempt-version-controls label { margin: 0; }
 .attempt-axis-card h3, .attempt-section h3 { margin-bottom: 8px; }
@@ -331,6 +361,11 @@ td:first-child, th:first-child { padding-left: 0; }
 .attempt-capture-warning p { margin: 7px 0 0; font-size: 12px; }
 .attempt-detail-sections { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 16px; }
 .attempt-section { min-width: 0; }
+.attempt-disclosure > summary { display: list-item; cursor: pointer; font-size: 14px; font-weight: 600; padding: 12px 0; }
+.attempt-disclosure > summary .muted { margin-left: 12px; font-size: 12px; font-weight: 400; }
+.attempt-disclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.attempt-disclosure:not([open]) { padding-bottom: 0; }
+.attempt-disclosure[open] > summary { margin-bottom: 12px; border-bottom: 1px solid var(--border); }
 .attempt-section .line { align-items: center; }
 .attempt-record-list { display: grid; gap: 10px; }
 .attempt-record { min-width: 0; padding: 14px 0; border-top: 1px solid var(--border); }
