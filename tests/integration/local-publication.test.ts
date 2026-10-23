@@ -4,6 +4,7 @@ import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
 import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
+import { confirmTerminalStops } from '../fixtures/attempt.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -115,7 +116,7 @@ it('completes from retained content after implementation removal and restart wit
   await f.pipeline.close(); f.storage.close();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+    confirmTerminalStops(f, f.attemptId, storage.executionPersistence());
     const tasks: Promise<void>[] = [];
     const publication = createPublication({ storage,github: f.github,workspaces: f.workspaces,verification: f.verification,
       cancelAttempt: async () => {},isClosed: () => false,logFailure: vi.fn(),enqueue: task => { tasks.push(task()); } });
@@ -165,7 +166,7 @@ it('migrates actual v13 effect/request definitions preserving confirmed historic
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(27); expect(storage.getSettings().installation_id).toBe(instanceId);
+    expect(storage.getDiagnostics().schemaVersion).toBe(34); expect(storage.getSettings().installation_id).toBe(instanceId);
     expect(storage.getEffects(f.attemptId)).toEqual(effects); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='changed' WHERE operation_id=?").run(effects[0]!.operationId)).toThrow();
     expect(storage.getAttempt(f.attemptId).result).toBe('delivered');
@@ -180,7 +181,7 @@ it('exposes Commit completion and its receipt through the existing protected HTT
   await app.ready();
   try {
     // App startup revokes old coordination. The fixture supplies an explicit stop observation before completion.
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+    confirmTerminalStops(f, f.attemptId);
     const boot = await app.inject({ method: 'POST',url: '/api/v1/session',headers: { host: '127.0.0.1:4317',origin: 'http://127.0.0.1:4317','x-factory-client': 'web' },payload: {} });
     const cookie = String(boot.headers['set-cookie']).split(';')[0]!;
     const context = f.context(); const path = `/api/v1/attempts/${f.attemptId}/publication/complete`;

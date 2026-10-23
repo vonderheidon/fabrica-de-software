@@ -97,10 +97,16 @@ export const OperationAccepted = Type.Object({
   receipt: Type.Optional(OperationReceipt), request_id: text(128),
 }, { additionalProperties: false });
 export type OperationAccepted = Static<typeof OperationAccepted>;
+export const OperationProgress = Type.Object({
+  step: Type.Union(['planned', 'quiescence_checked', 'moving', 'verifying', 'publishing_location'].map(step => Type.Literal(step))),
+  state: Type.Union(['planned', 'running', 'verified', 'uncertain', 'blocked'].map(state => Type.Literal(state))),
+  generation: Type.Integer({ minimum: 1 }), revision: Type.Integer({ minimum: 1 }),
+}, { additionalProperties: false });
+export type OperationProgress = Static<typeof OperationProgress>;
 export const OperationView = Type.Object({
   operation_id: OperationId, kind: text(128), resource: OperationResource,
   state: Type.Union(['accepted', 'running', 'succeeded', 'failed', 'unknown'].map((state) => Type.Literal(state))),
-  receipt: Type.Optional(OperationReceipt), warnings: Type.Optional(Type.Array(OperationWarning, { maxItems: 10 })),
+  receipt: Type.Optional(OperationReceipt), progress: Type.Optional(OperationProgress), warnings: Type.Optional(Type.Array(OperationWarning, { maxItems: 10 })),
   error: Type.Optional(ErrorResponse), request_id: text(128),
 }, { additionalProperties: false });
 export type OperationView = Static<typeof OperationView>;

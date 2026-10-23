@@ -69,7 +69,8 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
   PROFILE_TYPE_MISMATCH: { title: 'Perfil de outro papel', cause: 'O tipo do perfil escolhido não corresponde ao papel da preparação.', nextAction: 'Selecione um perfil ativo do papel correspondente.' },
   PROJECT_PROFILE_TYPE_MISMATCH: { title: 'Associação de perfil incompatível', cause: 'Um perfil associado ao projeto não corresponde ao papel esperado.', nextAction: 'Corrija a associação na configuração deste projeto.' },
   PROJECT_OWNER_MISMATCH: { title: 'Proprietário do quadro divergente', cause: 'O proprietário observado não corresponde ao quadro configurado.', nextAction: 'Confira o quadro e seu proprietário na configuração deste projeto.' },
-  STATUS_MAPPING_INVALID: { title: 'Mapeamento de Status inválido', cause: 'O campo ou uma das opções de Status configuradas não foi confirmado no quadro.', nextAction: 'Atualize as opções e confira os quatro valores de Status na configuração deste projeto.' },
+  STATUS_MAPPING_INVALID: { title: 'Mapeamento de Status inválido', cause: 'O campo ou uma das opções de Status configuradas não foi confirmado no quadro.', nextAction: 'Atualize as opções e confira os cinco valores de Status na configuração deste projeto.' },
+  STATUS_MAPPING_LEGACY: { title: 'Mapeamento histórico de quatro valores', cause: 'Esta configuração ainda não contém a coluna Backlog exigida pelo quadro V3.', nextAction: 'Na configuração do projeto, selecione novamente o campo Status e mapeie os cinco valores para gravar uma nova revisão.' },
   SCAFFOLD_GIT_IDENTITY_REQUIRED: { title: 'Autoria do commit inicial ausente', cause: 'O Git deste computador não tem nome e e-mail configurados para o commit inicial.', nextAction: 'Configure seu nome e e-mail no Git e crie novamente o projeto. Nenhum arquivo foi criado.' },
   CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: { title: 'Descrição sem confirmação', cause: 'O repositório foi criado, mas a atualização da descrição não foi confirmada.', nextAction: 'Consulte os efeitos preservados para conferir a descrição, sem recriar o repositório.' },
   CREATION_REMOTE_DESCRIPTION_CHANGED: { title: 'Descrição alterada no GitHub', cause: 'A descrição foi editada após a criação e foi preservada.', nextAction: 'Confira a descrição no GitHub antes de prosseguir com a criação.' },
@@ -81,12 +82,17 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
   PROJECT_REQUIRED: {
     title: 'Selecione o quadro do projeto',
     cause: 'O quadro GitHub e o mapeamento de Status ainda não foram configurados.',
-    nextAction: 'Abra a configuração do projeto, selecione o quadro e mapeie os quatro valores de Status. Depois, consulte as issues novamente.',
+    nextAction: 'Abra a configuração do projeto, confirme o repositório, vincule o quadro e mapeie as cinco opções de Status V3.',
   },
   REMOTE_UNCONFIRMED: {
     title: 'Confirme o repositório GitHub',
     cause: 'O projeto ainda não tem um repositório GitHub confirmado.',
     nextAction: 'Abra a configuração do projeto e confirme a origem GitHub antes de preparar uma issue.',
+  },
+  CODE_NOT_PUBLISHED: {
+    title: 'Publique a branch-base',
+    cause: 'O commit da branch-base ainda não está confirmado no repositório GitHub.',
+    nextAction: 'Publique a branch-base configurada e consulte novamente a preparação ou fila.',
   },
   PROFILES_REQUIRED: {
     title: 'Selecione os perfis do projeto',
@@ -407,7 +413,7 @@ export function operatorErrorMessage(code: string, message: string, status?: num
 
 export function diagnosticCopyFor(code: string, state: string, cause?: string | null, recovery?: string | null) {
   const known = diagnosticCopy[code];
-  if (known) return ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED'].includes(code) && cause && isPortugueseOperatorText(cause) ? { ...known, cause, ...(recovery && isPortugueseOperatorText(recovery) ? { nextAction: recovery } : {}) } : known;
+  if (known) return ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'PROJECT_REQUIRED', 'REMOTE_UNCONFIRMED', 'CODE_NOT_PUBLISHED', 'STATUS_MAPPING_LEGACY', 'STATUS_MAPPING_INVALID'].includes(code) && cause && isPortugueseOperatorText(cause) ? { ...known, cause, ...(recovery && isPortugueseOperatorText(recovery) ? { nextAction: recovery } : {}) } : known;
   const status = operatorState(state);
   return {
     title: status.known && state.toLocaleLowerCase('en') === 'passed' ? 'Verificação concluída' : 'Atenção necessária',

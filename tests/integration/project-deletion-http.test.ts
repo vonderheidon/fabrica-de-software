@@ -138,11 +138,15 @@ describe('project deletion HTTP boundary', () => {
 
   it('returns only the minimal receipt after finalization, including confirmation replay and resume', async () => {
     const f = await fixture(); const accepted = await f.accept();
+    const sharedTerminalId = randomUUID();
+    f.db.prepare(`INSERT INTO managed_terminals(id,installation_id,host_name,role,owner,generation,terminal_name,state,created_at_ms,updated_at_ms)
+      VALUES (?,?,?,'implementer','factory',1,?,'planned',1,1)`).run(sharedTerminalId, f.storage.getSettings().installation_id, 'test-host', `factory-${sharedTerminalId}`);
     const worker = f.storage.deletionWorker.claim(accepted.id)!;
     f.storage.deletionWorker.start(worker);
     // Controlled proof of absence; no actual filesystem removal.
     f.db.prepare("UPDATE project_deletion_targets SET state='removed',verified_at_ms=1 WHERE operation_id=?").run(accepted.id);
     f.storage.finalizeProjectDeletion({ operationId: accepted.id, projectId: f.projectId, workerGeneration: worker.generation, workerToken: worker.token });
+    expect(f.db.prepare('SELECT id FROM managed_terminals WHERE id=?').get(sharedTerminalId)).toEqual({ id: sharedTerminalId });
     const minimal = { operation_id: accepted.id, state: 'succeeded' };
     for (const url of [`/api/v1/project-deletions/${accepted.id}`, `/api/v1/operations/${accepted.id}`]) {
       const result = await f.app.inject({ method: 'GET', url, headers: f.headers });

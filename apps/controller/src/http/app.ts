@@ -30,7 +30,7 @@ import { installScaffoldRoutes } from './routes/scaffold.js';
 import { createDiagnostics, type DiagnosticDependencies } from '../modules/diagnostics/index.js';
 import { installOperationRoutes } from './routes/operation.js';
 
-type ProjectAppDependencies = Partial<Pick<ProjectDependencies, 'github' | 'githubSetup' | 'workspaces' | 'execution' | 'selectProjectsDirectory' | 'selectGitHubExecutable'>> & { githubRuntime?: GitHub };
+type ProjectAppDependencies = Partial<Pick<ProjectDependencies, 'github' | 'githubSetup' | 'workspaces' | 'execution' | 'selectProjectsDirectory' | 'selectGitHubExecutable' | 'selectExecutable' | 'toolDetector'>> & { githubRuntime?: GitHub };
 
 export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: ProjectAppDependencies, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>, deletionDependencies?: { workspaces: Parameters<typeof createDeletionCoordinator>[0]['workspaces']; coordinator: ReturnType<typeof createDeletionCoordinator> }) {
   const app = Fastify({
@@ -79,13 +79,16 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   installEventRoutes(app, storage, security);
   const defaultGitHub = projectDependencies?.githubRuntime ?? createGitHub({ savedExecutablePath: storage.getGitHubExecutablePath });
   const github = projectDependencies?.github ?? defaultGitHub;
-  const workspaces = projectDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub });
+  const workspaces = projectDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub,
+    dataDirectory: configuration.dataDirectory, projectStorage: storage });
   const projects = createProjects({ storage, github, githubSetup: projectDependencies?.githubSetup ?? defaultGitHub, workspaces, directoryBase: configuration.dataDirectory,
     ...(projectDependencies?.execution ? { execution: projectDependencies.execution } : {}),
     ...(projectDependencies?.selectProjectsDirectory ? { selectProjectsDirectory: projectDependencies.selectProjectsDirectory } : {}),
-    ...(projectDependencies?.selectGitHubExecutable ? { selectGitHubExecutable: projectDependencies.selectGitHubExecutable } : {}) });
+    ...(projectDependencies?.selectGitHubExecutable ? { selectGitHubExecutable: projectDependencies.selectGitHubExecutable } : {}),
+    ...(projectDependencies?.selectExecutable ? { selectExecutable: projectDependencies.selectExecutable } : {}),
+    ...(projectDependencies?.toolDetector ? { toolDetector: projectDependencies.toolDetector } : {}) });
   installProjectRoutes(app, projects);
-  const deletionWorkspaces = deletionDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory });
+  const deletionWorkspaces = deletionDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory, projectStorage: storage });
   const deletionCoordinator = deletionDependencies?.coordinator ?? createDeletionCoordinator({ storage, workspaces: deletionWorkspaces,
     logFailure: code => app.log.error({ code }, 'Project deletion stopped') });
   installProjectDeletionRoutes(app, storage, createProjectDeletions({ storage, workspaces: deletionWorkspaces, coordinator: deletionCoordinator }), deletionCoordinator);
@@ -96,7 +99,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   storage.interruptAttempts();
   const execution = providedPipeline ? null : createExecution({ dataDirectory: configuration.dataDirectory, persistence: storage.executionPersistence(),
     validatePassageScope: async binding => { if (!await pipeline.revalidateScope(binding)) throw new ExecutionError('RESULT_INVALID'); } });
-  const verificationWorkspaces = createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory });
+  const verificationWorkspaces = createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory, projectStorage: storage });
   storage.interruptCreations();
   const scaffold = createScaffold({ storage, github: scaffoldDependencies?.github ?? defaultGitHub, workspaces: scaffoldDependencies?.workspaces ?? verificationWorkspaces,
     logFailure: code => app.log.error({ code }, 'Scaffold creation stopped') });

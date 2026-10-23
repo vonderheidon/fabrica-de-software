@@ -33,8 +33,16 @@ Ciclo de implementação, verificação e revisão dentro de uma tentativa. Uma 
 _Avoid_: Nova tentativa
 
 **Passagem**:
-Trabalho de um papel em uma rodada, com resultado e vínculo próprios.
+Trabalho de um papel em uma rodada, com resultado e vínculo próprios, associado à sessão lógica desse papel na tentativa.
 _Avoid_: Terminal, conversa
+
+**Sessão lógica OMP**:
+Conversa própria de um papel dentro de uma tentativa, compartilhada pelas passagens daquele papel nas rodadas. Outra tentativa recebe uma sessão nova, mesmo quando usa o mesmo terminal físico.
+_Avoid_: Terminal Maestri, sessão restaurada após reinício
+
+**Terminal gerenciado**:
+Terminal físico Maestri cuja identidade e posse foram registradas pela fábrica. Pode ser reutilizado após uma observação atual confirmar identidade e disponibilidade; incerteza ou ocupação não é liberada por tempo.
+_Avoid_: Terminal manual, sessão lógica
 
 **Papel**:
 Responsabilidade de Implementador ou Revisor no ciclo, distinta do executor, modelo e especialização.

@@ -9,6 +9,8 @@ const reasonLabels: Record<QueueItem['reasons'][number], string> = {
   DRAFT_ITEM: 'Rascunho de issue', PULL_REQUEST: 'Card de pull request', ARCHIVED_ITEM: 'Item arquivado', ALREADY_CONSUMED: 'Ciclo Ready já consumido',
   ATTEMPT_ACTIVE: 'Já existe tentativa ativa', PROJECT_UNAVAILABLE: 'Projeto indisponível', AUTOMATION_DISABLED: 'Automação desabilitada para o projeto',
   ASSIGNEE_MISSING: 'Sem responsável', ASSIGNEE_OTHER: 'Responsável de outra conta', MULTIPLE_ASSIGNEES: 'Múltiplos responsáveis',
+  REMOTE_UNCONFIRMED: 'Remoto GitHub não confirmado', CODE_NOT_PUBLISHED: 'Commit da branch-base não publicado',
+  PROJECT_REQUIRED: 'Quadro GitHub não vinculado', STATUS_MAPPING_LEGACY: 'Mapeamento de Status legado', STATUS_MAPPING_INVALID: 'Mapeamento de Status inválido',
 };
 
 export function QueuePanel({ load, pageNotice, pauseNotice, pauseUncertain, onConsultPause, onRefresh, onNextPage, onPreviousPage, canGoBack, pausing, onEnable, onPause, onAuthority }: {

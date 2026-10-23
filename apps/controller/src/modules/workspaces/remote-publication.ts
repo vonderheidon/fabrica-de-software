@@ -6,10 +6,12 @@ import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirec
 import type { GitReader } from './git.js';
 import type { LocalCommitResult } from './publication.js';
 import type { AttemptEffectAuthorization } from '../github/index.js';
+import type { AttemptRootResolver } from './project-storage.js';
 
 /** Additional trusted host boundary; never populated from a request or environment. */
 export interface PushAuthorization { accountId: string; repositoryIds: readonly string[] }
-export function createRemotePublisher(dataDirectory?: string, git?: GitReader, authorization?: PushAuthorization, canonicalize: (path: string) => Promise<string> = realpath, attemptEffectAuthorization?: AttemptEffectAuthorization) {
+export function createRemotePublisher(dataDirectory?: string, git?: GitReader, authorization?: PushAuthorization, canonicalize: (path: string) => Promise<string> = realpath,
+  attemptEffectAuthorization?: AttemptEffectAuthorization, resolveAttemptRoot?: AttemptRootResolver) {
   async function context(delivery: Delivery, effect: EffectView) {
     const i = effect.expectedIdentity;
     if (!Value.Check(Delivery,delivery) || !Value.Check(EffectView,effect) || effect.kind !== 'push' || !effect.authorized || !['running','unknown'].includes(effect.state) ||
@@ -18,7 +20,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
        !i.repositoryId || !i.issueNumber || i.branchRef !== `refs/heads/factory/${i.issueNumber}/${delivery.attemptId}` ||
       !i.repositoryOwner || !/^[A-Za-z0-9-]{1,100}$/.test(i.repositoryOwner) || !i.repositoryName || !/^[A-Za-z0-9_.-]{1,100}$/.test(i.repositoryName)) throw new CaptureError('PUSH_IDENTITY_INVALID');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
-    const root = await managedRoot(dataDirectory,canonicalize); const parent = resolve(root,'git'); const repository = resolve(parent,`${delivery.attemptId}.git`);
+    const root = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory,canonicalize); const parent = resolve(root,'git'); const repository = resolve(parent,`${delivery.attemptId}.git`);
     await plainDirectory(parent,canonicalize); await plainDirectory(repository,canonicalize); await noBorrowedObjects(repository);
     if ((await metadataBytes(resolve(repository,'factory-owner'),36)).toString('utf8') !== delivery.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
     const local = async (args: string[]) => { const r = await git(repository,[`--git-dir=${repository}`,...args],{ isolatedConfig: true }); if (r.exitCode) throw new CaptureError('PUBLICATION_GIT_FAILED'); return r.stdout; };

@@ -56,9 +56,12 @@ describe('production startup ordering', () => {
 
     const settings = await app.inject({ url: '/api/v1/settings', headers: { host: headers.host, cookie } });
     const github = await app.inject({ url: '/api/v1/settings/github-options', headers: { host: headers.host, cookie } });
+    const tools = await app.inject({ url: '/api/v1/settings/tool-options', headers: { host: headers.host, cookie } });
 
     expect(settings.statusCode).toBe(200);
     expect(github.statusCode).toBe(200);
+    expect(tools.statusCode).toBe(200);
+    expect(tools.json()).toMatchObject({ maestri_connection: { state: 'connected' } });
     expect(github.json()).toMatchObject({ executable: { state: 'unavailable', path: null, version: null }, diagnostics: [{ code: 'GITHUB_CONTEXT_UNAVAILABLE' }] });
     expect(preflight).toHaveBeenCalledOnce();
   });
@@ -86,33 +89,45 @@ describe('production startup ordering', () => {
       const settings = await app.inject({ url: '/api/v1/settings', headers: { host: headers.host, cookie } });
       expect(settings.json<SettingsView>().settings).toMatchObject({ installation_id: identity, designated_host: hostname(), account_id: null, automation_enabled: false });
     }
+    const observed = await app.inject({ url: '/api/v1/settings/tool-options', headers: { host: headers.host, cookie: cookies[0] } });
+    expect(observed.statusCode).toBe(200);
     expect(cookies[0]).not.toBe(cookies[1]); expect(worker).toHaveBeenCalledOnce();
     await expect(startController({}, deps)).rejects.toMatchObject({ code: 'CONTROLLER_LOCK_UNAVAILABLE' });
     expect(executionFactory).toHaveBeenCalledOnce(); expect(worker).toHaveBeenCalledOnce();
   });
-  it('rejects missing native context without HTTP or scheduler and releases the lock', async () => {
-    const directory = environment();
-    const worker = vi.spyOn(pipelines, 'createPipeline'); const server = vi.spyOn(http, 'createApp');
-    await expect(startController({}, { dataDirectory })).rejects.toMatchObject({ code: 'CONTEXT_MISSING' });
-    expect(worker).not.toHaveBeenCalled(); expect(server).not.toHaveBeenCalled();
-    const lock = acquireControllerLock(directory); lock.close();
-    const storage = openStorage({ dataDirectory: directory });
-    expect(storage.getSettings().automation_enabled).toBe(false); storage.close();
+  it('keeps settings available when native tools or Maestri connection are unavailable', async () => {
+    const directory = environment(); localHttp();
+    const app = await startController({}, { dataDirectory }); apps.push(app);
+    const headers = { host: '127.0.0.1:4310', origin: 'http://127.0.0.1:4310', 'x-factory-client': 'web' };
+    const session = await app.inject({ method: 'POST', url: '/api/v1/session', headers, payload: {} });
+    const cookie = String(session.headers['set-cookie']).split(';')[0]!;
+    const settings = await app.inject({ url: '/api/v1/settings', headers: { host: headers.host, cookie } });
+    const tools = await app.inject({ url: '/api/v1/settings/tool-options', headers: { host: headers.host, cookie } });
+    expect(settings.statusCode).toBe(200);
+    expect(tools.statusCode).toBe(200);
+    expect(tools.json()).toMatchObject({ maestri_connection: { state: 'unavailable', diagnostic: 'CONTEXT_MISSING' } });
+    expect(tools.json().tools).toHaveProperty('git');
+    expect(directory).toBe(dataDirectory);
   });
-  it('holds the local lock while checking context, after migrations and before composition', async () => {
-    const directory = environment();
+  it('holds the local lock while an explicit native connection check is pending', async () => {
+    const directory = environment(); localHttp();
     let finish!: (result: Awaited<ReturnType<Execution['preflight']>>) => void;
     const preflight = vi.fn<Execution['preflight']>(() => new Promise(resolve => { finish = resolve; }));
     const executionFactory = factory(preflight);
-    const worker = vi.spyOn(pipelines, 'createPipeline'); const server = vi.spyOn(http, 'createApp');
-    const starting = startController({}, { executionFactory, dataDirectory });
+    const worker = vi.spyOn(pipelines, 'createPipeline');
+    const app = await startController({}, { executionFactory, dataDirectory }); apps.push(app);
+    const headers = { host: '127.0.0.1:4310', origin: 'http://127.0.0.1:4310', 'x-factory-client': 'web' };
+    const session = await app.inject({ method: 'POST', url: '/api/v1/session', headers, payload: {} });
+    const cookie = String(session.headers['set-cookie']).split(';')[0]!;
+    const checking = app.inject({ url: '/api/v1/settings/tool-options', headers: { host: headers.host, cookie } });
     await vi.waitFor(() => expect(preflight).toHaveBeenCalledOnce());
     expect(() => acquireControllerLock(directory)).toThrow();
     const storage = openStorage({ dataDirectory: directory }); expect(storage.getDiagnostics().schemaVersion).toBeGreaterThan(0); storage.close();
-    expect(worker).not.toHaveBeenCalled(); expect(server).not.toHaveBeenCalled();
+    expect(worker).toHaveBeenCalledOnce();
     finish({ ready: false, code: 'CONTEXT_STALE', ompVersion: null });
-    await expect(starting).rejects.toMatchObject({ code: 'CONTEXT_STALE' });
-    const lock = acquireControllerLock(directory); lock.close();
+    const result = await checking;
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ maestri_connection: { state: 'unavailable', diagnostic: 'CONTEXT_STALE' } });
   });
   it('rejects configuration before creating storage or checking native context', async () => {
     environment(); vi.stubEnv('FACTORY_BIND_HOST', '0.0.0.0');
@@ -140,7 +155,7 @@ describe('production startup ordering', () => {
     const reopened = openStorage({ dataDirectory: directory });
     expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getOperation(operationId)?.receipt).toEqual(receipt); reopened.close();
-    expect(preflight).toHaveBeenCalledTimes(2);
+    expect(preflight).not.toHaveBeenCalled();
   });
   it('cleans up scheduler, signal listeners and lock after a bind failure', async () => {
     const directory = environment(); localHttp(true);
@@ -155,7 +170,13 @@ describe('production startup ordering', () => {
     expect(() => openStorage({ dataDirectory: join(directory, 'other') }).close()).not.toThrow();
   });
   it('retains the sanitized preflight diagnostic', async () => {
-    environment();
-    await expect(startController({}, { executionFactory: factory(async () => { throw new ExecutionError('CLI_UNAVAILABLE'); }), dataDirectory })).rejects.toMatchObject({ code: 'CLI_UNAVAILABLE' });
+    environment(); localHttp();
+    const app = await startController({}, { executionFactory: factory(async () => { throw new ExecutionError('CLI_UNAVAILABLE'); }), dataDirectory }); apps.push(app);
+    const headers = { host: '127.0.0.1:4310', origin: 'http://127.0.0.1:4310', 'x-factory-client': 'web' };
+    const session = await app.inject({ method: 'POST', url: '/api/v1/session', headers, payload: {} });
+    const cookie = String(session.headers['set-cookie']).split(';')[0]!;
+    const response = await app.inject({ url: '/api/v1/settings/tool-options', headers: { host: headers.host, cookie } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ maestri_connection: { state: 'unavailable', diagnostic: 'CLI_UNAVAILABLE' } });
   });
 });

@@ -15,6 +15,7 @@ assert(!existsSync(join(directory, 'apps/controller/src')));
 assert(!existsSync(join(directory, '.agents')));
 assert(!existsSync(join(directory, 'node_modules/typescript')));
 const main = pathToFileURL(join(directory, 'dist/apps/controller/src/main.js')).href;
+const launcher = pathToFileURL(join(directory, 'scripts/start-host.mjs')).href;
 const execution = pathToFileURL(join(directory, 'dist/apps/controller/src/modules/execution/index.js')).href;
 const storage = pathToFileURL(join(directory, 'dist/apps/controller/src/modules/storage/index.js')).href;
 const configuration = pathToFileURL(join(directory, 'dist/apps/controller/src/config.js')).href;
@@ -45,7 +46,16 @@ await new Promise((resolve,reject) => { reservation.once('error',reject); reserv
 const port = reservation.address().port;
 await new Promise((resolve,reject)=>reservation.close(error=>error?reject(error):resolve()));
 Object.assign(process.env, { FACTORY_PORT: String(port), FACTORY_BIND_HOST:'127.0.0.1', FACTORY_BROWSER_ORIGIN:'http://127.0.0.1:'+port, FACTORY_LOG_LEVEL:'silent', FACTORY_DATA_DIR:${JSON.stringify(data)} });
-await assert.rejects(startController(), error => error.code === 'CONTEXT_MISSING');
+const { hostContext } = await import(${JSON.stringify(launcher)});
+const accessible = await startController(hostContext([]));
+try {
+  const origin = process.env.FACTORY_BROWSER_ORIGIN;
+  assert.equal((await fetch(origin+'/api/v1/health')).status,200);
+  const bootstrap = await fetch(origin+'/api/v1/session',{method:'POST',headers:{origin,'content-type':'application/json','x-factory-client':'web'},body:'{}'});
+  assert.equal(bootstrap.status,200);
+  const cookie = bootstrap.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(origin+'/api/v1/settings',{headers:{cookie}})).status,200);
+} finally { await accessible.close(); }
 // Controlled preflight is a local test seam, never evidence of Maestri connectivity.
 const dependencies = { executionFactory: options => ({ ...createExecution(options), preflight:async()=>({ready:true,code:null,ompVersion:'18.11.1'}) }) };
 let app;

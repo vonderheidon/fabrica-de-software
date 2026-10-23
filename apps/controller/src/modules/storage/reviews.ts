@@ -52,8 +52,14 @@ export function beginReview(db: Database.Database, deliveryId: string): Review |
     if (!role) throw denied();
     if (openFindings(db, a.id, delivery.round).length > 1000) throw new OperationError(503, 'FINDING_CONTEXT_LIMIT', 'The unresolved finding context exceeds the supported limit.');
     const id = randomUUID(); const passageId = randomUUID(); const now = Date.now();
-    db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,created_at_ms)
-      VALUES (?,?,?,?,'reviewer',?,?,'starting','pending',?)`).run(passageId, a.id, delivery.round, delivery.id, JSON.stringify(role), `factory-${passageId}`, now);
+    const source = db.prepare<[string, number], { id: string }>(`SELECT p.id FROM passages p JOIN attempt_sessions s ON s.id=p.attempt_session_id
+      WHERE p.attempt_id=? AND p.role='reviewer' AND p.round_number=? AND p.state='ready' AND p.tracking_state='tracked'
+        AND s.role='reviewer' AND s.attempt_id=p.attempt_id AND s.state='completed'
+        AND EXISTS (SELECT 1 FROM passage_results r WHERE r.passage_id=p.id)`).get(a.id, delivery.round - 1);
+    if (delivery.round > 1 && !source) throw denied();
+    db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,created_at_ms,attempt_session_id,session_source_id)
+      VALUES (?,?,?,?,'reviewer',?,?,'starting','pending',?,(SELECT id FROM attempt_sessions WHERE attempt_id=? AND role='reviewer'),?)`)
+      .run(passageId, a.id, delivery.round, delivery.id, JSON.stringify(role), `factory-${passageId}`, now, a.id, source?.id ?? null);
     db.prepare(`INSERT INTO reviews(id,delivery_id,attempt_id,passage_id,verification_id,content_identity,state,independence_state,workspace_state,created_at_ms)
       VALUES (?,?,?,?,?,?,'pending','pending','planned',?)`).run(id, delivery.id, a.id, passageId, verification.id, delivery.contentIdentity, now);
     db.prepare(`INSERT INTO resources(id,attempt_id,passage_id,kind,reference,owned,launch_state,created_at_ms) VALUES (?,?,?,'terminal',?,0,'planned',?)`).run(randomUUID(), a.id, passageId, `factory-${passageId}`, now);
@@ -131,8 +137,9 @@ export function beginCorrection(db: Database.Database, deliveryId: string): Corr
     const findings = openFindings(db, a.id, d.round + 1);
     if (findings.length > 1000) throw new OperationError(503, 'FINDING_CONTEXT_LIMIT', 'The unresolved finding context exceeds the supported limit.');
     db.prepare('INSERT INTO rounds(attempt_id,round_number,delivery_version,created_at_ms) VALUES (?,?,?,?)').run(a.id, d.round + 1, version, now);
-    db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,session_source_id,created_at_ms)
-      VALUES (?,?,?,?,'implementer',?,?,'starting','pending',?,?)`).run(passageId, a.id, d.round + 1, version, JSON.stringify(role), `factory-${passageId}`, d.producerPassageId, now);
+    db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,session_source_id,created_at_ms,attempt_session_id)
+      VALUES (?,?,?,?,'implementer',?,?,'starting','pending',?,?,(SELECT id FROM attempt_sessions WHERE attempt_id=? AND role='implementer'))`)
+      .run(passageId, a.id, d.round + 1, version, JSON.stringify(role), `factory-${passageId}`, d.producerPassageId, now, a.id);
     db.prepare("UPDATE attempts SET phase='implementing',diagnostic=NULL,revision=revision+1,updated_at_ms=? WHERE id=?").run(now, a.id);
     attemptEvent(db, a.id, 'correction.planned');
     return { sourcePassageId: d.producerPassageId, passageId, findings, review };

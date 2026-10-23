@@ -21,7 +21,7 @@ export async function captureFixture(directory?: string, identities?: Partial<Ca
   await writeFile(resolve(implementation, 'new unicode ç.txt'), 'new bytes 😀\n');
   await writeFile(resolve(implementation, 'binary.bin'), Buffer.from([0, 255, 1, 2]));
   const blobs = new Map<string, Buffer>(); const modes = new Map<string, string>();
-  const put = (data: string | Buffer) => { const value = Buffer.from(data); const hash = oid(value); blobs.set(hash, value); return hash; };
+  const put = (data: string | Buffer) => { const value = Buffer.from(data); const hash = createHash('sha1').update(`blob ${value.length}\0`).update(value).digest('hex'); blobs.set(hash, value); return hash; };
   const base = new Map([['tracked.txt', put('original\n')], ['deleted.txt', put('deleted\n')], ['old ç.txt', put('renamed bytes\n')]]);
   for (const path of base.keys()) modes.set(path, '100644');
   const trees = new Map<string, Map<string, string>>(); const treeModes = new Map<string, Map<string, string>>();
@@ -45,7 +45,10 @@ export async function captureFixture(directory?: string, identities?: Partial<Ca
       if (value.endsWith('^{tree}')) return reply(commits.get(value.slice(0, -7))! + '\n');
       return refs.has(value) ? reply(refs.get(value)! + '\n') : reply('', 1);
     }
-    if (command === 'ls-tree') return reply([...base].map(([path, hash]) => `${submodule ? '160000 commit' : '100644 blob'} ${hash}\t${path}\0`).join(''));
+    if (command === 'ls-tree') {
+      const treeId = commits.get(tail.at(-1)!); const entries = treeId ? trees.get(treeId)! : base;
+      return reply([...entries].map(([path, hash]) => `${submodule ? '160000 commit' : `${treeId ? treeModes.get(treeId)?.get(path) ?? '100644' : '100644'} blob`} ${hash}\t${path}\0`).join(''));
+    }
     if (command === 'ls-files' && tail.includes('--stage')) return reply([...base].filter(([p]) => !removedFromTracking.has(p)).map(([path, hash]) => `${modes.get(path)} ${hash} ${conflict ? '2' : '0'}\t${path}\0`).join(''));
     if (command === 'ls-files' && tail.includes('-v')) return reply([...base.keys()].filter(p => !removedFromTracking.has(p)).map(p => `H ${p}\0`).join(''));
     if (command === 'ls-files') return reply(untracked.map(p => `${p}\0`).join(''));

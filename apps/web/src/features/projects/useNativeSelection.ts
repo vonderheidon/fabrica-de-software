@@ -24,13 +24,18 @@ const initialCandidates: Record<NativeSelectionKind, string | null> = {
   projects_root: null,
   project_directory: null,
   gh_executable: null,
+  git_executable: null,
+  maestri_executable: null,
+  omp_executable: null,
+  powershell_executable: null,
 };
 
 export function nativeSelectionMessage(state: NativeSelectionState): string | null {
+  const executableKind = (kind: NativeSelectionKind) => kind === 'gh_executable' || kind.endsWith('_executable');
   switch (state.status) {
     case 'idle': return null;
-    case 'selecting': return state.kind !== 'gh_executable' ? 'Aguardando a seleção da pasta…' : 'Aguardando a seleção do executável…';
-    case 'selected': return state.kind !== 'gh_executable' ? 'Pasta selecionada como candidata. Ela ainda não foi salva.' : 'Executável selecionado como candidato. Ele ainda não foi validado nem salvo.';
+    case 'selecting': return executableKind(state.kind) ? 'Aguardando a seleção do executável…' : 'Aguardando a seleção da pasta…';
+    case 'selected': return executableKind(state.kind) ? 'Executável selecionado como candidato. Ele ainda não foi validado nem salvo.' : 'Pasta selecionada como candidata. Ela ainda não foi salva.';
     case 'cancelled': return 'Seleção cancelada. O valor salvo e a edição atual foram mantidos.';
     case 'concurrent': return state.message;
     case 'expired': return 'A seleção excedeu 125 segundos. O fechamento da janela não foi confirmado; a fábrica não a abrirá novamente sem uma nova ação sua.';

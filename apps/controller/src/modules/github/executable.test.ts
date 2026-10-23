@@ -11,7 +11,7 @@ function version(_context: GitHubContext, available: boolean): ToolObservation {
 }
 
 describe('GitHub executable resolution', () => {
-  it('tries PATH, GH_PATH, then the saved path and continues after invalid candidates', async () => {
+  it('revalidates the saved path first and falls through to other candidates after failure', async () => {
     const first = 'C:\\first\\gh.exe'; const second = 'D:\\configured\\gh.exe'; const saved = 'E:\\saved\\gh.exe';
     const attempted: string[] = [];
     const resolver = new GitHubExecutableResolver({ access,
@@ -22,8 +22,9 @@ describe('GitHub executable resolution', () => {
 
     const result = await resolver.resolve(saved);
 
-    expect(attempted).toEqual([first, second]);
+    expect(attempted).toEqual([saved, first, second]);
     expect(result.observation).toEqual({ state: 'observed', path: second, version: '2.70.0', diagnostics: [
+      { code: 'GH_CANDIDATE_INVALID', message: 'Um candidato do GitHub CLI existe, mas não passou por gh --version.', recovery: 'A busca continuará; se nenhum candidato funcionar, selecione outro executável.' },
       { code: 'GH_CANDIDATE_INVALID', message: 'Um candidato do GitHub CLI existe, mas não passou por gh --version.', recovery: 'A busca continuará; se nenhum candidato funcionar, selecione outro executável.' },
     ] });
     expect(resolver.currentContext()).toMatchObject({ executable: second, kind: 'windows_keyring' });
@@ -31,19 +32,19 @@ describe('GitHub executable resolution', () => {
     expect(JSON.stringify(result)).not.toContain('OTHER_TOKEN_MARKER');
   });
 
-  it('falls through a stale GH_PATH candidate to the saved path', async () => {
+  it('falls through the saved path to a valid GH_PATH candidate', async () => {
     const ghPath = 'D:\\stale\\gh.exe'; const saved = 'E:\\saved\\gh.exe';
     const attempted: string[] = [];
     const resolver = new GitHubExecutableResolver({ access,
       environment: () => ({ PATH: '', GH_PATH: ghPath }),
       stat: async () => ({ isFile: () => true }),
-      observeVersion: async context => { attempted.push(context.executable); return version(context, context.executable === saved); },
+      observeVersion: async context => { attempted.push(context.executable); return version(context, context.executable === ghPath); },
     });
 
     const result = await resolver.resolve(saved);
 
-    expect(attempted).toEqual([ghPath, saved]);
-    expect(result.observation).toMatchObject({ state: 'observed', path: saved, version: '2.70.0' });
+    expect(attempted).toEqual([saved, ghPath]);
+    expect(result.observation).toMatchObject({ state: 'observed', path: ghPath, version: '2.70.0' });
     expect(result.observation.diagnostics).toHaveLength(1);
   });
 

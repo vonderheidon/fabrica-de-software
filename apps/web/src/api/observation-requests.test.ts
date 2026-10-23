@@ -33,18 +33,19 @@ it('sends the exact queue scope and authorization from the displayed observation
 it('preserves the displayed scaffold plan and literal operator content in the creation command', () => {
   const plan: HttpScaffoldPlan = {
     format_version: 1, input: { name: 'projectId literal 😀', template_id: 'template', template_digest: hash,
-      destination_relative: 'folder', creation_mode: 'local', base_branch: 'main', triage_enabled: false },
+      destination_relative: 'folder', creation_mode: 'remote_push', base_branch: 'main', triage_enabled: false,
+      remote: { owner_id: 'owner', name: 'repo', visibility: 'private' }, board_name: 'Kanban' },
     installation_id: id, settings_e_tag: '"opaque"', projects_root: 'root', destination: 'root/folder', parent_identity: hash,
     template_digest: hash, files: [{ path: 'AGENTS.md', bytes: 0, sha256: hash }],
     engineering: { tracker: 'github', domain: 'single-context', instruction_file: 'AGENTS.md', triage_enabled: false, installs_skills: false, creates_labels: false },
-    account: { state: 'complete', id: 'account', login: 'user' }, owner_id: null, effects: ['register_local_project'],
+    account: { state: 'complete', id: 'account', login: 'user' }, owner_id: 'owner', effects: ['register_local_project'],
   };
   const body = createScaffoldRequest({ plan_hash: hash, plan, prerequisites: [] });
   expect(Value.Check(HttpScaffoldInput, plan.input)).toBe(true);
   expect(Value.Check(HttpCreateScaffold, body)).toBe(true);
   expect(body.plan).toBe(plan);
   expect(body.plan.input.name).toBe('projectId literal 😀');
-  expect(body.plan.input).not.toHaveProperty('remote');
+  expect(body.plan.input.board_name).toBe('Kanban');
 });
 
 it('consumes only the shared SSE frame shape, preserving seq and refusing malformed or aliased frames', () => {

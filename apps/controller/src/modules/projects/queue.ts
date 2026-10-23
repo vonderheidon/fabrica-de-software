@@ -5,9 +5,11 @@ import { QueueCommand, QueueQuery, type GitHubAccount, type GitHubQueryResult, t
 import type { Static } from '@sinclair/typebox';
 import { OperationError, type Storage } from '../storage/index.js';
 import { assessIssueReadiness, type GitHub } from '../github/index.js';
+import type { Workspaces } from '../workspaces/index.js';
+import { matchesObservedV3StatusMapping } from './status-mapping.js';
 
 type QueueGitHub = Pick<GitHub, 'getIdentity' | 'getProject' | 'listProjectItems' | 'getIssueContextById'>;
-type QueueDependencies = { storage: Storage; github: QueueGitHub; hostName?: string };
+type QueueDependencies = { storage: Storage; github: QueueGitHub; workspaces: Pick<Workspaces, 'inspectOrigin'>; hostName?: string };
 export interface QueueResult { observation: QueueObservation; etag: string; items: readonly QueueItem[] }
 export class QueueSummaryChanged extends OperationError {
   constructor(readonly current: QueueResult) { super(409, 'QUEUE_SUMMARY_CHANGED', 'The queue observation changed. Review the updated summary before enabling.'); }
@@ -16,7 +18,7 @@ const hash = (value: unknown): string => createHash('sha256').update(JSON.string
 const problem = (status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never => { throw new OperationError(status, code, message); };
 type QueueCommandBody = Static<typeof QueueCommand>;
 
-export function createQueue({ storage, github, hostName = hostname() }: QueueDependencies) {
+export function createQueue({ storage, github, workspaces, hostName = hostname() }: QueueDependencies) {
   // Display observations never grant authority: save and scheduler still call observe directly.
   const displayReads = new Map<string, { expires: number; promise: Promise<QueueResult> }>();
   let retryAtMs = 0;
@@ -72,10 +74,41 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       }
       if (!selectedIds && !configuration.automation_enabled) continue;
       modesByProject.push({ projectId: projectSummary.id, mode: configuration.default_delivery_mode });
-      if (!configuration.github_project || !configuration.source.repository_id) {
+      if (configuration.github_project && !('backlog' in configuration.github_project.status_option_ids)) {
         complete = false;
         blockedProjects.push(projectSummary.id);
-        diagnostics.push({ code: 'PROJECT_NOT_READY', message: `${projectSummary.name}: quadro GitHub ou repositório não está configurado.`, recovery: 'Abra a configuração do projeto, confirme a origem e selecione o quadro pelo nome antes de habilitar a fila.' });
+        diagnostics.push({ code: 'STATUS_MAPPING_LEGACY', message: `${projectSummary.name}: o mapeamento salvo ainda não contém Backlog.`,
+          recovery: 'Configure o mapeamento de cinco valores na configuração do projeto antes de iniciar pela fila.' });
+        continue;
+      }
+      if (!configuration.github_project || !('backlog' in configuration.github_project.status_option_ids)) {
+        complete = false;
+        blockedProjects.push(projectSummary.id);
+        diagnostics.push({ code: 'PROJECT_REQUIRED', message: `${projectSummary.name}: não há quadro GitHub válido vinculado.`, recovery: 'Vincule o repositório a um quadro GitHub e configure as cinco opções de Status V3.' });
+        continue;
+      }
+      if (!configuration.source.repository_id) {
+        complete = false;
+        blockedProjects.push(projectSummary.id);
+        diagnostics.push({ code: 'REMOTE_UNCONFIRMED', message: `${projectSummary.name}: a origem GitHub ainda não foi confirmada.`, recovery: 'Configure e confirme um remoto GitHub para este projeto.' });
+        continue;
+      }
+      const origin = await workspaces.inspectOrigin({ source: configuration.source, baseBranch: configuration.base_branch });
+      const remoteConfirmed = origin.state === 'identified' && Boolean(origin.remote?.confirmed && origin.remote.repository &&
+        origin.remote.repository.id === configuration.source.repository_id && !origin.remote.repository.isArchived);
+      if (!remoteConfirmed) {
+        complete = false;
+        blockedProjects.push(projectSummary.id);
+        diagnostics.push({ code: 'REMOTE_UNCONFIRMED', message: `${projectSummary.name}: o remoto GitHub não pôde ser confirmado para esta configuração.`, recovery: 'Confira a origem local, o remoto e o acesso ao repositório GitHub; depois consulte a fila novamente.' });
+        continue;
+      }
+      const basePublished = Boolean(origin.base && origin.remote?.branch && origin.base.branch === configuration.base_branch &&
+        origin.remote.branch.name === configuration.base_branch && origin.remote.branch.repositoryId === configuration.source.repository_id &&
+        origin.remote.branch.sha === origin.base.sha);
+      if (!basePublished) {
+        complete = false;
+        blockedProjects.push(projectSummary.id);
+        diagnostics.push({ code: 'CODE_NOT_PUBLISHED', message: `${projectSummary.name}: o commit da branch-base não está publicado e confirmado no GitHub.`, recovery: 'Publique a branch-base configurada e confira se o commit remoto corresponde ao commit observado na origem.' });
         continue;
       }
       if (deferred || identity.state !== 'complete' || !identity.data) continue;
@@ -96,10 +129,7 @@ export function createQueue({ storage, github, hostName = hostname() }: QueueDep
       diagnostics.push(...[...items.diagnostics, ...projectDetails.diagnostics].map(({ code, message, recovery }) => ({ code, message: `${projectSummary.name}: ${message}`, recovery })));
       if (items.state !== 'complete' || projectDetails.state !== 'complete' || !projectDetails.data) projectComplete = false;
       const details = projectDetails.data;
-      const mappingValid = details?.project.id === configuration.github_project.id &&
-        details.project.owner.id === configuration.github_project.owner_id && !details.project.closed &&
-        Object.values(configuration.github_project.status_option_ids).every((id) => details.singleSelectFields
-          .find((field) => field.id === configuration.github_project?.status_field_id)?.options.some((option) => option.id === id));
+      const mappingValid = Boolean(details && matchesObservedV3StatusMapping(configuration.github_project, details));
       if (!mappingValid) {
         projectComplete = false;
         diagnostics.push({ code: 'PROJECT_MAPPING_INVALID', message: `${projectSummary.name}: o quadro, proprietário ou mapeamento de Status diverge da configuração.`, recovery: 'Abra a configuração deste projeto e confirme o quadro e os valores de Status.' });

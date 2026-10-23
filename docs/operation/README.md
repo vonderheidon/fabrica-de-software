@@ -22,27 +22,29 @@ O smoke portátil usa HTTP e SQLite nativos em uma raiz com espaços/Unicode e c
 
 ## Terminal-âncora e bootstrap
 
-Abra um terminal normal **dentro do Maestri** no contexto autorizado do Windows com acesso ao keyring existente. Não importe variáveis de outro terminal nem invente `MAESTRI_PIPE`, terminal ou workspace. Informe quatro caminhos absolutos de executáveis EXE instalados, nesta ordem: Git, Maestri, OMP e PowerShell. O GitHub CLI não é necessário para iniciar a fábrica; a descoberta começa quando as opções do GitHub são consultadas. CMD/BAT/PS1 não substituem os executáveis nativos esperados pelo adapter. OMP suportado pelo adapter atual: **18.11.1**; outra versão exige conferência e adaptação explícita, sem fallback de modelo/perfil.
+Abra um terminal normal **dentro do Maestri** no contexto autorizado do Windows. Não importe variáveis de outro terminal nem invente `MAESTRI_PIPE`, terminal ou workspace. O launcher não exige caminhos absolutos: ele pesquisa Git, Maestri, OMP, PowerShell e GitHub CLI no host atual e revalida os candidatos. Versões encontradas não provam conexão Maestri nem acesso ao keyring. Se houver mais de um candidato válido sem preferência salva, Configuração apresenta a ambiguidade e permite localizar o executável. CMD/BAT/PS1 não substituem os executáveis nativos esperados pelo adapter.
 
 Exemplo a adaptar aos executáveis do host, sem caminhos pessoais fixados pelo produto:
 
 ```powershell
 $installationDirectory = 'D:\Aplicações\Fábrica local'
 Set-Location -LiteralPath $installationDirectory
-npm.cmd start -- 'D:\Ferramentas\Git\cmd\git.exe' 'D:\Ferramentas\Maestri\maestri.exe' 'D:\Ferramentas\OMP\omp.exe' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+npm.cmd start
 ```
 
 Alternativamente, após criar um `.env` **local** contendo somente as cinco opções de `.env.example`, use o carregamento nativo do Node:
 
 ```powershell
-node --env-file=.env scripts/start-host.mjs 'D:\Ferramentas\Git\cmd\git.exe' 'D:\Ferramentas\Maestri\maestri.exe' 'D:\Ferramentas\OMP\omp.exe' 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+node --env-file=.env scripts/start-host.mjs
 ```
 
-O launcher não procura executáveis Git, Maestri, OMP ou PowerShell no PATH e não lê credenciais de argumentos ou arquivos de bootstrap. A descoberta GitHub consulta candidatos em `PATH`, `GH_PATH` e no caminho salvo, nessa ordem, e exige que cada candidato exista e passe `gh --version`; `GH_TOKEN`/`GITHUB_TOKEN` não contam como instalação. Se nenhum funcionar, Configuração orienta instalar ou reiniciar após atualizar o PATH e permite localizar `gh.exe`. Salvar o caminho é uma operação separada e o valida novamente. A composição fornece o contexto de acesso do host independentemente do executável; achar ou selecionar `gh.exe` não concede acesso ao keyring. A observação de contas usa somente `github.com`, não inclui tokens e não vincula nem troca a conta ativa. Não refazer login ou alterar ACLs para contornar erro de contexto. O entrypoint `dist/apps/controller/src/main.js` sem composição também falha no preflight Maestri/OMP, sem iniciar scheduler/HTTP.
+`GET /api/v1/settings/tool-options` revalida candidatos locais para as cinco ferramentas. Git, Maestri, OMP e PowerShell guardam caminho preferido e instante da validação em `tool_preferences_json`; o GitHub CLI continua usando somente `gh_executable_path`. Preferências não são capacidades: a conexão Maestri aparece separada, e a leitura não cria acesso ao keyring nem eleva o processo. A fábrica abre a UI mesmo quando uma ferramenta falta; início, Git local e outras ações dependentes seguem bloqueados até a ferramenta necessária estar disponível. Salvar uma escolha de executável valida novamente seu caminho; no próximo início o launcher revalida a preferência e usa a máquina atual.
+
+A validação usa comandos de versão fixos, sem shell, e guarda somente caminho, versão e código diagnóstico. A descoberta do GH CLI considera o caminho salvo antes dos demais candidatos, `PATH` e `GH_PATH`, e exige sucesso de `gh --version`; `GH_TOKEN`/`GITHUB_TOKEN` não contam como instalação. O endpoint de opções GitHub consulta autenticação somente mediante ação de leitura explícita, usa `github.com`, não inclui tokens e não vincula nem troca a conta ativa. Não refazer login ou alterar ACLs para contornar erro de contexto.
 
 `GET /api/v1/settings/github-options` retorna o executável observado, conta vinculada, identidade ativa observada e contas do CLI com `active`, `valid` e `eligible`. Só conta ativa com autenticação validada e identidade GraphQL correspondente fica elegível. Inativas e inválidas recebem orientação para regularização externa. A consulta é somente leitura. Para salvar um caminho localizado, use `PUT /api/v1/settings` como comando isolado (`changes: {}` e `gh_executable_path`), com a revisão e a chave de idempotência atuais; o servidor revalida o EXE e o recibo pode ser consultado por `/api/v1/operations/:operationId`.
 
-Ordem: validar bootstrap → adquirir lock → abrir/conferir migrations e configuração persistida → carregar papéis → consultar contexto real Maestri e versão OMP → validar templates distribuídos → compor scheduler/HTTP → listen loopback. O pré-voo não recruta agente nem chama provider. Lock ocupado, banco desconhecido/mais novo/corrompido, checksum incompatível, recurso inválido ou contexto ausente/stale impedem avanço. Diagnósticos são códigos sanitizados; não registrar ambiente, argv, pipe, tokens ou stderr nativo.
+Ordem: validar bootstrap → adquirir lock → abrir/conferir migrations e configuração persistida → revalidar ferramentas configuradas → carregar papéis → validar templates distribuídos → compor scheduler/HTTP → listen loopback. O pré-voo de conexão não é executado antes da UI abrir; a leitura explícita de ferramentas o consulta sem recrutar agente ou chamar provider. Lock ocupado, banco desconhecido/mais novo/corrompido, checksum incompatível ou recurso inválido impedem avanço. Diagnósticos são sanitizados; não registrar ambiente, argv, pipe, tokens ou stderr nativo.
 
 As únicas variáveis de bootstrap são `NODE_ENV`, `FACTORY_BIND_HOST`, `FACTORY_PORT`, `FACTORY_BROWSER_ORIGIN` e `FACTORY_LOG_LEVEL`. Defaults/validação estão no README raiz. O banco é fixo em `<raiz da instalação>/var/factory/factory.sqlite`, independentemente do cwd. `FACTORY_DATA_DIR` é ignorada; HTTP e configuração persistida não substituem esse caminho. Git retido, ambientes, evidências e lock usam a mesma raiz operacional `var/factory`. Não inserir senha humana, token, Wire, segredos de provider ou variáveis `VITE_*` no exemplo/bundle.
 

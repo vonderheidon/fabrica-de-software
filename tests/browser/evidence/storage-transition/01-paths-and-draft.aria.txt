@@ -1,0 +1,107 @@
+- dialog "Configuração do projeto":
+  - text: Nova Fábrica
+  - button "Fechar diálogo"
+  - heading "Configuração do projeto" [level=2]
+  - region "Localizações do projeto":
+    - heading "Localizações do projeto" [level=2]
+    - term: Pasta original
+    - definition: C:\Projetos\Pasta original com nome longo e espaços\Aplicação preservada
+    - button "Copiar pasta original"
+    - term: Pasta gerenciada
+    - definition: var/factory/projects/project/v1/managed
+    - button "Copiar pasta gerenciada"
+    - paragraph: A pasta original permanece no lugar. Caminhos gerenciados relativos partem da instalação da fábrica. Banco e recursos compartilhados permanecem globais.
+    - link "Consultar ambientes e ações de abertura das tentativas":
+      - /url: "#principal/tentativas?projectId=00000000-0000-4000-8000-000000000091"
+    - paragraph:
+      - strong: Localização verificada
+    - paragraph:
+      - strong: "Próxima ação:"
+      - text: Consulte o plano atual antes de autorizar qualquer transição.
+    - group: Localizações registradas
+    - heading "Plano de transição" [level=3]
+    - paragraph: "Origem verificada: var/factory/projects/project/v1/managed"
+    - paragraph: "Destino na instalação: var/factory/projects/project/v2/managed"
+    - checkbox "Autorizo a transição entre a origem e o destino deste plano. A pasta original permanece intacta."
+    - text: Autorizo a transição entre a origem e o destino deste plano. A pasta original permanece intacta.
+    - button "Autorizar transição gerenciada" [disabled]
+    - button "Atualizar e rever plano"
+  - text: Projeto selecionado
+  - heading "Configuração do projeto" [level=2]
+  - paragraph: As alterações serão usadas nas próximas preparações deste projeto.
+  - group "Configuração do projeto":
+    - note "Dados necessários e controles opcionais":
+      - heading "Para preparar uma issue" [level=3]
+      - paragraph: Confirme o repositório GitHub, a branch-base, um perfil de cada papel e o quadro com seu mapeamento de Status. A issue precisa estar vinculada ao quadro para iniciar em qualquer modo, inclusive no início manual.
+      - heading "Controles opcionais" [level=3]
+      - paragraph: Checks, orientações e limite de correções podem permanecer nos valores atuais. O modo de entrega parte do padrão configurado.
+    - text: Tipo da origem
+    - combobox "Tipo da origem": Local
+    - text: Define como a origem será consultada nas próximas preparações. Localização da origem
+    - textbox "Localização da origem": C:\Projetos\Pasta original com nome longo e espaços\Aplicação preservada
+    - text: Pasta local ou URL GitHub do projeto. A troca vale para novas preparações. Branch-base
+    - textbox "Branch-base": main
+    - text: Branch de referência das próximas preparações, como “main”.
+    - region "Observações anteriores"
+    - text: Perfil implementador
+    - combobox "Perfil implementador": Selecione…
+    - text: Perfil que implementa a issue. Sem escolha específica, usa o perfil efetivo do projeto. Perfil revisor
+    - combobox "Perfil revisor": Selecione…
+    - text: Perfil responsável pela revisão independente. Sem escolha específica, usa o perfil efetivo do projeto.
+    - region "Observações anteriores"
+    - text: Limite de correções
+    - spinbutton "Limite de correções": "2"
+    - text: De 0 a 5 rodadas após a primeira revisão. Vale para novas tentativas; preserva as rodadas anteriores. Modo de entrega padrão
+    - combobox "Modo de entrega padrão": ICR
+    - text: Define o percurso padrão para novas preparações. Pode permanecer no valor atual. Escolha ICR, Commit local ou Pull request. Alterar o padrão muda as novas preparações e não reescreve tentativas existentes.
+    - checkbox "Automação deste projeto habilitada"
+    - text: Automação deste projeto habilitada Permite inícios automáticos deste projeto. Revise sua configuração e a fila antes de habilitar.
+    - paragraph: Ready indica elegibilidade na fila; não habilita a automação. Novos inícios exigem remoto GitHub confirmado, branch-base publicada e quadro com os cinco valores de Status, além dos demais pré-requisitos atuais.
+    - text: Ordem de prioridade
+    - combobox "Ordem de prioridade": Crescente
+    - text: Ordena os valores do campo numérico em ordem crescente ou decrescente. Campo de prioridade (ID)
+    - textbox "Campo de prioridade (ID)"
+    - text: Escolhe o campo numérico usado para ordenar candidatos da fila. Opcional; deixe vazio para usar os critérios padrão. Selecione um campo observado, por exemplo “Priority”. Alterar a prioridade muda a ordem dos próximos candidatos.
+    - checkbox "Usar posição do quadro" [checked]
+    - text: Usar posição do quadro Usa a posição no quadro no desempate da fila. Orientações do projeto
+    - textbox "Orientações do projeto": Rascunho preservado durante a transição
+    - text: Acrescenta contexto permanente do projeto aos papéis. Opcional; use texto claro e sem credenciais. Alterar as instruções afeta novas preparações e tentativas, sem reescrever capturas anteriores.
+    - status:
+      - paragraph: "Perfis disponíveis: nenhum Implementador e nenhum Revisor."
+      - link "Abrir Perfis Globais":
+        - /url: "#principal/perfis"
+    - group "Mapeamento GitHub Project e Status":
+      - text: Mapeamento GitHub Project e Status
+      - paragraph: Escolha o quadro pelo nome. Um mapeamento novo exige os cinco valores do Status; um mapeamento histórico de quatro valores permanece somente para leitura até a adequação.
+      - text: GitHub Project
+      - combobox "GitHub Project": Selecione…
+      - text: Associa o projeto a um quadro GitHub para consultar issues e acompanhar Status. Necessário para iniciar em todos os modos, inclusive manualmente, com a issue vinculada ao quadro. Escolha pelo título e proprietário, por exemplo “Roadmap · equipe”. Trocar o quadro exige mapear Status novamente.
+    - region "Observações anteriores"
+    - text: Validação
+    - heading "Checks" [level=3]
+    - button "Adicionar check"
+    - group "Check 1":
+      - text: Check 1 Comando do check 1
+      - textbox "Comando do check 1": npm test
+      - text: Comando executado sobre a versão capturada, como “npm test”. cwd relativo do check 1
+      - textbox "cwd relativo do check 1": .
+      - text: "Deve permanecer relativo ao ambiente da tentativa. Pasta do comando, relativa ao projeto: “.” ou “apps/web”, por exemplo. Timeout do check 1"
+      - spinbutton "Timeout do check 1": "1000"
+      - text: ms Prazo máximo em milissegundos. Vazio mantém o padrão; 60000 equivale a um minuto.
+      - button "Remover check"
+    - text: Origem local
+    - paragraph: Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.
+  - region "Observações anteriores"
+  - region "Observações anteriores"
+  - region "Observações anteriores"
+  - note
+  - paragraph: Verifica o projeto salvo. Não valida o rascunho nem confirma salvamento.
+  - button "Verificar condições do projeto"
+  - button "Atualizar leitura do projeto": Atualizar leitura
+  - heading "Exclusão do projeto" [level=3]
+  - paragraph: Remova o cadastro e os dados locais após conferir o que será perdido. Os recursos do GitHub serão preservados.
+  - button "Excluir definitivamente" [disabled]
+  - alert:
+    - paragraph: Não foi possível conferir o cadastro salvo. Atualize seus dados antes de abrir a exclusão.
+    - button "Consultar cadastro novamente"
+  - button "Salvar configuração"

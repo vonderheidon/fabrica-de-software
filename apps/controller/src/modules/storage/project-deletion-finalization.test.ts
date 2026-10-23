@@ -107,15 +107,21 @@ describe('exclusive project deletion closure and transactional finalization', ()
     const inventory = f.storage.getProjectDeletionInventory(f.selected.projectId);
     expect(inventory.blockers).toEqual([]);
     expect(Object.keys(inventory.keys).sort()).toEqual([...deletionTables].sort());
-    for (const table of deletionTables) expect(inventory.keys[table].length, table).toBeGreaterThan(0);
+    for (const table of deletionTables) {
+      if (table === 'project_storage_locations' || table === 'project_storage_transitions' || table === 'creation_board_operations' ||
+        (upgrade && (table === 'attempt_sessions' || table === 'terminal_occupancies'))) expect(inventory.keys[table], table).toEqual([]);
+      else expect(inventory.keys[table].length, table).toBeGreaterThan(0);
+    }
     const other = f.storage.getProjectDeletionInventory(f.other.projectId);
     for (const table of deletionTables) expect(inventory.keys[table].filter(key => other.keys[table].includes(key)), table).toEqual([]);
     expect(inventory.keys.operation_requests).not.toContain(JSON.stringify([f.globalOperation]));
     expect(inventory.keys.operation_requests).not.toContain(JSON.stringify([f.globalQueueOperation]));
+    const sharedManagedTerminals = f.db.prepare('SELECT * FROM managed_terminals ORDER BY id').all();
     const preserved = snapshot(f.db);
     const objects = f.db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
     guardedRows(f.db, inventory);
     expect(f.storage.finalizeProjectDeletion(f.command)).toEqual({ operation_id: f.command.operationId, state: 'succeeded' });
+    expect(f.db.prepare('SELECT * FROM managed_terminals ORDER BY id').all()).toEqual(sharedManagedTerminals);
     for (const table of deletionTables) {
       const actual = f.db.prepare(`SELECT * FROM ${identifier(table)} ORDER BY rowid`).all();
       const pk = primaryKey(f.db, table);

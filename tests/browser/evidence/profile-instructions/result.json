@@ -1,0 +1,281 @@
+{
+  "surface": "Independent reviewer / Playwright MCP / Chrome / compiled production UI / controlled HTTP",
+  "passed": [
+    "Implementer effective long text; conflict/rebase; field and server 413; local character and UTF-8 limits; refresh preserves draft",
+    "Both roles save only guidance patch; no early success while PUT pending; matching receipt closes",
+    "Mobile 390x844 no page overflow; long field, save action and Tab/Escape keyboard usable",
+    "On-demand captured roles/revision/composition; missing legacy values explicit; current edit/resync never changes captured long text; historical keyboard/mobile usable",
+    "Unvalidated credentials_redacted=false rejected before rendering; empty legacy capture explicitly unavailable"
+  ],
+  "captures": [
+    "01-editor-long-desktop.png",
+    "02-conflict-preserved.png",
+    "03-field-error.png",
+    "04-server-body-error.png",
+    "05-character-limit.png",
+    "06-utf8-limit.png",
+    "07-editor-mobile.png",
+    "08-editor-mobile-actions.png",
+    "14-historical-metadata.png",
+    "09-historical-desktop.png",
+    "10-historical-mobile.png",
+    "11-historical-mobile-actions.png",
+    "12-unvalidated-history-rejected.png",
+    "13-legacy-history.png"
+  ],
+  "mutations": [
+    {
+      "path": "/api/v1/settings",
+      "body": {
+        "changes": {},
+        "profile_changes": [
+          {
+            "action": "update",
+            "id": "00000000-0000-4000-8000-000000000001",
+            "changes": {
+              "guidance": "Instruções editadas pelo teclado. Preservar evidências e critérios."
+            }
+          }
+        ]
+      },
+      "revision": "\"review-1\""
+    },
+    {
+      "path": "/api/v1/settings",
+      "body": {
+        "changes": {},
+        "profile_changes": [
+          {
+            "action": "update",
+            "id": "00000000-0000-4000-8000-000000000001",
+            "changes": {
+              "guidance": "Instruções editadas pelo teclado. Preservar evidências e critérios."
+            }
+          }
+        ]
+      },
+      "revision": "\"review-2\""
+    },
+    {
+      "path": "/api/v1/settings",
+      "body": {
+        "changes": {},
+        "profile_changes": [
+          {
+            "action": "update",
+            "id": "00000000-0000-4000-8000-000000000001",
+            "changes": {
+              "guidance": "Instruções editadas pelo teclado. Preservar evidências e critérios."
+            }
+          }
+        ]
+      },
+      "revision": "\"review-2\""
+    },
+    {
+      "path": "/api/v1/settings",
+      "body": {
+        "changes": {},
+        "profile_changes": [
+          {
+            "action": "update",
+            "id": "00000000-0000-4000-8000-000000000001",
+            "changes": {
+              "guidance": "Instruções editadas pelo teclado. Preservar evidências e critérios."
+            }
+          }
+        ]
+      },
+      "revision": "\"review-2\""
+    },
+    {
+      "path": "/api/v1/settings",
+      "body": {
+        "changes": {},
+        "profile_changes": [
+          {
+            "action": "update",
+            "id": "00000000-0000-4000-8000-000000000002",
+            "changes": {
+              "guidance": "Revisor editado: conferir a composição capturada."
+            }
+          }
+        ]
+      },
+      "revision": "\"review-3\""
+    }
+  ],
+  "profileReads": 3,
+  "errors": [],
+  "historyFocus": {
+    "tag": "BUTTON",
+    "withinDialog": true
+  },
+  "chrome": "155.0.8059.86",
+  "assetUrls": [
+    "http://127.0.0.1:4310/assets/index--lUkqOGn.js"
+  ],
+  "ok": true,
+  "reviewedAt": "2026-10-23",
+  "initialFinding": {
+    "asset": "index-CixlEkfD.js",
+    "finding": "Historical load removed the trigger and moved focus to BODY outside dialog.",
+    "resolvedIn": "index--lUkqOGn.js",
+    "finalFocus": {
+      "tag": "BUTTON",
+      "withinDialog": true
+    }
+  },
+  "limits": [
+    "All APIs, saves and attempts were synthetic and intercepted; no operational database, provider, Maestri/OMP, GitHub or publication was used.",
+    "This proof verifies the compiled browser UI and frontend request lifecycle, not backend redaction completeness or integrated persistence.",
+    "The stream was a finite synthetic stream; reconnection is outside this sprint proof."
+  ],
+  "assets": [
+    {
+      "name": "index--lUkqOGn.js",
+      "sha256": "2a759efc6e3881f74e0d96a65c50ec506673694b39160de2d5166acdd28f2690"
+    },
+    {
+      "name": "index-AmCDw5UC.css",
+      "sha256": "8709c2f266277d5a0c57c209b853bf54c523a3dd362bc15211ae1fa5d6300bb1"
+    }
+  ],
+  "evidence": [
+    {
+      "name": "01-editor-long-desktop.png",
+      "bytes": 167612,
+      "sha256": "85be6ccd4e33026ea8b71a1c546385d138c6da5eae483fb457cf07d49a81813b"
+    },
+    {
+      "name": "01-mobile-conflict.png",
+      "bytes": 40814,
+      "sha256": "c6503fc5afd6be57a2abbfb50ef31be3db46405c6d80a27470b6bc145ef1322d"
+    },
+    {
+      "name": "02-conflict-preserved.png",
+      "bytes": 132061,
+      "sha256": "8ec0c2d5953e0b9af62501f1b5733c70fdf71dc93aaa3ebca96274046bc703e3"
+    },
+    {
+      "name": "02-history-long.png",
+      "bytes": 3742,
+      "sha256": "6fff27250aedf977fe8dda263e2aa4725bcd1c6c45629318f198d4497f0f8cac"
+    },
+    {
+      "name": "03-field-error.png",
+      "bytes": 131917,
+      "sha256": "01644098bcb8650aced5bc64f47a926a01da3d81efff0a6dd6fe4e0dfb776d67"
+    },
+    {
+      "name": "03-history-mobile.png",
+      "bytes": 31502,
+      "sha256": "7d75444c3a7fd37dcf0f9e20964d74d146385cc546432149af8b3ebeef7f3bd7"
+    },
+    {
+      "name": "04-reviewer-utf8-limit.png",
+      "bytes": 37946,
+      "sha256": "7fb5ebfc2ed252041b4cce7adefe43a42e61bdf775ddf62836c55fefe5faf233"
+    },
+    {
+      "name": "04-server-body-error.png",
+      "bytes": 131947,
+      "sha256": "32f6d39e811297b518d76ae52892762e84c2779313c9e36d1afc4b532e9636ac"
+    },
+    {
+      "name": "05-character-limit.png",
+      "bytes": 143392,
+      "sha256": "280f07939d8c8c790a6a8c11e846de745c679844bf545c0354fa6fe2dc3b7d6d"
+    },
+    {
+      "name": "05-reviewer-preserved.png",
+      "bytes": 40135,
+      "sha256": "56adc63a6b5b89c9d7c1d9884de9478610c825516edbd21b30df3e4ad77da7d7"
+    },
+    {
+      "name": "06-history-after-current-save.png",
+      "bytes": 103107,
+      "sha256": "7450b10cda402f61b88d928c69ddb49e2c3731bfdb1a8b2679ae7e114f9c8c87"
+    },
+    {
+      "name": "06-utf8-limit.png",
+      "bytes": 142335,
+      "sha256": "40860c5fc2b2bd272006887af6aa11246ce965b2a9206424b54d37fa0f820ce8"
+    },
+    {
+      "name": "07-editor-mobile.png",
+      "bytes": 43060,
+      "sha256": "336bdd0cc551fd7c4b2bf914d0069fffca084445ee7f3cea24301402795a53d1"
+    },
+    {
+      "name": "07-legacy.png",
+      "bytes": 93473,
+      "sha256": "ffbdbdadd4f1813b2f4ca54eb651fb94838e714c0265a0e66cccc423664144c0"
+    },
+    {
+      "name": "08-editor-mobile-actions.png",
+      "bytes": 43060,
+      "sha256": "336bdd0cc551fd7c4b2bf914d0069fffca084445ee7f3cea24301402795a53d1"
+    },
+    {
+      "name": "08-final-conflict.png",
+      "bytes": 137179,
+      "sha256": "2c7990dc9356b5186449adde14751f325a4672a1d0f5f04ac431b2dd3214249c"
+    },
+    {
+      "name": "09-historical-desktop.png",
+      "bytes": 119495,
+      "sha256": "9c2395de0dc8a6933ea1725af9b6c34386cb040922cc4a45095cbdca8d3812ae"
+    },
+    {
+      "name": "10-historical-mobile.png",
+      "bytes": 41089,
+      "sha256": "120d82b768b9d756438d339ecf447651381c8495d24279fc7a11b18030bd07d6"
+    },
+    {
+      "name": "11-historical-mobile-actions.png",
+      "bytes": 52339,
+      "sha256": "23d415521aef4f18bc7b3a020683b1cabc29b0d4e4453a41b7071f4c7b246f72"
+    },
+    {
+      "name": "12-unvalidated-history-rejected.png",
+      "bytes": 45017,
+      "sha256": "6bba509b1d42bf0293c6a87ec68ff1d3a3707607744ae87dce0d40642fe426c9"
+    },
+    {
+      "name": "13-legacy-history.png",
+      "bytes": 44952,
+      "sha256": "12c91cc3826227252c55c62378777cca787962fb350530c977cb4d9d05a49312"
+    },
+    {
+      "name": "14-historical-metadata.png",
+      "bytes": 77147,
+      "sha256": "8eda8b164069981403e90ae884b58ab431697a5c671ec916f009d4912d3b79e8"
+    },
+    {
+      "name": "proof.mcp.js",
+      "bytes": 16039,
+      "sha256": "e9fc1dd7c17d66084ec403ae1f170af753415ad2b50c0fb0b46610b2a551512d"
+    },
+    {
+      "name": "static-server.mjs",
+      "bytes": 840,
+      "sha256": "c42098f4c34a415a66c9d789d68f35c399e1534ad85fbf7b947ad6b6072c12aa"
+    }
+  ],
+  "cleanup": {
+    "browser": "Playwright MCP closed; no open tabs",
+    "serverPid": 25584,
+    "server": "Own exec session 93321 interrupted with Ctrl+C; completion exit 1 confirmed by write_stdin. Host PID inspection was unavailable and no third-party process was stopped."
+  },
+  "visualInspection": [
+    "01-editor-long-desktop.png",
+    "06-utf8-limit.png",
+    "08-editor-mobile-actions.png",
+    "09-historical-desktop.png",
+    "10-historical-mobile.png",
+    "11-historical-mobile-actions.png",
+    "12-unvalidated-history-rejected.png",
+    "14-historical-metadata.png"
+  ]
+}

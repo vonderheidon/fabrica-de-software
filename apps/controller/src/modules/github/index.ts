@@ -6,6 +6,7 @@ import { GraphQLReader, createGhRunner, GitHubRunnerError, queryGhAuthentication
 import { GitHubExecutableResolver } from './executable.js';
 import { inspectPullRequest } from './pull-requests.js';
 import { createRemoteScaffolder, type ScaffoldAuthorization } from './scaffold.js';
+import { createBoardOperations } from './board.js';
 import type { GitHubExecutableObservation } from '#contracts';
 export type { ScaffoldAuthorization } from './scaffold.js';
 
@@ -39,6 +40,7 @@ export function createGitHub(options: GitHubOptions = {}) {
   const reader = new GraphQLReader(runner);
   return {
     ...createClient(reader), ...createRemoteScaffolder(reader, options.scaffoldAuthorization),
+    ...createBoardOperations(reader, options.scaffoldAuthorization),
     mutateEffect: createEffectWriter(reader, options.mutationAuthorization, options.attemptEffectAuthorization),
     reconcilePullRequest: (effect: import('#contracts').EffectView, accountId: string) => inspectPullRequest(reader, effect, accountId),
     resolveExecutable: async (path: string | null) => (await resolver.resolve(path)).observation,

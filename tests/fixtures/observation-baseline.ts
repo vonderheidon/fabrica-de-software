@@ -46,7 +46,7 @@ export async function observationFixture(scenario: ObservationScenario, meter?: 
       const boardId = `PVT_synthetic_${index}`;
       const current = f.storage.getConfiguration(projectId);
       const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
-      const mapping = { ...configuration.github_project!, id: boardId };
+      const mapping = { ...configuration.github_project!, id: boardId } as import('#contracts').ProjectMapping;
       f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId,
         body: { project_changes: { github_project: mapping, automation_enabled: true } },
         configuration: { ...configuration, github_project: mapping, automation_enabled: true }, globalChanges: {} });
@@ -106,7 +106,7 @@ export async function observationFixture(scenario: ObservationScenario, meter?: 
       listProjectItems: (id: string) => traced('items', () => { if (remote) return remote.listProjectItems(id); const value = items.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_PROJECT'); return response(value, scenario.pages); }),
       getIssueContextById: (id: string) => traced('issue', () => { if (remote) return remote.getIssueContextById(id, { purpose: 'queue' }); const value = issues.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_ISSUE'); return response(value, scenario.pages); }),
     };
-    const queue = createQueue({ storage: f.storage, github, hostName: 'synthetic-host' });
+    const queue = createQueue({ storage: f.storage, github, workspaces: f.workspaces, hostName: 'synthetic-host' });
     return {
       storage: f.storage, directory: f.directory, projectIds, samples, queue, issues, projects, pipeline: f.pipeline,
       github: { ...f.github, ...github }, workspaces: f.workspaces,

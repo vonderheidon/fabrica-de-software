@@ -87,6 +87,8 @@
   .dialog[role="dialog"] .dialog-actions, .profile-delete-dialog[open] .dialog-actions { bottom: calc(-1 * var(--dialog-padding)); margin-inline: calc(-1 * var(--dialog-padding)); margin-bottom: calc(-1 * var(--dialog-padding)); padding: 12px var(--dialog-padding); }
   .dialog[role="dialog"] .dialog-actions > button, .profile-delete-dialog[open] .dialog-actions > button { flex: 1 1 130px; }
   .dialog[role="dialog"] .dialog-actions > p { flex-basis: 100%; }
+  .dialog[data-dialog='project-configuration'] .dialog-actions { flex-direction: row; }
+  .dialog[data-dialog='project-configuration'] .dialog-actions > .save-feedback:empty { flex-basis: 0; }
   .dialog .profile-catalog-row { align-items: stretch; flex-direction: column; gap: 8px; }
   .dialog .onboarding-footer-secondary { flex: 1 1 100%; }
 }

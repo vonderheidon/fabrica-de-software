@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AuthorizeUpgrade, EffectView } from '#contracts';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
+import { confirmTerminalStops } from '../fixtures/attempt.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -208,7 +209,7 @@ it('does not restore publication on restart and explicitly completes an authoriz
     const request = { deliveryId,authorizedMode: 'pr' as const,authorized: true as const };
     const context = () => ({ operationId: randomUUID(),expectedRevision: `"${f.attemptId}:${storage.getAttempt(f.attemptId).revision}"` });
     expect(() => publication.complete(f.attemptId,request,context())).toThrow(expect.objectContaining({ code: 'RESOURCES_NOT_RECONCILED' }));
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+    confirmTerminalStops(f, f.attemptId, storage.executionPersistence());
     const op = publication.complete(f.attemptId,request,context());
     await Promise.all(tasks); expect(storage.getOperation(op.operation_id)?.state).toBe('succeeded'); expect(storage.getPublicationSummary(f.attemptId).localState).toBe('completed');
   } finally { storage.close(); }
@@ -226,7 +227,7 @@ it('migrates actual v14 journals without fabricating upgrades, preserving receip
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(27); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
+    expect(storage.getDiagnostics().schemaVersion).toBe(34); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }
@@ -237,7 +238,7 @@ it('exposes protected upgrade summary/authorization with CAS and an operation re
   const app = createApp(loadConfiguration({ FACTORY_DATA_DIR: f.directory,FACTORY_PORT: '4317',FACTORY_LOG_LEVEL: 'silent' },process.cwd()),f.storage,undefined,undefined,undefined,f.pipeline); await app.ready();
   try {
     const host = '127.0.0.1:4317'; const origin = 'http://'+host;
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+    confirmTerminalStops(f, f.attemptId);
     const boot = await app.inject({ method: 'POST',url: '/api/v1/session',headers: { host,origin,'x-factory-client': 'web' },payload: {} });
     const cookie = String(boot.headers['set-cookie']).split(';')[0]!;
     const body = upgrade(f,'pr'); const c = f.context(); const url = `/api/v1/attempts/${f.attemptId}/publication/authorize-upgrade`;

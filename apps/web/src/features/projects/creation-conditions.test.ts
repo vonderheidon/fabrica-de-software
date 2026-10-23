@@ -13,11 +13,13 @@ const id = '00000000-0000-4000-8000-000000000061';
 const view: HttpCreationView = {
   creation: { id, operation_id: id, project_id: id, plan_hash: 'a'.repeat(64), revision: 1, state: 'completed', baseline_sha: 'a'.repeat(40), baseline_ref: 'refs/heads/main', diagnostic: null, created_at_ms: 1,
     plan: { format_version: 1, installation_id: id, settings_e_tag: '"one"', projects_root: 'C:\\controlled', destination: 'C:\\controlled\\project', parent_identity: 'a'.repeat(64), template_digest: 'a'.repeat(64), files: [{ path: 'AGENTS.md', bytes: 1, sha256: 'a'.repeat(64) }],
-      input: { name: 'Projeto controlado', template_id: 'engineering', template_digest: 'a'.repeat(64), destination_relative: 'project', creation_mode: 'remote_push', base_branch: 'main', triage_enabled: true },
+       input: { name: 'Projeto controlado', template_id: 'engineering', template_digest: 'a'.repeat(64), destination_relative: 'project', creation_mode: 'remote_push', base_branch: 'main', triage_enabled: true,
+         remote: { owner_id: 'account', name: 'project', visibility: 'private' }, board_name: 'Projeto controlado' },
       engineering: { tracker: 'github', domain: 'single-context', instruction_file: 'AGENTS.md', triage_enabled: true, installs_skills: false, creates_labels: false }, account: { state: 'observed', id: 'account', login: 'operator' }, owner_id: 'account', effects: [] } },
   confirmed_effects: [{ step: 'directory', state: 'confirmed' }], pending_effects: [], effects: [],
   remote_effects: [{ kind: 'baseline_push', operation_id: id, state: 'unknown', identity: {}, reason: null }],
-  prerequisites: [{ code: 'PROFILES_REQUIRED', message: 'Cadastre os perfis para iniciar.', recovery: 'Abra Perfis.' }], diagnostics: [], event_cursor: '1',
+  prerequisites: [{ code: 'PROFILES_REQUIRED', message: 'Cadastre os perfis para iniciar.', recovery: 'Abra Perfis.' }], diagnostics: [], board_operations: [],
+  board_name: 'Projeto controlado', board_url: null, next_action: 'none', event_cursor: '1',
 };
 const roots: ReturnType<typeof createRoot>[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await act(async () => root.unmount()); document.body.replaceChildren(); request.mockReset(); metadata.mockReset(); vi.unstubAllGlobals(); });

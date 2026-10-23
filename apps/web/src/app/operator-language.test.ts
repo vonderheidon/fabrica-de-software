@@ -57,6 +57,13 @@ describe('operator language', () => {
     }
   });
 
+  it('states that profile guidance is effective while technical contracts remain fixed', () => {
+    const help = fieldGuidanceFor('Orientações opcionais');
+    expect(help).toContain('comportamentais efetivas');
+    expect(help).toContain('não altera papel, critérios, permissões');
+    expect(help).toContain('schemas técnicos ou limites');
+  });
+
   it('has field-specific guidance for every project and preparation control', () => {
     const labels = [
       'Nome do projeto', 'Tipo de origem', 'Pasta local existente', 'URL do repositório GitHub',
@@ -66,7 +73,7 @@ describe('operator language', () => {
       'Perfil implementador', 'Perfil revisor', 'Limite de correções', 'Modo de entrega padrão',
       'Automação deste projeto habilitada', 'Ordem de prioridade', 'Campo de prioridade (ID)',
       'Usar posição do quadro', 'Orientações do projeto', 'GitHub Project', 'Campo Status',
-      'Status Ready', 'Status Em andamento', 'Status Em revisão', 'Status Entregue',
+      'Status Ready', 'Status Em andamento', 'Status Em revisão', 'Status Entregue', 'Orientações opcionais',
       'Comando do check 1', 'cwd relativo do check 1', 'Timeout do check 1',
       'Modo de entrega', 'Orientação', 'Issue', 'Projeto', 'Executor', 'Provider', 'Modelo', 'Esforço',
     ];

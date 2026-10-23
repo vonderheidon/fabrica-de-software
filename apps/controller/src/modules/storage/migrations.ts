@@ -76,7 +76,7 @@ function freshProfileLifecycleTable(sql: string): string {
 
 export function loadMigrations(): readonly Migration[] {
   const directory = new URL('./migrations/', import.meta.url);
-  const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql', '019_initial_configuration_facts.sql', '020_local_installation.sql', '021_inference_limits.sql', '022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql', '024_diagnostic_configuration_results.sql', '025_project_deletions.sql', '026_project_deletion_finalization.sql', '027_event_context.sql'];
+  const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql', '019_initial_configuration_facts.sql', '020_local_installation.sql', '021_inference_limits.sql', '022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql', '024_diagnostic_configuration_results.sql', '025_project_deletions.sql', '026_project_deletion_finalization.sql', '027_event_context.sql', '028_project_storage_locations.sql', '029_project_storage_transitions.sql', '030_tool_preferences.sql', '031_creation_board_operations.sql', '032_profile_composition.sql', '033_managed_terminals.sql', '034_session_continuity.sql'];
   try {
     const actual = readdirSync(directory).filter((name) => name.endsWith('.sql')).sort();
     if (JSON.stringify(files) !== JSON.stringify(actual)) {
@@ -204,6 +204,7 @@ export function applyMigrations(
           } else {
             db.exec(migration.sql);
           }
+          if (migration.name === '032_profile_composition.sql') migrateLegacyProfileComposition(db);
           insert.run(migration.version, migration.name, migration.checksum, Date.now());
           db.pragma(`user_version = ${migration.version}`);
         }
@@ -228,5 +229,48 @@ export function applyMigrations(
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw new StorageError('MIGRATION_FAILED', { cause: error });
+  }
+}
+
+interface LegacyRoleResource { id: string; role: 'implementer' | 'reviewer'; version: number; instructions: string }
+function legacyRoleInstructions(role: 'implementer' | 'reviewer'): string {
+  try {
+    const resource: unknown = JSON.parse(readFileSync(new URL(`../../../../../resources/roles/${role}.v1.json`, import.meta.url), 'utf8'));
+    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) throw new Error('invalid role resource');
+    const value = resource as Partial<LegacyRoleResource>;
+    if (value.id !== `factory.${role}` || value.role !== role || value.version !== 1 || typeof value.instructions !== 'string' ||
+      !value.instructions.trim() || value.instructions.length > 8192) throw new Error('invalid role resource');
+    return value.instructions;
+  } catch (error) {
+    throw new StorageError('MIGRATION_RESOURCES_INVALID', { cause: error });
+  }
+}
+
+function migrateLegacyProfileComposition(db: Database.Database): void {
+  const instructions = {
+    implementer: legacyRoleInstructions('implementer'),
+    reviewer: legacyRoleInstructions('reviewer'),
+  };
+  const profiles = db.prepare<[], { id: string; profile_type: 'implementer' | 'reviewer'; guidance: string; revision: number; updated_at_ms: number }>(
+    `SELECT id, profile_type, guidance, revision, updated_at_ms FROM execution_profiles
+     WHERE deleted_at_ms IS NULL AND composition_version IS NULL ORDER BY id`,
+  ).all();
+  const update = db.prepare<[string, number | null, number, number, string]>(`UPDATE execution_profiles
+    SET guidance = ?, composition_version = ?, revision = ?, updated_at_ms = ?
+    WHERE id = ? AND composition_version IS NULL`);
+  const now = Date.now();
+  for (const profile of profiles) {
+    if (profile.profile_type !== 'implementer' && profile.profile_type !== 'reviewer') {
+      throw new StorageError('PROFILE_SCHEMA_INCOMPATIBLE');
+    }
+    const behavior = instructions[profile.profile_type];
+    const guidance = profile.guidance.includes(behavior)
+      ? profile.guidance
+      : profile.guidance.length === 0 ? behavior : `${profile.guidance}\n\n${behavior}`;
+    // Keep incompatible legacy content byte-for-byte and visibly uncomposed; never truncate it.
+    if (profile.revision >= Number.MAX_SAFE_INTEGER) continue;
+    const composed = guidance.length <= 8192;
+    update.run(composed ? guidance : profile.guidance, composed ? 1 : null,
+      profile.revision + 1, Math.max(now, profile.updated_at_ms), profile.id);
   }
 }

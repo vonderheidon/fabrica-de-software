@@ -6,13 +6,14 @@ import { httpLimits } from './http/security/index.js';
 import { createGitHub, type GitHubContext, type GitHubHostAccess, type GitHubMutationAuthorization } from './modules/github/index.js';
 import { createWorkspaces, type GitContext } from './modules/workspaces/index.js';
 import { createPreparations, createQueue, validateScaffoldResources, createDeletionCoordinator } from './modules/projects/index.js';
-import { createExecution, ExecutionError, type ExecutionHost } from './modules/execution/index.js';
+import { createExecution, ExecutionError, withWindowsTerminalJobs, type ExecutionHost } from './modules/execution/index.js';
 import { createPipeline, type Pipeline } from './modules/pipeline/index.js';
 import { createVerification } from './modules/verification/index.js';
 import type { ToolObservation } from '#contracts';
+import { createToolDetector } from './modules/tools/index.js';
 
 /** Trusted host composition only. These declarations do not elevate or prove keyring access. */
-export interface ControllerHostContext { github?: GitHubContext; githubAccess?: GitHubHostAccess; githubMutationAuthorization?: GitHubMutationAuthorization; scaffoldAuthorization?: import('./modules/github/index.js').ScaffoldAuthorization; git?: GitContext; execution?: ExecutionHost; openFolder?: (path: string) => Promise<void>; selectProjectsDirectory?: (signal?: AbortSignal) => Promise<string | null>; selectGitHubExecutable?: (signal?: AbortSignal) => Promise<string | null> }
+export interface ControllerHostContext { discoverTools?: boolean; github?: GitHubContext; githubAccess?: GitHubHostAccess; githubMutationAuthorization?: GitHubMutationAuthorization; scaffoldAuthorization?: import('./modules/github/index.js').ScaffoldAuthorization; git?: GitContext; execution?: ExecutionHost; openFolder?: (path: string) => Promise<void>; selectProjectsDirectory?: (signal?: AbortSignal) => Promise<string | null>; selectGitHubExecutable?: (signal?: AbortSignal) => Promise<string | null>; selectExecutable?: (signal?: AbortSignal) => Promise<string | null> }
 
 /** Explicit composition seam for local contract tests; the CLI always uses the native factory. */
 export interface ControllerDependencies { executionFactory?: typeof createExecution; dataDirectory?: string }
@@ -32,41 +33,75 @@ export async function startController(hostContext: ControllerHostContext = {}, d
   let deletions: ReturnType<typeof createDeletionCoordinator> | undefined;
   try {
     storage.captureLocalHost();
-    const githubAccess = hostContext.githubAccess ?? (hostContext.github ? { kind: hostContext.github.kind, cwd: hostContext.github.cwd } : undefined);
+    const toolDetector = createToolDetector();
+    const detectedTools = hostContext.discoverTools
+      ? await toolDetector.detect(storage.getGlobalConfiguration().view.tool_preferences, storage.getGitHubExecutablePath())
+      : null;
+    if (detectedTools) storage.recordToolPreferenceValidation({
+      ...(detectedTools.git.selected_path ? { git: detectedTools.git.selected_path } : {}),
+      ...(detectedTools.maestri.selected_path ? { maestri: detectedTools.maestri.selected_path } : {}),
+      ...(detectedTools.omp.selected_path ? { omp: detectedTools.omp.selected_path } : {}),
+      ...(detectedTools.powershell.selected_path ? { powershell: detectedTools.powershell.selected_path } : {}),
+    });
+    const githubAccess = hostContext.githubAccess ?? (hostContext.github ? { kind: hostContext.github.kind, cwd: hostContext.github.cwd }
+      : undefined);
+    const gitContext = hostContext.git ?? (detectedTools?.git.selected_path && githubAccess
+      ? { kind: 'windows_keyring' as const, executable: detectedTools.git.selected_path, cwd: githubAccess.cwd } : undefined);
+    const executionHost = hostContext.execution ?? (detectedTools?.maestri.selected_path && detectedTools.omp.selected_path && detectedTools.powershell.selected_path
+      ? { maestriExecutable: detectedTools.maestri.selected_path, ompExecutable: detectedTools.omp.selected_path,
+        powershellExecutable: detectedTools.powershell.selected_path, inheritedEnvironment: process.env } : undefined);
     const github = createGitHub({ ...(hostContext.github ? { context: hostContext.github } : {}), ...(githubAccess ? { access: githubAccess } : {}),
       savedExecutablePath: storage.getGitHubExecutablePath,
       observeQuery: measurement => app?.log.info({ event: 'github_read', ...measurement }, 'GitHub read completed'),
       ...(hostContext.githubAccess || hostContext.github ? { attemptEffectAuthorization: { kind: 'confirmed_attempt' as const } } : {}),
       ...(hostContext.githubMutationAuthorization ? { mutationAuthorization: hostContext.githubMutationAuthorization } : {}),
       ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}) });
-    const workspaces = createWorkspaces({ github, dataDirectory: configuration.dataDirectory, ...(hostContext.git ? { context: hostContext.git } : {}), ...(hostContext.githubMutationAuthorization ? { pushAuthorization: hostContext.githubMutationAuthorization } : {}), ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}), ...(hostContext.openFolder ? { openFolder: hostContext.openFolder } : {}) });
+    const workspaces = createWorkspaces({ github, dataDirectory: configuration.dataDirectory,
+      projectStorage: { getAttemptProjectId: id => storage.getAttemptProjectId(id), getAttemptWorkspaceReference: id => storage.getAttemptWorkspaceReference(id),
+        getProjectStorageView: id => storage.getProjectStorageView(id), getStorageTransition: id => storage.getStorageTransition(id),
+        recordProjectStorageLocation: observation => storage.recordProjectStorageLocation(observation),
+        assertProjectStorageLocation: observation => storage.assertProjectStorageLocation(observation) },
+      ...(gitContext ? { context: gitContext } : {}), ...(hostContext.githubMutationAuthorization ? { pushAuthorization: hostContext.githubMutationAuthorization } : {}), ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}), ...(hostContext.openFolder ? { openFolder: hostContext.openFolder } : {}) });
     execution = (dependencies.executionFactory ?? createExecution)({ dataDirectory: configuration.dataDirectory, persistence: storage.executionPersistence(),
+      projectStorageRootForAttempt: workspaces.resolveAttemptRoot,
       validatePassageScope: async binding => { if (!pipeline || !await pipeline.revalidateScope(binding)) throw new ExecutionError('RESULT_INVALID'); },
       validateReviewerResult: async binding => {
         const review = storage.getReview(binding.deliveryVersion);
         if (!review || review.passageId !== binding.passageId) throw new ExecutionError('RESOURCE_INVALID');
         const valid = await workspaces.validateReview(storage.getDelivery(binding.deliveryVersion).delivery, review.id);
         storage.recordReviewIntegrity(binding, valid);
-      }, ...(hostContext.execution ? { host: hostContext.execution } : {}) });
-    // No worker, HTTP surface or dispatch exists before the real anchor query succeeds.
-    const preflight = await execution.preflight();
-    if (!preflight.ready) throw new ExecutionError(preflight.code ?? 'CONTEXT_MISSING');
+      }, ...(executionHost ? { host: withWindowsTerminalJobs(executionHost, configuration.dataDirectory) } : {}) });
+    // Missing local tools and Maestri connectivity never hide configuration access.
     await validateScaffoldResources();
     const activeExecution = execution;
     const preparations = createPreparations({ storage, github, workspaces });
     const logFailure = (code: string) => console.error(JSON.stringify({ level: 'error', code, message: 'Pipeline operation failed.' }));
     deletions = createDeletionCoordinator({ storage, workspaces, logFailure });
     const verification = createVerification({ storage, workspaces, dataDirectory: configuration.dataDirectory, logFailure });
-    const queue = createQueue({ storage, github });
+    const queue = createQueue({ storage, github, workspaces });
     pipeline = createPipeline({ storage, execution, preparations, workspaces, verification, github, queue, publication: { github, workspaces, verification },
       observeTools: async () => {
-        const [git, gh, runtime] = await Promise.all([workspaces.observeVersion(), github.observeVersion(), activeExecution.observeVersions()]);
-        const node: ToolObservation = { tool: 'node', state: 'observed', version: process.versions.node, cause: null, affectedRequirements: [], observedAtMs: Date.now() };
-        return [node, git, gh, ...runtime];
+        const [tools, preflight] = await Promise.all([
+          hostContext.discoverTools ? toolDetector.detect(storage.getGlobalConfiguration().view.tool_preferences, storage.getGitHubExecutablePath())
+            : Promise.resolve(null),
+          activeExecution.preflight(),
+        ]);
+        if (!tools) throw new ExecutionError('CONTEXT_MISSING');
+        const observedAtMs = Date.now();
+        const observation = (tool: 'git' | 'gh' | 'maestri' | 'omp', item: typeof tools.git, blocked = false): ToolObservation => {
+          const selected = item.selected_path ? item.candidates.find(candidate => candidate.path === item.selected_path) : undefined;
+          const ready = selected !== undefined && !blocked;
+          return { tool, state: ready ? 'observed' : 'unavailable', version: selected?.version ?? null,
+            cause: ready ? null : blocked ? preflight.code ?? 'MAESTRI_CONNECTION_UNAVAILABLE' : item.diagnostic ?? 'TOOL_NOT_AVAILABLE',
+            affectedRequirements: ready ? [] : ['RF-01', 'RF-06'], observedAtMs };
+        };
+        const node: ToolObservation = { tool: 'node', state: 'observed', version: process.versions.node, cause: null, affectedRequirements: [], observedAtMs };
+        return [node, observation('git', tools.git), observation('gh', tools.gh), observation('maestri', tools.maestri, !preflight.ready), observation('omp', tools.omp)];
       }, logFailure });
     app = createApp(configuration, storage, undefined, { github, githubSetup: github, githubRuntime: github, workspaces, execution,
       ...(hostContext.selectProjectsDirectory ? { selectProjectsDirectory: hostContext.selectProjectsDirectory } : {}),
-      ...(hostContext.selectGitHubExecutable ? { selectGitHubExecutable: hostContext.selectGitHubExecutable } : {}) }, { github, workspaces }, pipeline, { github, workspaces }, { execution }, { workspaces, coordinator: deletions });
+      ...(hostContext.selectGitHubExecutable ? { selectGitHubExecutable: hostContext.selectGitHubExecutable } : {}),
+      ...(hostContext.selectExecutable ? { selectExecutable: hostContext.selectExecutable } : {}), toolDetector }, { github, workspaces }, pipeline, { github, workspaces }, { execution }, { workspaces, coordinator: deletions });
     app.addHook('preClose', async () => { await deletions?.close(); });
     deletions.recover();
   } catch (error) {

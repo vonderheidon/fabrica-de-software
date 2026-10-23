@@ -10,6 +10,7 @@ import { Criterion } from "../preparations.js";
 import { CheckRun } from "./verification.js";
 import { Finding, Review, RoundHistory } from "./reviews.js";
 import { CriterionOutcome } from "./protocol-views.js";
+import { PassageRole } from "./protocol-views.js";
 const closed = { additionalProperties: false } as const;
 const nullable = <T extends import('@sinclair/typebox').TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 const text = Type.String({ maxLength: 4096 });
@@ -25,7 +26,15 @@ export const AttemptSummary = Type.Object({
 export type AttemptSummary = Static<typeof AttemptSummary>;
 export const AttemptPage = Page(AttemptSummary);
 export type AttemptPage = Static<typeof AttemptPage>;
-export const DetailSection = Type.Union(['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources'].map(v => Type.Literal(v)));
+export const HistoricalEffectiveProfile = Type.Object({
+    role: PassageRole, profile_id: Type.Union([OperationId, Type.Null()]), profile_revision: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+    executor: Type.String({ minLength: 1, maxLength: 256 }), provider: Type.String({ minLength: 1, maxLength: 256 }),
+    model: Type.String({ minLength: 1, maxLength: 256 }), effort: Type.Union([Type.String({ minLength: 1, maxLength: 128 }), Type.Null()]),
+    guidance: Type.String({ maxLength: 8192 }), composition_version: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+    context_summary: Type.String({ maxLength: 8192 }), technical_contract_summary: Type.String({ minLength: 1, maxLength: 4096 }),
+    credentials_redacted: Type.Literal(true),
+}, closed);
+export const DetailSection = Type.Union(['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources', 'profiles'].map(v => Type.Literal(v)));
 export type DetailSection = Static<typeof DetailSection>;
 export const AttemptDetailQuery = Type.Object({ ...paging, round_id: Type.Optional(Type.String({ pattern: '^[1-6]$' })), delivery_id: Type.Optional(OperationId), section: Type.Optional(DetailSection) }, closed);
 export type AttemptDetailQuery = Static<typeof AttemptDetailQuery>;
@@ -34,6 +43,9 @@ export type DeliveryDetailQuery = Static<typeof DeliveryDetailQuery>;
 export const PassageSummary = Type.Object({ id: OperationId, attempt_id: OperationId, delivery_id: OperationId, round: Type.Integer(),
     role: Type.Union([Type.Literal('implementer'), Type.Literal('reviewer')]), state: text, tracking: text,
     diagnostic: nullable(text), result_receipt_id: nullable(OperationId), created_at_ms: Type.Integer(),
+    attempt_session_id: Type.Optional(nullable(OperationId)), session_state: Type.Optional(nullable(text)),
+    session_source_id: Type.Optional(nullable(OperationId)), terminal_name: Type.Optional(nullable(text)), occupancy_state: Type.Optional(nullable(text)),
+    terminal_state: Type.Optional(nullable(text)),
 }, closed);
 export const CriterionDetail = Type.Object({ ...Criterion.properties, producer: nullable(Type.Object({ verdict: CriterionOutcome.properties.verdict, evidence: CriterionOutcome.properties.evidence }, closed)),
     reviewer: nullable(Type.Object({ verdict: CriterionOutcome.properties.verdict, evidence: CriterionOutcome.properties.evidence }, closed)) }, closed);
@@ -42,7 +54,7 @@ export const QuestionSummary = Type.Object({ id: OperationId, attempt_id: Operat
     state: Question.properties.state, revision: Type.Integer(), created_at_ms: Type.Integer(), expires_at_ms: nullable(Type.Integer()), delivery_receipt: Question.properties.delivery_receipt }, closed);
 export const FindingDetail = Type.Object({ ...Finding.properties, resolutions: Type.Array(Type.Object({ review_id: OperationId, delivery_id: OperationId,
         verdict: Type.Union([Type.Literal('resolved'), Type.Literal('unresolved')]), evidence: CriterionOutcome.properties.evidence }, closed), { maxItems: 6 }) }, closed);
-export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, CheckRun, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource]);
+export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, CheckRun, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource, HistoricalEffectiveProfile]);
 export type DetailItem = Static<typeof DetailItem>;
 export const DetailPage = Type.Object({ section: DetailSection, ...Page(DetailItem).properties }, closed);
 export type DetailPage = Static<typeof DetailPage>;

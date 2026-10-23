@@ -1,9 +1,10 @@
-import { lstat, mkdir, realpath } from 'node:fs/promises';
+import { lstat, mkdir, realpath, writeFile } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { WorkspacePreparation, type PreparedWorkspace } from '#contracts';
 import type { GitReader } from './git.js';
 import { githubReference } from './inspect.js';
+import type { AttemptRootResolver } from './project-storage.js';
 
 export class WorkspacePreparationError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -13,7 +14,8 @@ const within = (root: string, path: string) => {
   return part !== '' && !isAbsolute(part) && part !== '..' && !part.startsWith(`..${sep}`);
 };
 /** Owns only a newly reserved attempt directory. Failures preserve it for the caller's resource journal. */
-export function createWorkspacePreparer(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath) {
+export function createWorkspacePreparer(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath,
+  resolveAttemptRoot?: AttemptRootResolver) {
   return async (input: WorkspacePreparation): Promise<PreparedWorkspace> => {
     if (!Value.Check(WorkspacePreparation, input)) throw new WorkspacePreparationError('WORKSPACE_INPUT_INVALID');
     if (!dataDirectory || !isAbsolute(dataDirectory)) throw new WorkspacePreparationError('WORKSPACE_ROOT_UNAVAILABLE');
@@ -27,7 +29,8 @@ export function createWorkspacePreparer(dataDirectory?: string, git?: GitReader,
     if (!git) return failure('CONTEXT_UNAVAILABLE');
     let stage = 'WORKSPACE_PATH_UNAVAILABLE';
     try {
-      const data = await canonicalize(dataDirectory);
+      const data = await canonicalize(resolveAttemptRoot ? await resolveAttemptRoot(input.attemptId, true) : dataDirectory);
+      implementation = resolve(data, 'work', input.attemptId, 'implementation');
       if (!isAbsolute(data)) return failure('WORKSPACE_ROOT_INVALID');
       const work = resolve(data, 'work');
       let source: string;
@@ -75,6 +78,11 @@ export function createWorkspacePreparer(dataDirectory?: string, git?: GitReader,
           if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
         }
       }
+      const info = resolve(metadata, 'info');
+      try { await mkdir(info); } catch (error) { if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error; }
+      if (!(await lstat(info)).isDirectory() || (await lstat(info)).isSymbolicLink() || await canonicalize(info) !== info) return failure('CLONE_METADATA_INVALID');
+      // Fresh --template= clone only: never append through metadata supplied by an agent.
+      await writeFile(resolve(info, 'exclude'), '\n/.factory-evidence/\n', { flag: 'wx' });
       const runOwned = (args: readonly string[]) => git(implementation, [
         `--git-dir=${metadata}`, `--work-tree=${implementation}`, '-c', `core.worktree=${implementation}`, '-c', 'core.bare=false', '-c', `core.hooksPath=${hooks}`, '-c', 'core.attributesFile=', ...args,
       ]);

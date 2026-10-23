@@ -71,7 +71,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains approved identity
     expect(approved.state).toBe('approved');
     expect(f.storage.getCheckHistory(deliveryId, {}).entries.map(c => c.checkDefinitionId).sort()).toEqual(checks.map(c => c.id).sort());
     expect(runner.mock.calls).toHaveLength(2);
-    expect(materializeCheck.mock.calls).toHaveLength(2);
+    expect(materializeCheck.mock.calls).toHaveLength(4);
     const artifact = f.storage.getCheckHistory(deliveryId, {}).entries[0]!.artifacts[0]!;
     // Revoke coordination and explicitly confirm the two simulated terminals. No physical process is claimed.
     f.persistence.recordCancellation(f.attemptId, randomUUID());

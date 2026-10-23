@@ -1,4 +1,4 @@
-export type UncertainOperationKind = 'project.delete' | 'project-create' | 'project-register' | 'scaffold-create' | 'scaffold-reconcile' | 'settings-save' | 'profile-delete' | 'github-account-binding' | 'github-executable-save' | 'onboarding-root-save' | 'onboarding-complete' | 'onboarding-suppress' | 'queue-toggle' | 'queue-enable' | 'queue-pause' | 'attempt-start' | 'attempt-decision' | 'attempt-cancel' | 'delivery-publish';
+export type UncertainOperationKind = 'tool-preference-save' | 'project.delete' | 'project-create' | 'project-register' | 'scaffold-create' | 'scaffold-reconcile' | 'settings-save' | 'profile-delete' | 'github-account-binding' | 'github-executable-save' | 'onboarding-root-save' | 'onboarding-complete' | 'onboarding-suppress' | 'queue-toggle' | 'queue-enable' | 'queue-pause' | 'attempt-start' | 'attempt-decision' | 'attempt-cancel' | 'delivery-publish';
 
 export type UncertainOperation = {
   operationId: string;
@@ -8,7 +8,7 @@ export type UncertainOperation = {
 };
 
 const storageKey = 'factory.uncertain-operations.v1';
-const kinds: readonly UncertainOperationKind[] = ['project.delete', 'project-create', 'project-register', 'scaffold-create', 'scaffold-reconcile', 'settings-save', 'profile-delete', 'github-account-binding', 'github-executable-save', 'onboarding-root-save', 'onboarding-complete', 'onboarding-suppress', 'queue-toggle', 'queue-enable', 'queue-pause', 'attempt-start', 'attempt-decision', 'attempt-cancel', 'delivery-publish'];
+const kinds: readonly UncertainOperationKind[] = ['tool-preference-save', 'project.delete', 'project-create', 'project-register', 'scaffold-create', 'scaffold-reconcile', 'settings-save', 'profile-delete', 'github-account-binding', 'github-executable-save', 'onboarding-root-save', 'onboarding-complete', 'onboarding-suppress', 'queue-toggle', 'queue-enable', 'queue-pause', 'attempt-start', 'attempt-decision', 'attempt-cancel', 'delivery-publish'];
 
 function isUncertainOperation(value: unknown): value is UncertainOperation {
   if (typeof value !== 'object' || value === null) return false;

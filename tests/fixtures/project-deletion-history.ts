@@ -53,6 +53,20 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
   insert('accounts', { github_account_id: accountId, login: 'fixture', observed_at_ms: 0, created_at_ms: 0, updated_at_ms: 0 });
   insert('execution_profiles', { id: profileId, name: 'Shared', name_key: 'shared', profile_type: 'implementer', executor: 'maestri-omp',
     provider: 'fixture', model: 'fixture', effort: null, guidance: '', created_at_ms: 0, updated_at_ms: 0 });
+  const managedTerminalSchema = Boolean(db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='managed_terminals'").get());
+  const managedTerminals = new Map<'implementer' | 'reviewer', { id: string; terminalId: string }>();
+  if (managedTerminalSchema) for (const role of ['implementer', 'reviewer'] as const) {
+    let terminal = db.prepare<[string, string, string], { id: string; terminal_id: string; generation: number; state: 'planned' | 'available' }>(
+      'SELECT id,terminal_id,generation,state FROM managed_terminals WHERE installation_id=? AND host_name=? AND role=? LIMIT 1',
+    ).get(installationId, 'project-deletion-fixture', role);
+    if (!terminal) {
+      const id = uuid(); const terminalId = uuid();
+      insert('managed_terminals', { id, installation_id: installationId, host_name: 'project-deletion-fixture', role, owner: 'factory',
+        generation: 1, terminal_name: `factory-${id}`, workspace_id: uuid(), terminal_id: terminalId, state: 'planned', observed_at_ms: 0, created_at_ms: 0, updated_at_ms: 0 });
+      terminal = { id, terminal_id: terminalId, generation: 1, state: 'planned' };
+    }
+    managedTerminals.set(role, { id: terminal.id, terminalId: terminal.terminal_id });
+  }
   insert('controller_authority', { id: 'local', configured_account_id: accountId, observed_account_id: accountId, dispatch_paused: 1, observed_at_ms: 0 });
   function operation(type: string, resourceId: string, kind = 'fixture.history', id = uuid()) {
     insert('operation_requests', { operation_id: id, installation_id: installationId, account_id: accountId,
@@ -103,6 +117,21 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       preparation_id: preparationId, preparation_revision: 1, account_id: accountId, repository_id: 'shared-repository', issue_id: 'shared-issue',
       capture_json: JSON.stringify({ formatVersion: 1, configuration: { implementerProfile: { id: profileId } } }),
       phase: 'finished', result: 'delivered', source: 'manual', created_at_ms: 0, updated_at_ms: 0 });
+    const attemptSessions = new Map<'implementer' | 'reviewer', string>();
+    const sessionGenerations = new Map<'implementer' | 'reviewer', number>();
+    if (managedTerminalSchema) for (const role of ['implementer', 'reviewer'] as const) {
+      const sessionId = uuid(); attemptSessions.set(role, sessionId);
+      const terminal = db.prepare<[string], { generation: number; state: 'planned' | 'available' }>(
+        'SELECT generation,state FROM managed_terminals WHERE id=?',
+      ).get(managedTerminals.get(role)!.id)!;
+      const sessionGeneration = terminal.state === 'available' ? terminal.generation + 1 : terminal.generation;
+      sessionGenerations.set(role, sessionGeneration);
+      insert('attempt_sessions', { id: sessionId, attempt_id: attemptId, role, managed_terminal_id: managedTerminals.get(role)!.id,
+        session_directory_relative: `fixture/${attemptId}/sessions/${role}`, omp_session_id: uuid(), terminal_generation: sessionGeneration,
+        state: 'completed', created_at_ms: 0, updated_at_ms: 0 });
+      db.prepare("UPDATE managed_terminals SET generation=?,state='available' WHERE id=?")
+        .run(sessionGeneration, managedTerminals.get(role)!.id);
+    }
     insert('attempt_criteria', { attempt_id: attemptId, criterion_id: 'ac-1', occurrence_index: 1, text: 'Criterion' });
     const preparationOperation = operation('preparation', preparationId);
     event('preparation', preparationId, preparationOperation); // no project_id/FK to preparation
@@ -114,8 +143,12 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       insert('rounds', { attempt_id: attemptId, round_number: round, delivery_version: deliveryId, created_at_ms: 0 });
       for (const [id, role] of [[passageId, 'implementer'], [reviewerId, 'reviewer']] as const) {
         insert('passages', { id, attempt_id: attemptId, round_number: round, delivery_version: deliveryId, role,
-          role_resource_json: '{}', terminal_name: uuid(), state: 'cancelled', tracking_state: 'tracked', created_at_ms: 0,
-          session_source_id: role === 'implementer' ? priorProducer : null });
+          role_resource_json: '{}', terminal_name: uuid(), state: 'ready', tracking_state: 'tracked', created_at_ms: 0,
+          session_source_id: role === 'implementer' ? priorProducer : null,
+          ...(managedTerminalSchema ? { attempt_session_id: attemptSessions.get(role)! } : {}) });
+        if (managedTerminalSchema) insert('terminal_occupancies', { id: uuid(), managed_terminal_id: managedTerminals.get(role)!.id,
+          attempt_session_id: attemptSessions.get(role)!, attempt_id: attemptId, passage_id: id, generation: sessionGenerations.get(role)!,
+          state: 'released', claimed_at_ms: 0, released_at_ms: 0, reason: 'fixture-history' });
         insert('passage_results', { passage_id: id, attempt_id: attemptId, result_hash: hash, receipt_id: uuid(), summary_json: '{}', accepted_at_ms: 0 });
         insert('criterion_results', { passage_id: id, attempt_id: attemptId, criterion_id: 'ac-1', verdict: 'passed', evidence_json: '["proof"]' });
         insert('passage_events', { passage_id: id, event_type: 'fixture', created_at_ms: 0 });
@@ -150,7 +183,11 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
     const warningDelivery = uuid(); const warningPassage = uuid();
     insert('rounds', { attempt_id: attemptId, round_number: 3, delivery_version: warningDelivery, created_at_ms: 0 });
     insert('passages', { id: warningPassage, attempt_id: attemptId, round_number: 3, delivery_version: warningDelivery, role: 'implementer',
-      role_resource_json: '{}', terminal_name: uuid(), state: 'cancelled', tracking_state: 'tracked', created_at_ms: 0 });
+      role_resource_json: '{}', terminal_name: uuid(), state: 'cancelled', tracking_state: 'tracked', created_at_ms: 0,
+      ...(managedTerminalSchema ? { attempt_session_id: attemptSessions.get('implementer')! } : {}) });
+    if (managedTerminalSchema) insert('terminal_occupancies', { id: uuid(), managed_terminal_id: managedTerminals.get('implementer')!.id,
+      attempt_session_id: attemptSessions.get('implementer')!, attempt_id: attemptId, passage_id: warningPassage,
+      generation: sessionGenerations.get('implementer')!, state: 'released', claimed_at_ms: 0, released_at_ms: 0, reason: 'fixture-history' });
     insert('passage_results', { passage_id: warningPassage, attempt_id: attemptId, result_hash: hash, receipt_id: uuid(), summary_json: '{}', accepted_at_ms: 0 });
     insert('deliveries', { id: warningDelivery, attempt_id: attemptId, round_number: 3, producer_passage_id: warningPassage,
       base_sha: sha, repository_relative: `git/${attemptId}.git`, capture_state: 'failed' });

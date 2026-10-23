@@ -2,7 +2,8 @@ import { readTimeDefaults, readArtifactPolicy } from './common-json.js';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { Value } from '@sinclair/typebox/value';
-import { FactorySettings } from '#contracts';
+import { FactorySettings, ToolPreferences } from '#contracts';
+import type { ToolPreferences as ToolPreferencesValue } from '#contracts';
 import type Database from 'better-sqlite3';
 import { StorageError } from './errors.js';
 
@@ -83,6 +84,52 @@ export function readGitHubExecutablePath(db: Database.Database): string | null {
     throw new StorageError('SETTINGS_INVALID');
   }
   return row.gh_executable_path;
+}
+
+export function readToolPreferences(db: Database.Database): ToolPreferencesValue {
+  const columns = db.prepare<[], { name: string }>("PRAGMA table_info('factory_settings')").all();
+  if (!columns.some(column => column.name === 'tool_preferences_json')) {
+    // Historical read projections remain valid while migration 030 is pending; this never writes a backfill.
+    return {
+      format_version: 1,
+      git: { preferred_path: null, last_validated_at_ms: null },
+      maestri: { preferred_path: null, last_validated_at_ms: null },
+      omp: { preferred_path: null, last_validated_at_ms: null },
+      powershell: { preferred_path: null, last_validated_at_ms: null },
+    };
+  }
+  const row = db.prepare<[], { tool_preferences_json: unknown }>(
+    "SELECT tool_preferences_json FROM factory_settings WHERE id = 'local'",
+  ).get();
+  try {
+    const preferences: unknown = row && typeof row.tool_preferences_json === 'string'
+      ? JSON.parse(row.tool_preferences_json) as unknown : null;
+    if (!Value.Check(ToolPreferences, preferences)) throw new StorageError('SETTINGS_INVALID');
+    return preferences;
+  } catch (error) {
+    if (error instanceof StorageError) throw error;
+    throw new StorageError('SETTINGS_INVALID', { cause: error });
+  }
+}
+
+export function recordToolPreferenceValidation(db: Database.Database, validatedPaths: Readonly<Partial<Record<'git' | 'maestri' | 'omp' | 'powershell', string>>>): void {
+  // This timestamp is observation metadata; it never changes the saved path or host capability.
+  db.transaction(() => {
+    const current = readToolPreferences(db);
+    let changed = false;
+    const next = { ...current };
+    for (const tool of ['git', 'maestri', 'omp', 'powershell'] as const) {
+      const validatedPath = validatedPaths[tool];
+      if (validatedPath && current[tool].preferred_path?.toLowerCase() === validatedPath.toLowerCase()) {
+        const timestamp = Math.max(Date.now(), current[tool].last_validated_at_ms ?? 0);
+        if (timestamp !== current[tool].last_validated_at_ms) {
+          next[tool] = { ...current[tool], last_validated_at_ms: timestamp };
+          changed = true;
+        }
+      }
+    }
+    if (changed) db.prepare("UPDATE factory_settings SET tool_preferences_json = ? WHERE id = 'local'").run(JSON.stringify(next));
+  }).immediate();
 }
 
 export function readLinkedGitHubAccount(db: Database.Database): { id: string; login: string } | null {

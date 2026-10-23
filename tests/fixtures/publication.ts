@@ -39,6 +39,8 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
   const github = { ...f.github, getRepository: vi.fn(async () => complete(structuredClone(f.issue.repository))), mutateEffect,
     reconcilePullRequest: vi.fn<import('../../apps/controller/src/modules/github/index.js').GitHub['reconcilePullRequest']>(async e => remotePRs.get(e.operationId) ?? { state: 'unknown',receipt: null,reason: 'PR_NOT_OBSERVED',retryAtMs: null }) };
   const workspaces = { ...f.workspaces, verifyRetainedDelivery, folderCapability,
+    getDeliveryDiff: vi.fn<Workspaces['getDeliveryDiff']>(async delivery => ({ deliveryId: delivery.id, baseSha: delivery.baseSha,
+      contentIdentity: delivery.contentIdentity!, entries: [], nextCursor: null, hasMore: false })),
     createLocalCommit: vi.fn<Workspaces['createLocalCommit']>(async (delivery,effect,authorize) => {
       await authorize();
       return hasDelta ? { state: 'confirmed', receipt: { id: 'c'.repeat(40), contentIdentity: delivery.contentIdentity!, parentSha: delivery.baseSha, branchRef: effect.expectedIdentity.branchRef!, operationId: effect.operationId }, reason: null }

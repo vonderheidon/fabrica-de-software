@@ -4,6 +4,8 @@ Parte normativa da [SPEC](SPEC.md). Revisão de escopo aprovada em 2026-10-16: a
 
 ## 1. Responsabilidades e confiança
 
+Decisão do usuário em 23/10/2026, 18:37: há um único checkout de código por tentativa. Implementador, checks e Revisor trabalham alternadamente nele. Isso substitui a separação física de checkout e a criação de cópias por revisão/check nos contratos anteriores. Os papéis e suas conversas continuam separados. O papel anterior deve concluir seu resultado, ficar ocioso e ter seus processos próprios parados antes do próximo papel ou dos checks. Retomada mantém o mesmo cwd e o mesmo ID OMP do papel; outra tentativa recebe novo checkout e novas conversas. Referências Git, pareceres e evidências continuam imutáveis por versão/rodada. Conferências antes/depois recusam alteração do código durante revisão/checks, sem reset automático. Ambientes legados não são apagados nem convertidos por leitura ou restart.
+
 | Componente | Responsabilidade |
 | --- | --- |
 | Fábrica | Tentativas, despacho, checks, entrega/revisão estruturadas, histórico e seus próprios efeitos Git/GitHub |
@@ -24,7 +26,7 @@ A primeira versão inicia pelo terminal-âncora dentro do Maestri. Usar o contex
 
 Resolver o executável OMP instalado e usar argv/cwd explícitos. Consultar a ajuda da versão; EXE, CMD/BAT e shell PowerShell têm regras de quoting distintas. Não passar segredos ou prompts grandes pela linha de comando: usar arquivo de tarefa ou API suportada, sem enviar a mesma tarefa duas vezes.
 
-Uma sessão operacional por papel/passagem. Não usar OMP headless para fazer o trabalho enquanto outra TUI é decorativa. Preservar stdin/stdout do terminal, ferramentas nativas, regras, skills, LSP, comandos e mensagens. Não adotar --no-tools, --no-lsp, --no-skills ou --no-rules como política da fábrica.
+Uma sessão lógica OMP contínua por papel/tentativa, associada às passagens desse papel nas rodadas. Outra tentativa recebe sessão OMP nova. Um terminal Maestri próprio pode ser reutilizado entre tentativas somente após conferir sua identidade física e disponibilidade atual; isso não transfere conversa nem autoridade. Não usar OMP headless para fazer o trabalho enquanto outra TUI é decorativa. Preservar stdin/stdout do terminal, ferramentas nativas, regras, skills, LSP, comandos e mensagens. Não adotar --no-tools, --no-lsp, --no-skills ou --no-rules como política da fábrica.
 
 Selecionar provider/modelo/esforço exatos e conferir estado efetivo; não substituir silenciosamente o perfil. Usar autenticação normal existente, sem copiar tokens para prompts ou artefatos. Não executar chamadas de provider apenas para aprovar ambiente antes de cada tarefa.
 
@@ -129,3 +131,37 @@ MCP de fixture, resultado simulado e screenshots históricos não comprovam o pr
 - [GH CLI](https://cli.github.com/manual/): consultas e efeitos do adapter GitHub.
 
 Os estudos de SDK, isolamento MCP e supervisão Windows foram retirados do plano e da documentação ativa dos ensaios. Usar as evidências mínimas listadas no relatório atual, com seus limites; não portar mecanismos de estudo para produção sem necessidade concreta.
+
+## 10. Compatibilização V3 — decisão registrada em 2026-10-23
+
+Esta seção registra a compatibilização delimitada do contrato com o Pacote V3 de 23/10/2026, conforme o escopo explícito da sprint “Terminais próprios e ocupação segura”. Ela preserva os demais critérios INT-01–18 e não representa aceite de integração real, aprovação de fase ou autorização de efeitos externos.
+
+### Sessão por papel e tentativa
+
+**Decisão aplicada:** uma sessão lógica contínua por papel dentro da tentativa, compartilhada pelas passagens daquele papel nas rodadas; tentativa diferente recebe sessão OMP nova. Passagens e seus resultados continuam imutáveis e correlacionados à respectiva rodada/versão. Isso corresponde a US-09.C1–C4, US-10.C1–C4 e RF-41–47 da SPEC V3 datada, mantendo os demais limites INT-01–18.
+
+Proposta de mapeamento compatível:
+
+1. Introduzir identidade persistida `attempt_session` com unicidade `(attempt_id, role)`. Passagens continuam sendo unidades imutáveis de trabalho/resultado/rodada/versão e passam a referenciar essa identidade. A cadeia de `session_source_id` pode descrever continuidade entre passagens somente quando tentativa e papel coincidem.
+2. Correções do Implementador reutilizam a sessão e o ambiente da tentativa; revisões do Revisor reutilizam sua sessão separada. O Revisor não recebe autoridade para alterar o produto. Outra tentativa cria sessões lógicas e ambientes próprios, sem importar conversa, recibos ou autoridade.
+3. Separar sessão lógica de terminal físico. Um terminal gerenciado pode ser reutilizado entre tentativas somente após identidade, propriedade e ociosidade serem conferidas e a ocupação anterior estar liberada. A sessão OMP da nova tentativa continua nova. Terminal manual não é adotado; terminal ativo/incerto não é ocupado nem reiniciado.
+4. Na leitura de histórico, associar passagens antigas à sessão da tentativa somente quando tentativa, papel e encadeamento forem inequívocos. Não preencher vínculos por nome de terminal, título de issue ou proximidade temporal. Casos ambíguos permanecem legados/incompatíveis e não ganham continuidade automática.
+5. Preservar resultados, perguntas, recibos, IDs de passagem e referências históricas. Uma migration futura será aditiva e transacional; não reescrever migrations aplicadas nem transformar a conversa em snapshot. Reinício não restaura conversa: exige nova conferência do terminal/acompanhamento e mantém trabalho e resultados duráveis.
+
+**Gate de evidência:** a decisão de contrato está registrada; a ativação exige migration aditiva, fencing/ocupação e compatibilidade histórica. Isso não comprova INT real. A validação ainda exige ensaio Maestri/OMP pertinente, separado da suíte controlada, e deve observar disponibilidade física antes de reutilizar qualquer terminal.
+
+### Estratégia de transição dos diretórios — antes de qualquer movimento
+
+O V3 pede área gerenciada por projeto, mas não autoriza mover a pasta original do operador. A unidade de identidade deve ser `project_id` e uma chave estável de localização/layout versionado; nome de projeto, título de issue, caminho antigo ou nome de pasta não identificam propriedade. Banco e recursos compartilhados permanecem na raiz global da instalação. Não se fixa nesta proposta um nome final de diretório físico ainda não decidido.
+
+1. **Inventariar e classificar sem mover:** mapear cada localização e recurso exclusivo ao projeto/tentativa/passagem/versão e registrar caminho legado, identidade do objeto, proprietário, estado e consumidores. Recursos compartilhados ficam globais. Não ler conteúdo para gerar snapshots, nem persistir checkout, índice, ignorados ou caches no SQLite/JSON.
+2. **Manter leitores de compatibilidade:** criar um resolvedor por identidade e chave de localização. Referências históricas continuam apontando para seus caminhos registrados; referências novas usam a localização versionada do projeto. Atualizar, em fatias próprias, criação, execução, captura, checks, revisão, recuperação, retenção, publicação, artefatos e exclusão para consultarem o resolvedor. Leitura não escolhe outro caminho por nome nem regrava referência histórica.
+3. **Bloquear atividade incompatível:** não planejar nem executar transição enquanto houver implementação/check/revisão/publicação em uso, lançamento ou captura pendente, ocupação de terminal ativa/incerta, efeito externo incerto, exclusão concorrente ou arquivo aberto cuja identidade não possa ser conferida. Bloqueio preserva ambos os locais e informa recuperação concreta.
+4. **Planejar antes de escrever:** produzir plano fechado vinculado a projeto, revisão/geração, localizações de origem/destino, identidade observada e hash. Destino é calculado pelo host a partir do projeto/layout aprovado; a API não aceita caminho arbitrário. Confirmar autorização e persistir operação/diário e etapa antes de qualquer IO.
+5. **Executar e reconciliar por etapas:** conferir canonicalização e identidade na origem/destino sem seguir links; transportar somente recursos gerenciados identificados; conferir conteúdo/árvore ou checksum e metadados necessários no destino; atualizar localização corrente somente depois dessa confirmação. SQLite e filesystem não compartilham transação: interrupção mantém estado `unknown/blocked`, consulta ambos os lados e retoma a mesma operação sem apagar o único exemplar válido.
+6. **Preservar retenção e publicação:** refs/trees/commits Git e evidências continuam consultáveis por suas identidades imutáveis durante a transição. Publicação sempre usa a versão aprovada retida, não reconstrói conteúdo pelo caminho novo. Não coletar recurso enquanto tentativas, entregas, checks, pareceres, recibos ou evidências ainda o referenciem.
+7. **Concluir sem limpeza implícita:** manter caminho legado como localização compatível até todos os leitores, recovery, retenção, publicação e exclusão usarem o resolvedor e a operação estar reconciliada. Remoção do exemplar antigo é ação separada, com inventário/identidade atual, autorização e barreiras da exclusão; falha nunca apaga a única cópia válida. Renomear projeto não exige mover diretório.
+8. **Migrar dados sem backfill inventado:** adicionar tabelas de localizações e diário de transição em migration futura, sem mover arquivos durante migration e sem alterar linhas/referências históricas imutáveis. Registrar localização legado apenas quando o vínculo puder ser provado; valores ausentes/ambíguos ficam legados e bloqueiam operações dependentes até correção explícita.
+9. **Manter exclusão alinhada:** cada sprint que introduzir dados exclusivos deve atualizar o inventário e o finalizador da exclusão do projeto, incluindo propriedade, vínculos, retenção e ordem de remoção. A transição não pode apagar recursos globais, caminhos compartilhados ou históricos ainda referenciados.
+
+As entidades `project_storage_locations` e `project_storage_transitions` descritas na SPEC V3 são uma proposta técnica coerente com este diário; sua presença no documento não significa que existam na migration atual ou que a transição esteja implementada. Nenhum movimento deve ocorrer antes de decisão, migrations, atualização de todos os leitores e prova de recuperação parcial/reinício.

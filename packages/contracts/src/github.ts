@@ -16,7 +16,7 @@ export const GitHubProjectOwner = Type.Object({
   kind: Type.Union([Type.Literal('user'), Type.Literal('organization')]), login: RepositoryReference.properties.owner,
 }, closed);
 export type GitHubProjectOwner = Static<typeof GitHubProjectOwner>;
-export const GitHubProjectSelection = Type.Object({ id: GitHubId, statusFieldId: GitHubId, statusOptionIds: Type.Array(GitHubId, { maxItems: 100 }) }, closed);
+export const GitHubProjectSelection = Type.Object({ id: GitHubId, statusFieldId: GitHubId, statusOptionIds: Type.Array(GitHubId, { minItems: 5, maxItems: 5 }) }, closed);
 export type GitHubProjectSelection = Static<typeof GitHubProjectSelection>;
 export const GitHubRepository = Type.Object({
   id: GitHubId, owner: GitHubAccount, name: text(100), url: text(),
@@ -43,7 +43,7 @@ export const GitHubDiagnostic = Type.Object({
   code: Type.Union(([
     'CONTEXT_UNAVAILABLE', 'AUTHENTICATION_INVALID', 'RATE_LIMITED', 'ACCESS_DENIED', 'NOT_FOUND_OR_INACCESSIBLE',
     'RESPONSE_INVALID', 'CLI_UNAVAILABLE', 'QUERY_FAILED', 'QUERY_LIMIT', 'PAGINATION_INVALID', 'REFERENCE_INACCESSIBLE',
-    'STATUS_FIELD_INACCESSIBLE', 'STATUS_OPTION_INACCESSIBLE', 'INPUT_INVALID', 'BRANCH_NOT_FOUND',
+    'STATUS_FIELD_INACCESSIBLE', 'STATUS_OPTION_INACCESSIBLE', 'STATUS_MAPPING_INCOMPATIBLE', 'INPUT_INVALID', 'BRANCH_NOT_FOUND',
   ] as const).map((code) => Type.Literal(code))),
   message: text(2048), recovery: text(2048),
 }, closed);

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { attemptFixture, type AttemptFixture } from '../../../../../tests/fixtures/attempt.js';
+import { attemptFixture, confirmTerminalStops, type AttemptFixture } from '../../../../../tests/fixtures/attempt.js';
 import { projectConfigurationLock } from './project-configuration-lock.js';
 
 let fixture: AttemptFixture | undefined;
@@ -43,7 +43,7 @@ describe('project configuration execution barrier', () => {
     const operation = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
     f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(operation.resource.id);
     expect(projectConfigurationLock(f.db, f.projectId)).not.toBeNull();
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(operation.resource.id);
+    confirmTerminalStops(f, operation.resource.id);
     expect(projectConfigurationLock(f.db, f.projectId)).toBeNull();
     expect(() => f.storage.saveConfiguration(command(f))).not.toThrow();
   });
@@ -53,7 +53,7 @@ describe('project configuration execution barrier', () => {
     const operation = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
     const attemptId = operation.resource.id;
     f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(attemptId);
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(attemptId);
+    confirmTerminalStops(f, attemptId);
     const accept = () => {
       const operationId = randomUUID(); const attempt = f.storage.getAttempt(attemptId);
       f.storage.acceptPublication({ operationId, attemptId, kind: 'attempt.revalidate', body: {}, expectedRevision: `"${attemptId}:${attempt.revision}"` });

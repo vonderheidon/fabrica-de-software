@@ -9,7 +9,7 @@ export { VerificationError } from './artifacts.js';
 export { verificationLimits } from './runner.js';
 
 export interface VerificationOptions {
-  storage: Storage; workspaces: Pick<Workspaces, 'materializeCheck'>; dataDirectory: string;
+  storage: Storage; workspaces: Pick<Workspaces, 'materializeCheck'> & Partial<Pick<Workspaces, 'resolveAttemptRoot'>>; dataDirectory: string;
   logFailure: (code: string) => void;
 }
 /** Resolve each segment: lexical containment alone does not reject junctions. */
@@ -29,7 +29,7 @@ export async function checkDirectory(root: string, relative: string, canonicaliz
 }
 /** Internal seams let contract tests replace effects without adding HTTP command/upload APIs. */
 export function createVerification(options: VerificationOptions, seams: { runner?: CheckRunner; canonicalize?: (p: string) => Promise<string> } = {}) {
-  const { storage, workspaces } = options; const files = createArtifacts(options.dataDirectory, seams.canonicalize);
+  const { storage, workspaces } = options; const files = createArtifacts(options.dataDirectory, seams.canonicalize, workspaces.resolveAttemptRoot);
   const runner = seams.runner ?? runCheck;
   return {
     async verifyDelivery(deliveryId: string, signal: AbortSignal): Promise<void> {
@@ -51,6 +51,7 @@ export function createVerification(options: VerificationOptions, seams: { runner
             const result = await runner(check.definition.command, cwd, check.timeoutMs, signal);
             execution = result;
             stopUnconfirmed = result.diagnostic?.includes('STOP_UNCONFIRMED') ?? false;
+            if (!stopUnconfirmed) await workspaces.materializeCheck(plan.delivery, check.id);
             const output = sanitizeCheckOutput(result.output);
             if (output.length > 1_048_576) throw new VerificationError('ARTIFACT_OUTPUT_LIMIT');
             const artifact = await files.write({ attemptId: plan.delivery.attemptId, deliveryId, checkId: check.id }, output);

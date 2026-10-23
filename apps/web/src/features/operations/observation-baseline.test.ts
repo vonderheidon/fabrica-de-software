@@ -16,7 +16,7 @@ const automationEnabled = process.env.OBSERVATION_AUTOMATION === 'enabled';
 const page = { items: [], next_cursor: null, has_more: false, event_cursor: '1' };
 const onboarding: OnboardingController = {
   load: { snapshot: null, loading: false, refreshing: false, error: null }, operation: { status: 'idle' }, busy: false,
-  refresh: async () => null, saveProjectsRoot: async () => {}, complete: async () => {}, suppress: async () => {}, recover: async () => {},
+  refresh: async () => null, saveProjectsRoot: async () => {}, complete: async () => {}, suppress: async () => {}, saveTool: async () => {}, recover: async () => {},
 };
 function operation(login = 'synthetic-account'): HttpOperationSummary {
   return { account: { id: 'account', login, observed_id: 'account', observed_at_ms: epoch },

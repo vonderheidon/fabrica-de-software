@@ -1,15 +1,22 @@
 import { DeletionSummary } from './deletion-summary.js';
-import { Type, type Static } from '@sinclair/typebox';
+import { Kind, Type, TypeRegistry, type Static } from '@sinclair/typebox';
 import { ArtifactPolicy, Capability, DeliveryMode, FactorySettings, OperationId, OperationReceipt, OperationWarning, Page, TimeDefaults } from './base.js';
 import { GitHubDiagnostic, GitHubProject, GitHubProjectOwner, StatusField } from './github.js';
 import { AccountBinding } from './github-setup.js';
-import { OriginSource } from './workspaces.js';
+import { OriginSource, ProjectStorageView } from './workspaces.js';
 
 const closed = { additionalProperties: false } as const;
 const text = (maxLength = 2048) => Type.String({ minLength: 1, maxLength, pattern: '.*\\S.*' });
 const nullable = (maxLength = 256) => Type.Union([text(maxLength), Type.Null()]);
 const revision = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const timestamp = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
+export const V3StatusMapping = [
+  { key: 'backlog', name: 'Backlog' },
+  { key: 'ready', name: 'Ready' },
+  { key: 'in_progress', name: 'In progress' },
+  { key: 'in_review', name: 'In review' },
+  { key: 'delivered', name: 'Done' },
+] as const;
 export const ProfileType = Type.Union([Type.Literal('implementer'), Type.Literal('reviewer')]);
 export type ProfileType = Static<typeof ProfileType>;
 /** Versioned value used by existing snapshots and the private executor protocol. */
@@ -18,6 +25,10 @@ export const ExecutionProfileValue = Type.Object({
   provider: text(256), model: text(256), effort: nullable(128), guidance: Type.String({ maxLength: 8192 }),
 }, closed);
 export type ExecutionProfileValue = Static<typeof ExecutionProfileValue>;
+export const ComposedExecutionProfileValue = Type.Object({ ...ExecutionProfileValue.properties,
+  composition_version: Type.Union([revision, Type.Null()]),
+}, closed);
+export type ComposedExecutionProfileValue = Static<typeof ComposedExecutionProfileValue>;
 export const ExecutionProfile = Type.Object({
   name: text(256), profile_type: ProfileType, executor: Type.Literal('maestri-omp'),
   provider: text(256), model: text(256), effort: nullable(128), guidance: Type.String({ maxLength: 8192 }),
@@ -49,9 +60,11 @@ export const ProfileChanges = Type.Array(Type.Union([
   Type.Object({ action: Type.Literal('delete'), id: OperationId }, closed),
 ]), { maxItems: 100 });
 export type ProfileChanges = Static<typeof ProfileChanges>;
-export const StoredExecutionProfile = Type.Object({ ...ExecutionProfile.properties, id: OperationId, revision, created_at_ms: timestamp, updated_at_ms: timestamp }, closed);
+export const StoredExecutionProfile = Type.Object({ ...ExecutionProfile.properties, id: OperationId, revision, created_at_ms: timestamp,
+  updated_at_ms: timestamp, composition_version: Type.Union([revision, Type.Null()]) }, closed);
 export type StoredExecutionProfile = Static<typeof StoredExecutionProfile>;
-export const StoredExecutionProfileValue = Type.Object({ ...ExecutionProfileValue.properties, id: OperationId, revision, created_at_ms: timestamp, updated_at_ms: timestamp }, closed);
+export const StoredExecutionProfileValue = Type.Object({ ...ExecutionProfileValue.properties, id: OperationId, revision, created_at_ms: timestamp,
+  updated_at_ms: timestamp, composition_version: Type.Optional(Type.Union([revision, Type.Null()])) }, closed);
 export type StoredExecutionProfileValue = Static<typeof StoredExecutionProfileValue>;
 export const ProfileCounts = Type.Object({
   all: Type.Integer({ minimum: 0, maximum: 100 }),
@@ -91,34 +104,74 @@ export const GlobalChanges = Type.Partial(Type.Object({
   time_defaults: Type.Partial(TimeDefaults), artifact_policy: Type.Partial(ArtifactPolicy),
 }, closed));
 export type GlobalChanges = Static<typeof GlobalChanges>;
+export const NativeSelectionKind = Type.Union([
+  'projects_root', 'project_directory', 'gh_executable', 'git_executable',
+  'maestri_executable', 'omp_executable', 'powershell_executable',
+].map((kind) => Type.Literal(kind)));
+export type NativeSelectionKind = Static<typeof NativeSelectionKind>;
+export const NativeSelectionRequest = Type.Object({ kind: NativeSelectionKind }, closed);
+export type NativeSelectionRequest = Static<typeof NativeSelectionRequest>;
+export const NativeSelectionResult = Type.Union([
+  Type.Object({ state: Type.Literal('cancelled'), kind: NativeSelectionKind }, closed),
+  Type.Object({ state: Type.Literal('unavailable'), kind: NativeSelectionKind, diagnostic: text(128) }, closed),
+  Type.Object({ state: Type.Literal('selected'), kind: NativeSelectionKind, path: text(32768), observed_at_ms: timestamp }, closed),
+]);
+export type NativeSelectionResult = Static<typeof NativeSelectionResult>;
+const ToolPreference = Type.Object({ preferred_path: Type.Union([Type.Null(), text(32768)]), last_validated_at_ms: Type.Union([Type.Null(), timestamp]) }, closed);
+export const ToolPreferences = Type.Object({ format_version: Type.Literal(1), git: ToolPreference, maestri: ToolPreference, omp: ToolPreference, powershell: ToolPreference }, closed);
+export type ToolPreferences = Static<typeof ToolPreferences>;
 export const SettingsUpdate = Type.Object({
   changes: GlobalChanges,
   onboarding_changes: Type.Optional(OnboardingChanges),
   profile_changes: Type.Optional(ProfileChanges),
-  // Persisting a GitHub CLI executable is an isolated settings command.
+  // Executable preference changes are isolated settings commands.
   gh_executable_path: Type.Optional(text(4096)),
   account_binding: Type.Optional(AccountBinding),
+  tool_preferences: Type.Optional(ToolPreferences),
 }, closed);
 export type SettingsUpdate = Static<typeof SettingsUpdate>;
-export const NativeSelectionRequest = Type.Object({ kind: Type.Union([Type.Literal('projects_root'), Type.Literal('project_directory'), Type.Literal('gh_executable')]) }, closed);
-export type NativeSelectionRequest = Static<typeof NativeSelectionRequest>;
-export const NativeSelectionResult = Type.Union([
-  Type.Object({ state: Type.Literal('selected'), kind: NativeSelectionRequest.properties.kind, path: text(4096), observed_at_ms: timestamp }, closed),
-  Type.Object({ state: Type.Literal('cancelled'), kind: NativeSelectionRequest.properties.kind, path: Type.Null() }, closed),
-  Type.Object({ state: Type.Literal('unavailable'), kind: NativeSelectionRequest.properties.kind, path: Type.Null(), diagnostic: text(128) }, closed),
-]);
-export type NativeSelectionResult = Static<typeof NativeSelectionResult>;
+export const ToolCandidate = Type.Object({ path: text(32768), version: text(256) }, closed);
+export const ToolOption = Type.Object({
+  state: Type.Union(['available', 'unavailable', 'ambiguous'].map((value) => Type.Literal(value))),
+  candidates: Type.Array(ToolCandidate, { maxItems: 8 }),
+  selected_path: Type.Union([Type.Null(), text(32768)]),
+  diagnostic: Type.Union([Type.Null(), text(128)]), recovery: Type.String({ maxLength: 512 }),
+}, closed);
+export const ToolOptions = Type.Object({
+  tools: Type.Object({ git: ToolOption, maestri: ToolOption, omp: ToolOption, powershell: ToolOption, gh: ToolOption }, closed),
+  maestri_connection: Type.Object({ state: Type.Union(['connected', 'unavailable', 'not_checked'].map((value) => Type.Literal(value))), diagnostic: Type.Union([Type.Null(), text(128)]) }, closed),
+  observed_at_ms: timestamp,
+}, closed);
+export type ToolOptions = Static<typeof ToolOptions>;
 export const CheckDefinition = Type.Object({
   id: text(128), command: text(4096), cwd_relative: Type.String({ minLength: 1, maxLength: 4096 }),
   timeout_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647 })),
 }, closed);
 export type CheckDefinition = Static<typeof CheckDefinition>;
-export const StatusOptionIds = Type.Object({ ready: text(256), in_progress: text(256), in_review: text(256), delivered: text(256) }, closed);
-export const ProjectMapping = Type.Object({ id: text(256), owner_id: text(256), status_field_id: text(256), status_option_ids: StatusOptionIds }, closed);
+export const LegacyStatusOptionIds = Type.Object({ ready: text(256), in_progress: text(256), in_review: text(256), delivered: text(256) }, closed);
+export const StatusOptionIds = Type.Object({ backlog: text(256), ...LegacyStatusOptionIds.properties }, closed);
+const ProjectMappingShape = Type.Object({ id: text(256), owner_id: text(256), status_field_id: text(256), status_option_ids: StatusOptionIds }, closed);
+const ProjectMappingDistinctKind = 'ProjectMappingDistinctOptionIds';
+TypeRegistry.Set(ProjectMappingDistinctKind, (_schema, value) => {
+  if (typeof value !== 'object' || value === null || !('status_option_ids' in value)) return false;
+  const options = value.status_option_ids;
+  if (typeof options !== 'object' || options === null || !('backlog' in options) || !('ready' in options) ||
+      !('in_progress' in options) || !('in_review' in options) || !('delivered' in options)) return false;
+  const ids = [options.backlog, options.ready, options.in_progress, options.in_review, options.delivered];
+  if (!ids.every(id => typeof id === 'string')) return false;
+  return new Set(ids).size === 5;
+});
+const ProjectMappingDistinctConstraint = Type.Unsafe({ [Kind]: ProjectMappingDistinctKind, type: 'object' });
+export const ProjectMapping = Type.Intersect([ProjectMappingShape, ProjectMappingDistinctConstraint]);
+export type ProjectMapping = Static<typeof ProjectMapping>;
+export const LegacyProjectMapping = Type.Object({ id: text(256), owner_id: text(256), status_field_id: text(256), status_option_ids: LegacyStatusOptionIds }, closed);
+export type LegacyProjectMapping = Static<typeof LegacyProjectMapping>;
+export const ReadProjectMapping = Type.Union([ProjectMapping, LegacyProjectMapping]);
+export type ReadProjectMapping = Static<typeof ReadProjectMapping>;
 export const QueueOrder = Type.Object({ priority_field_id: nullable(), priority_direction: Type.Union([Type.Literal('asc'), Type.Literal('desc')]), use_board_position: Type.Boolean() }, closed);
 export const ProjectConfiguration = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repository_id: Type.Optional(text(256)), repository_url: Type.Optional(text(4096)) }, closed),
-  base_branch: text(1024), github_project: Type.Union([ProjectMapping, Type.Null()]),
+  base_branch: text(1024), github_project: Type.Union([ReadProjectMapping, Type.Null()]),
   implementer_profile_id: Type.Union([OperationId, Type.Null()]), reviewer_profile_id: Type.Union([OperationId, Type.Null()]),
   checks: Type.Array(CheckDefinition, { maxItems: 50 }), correction_limit: Type.Integer({ minimum: 0, maximum: 5 }),
   default_delivery_mode: DeliveryMode, automation_enabled: Type.Boolean(), queue_order: QueueOrder,
@@ -126,7 +179,8 @@ export const ProjectConfiguration = Type.Object({
 }, closed);
 export type ProjectConfiguration = Static<typeof ProjectConfiguration>;
 export const ProjectChanges = Type.Partial(Type.Object({
-  ...ProjectConfiguration.properties, source: OriginSource, queue_order: Type.Partial(QueueOrder),
+  ...ProjectConfiguration.properties, github_project: Type.Union([ProjectMapping, Type.Null()]),
+  source: OriginSource, queue_order: Type.Partial(QueueOrder),
 }, closed));
 export type ProjectChanges = Static<typeof ProjectChanges>;
 export const ConfigurationUpdate = Type.Object({ project_changes: ProjectChanges, global_changes: Type.Optional(GlobalChanges), profile_changes: Type.Optional(ProfileChanges) }, closed);
@@ -176,6 +230,7 @@ export const SettingsView = Type.Object({
   onboarding: OnboardingView,
   selection_capabilities: SelectionCapabilities,
   event_cursor: cursor,
+  tool_preferences: ToolPreferences,
 }, closed);
 export type SettingsView = Static<typeof SettingsView>;
 export const SettingsSaved = Type.Object({
@@ -183,7 +238,7 @@ export const SettingsSaved = Type.Object({
   warnings: Type.Optional(Type.Array(OperationWarning, { maxItems: 10 })),
 }, closed);
 export type SettingsSaved = Static<typeof SettingsSaved>;
-export const ConfigurationView = Type.Object({ deletion, configuration_lock: Type.Optional(Type.Union([Type.Object({ attempt_id: Type.String() }, closed), Type.Null()])), configuration: ProjectRevision, ...SettingsView.properties, prerequisites: Type.Array(Prerequisite) }, closed);
+export const ConfigurationView = Type.Object({ deletion, configuration_lock: Type.Optional(Type.Union([Type.Object({ attempt_id: Type.String() }, closed), Type.Null()])), configuration: ProjectRevision, storage: ProjectStorageView, ...SettingsView.properties, prerequisites: Type.Array(Prerequisite) }, closed);
 export type ConfigurationView = Static<typeof ConfigurationView>;
 export const ConfigurationSaved = Type.Object({ ...ConfigurationView.properties, operation_id: OperationId, receipt: OperationReceipt }, closed);
 export type ConfigurationSaved = Static<typeof ConfigurationSaved>;

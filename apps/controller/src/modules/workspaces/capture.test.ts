@@ -9,6 +9,33 @@ afterEach(async () => { for (const path of paths.splice(0)) await rm(path, { rec
 async function captureFixture() { const f = await createFixture(); paths.push(f.root); return f; }
 
 describe('capture with controlled Git and real filesystem', () => {
+  it('compares the current retained review version to its immediate predecessor and verifies both refs', async () => {
+    const f = await captureFixture();
+    const first = await f.capture(f.input); const previous = delivery(f.input, first);
+    await writeFile(join(f.implementation, 'tracked.txt'), 'second review version\n');
+    const input = { ...f.input, deliveryId: randomUUID(), passageId: randomUUID() };
+    const second = await f.capture(input); const current = { ...delivery(input, second), round: 2 };
+    const oldOid = f.trees.get(first.contentIdentity)!.get('tracked.txt')!;
+    const newOid = f.trees.get(second.contentIdentity)!.get('tracked.txt')!;
+    const commands: string[][] = [];
+    const diff = createDeliveryDiff(f.root, async (cwd, args, options) => {
+      if (!args.includes('diff')) return f.run(cwd, args, options);
+      commands.push([...args]);
+      expect(args).toContain(previous.commitSha);
+      expect(args).toContain(current.gitRef);
+      expect(args).not.toContain(current.baseSha);
+      if (args.includes('--raw')) return { exitCode: 0, stdout: `:100644 100644 ${oldOid} ${newOid} M\0tracked.txt\0` };
+      if (args.includes('--numstat')) return { exitCode: 0, stdout: '1\t1\ttracked.txt\0' };
+      return { exitCode: 0, stdout: '-changed tracked bytes\n+second review version\n' };
+    }, async path => path);
+    const page = await diff(current, {}, previous);
+    expect(page.baseSha).toBe(previous.commitSha);
+    expect(page.entries).toMatchObject([{ path: 'tracked.txt', patch: expect.stringContaining('second review version') }]);
+    expect(commands).toHaveLength(3);
+    await expect(diff(current, {}, { ...previous, attemptId: randomUUID() })).rejects.toThrow('DIFF_INPUT_INVALID');
+    f.refs.set(previous.gitRef!, 'f'.repeat(40));
+    await expect(diff(current, {}, previous)).rejects.toThrow('DELIVERY_INTEGRITY_FAILED');
+  });
   it('preserves executable modes from the implementation index when core.filemode is false', async () => {
     const f = await captureFixture(); f.setExecutable('tracked.txt');
     const result = await f.capture(f.input); expect(f.treeModes.get(result.contentIdentity)?.get('tracked.txt')).toBe('100755');

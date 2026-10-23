@@ -1,0 +1,130 @@
+{
+  "criterion": "feat-010-c3",
+  "date": "2026-10-23T15:04:12.288Z",
+  "reviewer": "independent Playwright MCP browser_review",
+  "result": "passed_desktop_rendered_journey",
+  "browser": "Playwright MCP / Chrome test profile",
+  "origin": "http://127.0.0.1:4310",
+  "distribution": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software\\build\\Fábrica distribuição-F1dAkt",
+  "installationId": "674068a8-1819-49ee-b6dd-3537176e2600",
+  "server": {
+    "entrypoint": "scripts/start-host.mjs",
+    "physicalProcesses": 2,
+    "sessions": [
+      7638,
+      72937
+    ],
+    "cleanInitialDatabase": true,
+    "pathRestriction": "PATH empty only in test controller subprocess; GH_PATH and Maestri/OMP context removed",
+    "operationalInstallationTouched": false
+  },
+  "nativeTool": {
+    "name": "Git",
+    "version": "2.55.0.windows.2",
+    "source": "C:/Program Files/Git/mingw64/bin/git.exe plus runtime DLLs",
+    "isolatedPath": ".cache/tools-browser-proof/git-runtime/git.exe",
+    "probe": "--version only",
+    "disappearance": "renamed isolated exe after stopping first controller; second controller started same distribution and SQLite; restored after missing-path assertions"
+  },
+  "assertions": {
+    "cleanWizardRendered": true,
+    "fiveMissingToolsOfferManualCorrection": true,
+    "invalidSaveKeepsWizardAndDraft": true,
+    "validManualChoicePersisted": true,
+    "validToolUsesSummaryWithoutManualInput": true,
+    "closeAndReopenPreservesChoice": true,
+    "physicalStopConfirmedByConnectionRefused": true,
+    "physicalRestartPreservesInstallationIdentity": true,
+    "physicalRestartPreservesPreferredPath": true,
+    "missingSavedPathRenderedWithCauseAndRecovery": true,
+    "redetectionPreservesKeyboardDraft": true,
+    "restoringBinaryRevalidatesSavedPreference": true
+  },
+  "separateValidation": {
+    "maestriOmpRealConnection": "NOT_EXECUTED",
+    "provider": "NOT_EXECUTED",
+    "nativeFilePicker": "NOT_EXECUTED",
+    "lateResponses": "existing deterministic unit coverage, not delayed in native proof",
+    "mobile": "NOT_ACCEPTED: horizontal overflow and clipped modal content at 390x844; screenshot 06",
+    "technical": "Parent reran typecheck, lint, build, 43 tests in 5 files and distribution smoke: exit 0"
+  },
+  "screenshots": [
+    {
+      "file": "01-clean-install.png",
+      "sha256": "a77e5672f2c9edbb8760e54344f677e9aec73a54026112696e35a0b6b503fde7",
+      "note": "Long element clipped by modal viewport; supplementary only"
+    },
+    {
+      "file": "02-failed-save-draft.png",
+      "sha256": "3ff62af6d31ce94d897d7151a30292b74dcde0d98d685ea660b46b831c61d629",
+      "note": "Long element clipped by modal viewport; supplementary only"
+    },
+    {
+      "file": "03-manual-correction-saved.png",
+      "sha256": "8c041296adf16aeb7fd3e8bb5f12f4c0ab0ddc1d1f46ca2271b34cb49ab3d089",
+      "note": "Long element clipped by modal viewport; supplementary only"
+    },
+    {
+      "file": "04-reopened.png",
+      "sha256": "47aeed729d1c2d008cbc96fd01bd210f0af071cd5879a08830648f3b59884591",
+      "note": "Long element clipped by modal viewport; supplementary only"
+    },
+    {
+      "file": "05-physical-restart-missing-path.png",
+      "sha256": "843921f640487c556a0de9b2fe77607a634a07da53fcdd18062de35dec8d02ce",
+      "note": "Long element clipped by modal viewport; supplementary only"
+    },
+    {
+      "file": "06-mobile-keyboard.png",
+      "sha256": "739c9970207972c2f007140367600039d4389c2c845033ebef4c1eaf7b456e2b",
+      "note": "Mobile limitation observed"
+    },
+    {
+      "file": "07-desktop-restart-viewport.png",
+      "sha256": "b25c10ccba202776f4c283b927c639703735ba45783a676443d7ddc63ec06b68",
+      "note": "Visually inspected desktop evidence"
+    },
+    {
+      "file": "08-missing-git-detail.png",
+      "sha256": "37d30746560fd2b4294d587d5ec5210beb3dfbf32ed12fce30f5030333e8de43",
+      "note": "Visually inspected desktop evidence"
+    },
+    {
+      "file": "09-valid-git-detail.png",
+      "sha256": "0998c57a8f041670b6c53369271c1a2462329ceffb821af901f3a16d0e74d51a",
+      "note": "Visually inspected desktop evidence"
+    },
+    {
+      "file": "10-valid-git-viewport.png",
+      "sha256": "4be38f293388b781986e6811f725b76ffc957c846ac53debc71dd96b1256b8df",
+      "note": "Visually inspected desktop evidence"
+    }
+  ],
+  "fixedVersion": {
+    "controllerSha256": "c07648a966375648d9492d0e24a515fca294a47c284918a9736549c3477079c1",
+    "webIndexSha256": "910af000b1ebd762e7eb6cbd4d7becf4b5c0ce7206d0fd36c988fe9ff907985e",
+    "webAssets": [
+      {
+        "file": "index-CFNqIhoD.css",
+        "sha256": "45ca198fc68c1602f6dfa2d48042215bec5ce0e2ed970133baf37af028b6bbd6"
+      },
+      {
+        "file": "index-Dc9nHJU9.js",
+        "sha256": "0616c2a3fbd62153c364634797b799609d2e1c50d85a0bc24161f9019e73e5f6"
+      }
+    ]
+  },
+  "cleanup": {
+    "browserClosed": true,
+    "controllersStopped": true,
+    "isolatedExecutableRestored": true
+  },
+  "reproduction": [
+    "npm.cmd run build",
+    "node scripts/package-distribution.mjs",
+    "Launch packaged scripts/start-host.mjs with absolute node.exe, FACTORY_PORT=4310 and PATH empty in subprocess only",
+    "Use Playwright MCP: navigate; assert clean tool inputs; invalid Git path save; assert retained draft; fill isolated real Git path; validate/save; assert summary; close/reopen wizard",
+    "Stop own controller with Ctrl+C; assert health connection refused; rename only isolated git.exe; restart identical package; reload Chrome; assert installation id and saved preference plus missing-path recovery",
+    "Restore isolated executable; redetect; assert automatic summary; close browser and own controller"
+  ]
+}

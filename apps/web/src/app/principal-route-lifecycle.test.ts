@@ -19,7 +19,7 @@ it('keeps the mounted screen usable when an invalid route is entered and correct
     load: { snapshot: null, loading: false, refreshing: false, error: null },
     operation: { status: 'idle' }, busy: false,
     refresh: async () => null, saveProjectsRoot: async () => {}, complete: async () => {},
-    suppress: async () => {}, recover: async () => {},
+    suppress: async () => {}, saveTool: async () => {}, recover: async () => {},
   };
   const render = async (hash: string) => {
     await act(async () => root.render(createElement(PrincipalScreen, {

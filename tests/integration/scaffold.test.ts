@@ -5,8 +5,8 @@ import { dirname, join, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { HttpScaffoldPlanned, HttpCreationView, HttpScaffoldOptions, CreationView, ScaffoldOptions, ScaffoldPlanned, type CreateScaffold, type ScaffoldInput, type SessionResponse } from '#contracts';
-import { toHttpScaffoldInput, toHttpCreateScaffold, toHttpCreationView } from '../../apps/controller/src/http/observation-views.js';
+import { HttpCreationView, HttpScaffoldOptions, CreationView, ScaffoldOptions, ScaffoldPlanned, type CreateScaffold, type ScaffoldInput, type SessionResponse } from '#contracts';
+import { toHttpScaffoldPlan, toHttpCreationView } from '../../apps/controller/src/http/observation-views.js';
 import { createScaffold } from '../../apps/controller/src/modules/projects/index.js';
 import { loadScaffoldCatalog, renderEngineering, renderScaffoldReadme } from '../../apps/controller/src/modules/projects/scaffold-resources.js';
 import { createLocalScaffolder } from '../../apps/controller/src/modules/workspaces/scaffold.js';
@@ -99,7 +99,7 @@ describe('local scaffold planning and durable creation (controlled Git and canon
   });
   it('returns versioned options and a deterministic plan with no destination or Git effects', async () => {
     const f = fixture(); const before = f.storage.getEvents({}); const options = await f.scaffold.getOptions(); expect(Value.Check(ScaffoldOptions,options)).toBe(true);
-    expect(options.creationModes.map(m => m.capability.available)).toEqual([true,false,false]);
+    expect(options.creationModes.map(m => m.capability.available)).toEqual([false]);
     const input = await choices(f); const first = await f.scaffold.plan(input); const second = await f.scaffold.plan(input);
     expect(Value.Check(ScaffoldPlanned,first)).toBe(true); expect(first).toEqual(second);
     expect(first.plan).toMatchObject({ destination: join(f.projectsRoot,'new-project'), ownerId: null, engineering: { tracker: 'github', installsSkills: false, createsLabels: false }, account: { id: 'fixture-user' } });
@@ -266,11 +266,11 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const receipt = saveTimeDefaults(db,{ operationId,expectedRevision: settingsETag(identity,old.revision),timeDefaults: { ...old.time_defaults,polling_interval_ms: 2000 } });
     expect(db.pragma('user_version',{ simple: true })).toBe(12); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(27);
+    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(34);
     expect(reopened.getOperation(operationId)).toEqual(receipt); expect(reopened.listProjects({}).items).toEqual([]);
     const probe = new Database(join(directory,'factory.sqlite')); try { expect(probe.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 }); expect(probe.pragma('foreign_key_check')).toEqual([]); } finally { probe.close(); }
   });
-  it('serves authenticated options/plans/creation resources with durable operation lookup', async () => {
+  it('serves only the complete mode and rejects legacy creation input at the HTTP boundary', async () => {
     const f = fixture(); const configuration = loadConfiguration({ FACTORY_DATA_DIR: join(f.directory,'data'), FACTORY_LOG_LEVEL: 'silent' },f.directory);
     const app = createApp(configuration,f.storage,undefined,undefined,undefined,undefined,{ github: f.github,workspaces: f.workspaces }); cleanup.push(() => app.close());
     expect((await app.inject({ url: '/api/v1/scaffold/options',headers: { host: '127.0.0.1:4310' } })).statusCode).toBe(401);
@@ -278,12 +278,16 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const session = await app.inject({ method: 'POST',url: '/api/v1/session',headers,payload: {} });
     const authenticated = { ...headers,cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrf_token };
     const options = await app.inject({ url: '/api/v1/scaffold/options',headers: authenticated }); expect(options.statusCode).toBe(200); expect(Value.Check(HttpScaffoldOptions, options.json())).toBe(true);
-    const planned = await app.inject({ method: 'POST',url: '/api/v1/scaffold/plans',headers: authenticated,payload: toHttpScaffoldInput(await choices(f)) }); expect(planned.statusCode).toBe(200);
-    const plan = planned.json<HttpScaffoldPlanned>();
-    const created = await app.inject({ method: 'POST',url: '/api/v1/scaffold/creations',headers: { ...authenticated,'idempotency-key': randomUUID() },payload: { plan_hash: plan.plan_hash,plan: plan.plan,authorized: true } }); expect(created.statusCode).toBe(202);
-    const creationId = created.json<{ resource: { id: string } }>().resource.id;
-    const detail = await app.inject({ url: `/api/v1/scaffold/creations/${creationId}`,headers: authenticated }); expect(detail.statusCode).toBe(200); expect(Value.Check(HttpCreationView, detail.json())).toBe(true); expect(detail.headers.etag).toBeDefined();
-    expect((await app.inject({ url: String(created.headers.location),headers: authenticated })).statusCode).toBe(200);
+    expect(options.json<HttpScaffoldOptions>().creation_modes.map(item => item.mode)).toEqual(['remote_push']);
+    const priorOperations = f.db.prepare('SELECT count(*) AS n FROM operation_requests').get();
+    const local = await choices(f);
+    const planned = await app.inject({ method: 'POST',url: '/api/v1/scaffold/plans',headers: authenticated,payload: {
+      name: local.name,template_id: local.templateId,template_digest: local.templateDigest,destination_relative: local.destinationRelative,
+      creation_mode: 'local',base_branch: local.baseBranch,triage_enabled: true,
+    } });
+    expect(planned.statusCode).toBe(400);
+    expect(f.db.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 });
+    expect(f.db.prepare('SELECT count(*) AS n FROM operation_requests').get()).toEqual(priorOperations);
   });
 });
 
@@ -351,16 +355,14 @@ it('preserves historical private plans and receipts while replaying the normaliz
   const headers = { ...base, cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrf_token, 'idempotency-key': id };
   const snapshot = () => ({ creations: f.db.prepare('SELECT * FROM project_creations').all(), operations: f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all(), effects: f.db.prepare('SELECT * FROM effects ORDER BY operation_id').all() });
   const before = snapshot(); const calls = f.calls.length; const changes = f.db.prepare('SELECT total_changes() AS n').get();
-  const canonical = toHttpCreateScaffold(body);
-  for (const payload of [body, { ...canonical, planHash: body.planHash }, { ...canonical, plan: { ...canonical.plan, settingsETag: body.plan.settingsETag } }, { ...canonical, plan: { ...canonical.plan, input: { ...canonical.plan.input, templateId: input.templateId } } }]) {
-    expect((await app.inject({ method: 'POST', url: '/api/v1/scaffold/creations', headers, payload })).statusCode).toBe(400);
-  }
-  const replay = await app.inject({ method: 'POST', url: '/api/v1/scaffold/creations', headers, payload: canonical });
-  expect(replay.statusCode, replay.body).toBe(202); expect(replay.json().receipt).toEqual(accepted.receipt);
+  const legacyCommand = { plan_hash: body.planHash, plan: toHttpScaffoldPlan(body.plan), authorized: true };
+  const rejected = await app.inject({ method: 'POST', url: '/api/v1/scaffold/creations', headers, payload: legacyCommand });
+  expect(rejected.statusCode).toBe(400);
   const read = await app.inject({ url: '/api/v1/scaffold/creations/'+accepted.resource.id, headers });
   expect(Value.Check(HttpCreationView, read.json())).toBe(true);
   const view = read.json<HttpCreationView>();
   expect(view.creation).toMatchObject({ operation_id: id, plan_hash: planned.planHash, plan: { format_version: 1, input: { name: input.name }, settings_e_tag: body.plan.settingsETag } });
+  expect(view.creation.plan.input).not.toHaveProperty('board_name'); expect(view.board_name).toBeNull();
   expect(snapshot()).toEqual(before); expect(f.calls).toHaveLength(calls); expect(f.db.prepare('SELECT total_changes() AS n').get()).toEqual(changes);
   const raw = f.db.prepare<[string], { plan_json: string }>('SELECT plan_json FROM project_creations WHERE id=?').get(accepted.resource.id)!;
   expect(JSON.parse(raw.plan_json)).toEqual(body.plan);

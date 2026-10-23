@@ -1,4 +1,5 @@
 import { CustomSelect } from '../../app/CustomSelect.js';
+import { configurationBodyLimit, configurationBodyLimitMessage } from '../../api/configuration-body.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { ConfigurationSaved, ExecutionCatalog, ExecutionProfile, ProfileType, SettingsSaved, StoredExecutionProfile } from '#contracts';
 import { finishConfigurationSave, retainConfigurationSave, consultConfigurationSave, hasOriginalConfigurationSave, revalidateConfigurationSave, resendConfigurationSave } from '../../api/configuration-save.js';
@@ -11,7 +12,7 @@ import { isLastProfileOfType } from './profile-collection.js';
 
 
 type CatalogState = { status: 'loading' | 'ready' | 'error'; data: ExecutionCatalog | null; message?: string };
-type SaveState = { status: 'idle' } | { status: 'saving' } | { status: 'error' | 'conflict'; message: string; code?: string; requestId?: string | null; facts?: Readonly<Record<string, string | number | boolean | null>> | null; affectedRequirements?: readonly string[] };
+type SaveState = { status: 'idle' } | { status: 'saving' } | { status: 'error' | 'conflict'; message: string; code?: string; requestId?: string | null; facts?: Readonly<Record<string, string | number | boolean | null>> | null; affectedRequirements?: readonly string[]; fieldErrors?: HttpError['fieldErrors'] };
 type ProfileValues = ExecutionProfile;
 type ProfileProjectBlocker = { projectIds: readonly string[]; count: number; truncated: boolean; recovery: string | null };
 
@@ -262,7 +263,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
 
   async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (saveInFlightRef.current || uncertainId || !draft || !draft.name.trim() || changes.length !== 1 || duplicateName) return;
+    if (saveInFlightRef.current || uncertainId || saveState.status === 'conflict' || !draft || !draft.name.trim() || changes.length !== 1 || duplicateName || bodyExcessive || guidanceExcessive) return;
     if (load.status !== 'ready' || load.identity !== identity || !baselineEtag) return;
     const instanceId = getControllerInstanceId();
     if (!instanceId) {
@@ -325,7 +326,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
         setSaveState({ status: 'conflict', message: 'A configuração mudou desde a leitura. Sua edição foi preservada; consulte a revisão atual para decidir se deseja reaplicá-la.', code: http.code, requestId: http.requestId, facts: http.facts, affectedRequirements: http.affectedRequirements });
         retryConfiguration();
       } else {
-        setSaveState({ status: 'error', message: http?.message ?? (error instanceof Error ? error.message : 'A gravação não foi confirmada.'), ...(http ? { code: http.code, requestId: http.requestId, facts: http.facts, affectedRequirements: http.affectedRequirements } : {}) });
+        setSaveState({ status: 'error', message: http?.message ?? (error instanceof Error ? error.message : 'A gravação não foi confirmada.'), ...(http ? { code: http.code, requestId: http.requestId, facts: http.facts, affectedRequirements: http.affectedRequirements, fieldErrors: http.fieldErrors } : {}) });
       }
     } finally {
       if (lifecycleRef.current.isCurrent(identityRef.current, operation)) {
@@ -339,7 +340,10 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
   const models = useMemo(() => displayedCatalog ? [...new Map(displayedCatalog.models.filter((model) => model.provider === draft?.provider).map((model) => [model.model, model])).values()] : [], [displayedCatalog, draft?.provider]);
   const effortOptions = useMemo(() => currentModel ? [...new Set(currentModel.efforts)] : [], [currentModel]);
   const actionBlockedByConflict = saveState.status === 'conflict';
-  const canSave = Boolean(draft && hasValidName && changes.length === 1 && !duplicateName && !uncertainId && !saveInFlightRef.current && !actionBlockedByConflict);
+  const guidanceLength = Array.from(draft?.guidance ?? '').length;
+  const guidanceExcessive = guidanceLength > 8192;
+  const bodyExcessive = new TextEncoder().encode(JSON.stringify(configurationCommand(projectId ? {} : null, {}, changes))).byteLength > configurationBodyLimit;
+  const canSave = Boolean(draft && hasValidName && changes.length === 1 && !duplicateName && !uncertainId && !saveInFlightRef.current && !actionBlockedByConflict && !bodyExcessive && !guidanceExcessive);
 
   if (load.status === 'error' && load.identity === identity) return <div className="profile-form-state" role="alert"><p>{load.message}</p><div className="profile-dialog-footer dialog-actions"><button type="button" onClick={onClose}>Cancelar</button><button type="button" onClick={retryConfiguration}>Tentar novamente</button></div></div>;
   if (!draft) return <div className="profile-form-state" role="status"><p>{profileLoadError || 'Consultando o perfil e sua configuração atual…'}</p>{profileLoadError && <button type="button" onClick={retryConfiguration}>Consultar novamente</button>}</div>;
@@ -405,15 +409,17 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
         <small id="profile-effort-help" className="field-guidance">Nível de raciocínio oferecido pelo modelo. Use “Não se aplica” quando não houver opções.</small>
       </div>
       <h3 className="dialog-section-title">Orientações</h3>
-      <div className="form-field field-full"><label htmlFor="profile-guidance">Orientações opcionais</label>
-        <textarea id="profile-guidance" value={draft.guidance} maxLength={8192} aria-describedby="profile-guidance-help" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => ({ ...current, guidance: value })); }} />
-        <small id="profile-guidance-help" className="field-guidance">Instruções adicionais para as próximas execuções. Até 8.192 caracteres; não inclua credenciais.</small>
+      <div className="form-field field-full"><label htmlFor="profile-guidance">Instruções comportamentais</label>
+        <textarea id="profile-guidance" value={draft.guidance} rows={12} aria-invalid={guidanceExcessive || bodyExcessive || saveState.status === 'error' && saveState.fieldErrors?.some(error => error.field.includes('guidance'))} aria-describedby="profile-guidance-help profile-guidance-count profile-guidance-limit profile-field-errors" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => ({ ...current, guidance: value })); }} />
+        <small id="profile-guidance-help" className="field-guidance">Estas são as instruções comportamentais efetivas do perfil nas novas tentativas. Até 8.192 caracteres; não inclua credenciais. O texto não altera papel, critérios, permissões, schemas de resultado ou limites técnicos.</small>
+        <small id="profile-guidance-count">{guidanceLength.toLocaleString('pt-BR')} / 8.192 caracteres. Tentativas iniciadas mantêm as instruções capturadas.</small>
+        <span id="profile-guidance-limit">{guidanceExcessive ? <span role="alert">As instruções excedem 8.192 caracteres. Reduza o texto antes de salvar; o rascunho foi preservado.</span> : bodyExcessive ? <span role="alert">{configurationBodyLimitMessage} O rascunho foi preservado.</span> : null}</span>
       </div>
     </div>
 
     {profileLoadError && <p role="alert" className="error">{profileLoadError}</p>}
     {refreshError && <div className="notice compact-notice" role="status"><p>A consulta da configuração mais recente falhou. Sua edição continua preservada.</p><button type="button" onClick={retryConfiguration}>Tentar consultar novamente</button></div>}
-    {saveState.status === 'error' && <div className="notice profile-save-error" role="alert"><b>Não foi possível confirmar o salvamento</b><p>{saveState.message}</p></div>}
+    {saveState.status === 'error' && <div className="notice profile-save-error" role="alert"><b>Não foi possível confirmar o salvamento</b><p>{saveState.message}</p><ul id="profile-field-errors">{saveState.fieldErrors?.map((error, index) => <li key={index}>{error.message}</li>)}</ul></div>}
     {typeChangeBlocker && <div className="notice profile-save-error" role="alert"><b>Substitua o perfil nos projetos relacionados</b><p>{typeChangeBlocker.count} projeto(s) atual(is) usam este perfil neste papel.</p><ul className="compact-list">{typeChangeBlocker.projectIds.map((id, index) => <li key={id}><a href={`#principal/projetos?dialog=project-configuration&projectId=${encodeURIComponent(id)}`}>Abrir configuração do projeto afetado {index + 1}</a></li>)}</ul>{typeChangeBlocker.truncated && <p>Há outros projetos relacionados além dos exibidos.</p>}{typeChangeBlocker.recovery && <p>{typeChangeBlocker.recovery}</p>}</div>}
     {saveState.status === 'conflict' && <div className="notice profile-save-error" role="alert"><b>Conflito ao salvar</b><p>{saveState.message}</p>{canApplyConflict && <button type="button" onClick={applyLatestRevision}>{profileId ? 'Aplicar minha edição sobre a revisão atual' : 'Usar a revisão atual e tentar novamente'}</button>}</div>}
     {uncertainId && <div className="notice profile-save-error" role="alert"><b>Gravação ainda não confirmada</b><p>{recoveryMessage}</p><button type="button" onClick={() => void finishUncertainSave()} disabled={saveInFlightRef.current}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void finishUncertainSave(true)} disabled={saveInFlightRef.current}>Reapresentar a mesma operação</button>}</div>}

@@ -4,7 +4,7 @@ import { publicationFixture, type PublicationFixture } from '../fixtures/publica
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { complete } from '../fixtures/attempt.js';
+import { complete, confirmTerminalStops } from '../fixtures/attempt.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { removePublicationSchema } from '../fixtures/publication-schema.js';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
@@ -37,7 +37,7 @@ it('requires explicit current authorization and reconciled resources after resta
     expect(() => local.publication.complete(f.attemptId,request,context())).toThrow(expect.objectContaining({ code: 'RESOURCES_NOT_RECONCILED' }));
     expect(reopened.getDeliveryDetail(deliveryId,{}).publication.completeCapability).toEqual({ available: false,reason_code: 'RESOURCES_NOT_RECONCILED' });
     // Controlled trusted-host stop observation. No claim that Maestri was physically exercised.
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+    confirmTerminalStops(f, f.attemptId, reopened.executionPersistence());
     f.mutateEffect.mockImplementation(write);
     const op = local.publication.complete(f.attemptId,request,context()); await local.drain();
     expect(reopened.getOperation(op.operation_id)?.state).toBe('succeeded'); expect(reopened.getAttempt(f.attemptId).result).toBe('delivered');
@@ -99,7 +99,7 @@ it.each(['closed_issue','missing_project','owner_changed','field_option_removed'
   const remote = observationWire({ issues: new Map([[f.issue.id, f.issue]]), projects: new Map([[f.project.project.id, f.project]]),
     items: new Map([[f.project.project.id, [{ id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true }]]]),
     pages: 1, account: () => 'ACCOUNT_test' }, new BackendMeasurement(), { afterSend: async operation => { if (operation === 'GroupedValues') grouped++; } });
-  const queue = createQueue({ storage: f.storage, github: remote, hostName: 'test-host' });
+  const queue = createQueue({ storage: f.storage, github: remote, workspaces: f.workspaces, hostName: 'test-host' });
   const display = await queue.read({ projectId: f.projectId }); expect(display.observation.complete).toBe(true);
   expect(grouped).toBe(1);
   expect((await queue.read({ projectId: f.projectId })).etag).toBe(display.etag); expect(grouped).toBe(1);
@@ -139,7 +139,7 @@ it('allows correction and a new review to project their stages without adopting 
   expect(f.storage.getReview(old)?.state).toBe('rejected');
   await f.implement(); expect(f.issue.memberships[0]!.statusValues[0]!.optionId).toBe('REVIEW'); await f.approve();
   expect(f.status().result).toBe('delivered'); expect(f.issue.comments).toHaveLength(1); expect(f.issue.comments[0]!.body).toContain(f.status().deliveryId);
-  expect(f.issue.comments[0]!.body).not.toContain(`Versão: ${old}`); expect(f.execution.continuePassage).toHaveBeenCalledOnce();
+  expect(f.issue.comments[0]!.body).not.toContain(`Versão: ${old}`); expect(f.execution.continuePassage).toHaveBeenCalledTimes(2);
 });
 
 it('does not replay an unknown Status when readback is partial, and does not send the following comment', async () => {
@@ -422,7 +422,7 @@ it('migrates v10 without changing approved content, receipts or identity, and wi
   removePublicationSchema(f.db);
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(27); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(34); expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getReview(deliveryId)).toEqual(review); expect(reopened.getDelivery(deliveryId).delivery).toEqual(delivery);
     expect(reopened.getOperation(reopened.getAttempt(f.attemptId).operationId)?.receipt).toEqual(receipt);
     expect(reopened.getEffects(f.attemptId)).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);

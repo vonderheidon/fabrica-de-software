@@ -3,15 +3,30 @@ import { resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, OperationId } from '#contracts';
 import type { GitReader } from './git.js';
-import { CaptureError, ensureDirectory, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
+import { CaptureError, createCapturer, ensureDirectory, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
+import type { AttemptRootResolver } from './project-storage.js';
+
+/** Checks and review borrow the one owned checkout only after the pipeline stops its prior role. */
+export function createAttemptMaterializer(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath,
+  resolveAttemptRoot?: AttemptRootResolver) {
+  const validate = createCapturer(dataDirectory, git, canonicalize, resolveAttemptRoot);
+  return async (delivery: Delivery, operationId: string): Promise<string> => {
+    if (!Value.Check(Delivery, delivery) || !Value.Check(OperationId, operationId)) throw new CaptureError('DELIVERY_NOT_CAPTURED');
+    if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
+    await validate({ attemptId: delivery.attemptId, passageId: delivery.producerPassageId, deliveryId: delivery.id, baseSha: delivery.baseSha, declaredFiles: [] }, delivery);
+    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory, canonicalize);
+    return resolve(data, 'work', delivery.attemptId, 'implementation');
+  };
+}
 
 /** One private operational Git checkout per check. No bytes are read from implementation. */
-export function createCheckMaterializer(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath, purpose: 'checks' | 'reviews' | 'publication' = 'checks') {
+export function createCheckMaterializer(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath,
+  purpose: 'checks' | 'reviews' | 'publication' = 'checks', resolveAttemptRoot?: AttemptRootResolver) {
   return async (delivery: Delivery, checkId: string): Promise<string> => {
     if (!Value.Check(Delivery, delivery) || !Value.Check(OperationId, checkId) || delivery.captureState !== 'captured') throw new CaptureError('DELIVERY_NOT_CAPTURED');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
     try {
-      const data = await managedRoot(dataDirectory, canonicalize);
+      const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory, canonicalize);
       const repositories = resolve(data, 'git'); const repository = resolve(repositories, `${delivery.attemptId}.git`);
       for (const path of [repositories, repository]) await plainDirectory(path, canonicalize);
       await noBorrowedObjects(repository);

@@ -706,3 +706,21 @@ td:first-child, th:first-child { padding-left: 0; }
   .records-filter-actions, .diagnostic-actions { align-items: stretch; }
   .dashboard-grid .panel-title, .dashboard-context-card .panel-title { align-items: flex-start; }
 }
+.tools-summary { display: grid; gap: 0; }
+.tool-summary { padding: 12px 0; border-bottom: 1px solid var(--border, #ddd); min-width: 0; }
+.tool-summary > div:first-child { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.tool-summary p { margin: 6px 0; }
+.tool-path { overflow-wrap: anywhere; font-size: 13px; }
+.tools-setup .form-field { margin-top: 10px; }
+.project-storage { min-width: 0; }
+.project-storage-paths { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 1rem; }
+.project-storage-paths > div { min-width: 0; }
+.project-storage-paths dd, .storage-path { margin-inline-start: 0; overflow-wrap: anywhere; white-space: pre-wrap; user-select: text; }
+.project-storage .row { display: flex; flex-wrap: wrap; gap: .5rem; }
+.project-storage button { max-width: 100%; white-space: normal; }
+.storage-transition-authorization { display: flex; align-items: flex-start; gap: .5rem; margin-block: 1rem; }
+.storage-transition-authorization input { width: 18px; height: 18px; margin: 0; flex: 0 0 auto; accent-color: var(--accent); }
+/* Captured instructions remain readable without widening the shared dialog. */
+.historical-profiles { min-width: 0; }
+.historical-profiles article + article { border-top: 1px solid var(--border); margin-top: 1rem; padding-top: 1rem; }
+.historical-profile-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 24rem; overflow: auto; font: inherit; }

@@ -4,10 +4,14 @@ import type Database from 'better-sqlite3';
 // referencing our attempt must block deletion, never become part of our project.
 const ownership = {
   projects: 'id = @projectId',
+  project_storage_locations: 'project_id = @projectId',
+  project_storage_transitions: 'project_id = @projectId',
   project_revisions: 'project_id = @projectId',
   preparations: 'project_id = @projectId',
   preparation_revisions: 'project_id = @projectId',
   attempts: 'project_id = @projectId',
+  attempt_sessions: 'attempt_id IN (SELECT id FROM owned_attempts)',
+  terminal_occupancies: 'attempt_id IN (SELECT id FROM owned_attempts)',
   attempt_criteria: 'attempt_id IN (SELECT id FROM owned_attempts)',
   rounds: 'attempt_id IN (SELECT id FROM owned_attempts)',
   passages: 'attempt_id IN (SELECT id FROM owned_attempts)',
@@ -36,6 +40,7 @@ const ownership = {
   queue_consumptions: 'project_id = @projectId',
   project_creations: 'project_id = @projectId',
   creation_steps: 'creation_id IN (SELECT id FROM owned_project_creations)',
+  creation_board_operations: 'creation_id IN (SELECT id FROM owned_project_creations)',
   creation_reconciliations: 'creation_id IN (SELECT id FROM owned_project_creations)',
   effects: 'attempt_id IN (SELECT id FROM owned_attempts) OR creation_id IN (SELECT id FROM owned_project_creations)',
   diagnostic_runs: `project_id = @projectId OR creation_id IN (SELECT id FROM owned_project_creations)
@@ -89,7 +94,7 @@ function domainPredicate(type: string, id: string, includeOperations: boolean): 
 }
 
 const operationSources = [
-  ['attempts', 'operation_id'], ['project_creations', 'operation_id'],
+  ['attempts', 'operation_id'], ['project_creations', 'operation_id'], ['creation_board_operations', 'operation_id'],
   ['cancellation_requests', 'operation_id'], ['resource_removals', 'operation_id'],
   ['native_open_requests', 'operation_id'], ['capture_runs', 'operation_id'],
   ['execution_questions', 'answer_operation_id'], ['publication_requests', 'operation_id'],

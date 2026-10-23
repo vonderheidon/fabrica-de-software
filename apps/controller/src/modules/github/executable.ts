@@ -26,12 +26,12 @@ function diagnostic(code: string, message: string, recovery: string): GitHubSetu
 
 function candidates(environment: NodeJS.ProcessEnv, savedPath: string | null, initialExecutable?: string): { items: Candidate[]; truncated: boolean } {
   const list: Candidate[] = [];
+  if (savedPath) list.push({ path: savedPath, source: 'saved' });
   for (const directory of (environment.PATH ?? '').split(';')) {
     const normalized = cleanQuote(directory);
     if (normalized) list.push({ path: win32.join(normalized, 'gh.exe'), source: 'PATH' });
   }
   if (environment.GH_PATH) list.push({ path: environment.GH_PATH, source: 'GH_PATH' });
-  if (savedPath) list.push({ path: savedPath, source: 'saved' });
   // Compatibility for explicitly composed hosts; normal startup uses the saved setting.
   if (initialExecutable) list.push({ path: initialExecutable, source: 'saved' });
   const seen = new Set<string>();

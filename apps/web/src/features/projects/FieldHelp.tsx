@@ -1,4 +1,5 @@
 const guidance: Readonly<Record<string, string>> = {
+  'status backlog': 'Opção Backlog do campo Status do quadro. Necessária no mapeamento V3; selecione a opção confirmada pelo GitHub, sem substituir os valores históricos automaticamente.',
   'definir prazo para perguntas': 'Tempo para responder ao agente antes de a pergunta expirar. Desativado usa o padrão.',
   'duracao': 'Prazo em minutos. Exemplo: 0,5 equivale a 30 segundos.',
   'unidade': 'Unidade do prazo. Exemplo: ms = milissegundos.',
@@ -30,7 +31,7 @@ const guidance: Readonly<Record<string, string>> = {
   'issue': 'Escolha uma issue elegível. Conteúdo e responsabilidade serão conferidos antes do início.',
   'projeto': 'Projeto desta preparação. Para mudar, abra a preparação pelo outro projeto.',
   'orientacao': 'Instruções desta preparação. Até 8.192 caracteres; não inclua credenciais. Editar exige revisar o resumo.',
-  'orientacoes opcionais': 'Acrescenta instruções para este perfil. Opcional; limite de 8.192 caracteres. Use texto simples sem credenciais. Alterar o texto afeta as passagens futuras que usarem o perfil.',
+  'orientacoes opcionais': 'Instruções comportamentais efetivas deste perfil nas novas tentativas. Opcional; limite de 8.192 caracteres. Não inclui credenciais e não altera papel, critérios, permissões, schemas técnicos ou limites. Edições não mudam capturas existentes.',
   'orientacoes do projeto': 'Acrescenta contexto permanente do projeto aos papéis. Opcional; use texto claro e sem credenciais. Alterar as instruções afeta novas preparações e tentativas, sem reescrever capturas anteriores.',
   'executor': 'Informa qual executor este perfil usa. Fixo como Maestri/OMP nesta entrega e não editável. O valor determina a sessão usada por novas passagens.',
   'provider': 'Escolhe o provider disponível no catálogo OMP. Necessário para criar um perfil; selecione pelo nome exibido na lista, por exemplo uma opção do catálogo atual. Alterar o provider atualiza as opções de modelo e pode limpar escolhas incompatíveis.',
@@ -38,7 +39,7 @@ const guidance: Readonly<Record<string, string>> = {
   'modelo': 'Escolhe o modelo dentro do provider selecionado. Necessário para criar um perfil; selecione o nome de modelo mostrado no catálogo OMP. Alterar o modelo atualiza os esforços disponíveis e pode limpar uma escolha incompatível.',
   'esforco': 'Escolhe o nível de esforço oferecido pelo modelo. Necessário quando o catálogo lista níveis; selecione um dos valores apresentados. Use “Não se aplica” somente quando o modelo não oferece esforço. Alterar essa opção afeta novas passagens.',
   'github project': 'Associa o projeto a um quadro GitHub para consultar issues e acompanhar Status. Necessário para iniciar em todos os modos, inclusive manualmente, com a issue vinculada ao quadro. Escolha pelo título e proprietário, por exemplo “Roadmap · equipe”. Trocar o quadro exige mapear Status novamente.',
-  'campo status': 'Campo usado para acompanhar as etapas. Trocá-lo limpa os quatro valores mapeados abaixo.',
+  'campo status': 'Campo usado para acompanhar as etapas. Trocá-lo limpa os cinco valores mapeados abaixo.',
   'status ready': 'Valor que identifica as issues prontas para entrar na fila, como “Ready”.',
   'status em andamento': 'Valor usado enquanto a implementação está em andamento, como “In progress”.',
   'status em revisao': 'Valor usado durante a revisão, como “In review”.',

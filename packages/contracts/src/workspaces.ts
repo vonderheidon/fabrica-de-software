@@ -1,5 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { GitHubBranch, GitHubRepository, GitHubDiagnostic } from './github.js';
+import { Capability, OperationId } from './base.js';
 
 const closed = { additionalProperties: false } as const;
 const text = (maxLength = 4096) => Type.String({ minLength: 1, maxLength });
@@ -33,3 +34,42 @@ export const OriginInspection = Type.Object({
   executionReady: Type.Literal(false),
 }, closed);
 export type OriginInspection = Static<typeof OriginInspection>;
+
+const storagePath = Type.String({ minLength: 1, maxLength: 32768 });
+export const ProjectStorageLocation = Type.Object({
+  id: OperationId, location_key: Type.String({ minLength: 1, maxLength: 256 }),
+  layout_version: Type.Integer({ minimum: 1 }), path: storagePath, current: Type.Boolean(),
+  verified_at_ms: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+}, closed);
+export type ProjectStorageLocation = Static<typeof ProjectStorageLocation>;
+export const StorageTransitionPlan = Type.Object({
+  location_key: Type.String({ minLength: 1, maxLength: 256 }), source_location_id: OperationId,
+  destination_relative: storagePath, plan_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability,
+}, closed);
+export type StorageTransitionPlan = Static<typeof StorageTransitionPlan>;
+export const StorageTransitionCommand = Type.Object({ location_key: Type.String({ minLength: 1, maxLength: 256 }),
+  source_location_id: OperationId, plan_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), authorized: Type.Literal(true) }, closed);
+export type StorageTransitionCommand = Static<typeof StorageTransitionCommand>;
+export const ProjectStorageView = Type.Object({
+  managed_root: Type.Union([storagePath, Type.Null()]), original_path: Type.Union([storagePath, Type.Null()]),
+  locations: Type.Array(ProjectStorageLocation, { maxItems: 100 }), transition_plan: Type.Union([StorageTransitionPlan, Type.Null()]),
+  active_transition_operation_id: Type.Union([OperationId, Type.Null()]),
+  state: Type.Union([Type.Literal('current'), Type.Literal('legacy'), Type.Literal('transitioning'), Type.Literal('uncertain'), Type.Literal('blocked')]),
+  cause: Type.Union([storagePath, Type.Null()]), recovery: Type.Union([storagePath, Type.Null()]),
+}, closed);
+export type ProjectStorageView = Static<typeof ProjectStorageView>;
+
+/** Filesystem identity captured by the workspace adapter for an existing managed root. */
+export const ProjectStorageObjectIdentity = Type.Object({
+  format_version: Type.Literal(1), volume_id: Type.String({ minLength: 1, maxLength: 128 }),
+  object_id: Type.String({ minLength: 1, maxLength: 128 }),
+  ancestors: Type.Array(Type.Object({ volume_id: Type.String({ minLength: 1, maxLength: 128 }),
+    object_id: Type.String({ minLength: 1, maxLength: 128 }) }, closed), { minItems: 1, maxItems: 64 }),
+}, closed);
+export type ProjectStorageObjectIdentity = Static<typeof ProjectStorageObjectIdentity>;
+export const ProjectStorageRootObservation = Type.Object({
+  project_id: OperationId, location_key: Type.String({ minLength: 1, maxLength: 256 }),
+  layout_version: Type.Integer({ minimum: 1 }), root_relative: Type.String({ minLength: 1, maxLength: 32768 }),
+  object_identity: ProjectStorageObjectIdentity, verified_at_ms: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+}, closed);
+export type ProjectStorageRootObservation = Static<typeof ProjectStorageRootObservation>;

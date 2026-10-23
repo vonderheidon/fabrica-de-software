@@ -6,22 +6,28 @@ import type { ExecutionHost } from '../../index.js';
 import type { RoleResource } from '../../roles.js';
 import type { PassageChannel } from './channel.js';
 import { runCli } from './native.js';
+import type { AttemptRootResolver } from '../../../workspaces/index.js';
 
 export interface Bootstrap {
   path: string;
   removeSecret(): Promise<void>;
 }
-export type BootstrapWriter = (data: string, request: PassageRequest, host: ExecutionHost, role: RoleResource, channel: PassageChannel, ompVersion: string) => Promise<Bootstrap>;
-export function buildOmpArguments(request: PassageRequest, extensionPath: string): string[] {
+export type BootstrapWriter = (data: string, request: PassageRequest, host: ExecutionHost, role: RoleResource, channel: PassageChannel, ompVersion: string,
+  resolveAttemptRoot?: AttemptRootResolver, sessionDirectoryRelative?: string) => Promise<Bootstrap>;
+export function buildOmpArguments(request: PassageRequest, extensionPath: string, sessionDirectory: string): string[] {
   const args = ['--provider', request.profile.provider, '--model', request.profile.model];
   if (request.profile.effort !== null) args.push('--thinking', request.profile.effort);
+  args.push('--session-dir', sessionDirectory);
+  if (request.binding.round > 1) args.push('--continue');
   args.push('--extension', extensionPath);
   return args;
 }
-export const writeBootstrap: BootstrapWriter = async (data, request, host, role, channel, ompVersion) => {
+export const writeBootstrap: BootstrapWriter = async (data, request, host, role, channel, ompVersion, resolveAttemptRoot,
+  sessionDirectoryRelative = `sessions/${request.binding.attemptId}/${request.binding.role}`) => {
   if (!isAbsolute(data) || !isAbsolute(request.cwd)) throw new ExecutionError('INPUT_INVALID');
-  const root = await realpath(data);
-  if ((await lstat(data)).isSymbolicLink()) throw new ExecutionError('RESOURCE_INVALID');
+  const resourceRoot = resolveAttemptRoot ? await resolveAttemptRoot(request.binding.attemptId) : data;
+  const root = await realpath(resourceRoot);
+  if (root !== resourceRoot || (await lstat(resourceRoot)).isSymbolicLink() || (await lstat(data)).isSymbolicLink()) throw new ExecutionError('RESOURCE_INVALID');
   const cwd = await realpath(request.cwd);
   if (cwd !== request.cwd) throw new ExecutionError('INPUT_INVALID');
   const directory = join(root, 'execution-bootstrap');
@@ -36,7 +42,7 @@ export const writeBootstrap: BootstrapWriter = async (data, request, host, role,
     const script = `$ErrorActionPreference='Stop'; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; ` +
       `$acl=New-Object System.Security.AccessControl.DirectorySecurity; $acl.SetOwner($sid); $acl.SetAccessRuleProtection($true,$false); ` +
       `$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'); ` +
-      `$acl.AddAccessRule($rule); Set-Acl -LiteralPath ${quote(own)} -AclObject $acl`;
+      `$acl.AddAccessRule($rule); $directory=[System.IO.DirectoryInfo]::new(${quote(own)}); $directory.SetAccessControl($acl)`;
     const response = await runCli(host.powershellExecutable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], root, host.inheritedEnvironment);
     if (response.exitCode !== 0) throw new ExecutionError('RESOURCE_INVALID');
   }
@@ -45,11 +51,37 @@ export const writeBootstrap: BootstrapWriter = async (data, request, host, role,
   const extensionPath = new URL('./extension.js', import.meta.url);
   const { fileURLToPath } = await import('node:url');
   const extensionFile = fileURLToPath(extensionPath);
+  if (!sessionDirectoryRelative || isAbsolute(sessionDirectoryRelative) || /^[A-Za-z]:/u.test(sessionDirectoryRelative) ||
+    sessionDirectoryRelative.split(/[\\/]/u).some(segment => !segment || segment === '.' || segment === '..' || segment === '.git') ||
+    ![`sessions/${request.binding.attemptId}/${request.binding.role}`, `sessions/${request.binding.role}`]
+      .includes(sessionDirectoryRelative.split(/[\\/]/u).join('/'))) throw new ExecutionError('RESOURCE_INVALID');
+  const sessionsRoot = join(root, 'sessions');
+  try { await mkdir(sessionsRoot, { mode: 0o700 }); } catch (error) {
+    if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw new ExecutionError('RESOURCE_INVALID');
+  }
+  const sessionsRootStat = await lstat(sessionsRoot);
+  if (!sessionsRootStat.isDirectory() || sessionsRootStat.isSymbolicLink() || await realpath(sessionsRoot) !== sessionsRoot) throw new ExecutionError('RESOURCE_INVALID');
+  let sessionDirectory = sessionsRoot;
+  for (const segment of sessionDirectoryRelative.split(/[\\/]/u).slice(1)) {
+    sessionDirectory = join(sessionDirectory, segment);
+    try { await mkdir(sessionDirectory, { mode: 0o700 }); } catch (error) {
+      if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'EEXIST') throw new ExecutionError('RESOURCE_INVALID');
+    }
+    if (!(await lstat(sessionDirectory)).isDirectory() || (await lstat(sessionDirectory)).isSymbolicLink() || await realpath(sessionDirectory) !== sessionDirectory) {
+      throw new ExecutionError('RESOURCE_INVALID');
+    }
+  }
+  const sessionRealPath = await realpath(sessionDirectory);
+  const sessionDirectoryStat = await lstat(sessionDirectory);
+  if (!sessionDirectoryStat.isDirectory() || sessionDirectoryStat.isSymbolicLink() || sessionRealPath !== sessionDirectory || relative(root, sessionRealPath).startsWith(`..${sep}`)) {
+    throw new ExecutionError('RESOURCE_INVALID');
+  }
   const payload = {
     protocolVersion: 1, host: '127.0.0.1', port: channel.port, token: channel.token,
-    cwd, ompExecutable: host.ompExecutable, ompVersion,
-    args: buildOmpArguments(request, extensionFile),
-    role, task: request.task, guidance: request.profile.guidance, gitNexusRequired: request.gitNexusRequired,
+    cwd, ompExecutable: host.ompExecutable, ompVersion, sessionDirectory,
+    args: buildOmpArguments(request, extensionFile, sessionDirectory),
+    role: { reference: role.reference, resultSchema: role.resultSchema, questionSchema: role.questionSchema },
+    task: request.task, guidance: request.profile.guidance, gitNexusRequired: request.gitNexusRequired,
   };
   const handle = await open(target, 'wx', 0o600);
   try { await handle.writeFile(JSON.stringify(payload), 'utf8'); await handle.sync(); } finally { await handle.close(); }

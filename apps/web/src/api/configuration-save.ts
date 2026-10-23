@@ -14,7 +14,7 @@ export type ConfigurationSaveRequest = Readonly<{
   instanceId: string;
   installationId: string;
 }>;
-type ConfigurationSaveKind = 'settings-save' | 'profile-delete' | 'github-account-binding' | 'github-executable-save' | 'onboarding-root-save' | 'onboarding-complete' | 'onboarding-suppress';
+type ConfigurationSaveKind = 'tool-preference-save' | 'settings-save' | 'profile-delete' | 'github-account-binding' | 'github-executable-save' | 'onboarding-root-save' | 'onboarding-complete' | 'onboarding-suppress';
 const requests = new Map<string, ConfigurationSaveRequest>();
 const missing = new Set<string>();
 

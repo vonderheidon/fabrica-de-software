@@ -35,11 +35,12 @@ public static class ProjectsFolderPicker {
     try {
       Console.OutputEncoding = new System.Text.UTF8Encoding(false);
       string selected;
-      if (args.Length == 1 && args[0] == "github") {
+      if (args.Length == 1 && (args[0] == "github" || args[0] == "executable")) {
         using (var dialog = new System.Windows.Forms.OpenFileDialog()) {
-          dialog.Title = "Localize o GitHub CLI (gh.exe)";
-          dialog.Filter = "GitHub CLI (gh.exe)|gh.exe";
-          dialog.FileName = "gh.exe";
+          bool github = args[0] == "github";
+          dialog.Title = github ? "Localize o GitHub CLI (gh.exe)" : "Localize o executável da ferramenta";
+          dialog.Filter = github ? "GitHub CLI (gh.exe)|gh.exe" : "Executáveis (*.exe)|*.exe";
+          dialog.FileName = github ? "gh.exe" : "";
           dialog.CheckFileExists = true;
           dialog.CheckPathExists = true;
           dialog.Multiselect = false;

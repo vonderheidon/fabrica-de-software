@@ -7,7 +7,7 @@ import Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  ConfigurationOptions, ConfigurationSaved, ConfigurationView, ExecutionCatalog, GitHubSetupOptions, NativeSelectionResult, ProjectRegistered, SettingsSaved, HttpQueueObservation as QueueObservation,
+  ConfigurationOptions, ConfigurationSaved, ConfigurationView, ExecutionCatalog, GitHubSetupOptions, NativeSelectionResult, ProjectRegistered, SettingsSaved, ToolOptions, HttpQueueObservation as QueueObservation,
   SettingsView, type ConfigurationUpdate, type ExecutionProfile, type ProfileChanges, type GitHubProjectDetails, type GitHubProjectSelection, type GitHubQueryResult,
   type IssueContext, type OriginInspection, type ProjectDetail, type ProjectItem, type ProjectPage, type SessionResponse, type SettingsUpdate,
 } from '#contracts';
@@ -17,6 +17,7 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 import { createProjectDeletionPersistence } from '../../apps/controller/src/modules/storage/project-deletions.js';
 import { createProjects, type ProjectDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { createQueue } from '../../apps/controller/src/modules/projects/queue.js';
+import { createToolDetector } from '../../apps/controller/src/modules/tools/index.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
@@ -38,6 +39,13 @@ async function queueFixture() {
       body: { project_changes: changes }, configuration, globalChanges: {} });
   }
   configure({ source: { kind: 'local', location: f.directory }, github_project: mapping, automation_enabled: true });
+  const configuredSource = f.storage.getConfiguration(projectId).view.configuration.source;
+  f.inspectOrigin.mockResolvedValue({ state: 'identified', source: { kind: configuredSource.kind, location: configuredSource.location },
+    local: { root: f.directory, headSha: 'a'.repeat(40), dirty: false }, base: { branch: 'main', sha: 'a'.repeat(40), observedFrom: 'local' },
+    remote: { name: 'origin', url: 'https://github.com/test-org/repo', confirmed: true,
+      repository: { id: 'REPO_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true },
+      branch: { repositoryId: 'REPO_test', name: 'main', sha: 'a'.repeat(40) } },
+    diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false });
   const contexts: IssueContext[] = [1, 2, 3].map((number) => ({
     id: `ISSUE_${number}`, number, url: `https://github.com/test-org/repo/issues/${number}`, title: `Issue ${number}`, body: 'Goal', state: 'OPEN',
     repository: { id: 'REPO_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true },
@@ -47,7 +55,7 @@ async function queueFixture() {
   const items: ProjectItem[] = contexts.map((issue) => ({ id: `ITEM_${issue.number}`, archived: false, kind: 'issue', contentId: issue.id, title: issue.title, url: issue.url, executable: true }));
   vi.mocked(f.github.listProjectItems).mockImplementation(async () => complete(structuredClone(items)));
   vi.mocked(f.github.getIssueContextById).mockImplementation(async (id) => complete(structuredClone(contexts.find((issue) => issue.id === id)!)));
-  const queue = createQueue({ storage: f.storage, github: f.github });
+  const queue = createQueue({ storage: f.storage, github: f.github, workspaces: { inspectOrigin: f.inspectOrigin } });
   return { ...f, headers, projectId, contexts, items, queue, configure };
 }
 
@@ -221,7 +229,7 @@ describe('complete Ready observations without dispatch', () => {
       return complete(structuredClone(projectDetails));
     });
     expect((await f.queue.observe({})).observation).toMatchObject({ complete: false, valid: false, eligibleTotal: null });
-    const next = createQueue({ storage: f.storage, github: f.github });
+    const next = createQueue({ storage: f.storage, github: f.github, workspaces: { inspectOrigin: f.inspectOrigin } });
     vi.mocked(f.github.getIdentity).mockResolvedValueOnce(complete({ id: 'ACCOUNT_test', login: 'test-user' }))
       .mockResolvedValueOnce(complete({ id: 'OTHER', login: 'other' }));
     expect((await next.observe({})).observation).toMatchObject({ complete: false, valid: false, eligibleTotal: null });
@@ -259,11 +267,15 @@ const profileCatalog: ExecutionCatalog = { state: 'loaded', executor: 'maestri-o
     { provider: 'provider-exact', provider_name: 'provider-exact', model: 'must-rollback', model_name: 'Rollback fixture', efforts: ['custom-effort'] },
     { provider: 'provider-exact', provider_name: 'provider-exact', model: 'plain-model', model_name: 'Plain model', efforts: [] },
   ] };
-const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_status', status_option_ids: { ready: 'OPT_ready', in_progress: 'OPT_progress', in_review: 'OPT_review', delivered: 'OPT_delivered' } };
+const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_status', status_option_ids: { backlog: 'OPT_backlog', ready: 'OPT_ready', in_progress: 'OPT_progress', in_review: 'OPT_review', delivered: 'OPT_delivered' } };
 const projectDetails: GitHubProjectDetails = { project: { id: mapping.id, owner: { id: mapping.owner_id, login: 'test-org', kind: 'organization' }, number: 1, title: 'Test Project', url: 'https://github.com/orgs/test-org/projects/1', closed: false },
-  singleSelectFields: [{ id: mapping.status_field_id, name: 'Custom status', options: Object.values(mapping.status_option_ids).map((id) => ({ id, name: id })) }] };
+  singleSelectFields: [{ id: mapping.status_field_id, name: 'Status', options: [
+    { id: mapping.status_option_ids.backlog, name: 'Backlog' }, { id: mapping.status_option_ids.ready, name: 'Ready' },
+    { id: mapping.status_option_ids.in_progress, name: 'In progress' }, { id: mapping.status_option_ids.in_review, name: 'In review' },
+    { id: mapping.status_option_ids.delivered, name: 'Done' },
+  ] }] };
 function complete<T>(data: T): GitHubQueryResult<T> { return { state: 'complete', data, diagnostics: [], retryAtMs: null }; }
-function fixture(realAdapters = false, selectionCallbacks: Pick<ProjectDependencies, 'selectProjectsDirectory' | 'selectGitHubExecutable'> = {}, execution: ProjectDependencies['execution'] | null | undefined = undefined) {
+function fixture(realAdapters = false, selectionCallbacks: Pick<ProjectDependencies, 'selectProjectsDirectory' | 'selectGitHubExecutable' | 'selectExecutable' | 'toolDetector'> = {}, execution: ProjectDependencies['execution'] | null | undefined = undefined) {
   const directory = mkdtempSync(join(tmpdir(), 'factory-projects-')); directories.push(directory);
   const storage = openStorage({ dataDirectory: directory, busyTimeoutMs: 25 }); resources.push(storage);
   const inspection: OriginInspection = { state: 'identified', source: { kind: 'local', location: directory }, local: { root: directory, headSha: 'a'.repeat(40), dirty: true }, base: { branch: 'main', sha: 'a'.repeat(40), observedFrom: 'local' }, remote: null,
@@ -465,6 +477,52 @@ describe('project registration and lightweight catalog', () => {
     expect(['dirty.txt', 'HEAD', 'index'].map((name) => readFileSync(join(f.directory, name)))).toEqual(before);
     expect(f.inspectOrigin).toHaveBeenCalledOnce(); expect(f.github.validateProjectSelection).not.toHaveBeenCalled();
   });
+  it.each(['remote', 'published_base', 'board'] as const)('refuses direct project automation while %s readiness is missing', async missing => {
+    const f = fixture(); const headers = await session(f); const registration = await register(f, headers);
+    const project = registration.json<ProjectDetail>().project;
+    const expectedCode = missing === 'remote' ? 'REMOTE_UNCONFIRMED' : missing === 'published_base' ? 'CODE_NOT_PUBLISHED' : 'PROJECT_REQUIRED';
+    const projectFields = missing === 'remote' ? {} : { source: { kind: 'local' as const, location: f.directory } };
+    if (missing !== 'remote') {
+      const repository = { id: 'REPOSITORY_test', name: 'repository', owner: { id: 'OWNER_test', login: 'test-org' },
+        url: 'https://github.com/test-org/repository', defaultBranch: 'main', isPrivate: true, isArchived: false };
+      f.inspection.remote = { name: 'origin', url: repository.url, confirmed: true, repository,
+        branch: missing === 'published_base' ? null : { repositoryId: repository.id, name: 'main', sha: 'a'.repeat(40) } };
+      f.inspection.diagnostics = missing === 'published_base'
+        ? [{ code: 'BRANCH_NOT_FOUND', message: 'The selected base has no published commit.', recovery: 'Publish the configured base branch.' }]
+        : [];
+    }
+    if (missing === 'published_base') {
+      const beforeMapping = f.storage.getConfiguration(project.id);
+      const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = beforeMapping.view.configuration;
+      f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: beforeMapping.etag, projectId: project.id,
+        body: { project_changes: { github_project: mapping } }, configuration: { ...configuration, github_project: mapping }, globalChanges: {} });
+    }
+    const current = f.storage.getConfiguration(project.id);
+    const eventCount = f.storage.getEvents({}).items.length;
+    const etag = f.storage.getConfiguration(project.id).etag;
+    const response = await f.app.inject({ method: 'PUT', url: `/api/v1/projects/${project.id}/configuration`,
+      headers: { ...headers, 'if-match': etag, 'idempotency-key': randomUUID() },
+      payload: { project_changes: { ...projectFields, automation_enabled: true } } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ code: expectedCode, affected_requirements: ['RF-15'] });
+    expect(f.storage.getConfiguration(project.id).view.configuration.automation_enabled).toBe(false);
+    expect(f.storage.getConfiguration(project.id).etag).toBe(current.etag);
+    expect(f.storage.getEvents({}).items).toHaveLength(eventCount);
+  });
+  it('registers an existing local project when its GitHub base has no published commit and reports the missing requirement', async () => {
+    const f = fixture(); const headers = await session(f);
+    const repository = { id: 'REPOSITORY_test', name: 'repository', owner: { id: 'OWNER_test', login: 'test-org' },
+      url: 'https://github.com/test-org/repository', defaultBranch: 'main', isPrivate: true, isArchived: false };
+    f.inspection.remote = { name: 'origin', url: repository.url, confirmed: true, repository, branch: null };
+    f.inspection.diagnostics = [{ code: 'BRANCH_NOT_FOUND', message: 'The selected base has no published commit.', recovery: 'Publish the configured base branch.' }];
+    const response = await register(f, headers, 'Local project awaiting first push');
+    expect(response.statusCode).toBe(201);
+    expect(response.json<ProjectDetail>().prerequisites).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'CODE_NOT_PUBLISHED', message: expect.stringContaining('branch-base'), recovery: expect.stringContaining('Publique') }),
+    ]));
+    expect(response.json<ProjectDetail>().prerequisites.map(item => item.code)).not.toContain('REMOTE_UNCONFIRMED');
+    expect(f.storage.getConfiguration(response.json<ProjectDetail>().project.id).view.configuration.automation_enabled).toBe(false);
+  });
   it('recovers lost registration responses before inspecting again, including after reopen', async () => {
     const f = fixture(); const headers = await session(f); const key = randomUUID();
     const first = await register(f, headers, 'Stable project', key); const firstBody = first.json<ProjectDetail>();
@@ -611,7 +669,13 @@ describe('global and aggregate configuration', () => {
     expect(f.storage.getGlobalConfiguration().view.profiles[0]).toMatchObject({ revision: 2, effort: 'changed-exactly' });
   });
   it('atomically commits all project fields, explicit globals, profiles, pointer, receipt and event', async () => {
-    const f = fixture(); const headers = await session(f); const id = (await register(f, headers)).json<ProjectDetail>().project.id;
+    const f = fixture(); const headers = await session(f);
+    const repository = { id: 'REPOSITORY_test', name: 'repository', owner: { id: 'OWNER_test', login: 'test-org' },
+      url: 'https://github.com/test-org/repository', defaultBranch: 'main', isPrivate: true, isArchived: false };
+    f.inspection.remote = { name: 'origin', url: repository.url, confirmed: true, repository,
+      branch: { repositoryId: repository.id, name: 'main', sha: 'a'.repeat(40) } };
+    f.inspection.diagnostics = [{ code: 'LOCAL_CHANGES_EXCLUDED', message: 'Dirty excluded.', recovery: 'Use committed base.' }];
+    const id = (await register(f, headers)).json<ProjectDetail>().project.id;
     await putSettings(f, headers, { changes: {}, profile_changes: [profile] });
     const p = f.storage.getGlobalConfiguration().view.profiles[0]!; const old = f.storage.getConfiguration(id);
     const body: ConfigurationUpdate = { project_changes: { github_project: mapping, implementer_profile_id: p.id, reviewer_profile_id: p.id, correction_limit: 5, default_delivery_mode: 'pr', automation_enabled: true, checks: [{ id: 'check', command: 'npm.cmd test', cwd_relative: 'apps/backend', timeout_ms: 1000 }], queue_order: { priority_direction: 'desc', use_board_position: false }, guidance: 'Project instructions' }, global_changes: { time_defaults: { passage_active_time_ms: 123456 } }, profile_changes: profileCommands([{ ...profile, id: p.id, effort: 'updated-exact' }]) };
@@ -686,6 +750,21 @@ describe('global and aggregate configuration', () => {
     expect((await putConfiguration(f, headers, id, { project_changes: { github_project: mapping } })).statusCode).toBe(503);
     expect(f.storage.getConfiguration(id).view.configuration.github_project).toBeNull();
   });
+  it('rejects existing option IDs when observed names, order or mapped identities are incompatible', async () => {
+    const f = fixture(); const headers = await session(f); const id = (await register(f, headers)).json<ProjectDetail>().project.id;
+    const validOptions = projectDetails.singleSelectFields[0]!.options;
+    const mismatches: GitHubProjectDetails[] = [
+      { ...projectDetails, singleSelectFields: [{ ...projectDetails.singleSelectFields[0]!, options: validOptions.map((option, index) => ({ ...option, name: index === 0 ? 'Icebox' : option.name })) }] },
+      { ...projectDetails, singleSelectFields: [{ ...projectDetails.singleSelectFields[0]!, options: [...validOptions].reverse() }] },
+      { ...projectDetails, singleSelectFields: [{ ...projectDetails.singleSelectFields[0]!, options: validOptions.map((option, index) => ({ ...option, id: validOptions[(index + 1) % validOptions.length]!.id })) }] },
+    ];
+    for (const details of mismatches) {
+      vi.mocked(f.github.validateProjectSelection).mockResolvedValue(complete(details));
+      const response = await putConfiguration(f, headers, id, { project_changes: { github_project: mapping } });
+      expect(response.statusCode).toBe(400);
+      expect(f.storage.getConfiguration(id).view.configuration.github_project).toBeNull();
+    }
+  });
   it('prevents rewriting history, deleting it, null/missing pointers or linking another project revision', async () => {
     const f = fixture(); const headers = await session(f); const a = (await register(f, headers, 'A')).json<ProjectDetail>().project; const b = (await register(f, headers, 'B')).json<ProjectDetail>().project;
     expect(() => f.db.prepare('UPDATE project_revisions SET correction_limit = 3 WHERE id = ?').run(a.current_revision_id)).toThrow('IMMUTABLE_RECORD');
@@ -700,7 +779,7 @@ describe('global and aggregate configuration', () => {
     vi.mocked(f.github.listProjects).mockResolvedValue(complete([projectDetails.project, { ...projectDetails.project, id: 'ZZ-last' }]));
     const url = `/api/v1/projects/${id}/configuration-options?owner_id=${mapping.owner_id}&github_project_id=${mapping.id}&status_field_id=${mapping.status_field_id}&limit=1`;
     const r = await f.app.inject({ url, headers }); expect(r.statusCode).toBe(200); expect(Value.Check(ConfigurationOptions, r.json())).toBe(true);
-    const options = r.json<ConfigurationOptions>(); expect(options.completeness).toBe('complete'); expect(options.status_options).toHaveLength(4); expect(options.projects.has_more).toBe(true);
+    const options = r.json<ConfigurationOptions>(); expect(options.completeness).toBe('complete'); expect(options.status_options).toHaveLength(5); expect(options.projects.has_more).toBe(true);
     expect(f.github.getProjectOwner).toHaveBeenCalledWith(mapping.owner_id); expect(f.github.listProjects).toHaveBeenCalledWith({ kind: 'organization', login: 'test-org' });
     const next = await f.app.inject({ url: `${url}&cursor=${options.projects.next_cursor}`, headers }); expect(next.statusCode).toBe(200); expect(next.json<ConfigurationOptions>().projects.items[0]?.id).toBe('ZZ-last');
     vi.mocked(f.github.listProjects).mockResolvedValue(complete([projectDetails.project]));
@@ -735,29 +814,108 @@ describe('global and aggregate configuration', () => {
     const executable = await selectSetting(f, headers, { kind: 'gh_executable' });
     expect(executable.statusCode).toBe(200);
     expect(executable.json()).toMatchObject({ state: 'selected', kind: 'gh_executable', path: selectedExecutable });
-    expect(selectProjectsDirectory).toHaveBeenCalledTimes(1); expect(selectGitHubExecutable).toHaveBeenCalledTimes(1);
+    const projectDirectory = await selectSetting(f, headers, { kind: 'project_directory' });
+    expect(projectDirectory.statusCode).toBe(200);
+    expect(projectDirectory.json()).toMatchObject({ state: 'selected', kind: 'project_directory', path: selectedDirectory });
+    expect(selectProjectsDirectory).toHaveBeenCalledTimes(2); expect(selectGitHubExecutable).toHaveBeenCalledTimes(1);
     expect(f.storage.getSettings().projects_root).toBeNull();
     expect(f.db.prepare('SELECT projects_root_confirmed_at_ms FROM factory_settings').get()).toEqual({ projects_root_confirmed_at_ms: null });
     expect(f.db.prepare('SELECT count(*) AS count FROM operation_requests').get()).toEqual({ count: 0 });
 
     const invalidRequest = await selectSetting(f, headers, { kind: 'projects_root', path: selectedDirectory, command: 'whoami', argv: ['--version'] });
     expect(invalidRequest.statusCode).toBe(400);
-    expect(selectProjectsDirectory).toHaveBeenCalledTimes(1);
+    expect(selectProjectsDirectory).toHaveBeenCalledTimes(2);
     openProbe.mockRestore();
+  });
+
+  it('accepts and validates each of the four managed executable kinds independently', async () => {
+    const directoryBase = mkdtempSync(join(tmpdir(), 'native tools - ')); directories.push(directoryBase);
+    const names = ['git.exe', 'maestri.exe', 'omp.exe', 'pwsh.exe'];
+    const executableDirectory = join(directoryBase, 'Ferramentas ç'); mkdirSync(executableDirectory);
+    const paths = names.map(name => { const path = join(executableDirectory, name); writeFileSync(path, 'native fixture'); return path; });
+    const selected = [...paths];
+    const selectExecutable = vi.fn(async () => selected.shift() ?? null);
+    const toolDetector = createToolDetector({ platform: 'win32', stat: async () => ({ isFile: () => true }), access: async () => {},
+      run: async () => 'tool version 1.0' });
+    const f = fixture(false, { selectExecutable, toolDetector }); const headers = await session(f);
+    const kinds = ['git_executable', 'maestri_executable', 'omp_executable', 'powershell_executable'] as const;
+
+    for (const [index, kind] of kinds.entries()) {
+      const response = await selectSetting(f, headers, { kind });
+      expect(response.statusCode).toBe(200);
+      expect(Value.Check(NativeSelectionResult, response.json())).toBe(true);
+      expect(response.json()).toEqual({ state: 'selected', kind, path: paths[index], observed_at_ms: expect.any(Number) });
+    }
+    expect(selectExecutable).toHaveBeenCalledTimes(4);
+    expect(f.storage.getGlobalConfiguration().view.tool_preferences.git.preferred_path).toBeNull();
+    expect(f.db.prepare('SELECT count(*) AS count FROM operation_requests').get()).toEqual({ count: 0 });
+  });
+
+  it('saves only validated executable preferences with server timestamps and stable replay identity', async () => {
+    const toolDetector = createToolDetector({ platform: 'win32', stat: async () => ({ isFile: () => true }), access: async () => {},
+      run: async () => 'version 1.0', clock: () => 9876 });
+    const f = fixture(false, { toolDetector }); const headers = await session(f);
+    const preferences: NonNullable<SettingsUpdate['tool_preferences']> = {
+      format_version: 1,
+      git: { preferred_path: 'C:\\Program Files ç\\git.exe', last_validated_at_ms: null },
+      maestri: { preferred_path: 'C:\\Program Files ç\\maestri.exe', last_validated_at_ms: null },
+      omp: { preferred_path: 'C:\\Program Files ç\\omp.exe', last_validated_at_ms: null },
+      powershell: { preferred_path: 'C:\\Program Files ç\\pwsh.exe', last_validated_at_ms: null },
+    };
+    const command: SettingsUpdate = { changes: {}, tool_preferences: preferences };
+    const key = randomUUID();
+    const expectedRevision = f.storage.getGlobalConfiguration().etag;
+    const saved = await putSettings(f, headers, command, expectedRevision, key);
+    expect(saved.statusCode).toBe(200);
+    const body = saved.json<SettingsSaved>();
+    expect(body.tool_preferences).toMatchObject({
+      format_version: 1,
+      git: { preferred_path: 'C:\\Program Files ç\\git.exe', last_validated_at_ms: 9876 },
+      maestri: { preferred_path: 'C:\\Program Files ç\\maestri.exe', last_validated_at_ms: 9876 },
+      omp: { preferred_path: 'C:\\Program Files ç\\omp.exe', last_validated_at_ms: 9876 },
+      powershell: { preferred_path: 'C:\\Program Files ç\\pwsh.exe', last_validated_at_ms: 9876 },
+    });
+    expect(f.storage.getGitHubExecutablePath()).toBeNull();
+    const replay = await putSettings(f, headers, command, expectedRevision, key);
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json<SettingsSaved>().operation_id).toBe(body.operation_id);
+  });
+
+  it('reports validated local candidates separately from Maestri connection state', async () => {
+    const toolDetector = createToolDetector({ platform: 'win32', environment: () => ({ PATH: 'C:\\Program Files ç\\Tools' }),
+      stat: async () => ({ isFile: () => true }), access: async () => {}, run: async () => 'tool version 1.0' });
+    const execution: NonNullable<ProjectDependencies['execution']> = {
+      getCatalog: vi.fn(async () => structuredClone(profileCatalog)),
+      preflight: vi.fn(async () => ({ ready: false, code: 'CONTEXT_MISSING' as const, ompVersion: null })),
+    };
+    const f = fixture(false, { toolDetector }, execution); const headers = await session(f);
+
+    const response = await f.app.inject({ url: '/api/v1/settings/tool-options', headers });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<ToolOptions>();
+    for (const tool of ['git', 'maestri', 'omp', 'gh'] as const) {
+      expect(body.tools[tool].state).toBe('available');
+      expect(body.tools[tool].candidates[0]?.path).toContain('Program Files ç');
+      expect(body.tools[tool].candidates[0]?.version).toBe('tool version 1.0');
+    }
+    expect(body.tools.powershell.state).toBe('ambiguous');
+    expect(body.tools.powershell.candidates).toHaveLength(2);
+    expect(body.maestri_connection).toEqual({ state: 'unavailable', diagnostic: 'CONTEXT_MISSING' });
   });
 
   it('reports unavailable and cancelled selections without changing the saved root', async () => {
     const unavailable = fixture(); const unavailableHeaders = await session(unavailable);
     const missing = await selectSetting(unavailable, unavailableHeaders, { kind: 'projects_root' });
     expect(missing.statusCode).toBe(200);
-    expect(missing.json()).toMatchObject({ state: 'unavailable', kind: 'projects_root', path: null, diagnostic: 'NATIVE_SELECTION_UNAVAILABLE' });
+    expect(missing.json()).toMatchObject({ state: 'unavailable', kind: 'projects_root', diagnostic: 'NATIVE_SELECTION_UNAVAILABLE' });
 
     const selectProjectsDirectory = vi.fn(async () => null);
     const f = fixture(false, { selectProjectsDirectory }); const headers = await session(f);
     const before = f.storage.getGlobalConfiguration();
     const cancelled = await selectSetting(f, headers, { kind: 'projects_root' });
     expect(cancelled.statusCode).toBe(200);
-    expect(cancelled.json()).toEqual({ state: 'cancelled', kind: 'projects_root', path: null });
+    expect(cancelled.json()).toEqual({ state: 'cancelled', kind: 'projects_root' });
     expect(f.storage.getGlobalConfiguration()).toEqual(before);
   });
 
@@ -792,7 +950,7 @@ describe('global and aggregate configuration', () => {
     expect(second.json()).toMatchObject({ code: 'NATIVE_SELECTION_IN_PROGRESS', message: 'Já existe uma seleção em andamento. Conclua ou cancele a janela aberta e tente novamente.' });
     expect(selectProjectsDirectory).toHaveBeenCalledTimes(1);
     completeSelection?.(null);
-    expect((await first).json()).toMatchObject({ state: 'cancelled', path: null });
+    expect((await first).json()).toMatchObject({ state: 'cancelled' });
   });
 
   it('removes the handler deadline only from native selection', async () => {
@@ -827,7 +985,7 @@ describe('global and aggregate configuration', () => {
       expect(receivedSignal?.aborted).toBe(false);
       await expect(selections.selectSetting({ kind: 'gh_executable' })).rejects.toMatchObject({ statusCode: 409, code: 'NATIVE_SELECTION_IN_PROGRESS' });
       completeSelection?.(null);
-      expect(await first).toMatchObject({ state: 'cancelled', kind: 'projects_root', path: null });
+      expect(await first).toMatchObject({ state: 'cancelled', kind: 'projects_root' });
       expect(f.storage.getSettings().projects_root).toBeNull();
     } finally { vi.useRealTimers(); }
   });
@@ -850,7 +1008,7 @@ describe('global and aggregate configuration', () => {
     expect(receivedSignal?.aborted).toBe(true);
     await expect(selections.selectSetting({ kind: 'gh_executable' })).rejects.toMatchObject({ statusCode: 409, code: 'NATIVE_SELECTION_CANCELLED' });
     completeSelection?.(f.directory);
-    expect(await pending).toMatchObject({ state: 'unavailable', kind: 'projects_root', path: null, diagnostic: 'NATIVE_SELECTION_CANCELLED' });
+    expect(await pending).toMatchObject({ state: 'unavailable', kind: 'projects_root', diagnostic: 'NATIVE_SELECTION_CANCELLED' });
     expect(f.storage.getSettings().projects_root).toBeNull();
   });
 
@@ -937,7 +1095,7 @@ describe('global and aggregate configuration', () => {
       const accepted = saveTimeDefaults(db, { operationId: randomUUID(), expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
       const identity = db.prepare('SELECT installation_id FROM factory_settings').get();
       applyMigrations(db, loadMigrations(), () => { throw new Error('Must not reseed'); });
-      expect(db.pragma('user_version', { simple: true })).toBe(27); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
+      expect(db.pragma('user_version', { simple: true })).toBe(34); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
       expect(db.prepare('SELECT * FROM projects').all()).toEqual([]); expect(db.prepare('SELECT * FROM execution_profiles').all()).toEqual([]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect(readOperation(db, accepted.operation_id)).toEqual(accepted);
@@ -980,7 +1138,7 @@ describe('global and aggregate configuration', () => {
     expect(response.json()).toMatchObject({ complete: true, valid: false, eligible_total: 0, page: { items: [], has_more: false } });
     expect(response.json().diagnostics).not.toContainEqual(expect.objectContaining({ code: 'PROJECT_NOT_READY' }));
     const scoped = await f.app.inject({ method: 'GET', url: `/api/v1/queue?project_id=${projectId}`, headers });
-    expect(scoped.json()).toMatchObject({ complete: false, valid: false, eligible_total: null, diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'PROJECT_NOT_READY' })]) });
+    expect(scoped.json()).toMatchObject({ complete: false, valid: false, eligible_total: null, diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'PROJECT_REQUIRED' })]) });
     expect(response.headers.etag).toBeTruthy();
   });
 
@@ -1008,6 +1166,12 @@ describe('global and aggregate configuration', () => {
     const configuration = { ...currentConfiguration, source: { kind: 'local' as const, location: f.directory, repository_id: 'REPO_test', repository_url: 'https://github.com/test-org/repo' }, github_project: mapping, automation_enabled: true };
     f.storage.saveConfiguration({ operationId: randomUUID(), projectId, expectedRevision: current.etag,
       body: { project_changes: { source: { kind: 'local', location: f.directory }, github_project: mapping, automation_enabled: true } }, configuration, globalChanges: {} });
+    vi.mocked(f.inspectOrigin).mockResolvedValue({ state: 'identified', source: { kind: 'local', location: f.directory },
+      local: { root: f.directory, headSha: 'a'.repeat(40), dirty: false }, base: { branch: 'main', sha: 'a'.repeat(40), observedFrom: 'local' },
+      remote: { name: 'origin', url: 'https://github.com/test-org/repo', confirmed: true,
+        repository: { id: 'REPO_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true },
+        branch: { repositoryId: 'REPO_test', name: 'main', sha: 'a'.repeat(40) } },
+      diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false });
     const projectItems: ProjectItem[] = [
       { id: 'ITEM_1', archived: false, kind: 'issue', contentId: 'ISSUE_1', title: 'Eligible issue', url: 'https://github.com/test-org/repo/issues/1', executable: true },
       { id: 'ITEM_2', archived: false, kind: 'issue', contentId: 'ISSUE_2', title: 'Multiple assignees', url: 'https://github.com/test-org/repo/issues/2', executable: true },

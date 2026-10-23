@@ -3,11 +3,13 @@ import { lstat, mkdir, open, realpath, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Artifact, OperationId } from '#contracts';
+import type { AttemptRootResolver } from '../workspaces/index.js';
 
 export class VerificationError extends Error { constructor(readonly code: string, options?: ErrorOptions) { super(code, options); } }
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 const missing = (e: unknown) => e instanceof Error && 'code' in e && e.code === 'ENOENT';
-export function createArtifacts(dataDirectory: string, canonicalize: (p: string) => Promise<string> = realpath) {
+export function createArtifacts(dataDirectory: string, canonicalize: (p: string) => Promise<string> = realpath,
+  resolveAttemptRoot?: AttemptRootResolver) {
   async function directory(path: string, create: boolean): Promise<void> {
     if (create) {
       try { await mkdir(path); } catch (e) { if (!(e instanceof Error && 'code' in e && e.code === 'EEXIST')) throw e; }
@@ -17,7 +19,10 @@ export function createArtifacts(dataDirectory: string, canonicalize: (p: string)
   }
   async function filename(a: Artifact, create: boolean): Promise<string> {
     if (!Value.Check(Artifact, a) || a.pathRelative !== `${a.attemptId}/${a.checkId}/${a.id}.log`) throw new VerificationError('ARTIFACT_INTEGRITY_FAILED');
-    const data = await canonicalize(dataDirectory);
+    const rootPath = resolveAttemptRoot ? await resolveAttemptRoot(a.attemptId) : dataDirectory;
+    const data = await canonicalize(rootPath);
+    const rootStat = await lstat(rootPath);
+    if (data !== rootPath || !rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new VerificationError('ARTIFACT_INTEGRITY_FAILED');
     const root = resolve(data, 'artifacts'); const attempt = resolve(root, a.attemptId); const parent = resolve(attempt, a.checkId);
     await directory(root, create); await directory(attempt, create); await directory(parent, create);
     return resolve(parent, `${a.id}.log`);

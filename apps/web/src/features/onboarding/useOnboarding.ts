@@ -10,7 +10,7 @@ import {
 import { getControllerInstanceId, HttpError, requestJsonWithMetadata } from '../../api/http.js';
 import { readUncertainOperations } from '../../api/uncertain-operations.js';
 
-export type OnboardingCommandKind = 'projects-root' | 'complete' | 'suppress';
+export type OnboardingCommandKind = 'projects-root' | 'complete' | 'suppress' | 'tools';
 
 export type OnboardingSnapshot = {
   settings: SettingsView;
@@ -39,6 +39,7 @@ export type OnboardingController = {
   saveProjectsRoot: (path: string) => Promise<void>;
   complete: () => Promise<void>;
   suppress: () => Promise<void>;
+  saveTool: (tool: 'git' | 'maestri' | 'omp' | 'powershell' | 'gh', path: string) => Promise<void>;
   recover: (resend?: boolean) => Promise<void>;
 };
 
@@ -46,14 +47,15 @@ const uncertainKinds = {
   'projects-root': 'onboarding-root-save',
   complete: 'onboarding-complete',
   suppress: 'onboarding-suppress',
+  tools: 'tool-preference-save',
 } as const;
 
 function initialOperation(): OnboardingOperation {
   const pending = readUncertainOperations().find((item) =>
-    item.kind === uncertainKinds['projects-root'] || item.kind === uncertainKinds.complete || item.kind === uncertainKinds.suppress,
+    Object.values(uncertainKinds).some(kind => kind === item.kind),
   );
   if (!pending) return { status: 'idle' };
-  const kind = pending.kind === uncertainKinds['projects-root'] ? 'projects-root' : pending.kind === uncertainKinds.complete ? 'complete' : 'suppress';
+  const kind = pending.kind === uncertainKinds['projects-root'] ? 'projects-root' : pending.kind === uncertainKinds.complete ? 'complete' : pending.kind === uncertainKinds.tools ? 'tools' : 'suppress';
   return {
     status: 'uncertain', kind, operationId: pending.operationId,
     message: 'A operação original continua sem confirmação. Consulte o mesmo ID antes de iniciar outra alteração.',
@@ -82,6 +84,15 @@ export function useOnboarding(enabled: boolean): OnboardingController {
   const requestSequenceRef = useRef(0);
   const requestControllerRef = useRef<AbortController | null>(null);
   const commandInFlightRef = useRef(false);
+  const lifecycleRef = useRef(0);
+  const contextRef = useRef('');
+  contextRef.current = JSON.stringify([load.snapshot?.settings.settings.installation_id, load.snapshot?.settings.settings.account_id]);
+  const contextIdentity = contextRef.current;
+  useEffect(() => { setOperation(initialOperation()); }, [contextIdentity]);
+  useEffect(() => {
+    lifecycleRef.current += 1;
+    return () => { lifecycleRef.current += 1; };
+  }, [enabled]);
 
   const refresh = useCallback(async (): Promise<OnboardingSnapshot | null> => {
     const requestSequence = ++requestSequenceRef.current;
@@ -94,6 +105,7 @@ export function useOnboarding(enabled: boolean): OnboardingController {
       if (requestSequence !== requestSequenceRef.current) return null;
       if (!etag) throw new Error('O controlador não retornou a revisão da configuração.');
       const snapshot = { settings: data, etag };
+      contextRef.current = JSON.stringify([data.settings.installation_id, data.settings.account_id]);
       setLoad({ snapshot, loading: false, refreshing: false, error: null });
       return snapshot;
     } catch (error: unknown) {
@@ -136,6 +148,9 @@ export function useOnboarding(enabled: boolean): OnboardingController {
     const snapshot = load.snapshot;
     if (!enabled || !snapshot || commandInFlightRef.current || operation.status === 'uncertain' || operation.status === 'saving') return;
     const operationId = crypto.randomUUID();
+    const lifecycle = lifecycleRef.current;
+    const context = contextRef.current;
+    const isCurrent = () => lifecycle === lifecycleRef.current && context === contextRef.current;
     const instanceId = getControllerInstanceId();
     if (!instanceId) {
       setOperation({ status: 'failed', kind, message: 'Consulte a configuração novamente antes de salvar.', requestId: null });
@@ -166,6 +181,7 @@ export function useOnboarding(enabled: boolean): OnboardingController {
       });
       if (data.operation_id !== operationId || !data.receipt || !etag) throw new Error('O controlador não confirmou a operação com o recibo e a revisão esperados.');
       finishConfigurationSave(operationId);
+      if (!isCurrent()) return;
       requestSequenceRef.current += 1;
       requestControllerRef.current?.abort();
       requestControllerRef.current = null;
@@ -173,6 +189,7 @@ export function useOnboarding(enabled: boolean): OnboardingController {
       setOperation({ status: 'confirmed', kind, operationId, receipt: data.receipt });
     } catch (error: unknown) {
       const details = errorDetails(error);
+      if (!isCurrent()) return;
       if (requestStarted && details.uncertain) {
         setOperation({ status: 'uncertain', kind, operationId, message: 'A resposta não foi confirmada. Consulte a operação original antes de qualquer novo comando.', recoveryError: null, canResend: false });
       } else {
@@ -202,13 +219,25 @@ export function useOnboarding(enabled: boolean): OnboardingController {
     await save('suppress', { changes: {}, onboarding_changes: { suppressed: true } });
   }, [save]);
 
+  const saveTool = useCallback(async (tool: 'git' | 'maestri' | 'omp' | 'powershell' | 'gh', path: string): Promise<void> => {
+    const preferences = load.snapshot?.settings.tool_preferences;
+    if (!preferences || !path.trim()) return;
+    await save('tools', tool === 'gh' ? { changes: {}, gh_executable_path: path.trim() } : {
+      changes: {}, tool_preferences: { ...preferences, [tool]: { ...preferences[tool], preferred_path: path.trim() } },
+    });
+  }, [load.snapshot, save]);
+
   const recover = useCallback(async (resend = false): Promise<void> => {
     if (operation.status !== 'uncertain' || commandInFlightRef.current) return;
     commandInFlightRef.current = true;
+    const lifecycle = lifecycleRef.current;
+    const context = contextRef.current;
+    const isCurrent = () => lifecycle === lifecycleRef.current && context === contextRef.current;
     setOperation((current) => current.status === 'uncertain' ? { ...current, recoveryError: null } : current);
     try {
       if (resend) {
         const saved = await resendConfigurationSave<SettingsSaved>(operation.operationId);
+        if (!isCurrent()) return;
         if (saved.data.operation_id !== operation.operationId || !saved.data.receipt || !saved.etag) throw new Error('A reapresentação não confirmou o recibo original.');
         finishConfigurationSave(operation.operationId);
         requestSequenceRef.current += 1;
@@ -219,6 +248,7 @@ export function useOnboarding(enabled: boolean): OnboardingController {
         return;
       }
       const result = await consultConfigurationSave(operation.operationId);
+      if (!isCurrent()) return;
       if (!result) {
         const canResend = hasOriginalConfigurationSave(operation.operationId);
         setOperation({ ...operation, canResend, recoveryError: 'A operação não foi localizada. Isso não confirma que a gravação deixou de ocorrer.' });
@@ -235,6 +265,7 @@ export function useOnboarding(enabled: boolean): OnboardingController {
         setOperation({ ...operation, recoveryError: `A operação permanece ${result.state}. Consulte novamente antes de enviar outro comando.` });
       }
     } catch (error: unknown) {
+      if (!isCurrent()) return;
       const details = errorDetails(error);
       setOperation({ ...operation, recoveryError: details.message });
     } finally {
@@ -242,5 +273,5 @@ export function useOnboarding(enabled: boolean): OnboardingController {
     }
   }, [operation, refresh]);
 
-  return { load, operation, busy: commandInFlightRef.current || operation.status === 'saving', refresh, saveProjectsRoot, complete, suppress, recover };
+  return { load, operation, busy: commandInFlightRef.current || operation.status === 'saving', refresh, saveProjectsRoot, complete, suppress, saveTool, recover };
 }

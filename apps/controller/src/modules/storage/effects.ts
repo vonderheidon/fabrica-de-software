@@ -23,7 +23,7 @@ function validateCreationEffect(db: Database.Database, creationId: string, kind:
     'SELECT * FROM project_creations WHERE id=? AND installation_id=? AND account_id IS ?').get(creationId,s.installation_id,s.account_id);
   if (!c) throw new OperationError(404,'CREATION_NOT_FOUND','Creation not found in this account.');
   const p = JSON.parse(c.plan_json) as ScaffoldPlan; const r = p.input.remote;
-  if (!r || !c.baseline_sha || c.baseline_ref !== `refs/heads/${p.input.baseBranch}` || !db.prepare("SELECT creation_id FROM creation_steps WHERE creation_id=? AND step='baseline' AND state='confirmed'").get(creationId) || !['pending','running'].includes(c.state) || p.settingsETag !== configurationETag(readSettingsView(db)) ||
+  if (!r || !c.baseline_sha || c.baseline_ref !== `refs/heads/${p.input.baseBranch}` || !db.prepare("SELECT creation_id FROM creation_steps WHERE creation_id=? AND step='baseline' AND state='confirmed'").get(creationId) || !['pending','running','partial'].includes(c.state) || p.settingsETag !== configurationETag(readSettingsView(db)) ||
     p.account.id !== s.account_id || authorization.accountId !== p.account.id || authorization.sourceOperationId !== c.operation_id ||
     authorization.mode !== p.input.creationMode || identity.planHash !== c.plan_hash || scope !== creationId || identity.issueId !== undefined ||
     identity.ownerId !== r.ownerId || identity.repositoryOwner !== p.ownerLogin || identity.repositoryName !== r.name || identity.visibility !== r.visibility ||

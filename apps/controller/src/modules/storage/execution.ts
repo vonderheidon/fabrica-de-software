@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { ExecutionQuestion, ImplementerResult, OperationId, PassageBinding, ReviewerResult, ScopeChange, type ExecutionProfileValue, type PassageResult } from '#contracts';
-import { ExecutionError, type AnswerRecord, type ExecutionCode, type ExecutionEvent, type ExecutionPersistence, type PassageHandle, type PassageRecord, type QuestionRecord, type ResultRecord } from '../execution/index.js';
+import { ExecutionError, type AnswerRecord, type AttemptSessionIdentity, type ExecutionCode, type ExecutionEvent, type ExecutionPersistence, type PassageHandle, type PassageRecord, type QuestionRecord, type ResultRecord } from '../execution/index.js';
 import { attemptEvent, readAttempt, readCapture } from './attempts.js';
 import { digest } from './configuration-reads.js';
 import { createPendingDelivery } from './deliveries.js';
@@ -14,6 +14,8 @@ interface PassageRow {
   id: string; attempt_id: string; round_number: number; delivery_version: string; role: 'implementer' | 'reviewer';
   role_resource_json: string; request_hash: string | null; terminal_name: string; state: PassageRecord['state'];
   diagnostic: ExecutionCode | null; effective_profile_json: string | null; executor_version: string | null;
+  attempt_session_id: string | null; session_directory_relative: string | null; terminal_generation: number | null;
+  managed_terminal_id: string | null; managed_terminal_name: string | null; terminal_id: string | null; workspace_id: string | null;
 }
 export function createExecutionPersistence(db: Database.Database, onResultAccepted?: (binding: PassageBinding) => void): ExecutionPersistence {
   const atomic = <T>(fn: () => T, write = true): T => {
@@ -22,20 +24,26 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
   };
   function row(handle: PassageHandle): PassageRow {
     if (!Value.Check(OperationId, handle.passageId)) throw new ExecutionError('INPUT_INVALID');
-    const found = db.prepare<[string], PassageRow>(`WITH RECURSIVE chain AS (SELECT * FROM passages WHERE id=? UNION ALL SELECT s.* FROM passages s JOIN chain c ON s.id=c.session_source_id)
-      SELECT c.* FROM chain c ORDER BY c.round_number DESC LIMIT 1`).get(handle.passageId);
+    const found = db.prepare<[string], PassageRow>(`SELECT p.*,s.id AS attempt_session_id,s.session_directory_relative,s.terminal_generation,
+      t.id AS managed_terminal_id,t.terminal_name AS managed_terminal_name,t.terminal_id,t.workspace_id
+      FROM passages p LEFT JOIN attempt_sessions s ON s.id=p.attempt_session_id
+      LEFT JOIN managed_terminals t ON t.id=s.managed_terminal_id WHERE p.id=?`).get(handle.passageId);
     if (!found) throw new ExecutionError('TRACKING_LOST');
-    const root = db.prepare<[string], { terminal_name: string }>(`WITH RECURSIVE chain AS (SELECT id,session_source_id,terminal_name FROM passages WHERE id=? UNION ALL SELECT s.id,s.session_source_id,s.terminal_name FROM passages s JOIN chain c ON s.id=c.session_source_id)
-      SELECT terminal_name FROM chain WHERE session_source_id IS NULL`).get(handle.passageId);
-    if (!root) throw new ExecutionError('STORAGE_FAILED');
-    found.terminal_name = root.terminal_name;
+    if (found.attempt_session_id && !db.prepare(`SELECT id FROM attempt_sessions WHERE id=? AND attempt_id=? AND role=?`)
+      .get(found.attempt_session_id, found.attempt_id, found.role)) throw new ExecutionError('TRACKING_LOST');
     return found;
   }
   function getPassage(handle: PassageHandle): PassageRecord {
     const p = row(handle);
     return { handle, binding: { attemptId: p.attempt_id, passageId: p.id, role: p.role, round: p.round_number, deliveryVersion: p.delivery_version },
       requestHash: p.request_hash ?? '', state: p.state, roleResource: JSON.parse(p.role_resource_json) as PassageRecord['roleResource'],
-      terminalName: p.terminal_name, diagnostic: p.diagnostic,
+      terminalName: p.terminal_name, terminalResourceName: p.terminal_name, diagnostic: p.diagnostic,
+      ...(p.managed_terminal_name ? { managedTerminalName: p.managed_terminal_name } : {}),
+      ...(p.terminal_id ? { terminalId: p.terminal_id } : { terminalId: null }),
+      ...(p.workspace_id ? { workspaceId: p.workspace_id } : { workspaceId: null }),
+      ...(p.attempt_session_id ? { attemptSessionId: p.attempt_session_id } : {}),
+      ...(p.session_directory_relative ? { sessionDirectoryRelative: p.session_directory_relative } : {}),
+      ...(p.terminal_generation !== null ? { terminalGeneration: p.terminal_generation } : {}),
       effectiveProfile: p.effective_profile_json ? JSON.parse(p.effective_profile_json) as ExecutionProfileValue : null, executorVersion: p.executor_version };
   }
   function assertBinding(binding: PassageBinding): PassageRow {
@@ -70,31 +78,142 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
   }
   return {
     getPassage: (h) => atomic(() => getPassage(h), false),
-    reserve: (input) => atomic(() => {
+    getAttemptSession: (handle, binding) => atomic(() => {
+      if (binding) {
+        if (binding.passageId !== handle.passageId) throw new ExecutionError('TRACKING_LOST');
+        assertBinding(binding);
+      }
+      const p = row(handle);
+      if (!p.attempt_session_id || !p.managed_terminal_id || !p.managed_terminal_name || !p.session_directory_relative || p.terminal_generation === null) throw new ExecutionError('STORAGE_FAILED');
+      const session = db.prepare<[string], { state: AttemptSessionIdentity['state']; omp_session_id: string | null; terminal_state: AttemptSessionIdentity['terminalState'] }>(
+        `SELECT s.state,s.omp_session_id,t.state AS terminal_state FROM attempt_sessions s JOIN managed_terminals t ON t.id=s.managed_terminal_id
+          WHERE s.id=? AND (s.terminal_generation=t.generation OR
+            (s.state='reserved' AND s.omp_session_id IS NULL AND t.state='available' AND s.terminal_generation=t.generation+1))`,
+      ).get(p.attempt_session_id);
+      if (!session) throw new ExecutionError('STORAGE_FAILED');
+      return { id: p.attempt_session_id, attemptId: p.attempt_id, role: p.role, managedTerminalId: p.managed_terminal_id,
+        terminalName: p.managed_terminal_name, terminalId: p.terminal_id, workspaceId: p.workspace_id, generation: p.terminal_generation, terminalState: session.terminal_state,
+        state: session.state, ompSessionId: session.omp_session_id, sessionDirectoryRelative: p.session_directory_relative };
+    }, false),
+    allocateTerminal: (handle) => atomic(() => {
+      const p = row(handle);
+      if (!p.attempt_session_id || !p.managed_terminal_id || p.terminal_generation === null || p.terminal_id === null || p.workspace_id === null) throw new ExecutionError('TRACKING_LOST');
+      const session = db.prepare<[string], { state: string; omp_session_id: string | null }>(
+        'SELECT state,omp_session_id FROM attempt_sessions WHERE id=?',
+      ).get(p.attempt_session_id);
+      const oldTerminal = db.prepare<[string], { installation_id: string; host_name: string; role: 'implementer' | 'reviewer'; generation: number; state: string }>(
+        'SELECT installation_id,host_name,role,generation,state FROM managed_terminals WHERE id=?',
+      ).get(p.managed_terminal_id);
+      if (!session || session.state !== 'reserved' || session.omp_session_id !== null || !oldTerminal ||
+        oldTerminal.state !== 'available' || oldTerminal.generation + 1 !== p.terminal_generation) throw new ExecutionError('TRACKING_LOST');
+      db.prepare("UPDATE managed_terminals SET state='uncertain',updated_at_ms=? WHERE id=? AND generation=? AND state='available'")
+        .run(Date.now(), p.managed_terminal_id, oldTerminal.generation);
+      const id = randomUUID(); const terminalName = `factory-${id}`; const now = Date.now();
+      db.prepare(`INSERT INTO managed_terminals(id,installation_id,host_name,role,owner,generation,terminal_name,state,created_at_ms,updated_at_ms)
+        VALUES (?,?,?,?,'factory',1,?,'planned',?,?)`).run(id, oldTerminal.installation_id, oldTerminal.host_name, oldTerminal.role, terminalName, now, now);
+      const updated = db.prepare("UPDATE attempt_sessions SET managed_terminal_id=?,terminal_generation=?,updated_at_ms=? WHERE id=? AND state='reserved' AND omp_session_id IS NULL")
+        .run(id, 1, now, p.attempt_session_id);
+      if (updated.changes !== 1) throw new ExecutionError('TRACKING_LOST');
+      return { id: p.attempt_session_id, attemptId: p.attempt_id, role: p.role, managedTerminalId: id,
+        terminalName, terminalId: null, workspaceId: null, generation: 1, terminalState: 'planned',
+        state: 'reserved', ompSessionId: null, sessionDirectoryRelative: p.session_directory_relative! };
+    }),
+    reserve: (input, terminalAvailabilityConfirmed = false) => atomic(() => {
       const p = assertBinding(input.binding); active(p);
       capturedInput(p);
-      if (input.handle.passageId !== p.id || input.terminalName !== p.terminal_name || digest(input.roleResource) !== digest(JSON.parse(p.role_resource_json)) || !/^[a-f0-9]{64}$/.test(input.requestHash)) throw new ExecutionError('RESOURCE_INVALID');
+      if (input.handle.passageId !== p.id || input.terminalName !== p.terminal_name ||
+        digest(input.roleResource) !== digest(JSON.parse(p.role_resource_json)) || !/^[a-f0-9]{64}$/.test(input.requestHash)) throw new ExecutionError('RESOURCE_INVALID');
       if (p.request_hash) {
         if (p.request_hash !== input.requestHash) throw new ExecutionError('RESULT_CONFLICT');
         return { created: false, record: getPassage(input.handle) };
       }
+      if (!p.attempt_session_id || !p.managed_terminal_id || p.terminal_generation === null) throw new ExecutionError('STORAGE_FAILED');
+      const terminal = db.prepare<[string], { state: string; generation: number; terminal_id: string | null }>(
+        'SELECT state,generation,terminal_id FROM managed_terminals WHERE id=?',
+      ).get(p.managed_terminal_id);
+      const session = p.attempt_session_id ? db.prepare<[string], { omp_session_id: string | null; state: string }>(
+        'SELECT omp_session_id,state FROM attempt_sessions WHERE id=?',
+      ).get(p.attempt_session_id) : undefined;
+      if (!session || !['reserved','completed'].includes(session.state)) throw new ExecutionError('TRACKING_LOST');
+      const source = db.prepare<[string], { session_source_id: string | null }>('SELECT session_source_id FROM passages WHERE id=?').get(p.id)?.session_source_id;
+      if (session.omp_session_id && (!source || !db.prepare(`SELECT id FROM passages WHERE id=? AND attempt_id=? AND role=?
+        AND attempt_session_id=? AND round_number=? AND state='ready' AND tracking_state='tracked'
+        AND EXISTS (SELECT 1 FROM passage_results WHERE passage_id=passages.id)`)
+        .get(source, p.attempt_id, p.role, p.attempt_session_id, p.round_number - 1))) throw new ExecutionError('TRACKING_LOST');
+      const newTerminal = terminal?.state === 'planned' && terminal.generation === p.terminal_generation && terminal.terminal_id === null;
+      const reusableTerminal = terminal?.state === 'available' && Boolean(terminal.terminal_id) && terminalAvailabilityConfirmed &&
+        (terminal.generation + 1 === p.terminal_generation || (terminal.generation === p.terminal_generation && Boolean(session?.omp_session_id)));
+      if (!terminal || (!newTerminal && !reusableTerminal)) throw new ExecutionError('TRACKING_LOST');
       const workspace = db.prepare("SELECT id FROM resources WHERE attempt_id=? AND kind='implementation' AND launch_state='ready' AND owned=1").get(p.attempt_id);
       if (!workspace) throw new ExecutionError('RESOURCE_INVALID');
       db.prepare('UPDATE passages SET request_hash=? WHERE id=? AND request_hash IS NULL').run(input.requestHash, p.id);
       db.prepare("UPDATE resources SET launch_state='starting',owned=1 WHERE passage_id=? AND kind='terminal' AND launch_state='planned'").run(p.id);
+      db.prepare("UPDATE managed_terminals SET generation=?,state=CASE WHEN terminal_id IS NULL THEN 'planned' ELSE 'occupied' END,updated_at_ms=? WHERE id=? AND state IN ('planned','available')")
+        .run(p.terminal_generation, Date.now(), p.managed_terminal_id);
+      db.prepare(`INSERT INTO terminal_occupancies(id,managed_terminal_id,attempt_session_id,attempt_id,passage_id,generation,state,claimed_at_ms)
+        VALUES (?,?,?,?,?,?,'occupied',?)`).run(randomUUID(), p.managed_terminal_id, p.attempt_session_id, p.attempt_id, p.id, p.terminal_generation, Date.now());
+      db.prepare("UPDATE attempt_sessions SET state='active',updated_at_ms=? WHERE id=? AND state IN ('reserved','completed')")
+        .run(Date.now(), p.attempt_session_id);
       event(p, 'cleanup-updated', null);
       return { created: true, record: getPassage(input.handle) };
+    }),
+    confirmTerminal: (handle, observation) => atomic(() => {
+      const p = row(handle);
+      if (!p.attempt_session_id || !p.managed_terminal_id || p.terminal_generation === null ||
+        !Value.Check(OperationId, observation.workspaceId) || !Value.Check(OperationId, observation.terminalId) || !Value.Check(OperationId, observation.ompSessionId)) throw new ExecutionError('RESOURCE_INVALID');
+      const terminal = db.prepare<[string], { generation: number; workspace_id: string | null; terminal_id: string | null; state: string }>(
+        'SELECT generation,workspace_id,terminal_id,state FROM managed_terminals WHERE id=?',
+      ).get(p.managed_terminal_id);
+      if (!terminal || terminal.generation !== p.terminal_generation || !['planned','occupied'].includes(terminal.state) ||
+        (terminal.terminal_id !== null && terminal.terminal_id !== observation.terminalId) ||
+        (terminal.workspace_id !== null && terminal.workspace_id !== observation.workspaceId)) throw new ExecutionError('TRACKING_LOST');
+      const occupancy = db.prepare<[string], { state: string }>("SELECT state FROM terminal_occupancies WHERE passage_id=? ORDER BY generation DESC LIMIT 1").get(p.id);
+      if (!occupancy || occupancy.state !== 'occupied') throw new ExecutionError('TRACKING_LOST');
+      db.prepare("UPDATE managed_terminals SET terminal_id=?,workspace_id=?,state='occupied',observed_at_ms=?,updated_at_ms=? WHERE id=? AND generation=?")
+        .run(observation.terminalId, observation.workspaceId, Date.now(), Date.now(), p.managed_terminal_id, p.terminal_generation);
+      db.prepare(`UPDATE resources SET stop_state='confirmed',diagnostic=NULL WHERE kind='terminal' AND stop_state<>'confirmed' AND passage_id IN (
+        SELECT old_passage.id FROM passages old_passage JOIN attempt_sessions old_session ON old_session.id=old_passage.attempt_session_id
+        WHERE old_session.managed_terminal_id=? AND old_session.id<>?
+      )`).run(p.managed_terminal_id, p.attempt_session_id);
+      const updated = db.prepare("UPDATE attempt_sessions SET omp_session_id=?,state='active',updated_at_ms=? WHERE id=? AND (omp_session_id IS NULL OR omp_session_id=?)")
+        .run(observation.ompSessionId, Date.now(), p.attempt_session_id, observation.ompSessionId);
+      if (updated.changes !== 1) throw new ExecutionError('TRACKING_LOST');
+    }),
+    claimContinuation: (handle) => atomic(() => {
+      const p = row(handle);
+      if (!p.attempt_session_id || !p.managed_terminal_id || p.terminal_generation === null || !p.workspace_id || !p.terminal_id) throw new ExecutionError('TRACKING_LOST');
+      const terminal = db.prepare<[string], { state: string; generation: number }>('SELECT state,generation FROM managed_terminals WHERE id=?').get(p.managed_terminal_id);
+      if (!terminal || terminal.state !== 'available' || terminal.generation !== p.terminal_generation) throw new ExecutionError('TRACKING_LOST');
+      db.prepare(`INSERT INTO terminal_occupancies(id,managed_terminal_id,attempt_session_id,attempt_id,passage_id,generation,state,claimed_at_ms)
+        VALUES (?,?,?,?,?,?,'occupied',?)`).run(randomUUID(), p.managed_terminal_id, p.attempt_session_id, p.attempt_id, p.id, p.terminal_generation, Date.now());
+      db.prepare("UPDATE managed_terminals SET state='occupied',updated_at_ms=? WHERE id=? AND state='available'").run(Date.now(), p.managed_terminal_id);
+      db.prepare("UPDATE attempt_sessions SET state='active',updated_at_ms=? WHERE id=?").run(Date.now(), p.attempt_session_id);
+    }),
+    releaseOccupancy: (handle, state, reason) => atomic(() => {
+      const p = row(handle);
+      const occupancy = db.prepare<[string], { id: string; managed_terminal_id: string; attempt_session_id: string; generation: number; state: string }>(
+        'SELECT id,managed_terminal_id,attempt_session_id,generation,state FROM terminal_occupancies WHERE passage_id=? ORDER BY generation DESC LIMIT 1',
+      ).get(p.id);
+      if (!occupancy || occupancy.state !== 'occupied') return;
+      if (state === 'released') {
+        db.prepare("UPDATE terminal_occupancies SET state='released',released_at_ms=?,reason=? WHERE id=? AND state='occupied'").run(Date.now(), reason, occupancy.id);
+        db.prepare("UPDATE managed_terminals SET state='available',updated_at_ms=? WHERE id=? AND generation=? AND state='occupied'").run(Date.now(), occupancy.managed_terminal_id, occupancy.generation);
+        db.prepare("UPDATE attempt_sessions SET state='completed',updated_at_ms=? WHERE id=?").run(Date.now(), occupancy.attempt_session_id);
+      } else {
+        db.prepare("UPDATE terminal_occupancies SET state='uncertain',reason=? WHERE id=? AND state='occupied'").run(reason ?? 'TERMINAL_AVAILABILITY_UNCERTAIN', occupancy.id);
+        db.prepare("UPDATE managed_terminals SET state='uncertain',updated_at_ms=? WHERE id=? AND generation=?").run(Date.now(), occupancy.managed_terminal_id, occupancy.generation);
+        db.prepare("UPDATE attempt_sessions SET state='uncertain',updated_at_ms=? WHERE id=?").run(Date.now(), occupancy.attempt_session_id);
+      }
     }),
     record: (handle, state, code, type) => atomic(() => {
       const p = row(handle);
       if (state !== 'ready') checkpoint(db, p.id, 'stopped');
       if (state === 'ready' && p.state !== 'ready') throw new ExecutionError('TRACKING_LOST');
       db.prepare('UPDATE passages SET state=?,tracking_state=?,diagnostic=? WHERE id=?').run(state, state === 'ready' ? 'tracked' : 'lost', code, p.id);
-      // A completed old reviewer must not revoke the correction/new version's continuity.
+      // The latest passage of either role owns that conversation's continuity, even between rounds.
       if (state !== 'ready') db.prepare(`UPDATE attempts SET suspension=?,diagnostic=? WHERE id=? AND result IS NULL
-        AND ?=(SELECT max(round_number) FROM rounds WHERE attempt_id=?)
-        AND (?='implementer' OR NOT EXISTS (SELECT 1 FROM passage_results WHERE passage_id=?))`)
-        .run('TRACKING_LOST', code, p.attempt_id, p.round_number, p.attempt_id, p.role, p.id);
+        AND NOT EXISTS (SELECT 1 FROM passages WHERE attempt_id=? AND role=? AND round_number>?)`)
+        .run('TRACKING_LOST', code, p.attempt_id, p.attempt_id, p.role, p.round_number);
       if (state !== 'ready' && state !== 'cancelled') {
         const revoked = db.prepare("UPDATE attempts SET phase='finished',result='interrupted',suspension=NULL WHERE id=? AND result IS NULL AND suspension='TRACKING_LOST'").run(p.attempt_id);
         if (revoked.changes) {
@@ -104,6 +223,19 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
         }
       }
       db.prepare("UPDATE resources SET launch_state=?,diagnostic=? WHERE passage_id=? AND kind='terminal'").run(state === 'ready' ? 'ready' : 'partial', code, p.id);
+      if (state !== 'ready') {
+        db.prepare(`UPDATE attempt_sessions SET state='uncertain',updated_at_ms=? WHERE id=?
+          AND NOT EXISTS (SELECT 1 FROM passages WHERE attempt_session_id=? AND round_number>?)`)
+          .run(Date.now(), p.attempt_session_id, p.attempt_session_id, p.round_number);
+        const occupancy = db.prepare<[string], { id: string; managed_terminal_id: string; attempt_session_id: string; generation: number }>(
+          "SELECT id,managed_terminal_id,attempt_session_id,generation FROM terminal_occupancies WHERE passage_id=? AND state='occupied' ORDER BY generation DESC LIMIT 1",
+        ).get(p.id);
+        if (occupancy) {
+          db.prepare("UPDATE terminal_occupancies SET state='uncertain',reason=? WHERE id=?").run(code ?? 'TRACKING_LOST', occupancy.id);
+          db.prepare("UPDATE managed_terminals SET state='uncertain',updated_at_ms=? WHERE id=? AND generation=?").run(Date.now(), occupancy.managed_terminal_id, occupancy.generation);
+          db.prepare("UPDATE attempt_sessions SET state='uncertain',updated_at_ms=? WHERE id=?").run(Date.now(), occupancy.attempt_session_id);
+        }
+      }
       event(p, type, code);
     }),
     confirmReady: (handle, profile, executorVersion) => atomic(() => {
@@ -160,6 +292,14 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
         .run(p.id, p.attempt_id, c.criterionId, c.verdict, JSON.stringify(c.evidence));
       if (p.role === 'implementer') createPendingDelivery(db, input.binding);
       else acceptReview(db, input.binding, result as import('#contracts').ReviewerResult);
+      const occupancy = db.prepare<[string], { id: string; managed_terminal_id: string; attempt_session_id: string; generation: number }>(
+        "SELECT id,managed_terminal_id,attempt_session_id,generation FROM terminal_occupancies WHERE passage_id=? AND state='occupied' ORDER BY generation DESC LIMIT 1",
+      ).get(p.id);
+      if (occupancy) {
+        db.prepare("UPDATE terminal_occupancies SET state='released',released_at_ms=?,reason='RESULT_ACCEPTED' WHERE id=? AND state='occupied'").run(Date.now(), occupancy.id);
+        db.prepare("UPDATE managed_terminals SET state='available',updated_at_ms=? WHERE id=? AND generation=? AND state='occupied'").run(Date.now(), occupancy.managed_terminal_id, occupancy.generation);
+        db.prepare("UPDATE attempt_sessions SET state='completed',updated_at_ms=? WHERE id=?").run(Date.now(), occupancy.attempt_session_id);
+      }
       // Agent reports are not a delivery, successful checks or final approval.
       if (p.role === 'implementer') db.prepare("UPDATE attempts SET phase='verifying' WHERE id=?").run(p.attempt_id);
       event(p, 'result-accepted', null);
@@ -230,8 +370,31 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
     recordStop: (handle, receipt) => atomic(() => {
       const p = row(handle);
       if (receipt.passageId !== p.id) throw new ExecutionError('INPUT_INVALID');
-      db.prepare("UPDATE resources SET stop_state=?,diagnostic=?,launch_state=CASE WHEN ?='requested' THEN launch_state ELSE 'partial' END WHERE attempt_id=? AND reference=? AND kind='terminal' AND stop_state<>'confirmed'")
-        .run(receipt.state, receipt.state === 'uncertain' ? 'STOP_UNCONFIRMED' : receipt.state === 'requested' ? 'STOP_REQUESTED' : null, receipt.state, p.attempt_id, p.terminal_name);
+      if (p.managed_terminal_id) {
+        db.prepare(`UPDATE resources SET stop_state=?,diagnostic=?,launch_state=CASE WHEN ?='requested' THEN launch_state ELSE 'partial' END
+          WHERE kind='terminal' AND stop_state<>'confirmed' AND passage_id IN (
+            SELECT managed_passage.id FROM passages managed_passage JOIN attempt_sessions managed_session ON managed_session.id=managed_passage.attempt_session_id
+            WHERE managed_session.managed_terminal_id=? AND managed_session.id=? AND managed_passage.round_number<=?
+          )`).run(receipt.state, receipt.state === 'uncertain' ? 'STOP_UNCONFIRMED' : receipt.state === 'requested' ? 'STOP_REQUESTED' : null,
+            receipt.state, p.managed_terminal_id, p.attempt_session_id, p.round_number);
+      } else {
+        db.prepare("UPDATE resources SET stop_state=?,diagnostic=?,launch_state=CASE WHEN ?='requested' THEN launch_state ELSE 'partial' END WHERE attempt_id=? AND reference=? AND kind='terminal' AND stop_state<>'confirmed'")
+          .run(receipt.state, receipt.state === 'uncertain' ? 'STOP_UNCONFIRMED' : receipt.state === 'requested' ? 'STOP_REQUESTED' : null, receipt.state, p.attempt_id, p.terminal_name);
+      }
+      const occupancy = db.prepare<[string], { id: string; managed_terminal_id: string; attempt_session_id: string; generation: number; state: string }>(
+        "SELECT id,managed_terminal_id,attempt_session_id,generation,state FROM terminal_occupancies WHERE passage_id=? AND state IN ('occupied','uncertain') ORDER BY generation DESC LIMIT 1",
+      ).get(p.id);
+      if (occupancy && receipt.state !== 'requested') {
+        if (receipt.state === 'confirmed') {
+          db.prepare("UPDATE terminal_occupancies SET state='released',released_at_ms=?,reason='STOP_CONFIRMED' WHERE id=?").run(Date.now(), occupancy.id);
+          db.prepare("UPDATE managed_terminals SET state='available',updated_at_ms=? WHERE id=? AND generation=?").run(Date.now(), occupancy.managed_terminal_id, occupancy.generation);
+        } else {
+          db.prepare("UPDATE terminal_occupancies SET state='uncertain',reason='STOP_UNCONFIRMED' WHERE id=?").run(occupancy.id);
+          db.prepare("UPDATE managed_terminals SET state='uncertain',updated_at_ms=? WHERE id=? AND generation=?").run(Date.now(), occupancy.managed_terminal_id, occupancy.generation);
+        }
+        db.prepare("UPDATE attempt_sessions SET state=CASE WHEN state IN ('uncertain','interrupted') THEN state ELSE ? END,updated_at_ms=? WHERE id=?")
+          .run(receipt.state === 'confirmed' ? 'completed' : 'uncertain', Date.now(), occupancy.attempt_session_id);
+      }
       event(p, 'cleanup-updated', null);
     }),
   };

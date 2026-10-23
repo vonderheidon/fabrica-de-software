@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { TSchema } from '@sinclair/typebox';
 import { TypeGuard } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { DiagnosticCheck, HttpDiagnosticCheck, DiagnosticContext, HttpDiagnosticContext, DiagnosticChecks, HttpDiagnosticChecks, DiagnosticRequest, HttpDiagnosticRequest, ContextDiagnostic, HttpContextDiagnostic, DiagnosticReport, HttpDiagnosticReport, DiagnosticsView, HttpDiagnosticsView, OperationSummaryQuery, HttpOperationSummaryQuery, OperationSummary, HttpOperationSummary, QueueScope, HttpQueueScope, QueueReason, HttpQueueReason, QueueItem, HttpQueueItem, QueueDiagnostic, HttpQueueDiagnostic, QueueObservation, HttpQueueObservation, QueueQuery, HttpQueueQuery, QueueCommand, HttpQueueCommand, QueueSaved, HttpQueueSaved, QueueConflict, HttpQueueConflict, CreationMode, HttpCreationMode, ScaffoldInput, HttpScaffoldInput, ScaffoldFile, HttpScaffoldFile, ScaffoldAccount, HttpScaffoldAccount, ScaffoldEngineering, HttpScaffoldEngineering, ScaffoldPlan, HttpScaffoldPlan, ScaffoldPlanned, HttpScaffoldPlanned, ScaffoldOptions, HttpScaffoldOptions, CreateScaffold, HttpCreateScaffold, HttpCreationParams, CreationStep, HttpCreationStep, ProjectCreation, HttpProjectCreation, CreationEffectIdentity, HttpCreationEffectIdentity, CreationEffect, HttpCreationEffect, CreationView, HttpCreationView, ControllerEvent, HttpControllerEvent, EventQuery, HttpEventQuery, EventListQuery, HttpEventListQuery, EventStreamQuery, HttpEventStreamQuery, EventPage, HttpEventPage, HttpControllerEventFrame } from './index.js';
+import { DiagnosticCheck, HttpDiagnosticCheck, DiagnosticContext, HttpDiagnosticContext, DiagnosticChecks, HttpDiagnosticChecks, DiagnosticRequest, HttpDiagnosticRequest, ContextDiagnostic, HttpContextDiagnostic, DiagnosticReport, HttpDiagnosticReport, DiagnosticsView, HttpDiagnosticsView, OperationSummaryQuery, HttpOperationSummaryQuery, OperationSummary, HttpOperationSummary, QueueScope, HttpQueueScope, QueueReason, HttpQueueReason, QueueItem, HttpQueueItem, QueueDiagnostic, HttpQueueDiagnostic, QueueObservation, HttpQueueObservation, QueueQuery, HttpQueueQuery, QueueCommand, HttpQueueCommand, QueueSaved, HttpQueueSaved, QueueConflict, HttpQueueConflict, CreationMode, HttpCreationMode, ScaffoldInputV3, HttpScaffoldInput, ScaffoldFile, HttpScaffoldFile, ScaffoldAccount, HttpScaffoldAccount, ScaffoldEngineering, HttpScaffoldEngineering, ScaffoldPlanV3, HttpScaffoldPlan, HttpScaffoldPlanV3, HttpLegacyScaffoldPlan, HttpScaffoldPlanned, ScaffoldOptions, HttpScaffoldOptions, HttpCreateScaffold, HttpCreationParams, CreationStep, HttpCreationStep, HttpProjectCreation, CreationEffectIdentity, HttpCreationEffectIdentity, CreationEffect, HttpCreationEffect, CreationBoardOperation, HttpCreationBoardOperation, ControllerEvent, HttpControllerEvent, EventQuery, HttpEventQuery, EventListQuery, HttpEventListQuery, EventStreamQuery, HttpEventStreamQuery, EventPage, HttpEventPage, HttpControllerEventFrame } from './index.js';
 
 // Test-only schema comparison: keywords and constraints stay verbatim; only declared JSON property names change.
 function expectedHttpSchema(schema: TSchema): unknown {
@@ -34,19 +34,16 @@ const pairs: readonly (readonly [string, TSchema, TSchema])[] = [
   ['QueueSaved', QueueSaved, HttpQueueSaved],
   ['QueueConflict', QueueConflict, HttpQueueConflict],
   ['CreationMode', CreationMode, HttpCreationMode],
-  ['ScaffoldInput', ScaffoldInput, HttpScaffoldInput],
+  ['ScaffoldInputV3', ScaffoldInputV3, HttpScaffoldInput],
   ['ScaffoldFile', ScaffoldFile, HttpScaffoldFile],
   ['ScaffoldAccount', ScaffoldAccount, HttpScaffoldAccount],
   ['ScaffoldEngineering', ScaffoldEngineering, HttpScaffoldEngineering],
-  ['ScaffoldPlan', ScaffoldPlan, HttpScaffoldPlan],
-  ['ScaffoldPlanned', ScaffoldPlanned, HttpScaffoldPlanned],
+  ['ScaffoldPlanV3', ScaffoldPlanV3, HttpScaffoldPlanV3],
   ['ScaffoldOptions', ScaffoldOptions, HttpScaffoldOptions],
-  ['CreateScaffold', CreateScaffold, HttpCreateScaffold],
   ['CreationStep', CreationStep, HttpCreationStep],
-  ['ProjectCreation', ProjectCreation, HttpProjectCreation],
   ['CreationEffectIdentity', CreationEffectIdentity, HttpCreationEffectIdentity],
   ['CreationEffect', CreationEffect, HttpCreationEffect],
-  ['CreationView', CreationView, HttpCreationView],
+  ['CreationBoardOperation', CreationBoardOperation, HttpCreationBoardOperation],
   ['ControllerEvent', ControllerEvent, HttpControllerEvent],
   ['EventQuery', EventQuery, HttpEventQuery],
   ['EventListQuery', EventListQuery, HttpEventListQuery],
@@ -57,6 +54,29 @@ it.each(pairs)('preserves all constraints and closes the HTTP representation of 
   expect(http).toEqual(expectedHttpSchema(internal));
 });
 
+const legacyScaffoldPlan = {
+  format_version: 1,
+  input: { name: 'Legacy project',template_id: 'engineering.v1',template_digest: 'a'.repeat(64),destination_relative: 'legacy',
+    creation_mode: 'local',base_branch: 'main',triage_enabled: true },
+  installation_id: '11111111-1111-4111-8111-111111111111',settings_e_tag: '"legacy"',projects_root: 'C:\\projects',
+  destination: 'C:\\projects\\legacy',parent_identity: 'b'.repeat(64),template_digest: 'a'.repeat(64),
+  files: [{ path: 'AGENTS.md',bytes: 1,sha256: 'c'.repeat(64) }],
+  engineering: { tracker: 'github',domain: 'single-context',instruction_file: 'AGENTS.md',triage_enabled: true,installs_skills: false,creates_labels: false },
+  account: { state: 'complete',id: 'account',login: 'operator' },owner_id: null,effects: ['register_local_project'],
+};
+it('shares the strict V3 plan across planning and new writes while retaining legacy plans for reads', () => {
+  expect(HttpScaffoldPlanned.properties.plan).toEqual(HttpScaffoldPlanV3);
+  expect(HttpCreateScaffold.properties.plan).toEqual(HttpScaffoldPlanV3);
+  expect(Value.Check(HttpScaffoldPlan,legacyScaffoldPlan)).toBe(true);
+  expect(Value.Check(HttpLegacyScaffoldPlan,legacyScaffoldPlan)).toBe(true);
+  expect(Value.Check(HttpScaffoldPlanV3,legacyScaffoldPlan)).toBe(false);
+  expect(Value.Check(HttpCreateScaffold,{ plan_hash: 'd'.repeat(64),plan: legacyScaffoldPlan,authorized: true })).toBe(false);
+  const historical = { id,operation_id: id,project_id: null,plan_hash: 'd'.repeat(64),plan: legacyScaffoldPlan,state: 'failed',revision: 1,
+    baseline_sha: null,baseline_ref: null,diagnostic: null,created_at_ms: 0 };
+  expect(Value.Check(HttpProjectCreation,historical)).toBe(true);
+  expect(historical.plan.input).not.toHaveProperty('board_name');
+});
+
 const id = '11111111-1111-4111-8111-111111111111';
 const queries: readonly (readonly [TSchema, Record<string, unknown>, string, string])[] = [
   [HttpOperationSummaryQuery, { project_id: id }, 'project_id', 'projectId'],
@@ -64,7 +84,8 @@ const queries: readonly (readonly [TSchema, Record<string, unknown>, string, str
   [HttpEventListQuery, { project_id: id }, 'project_id', 'projectId'],
   [HttpEventStreamQuery, { attempt_id: id }, 'attempt_id', 'attemptId'],
   [HttpQueueQuery, { project_ids: id }, 'project_ids', 'projectIds'],
-  [HttpScaffoldInput, { name: 'Name', template_id: 'template', template_digest: 'a'.repeat(64), destination_relative: 'folder', creation_mode: 'local', base_branch: 'main', triage_enabled: false }, 'template_id', 'templateId'],
+  [HttpScaffoldInput, { name: 'Name', template_id: 'template', template_digest: 'a'.repeat(64), destination_relative: 'folder', creation_mode: 'remote_push', base_branch: 'main', triage_enabled: false,
+    remote: { owner_id: 'owner',name: 'repo',visibility: 'private' },board_name: 'Kanban' }, 'template_id', 'templateId'],
   [HttpQueueCommand, { enabled: true, scope: { kind: 'account', project_ids: [id] }, observation_id: id, authorized_summary_hash: 'hash' }, 'observation_id', 'observationId'],
 ];
 it.each(queries)('rejects aliases alone and alongside canonical fields %#', (schema, canonical, key, alias) => {

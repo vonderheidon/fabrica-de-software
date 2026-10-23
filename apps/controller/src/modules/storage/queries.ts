@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery, DetailItem, type AttemptPage, type AttemptDetail, type DeliveryDetail, type DetailPage, type DetailSection } from '#contracts';
-import { readAttempt } from './attempts.js';
+import { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery, DetailItem, type AttemptPage, type AttemptDetail, type DeliveryDetail, type DetailPage, type DetailSection, type HistoricalEffectiveProfile } from '#contracts';
+import { readAttempt, readCapture } from './attempts.js';
 import { deliveryView, readDelivery } from './deliveries.js';
 import { digest, eventCursor } from './configuration-reads.js';
 import { readSettings } from './settings.js';
@@ -14,6 +14,35 @@ import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
 
 const cursorError = () => new OperationError(400, 'QUERY_CURSOR_INVALID', 'The cursor does not match this scope, section, filter or order.');
+function redactProfileText(value: string): string {
+  return value
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi, '[REDACTED PRIVATE KEY]')
+    .replace(/(https?:\/\/)[^/\s:@]+(?::[^/\s@]*)?@/gi, '$1[REDACTED]@')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b/g, '[REDACTED CREDENTIAL]')
+    .replace(/\b(authorization|cookie|set-cookie|x-csrf-token|password|secret|token|api[_-]?key)\b\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1=[REDACTED]');
+}
+function profileContextSummary(capture: ReturnType<typeof readCapture>): string {
+  const body = redactProfileText(capture.issue.body);
+  const bodyExcerpt = body.length <= 4096 ? body : `${body.slice(0, 4096)}\n[Conteúdo restante omitido; SHA-256 ${digest(body)}]`;
+  const title = redactProfileText(capture.issue.title);
+  const titleExcerpt = title.length <= 512 ? title : `${title.slice(0, 512)} [título resumido; SHA-256 ${digest(title)}]`;
+  const criteria = capture.criteria.slice(0, 10).map((criterion) => `${criterion.id}: ${redactProfileText(criterion.text).slice(0, 256)}`);
+  if (capture.criteria.length > 10) criteria.push(`${capture.criteria.length - 10} critérios adicionais; SHA-256 ${digest(capture.criteria.slice(10))}`);
+  return `Issue #${capture.issue.number}: ${titleExcerpt}\n${bodyExcerpt}\nCritérios capturados:\n${criteria.join('\n')}`;
+}
+function profileComposition(role: 'implementer' | 'reviewer', profile: NonNullable<ReturnType<typeof readCapture>['configuration']['implementer_profile']>, contextSummary: string): HistoricalEffectiveProfile {
+  return {
+    role, profileId: profile.id ?? null, profileRevision: 'revision' in profile ? profile.revision : null,
+    executor: redactProfileText(profile.executor), provider: redactProfileText(profile.provider), model: redactProfileText(profile.model),
+    effort: profile.effort === null ? null : redactProfileText(profile.effort),
+    guidance: redactProfileText(profile.guidance),
+    compositionVersion: 'composition_version' in profile ? profile.composition_version ?? null : null,
+    contextSummary, technicalContractSummary: role === 'implementer'
+      ? 'Contrato do Implementador v1. O controlador fixa tentativa, papel, rodada, versão e IDs de critérios; execution_complete e execution_question usam schemas fechados e validação do servidor. Guidance não altera permissões, checkout, autorização de publicação ou limites.'
+      : 'Contrato do Revisor v1. O controlador fixa tentativa, papel, rodada, versão, IDs de critérios e achados; execution_complete e execution_question usam schemas fechados e validação do servidor. Guidance não concede escrita no produto, altera a versão revisada nem muda limites.',
+    credentialsRedacted: true,
+  };
+}
 function decodeCursor(cursor: string | undefined, fingerprint: string, ceiling: number) {
   if (!cursor) return { ceiling, after: '' };
   let value: unknown;
@@ -48,8 +77,10 @@ interface SectionPlan { from: string; key: string; delivery: string; round: stri
 const plans: Record<DetailSection, SectionPlan> = {
   rounds: { from: 'rounds t LEFT JOIN passages p ON p.attempt_id=t.attempt_id AND p.round_number=t.round_number AND p.role=\'implementer\' LEFT JOIN passage_results z ON z.passage_id=p.id LEFT JOIN deliveries d ON d.id=t.delivery_version LEFT JOIN reviews r ON r.delivery_id=d.id', key: "printf('%02d',t.round_number)", delivery: 't.delivery_version', round: 't.round_number',
     select: 't.round_number AS round,t.delivery_version AS deliveryId,p.id AS producerPassageId,z.receipt_id AS producerReceiptId,r.id AS reviewId,r.state AS reviewState,d.content_identity AS contentIdentity' },
-  passages: { from: 'passages t LEFT JOIN passage_results z ON z.passage_id=t.id', key: "printf('%02d',t.round_number)||':'||t.role||':'||t.id", delivery: 't.delivery_version', round: 't.round_number',
-    select: 't.id,t.attempt_id AS attemptId,t.delivery_version AS deliveryId,t.round_number AS round,t.role,t.state,t.tracking_state AS tracking,t.diagnostic,z.receipt_id AS resultReceiptId,t.created_at_ms AS createdAtMs' },
+  passages: { from: 'passages t LEFT JOIN passage_results z ON z.passage_id=t.id LEFT JOIN attempt_sessions s ON s.id=t.attempt_session_id LEFT JOIN managed_terminals m ON m.id=s.managed_terminal_id', key: "printf('%02d',t.round_number)||':'||t.role||':'||t.id", delivery: 't.delivery_version', round: 't.round_number',
+    select: `t.id,t.attempt_id AS attemptId,t.delivery_version AS deliveryId,t.round_number AS round,t.role,t.state,t.tracking_state AS tracking,t.diagnostic,z.receipt_id AS resultReceiptId,t.created_at_ms AS createdAtMs,
+      s.id AS attemptSessionId,s.state AS sessionState,t.session_source_id AS sessionSourceId,m.terminal_name AS terminalName,m.state AS terminalState,
+      (SELECT o.state FROM terminal_occupancies o WHERE o.passage_id=t.id ORDER BY o.claimed_at_ms DESC,o.id DESC LIMIT 1) AS occupancyState` },
   criteria: { from: 'attempt_criteria t', key: "printf('%06d',t.occurrence_index)||':'||t.criterion_id", delivery: 'NULL', round: 'NULL',
     select: `t.criterion_id AS id,t.text,t.occurrence_index AS occurrence_index,
       (SELECT json_extract(j.value,'$.explicit') FROM attempts a,json_each(a.capture_json,'$.criteria') j WHERE a.id=t.attempt_id AND json_extract(j.value,'$.id')=t.criterion_id) AS explicit,
@@ -70,7 +101,27 @@ const plans: Record<DetailSection, SectionPlan> = {
 };
 export function readDetailPage(db: Database.Database, attemptId: string, query: AttemptDetailQuery): DetailPage | null {
   if (!query.section) { if (query.cursor) throw cursorError(); return null; }
-  const a = readAttempt(db, attemptId); const s = readSettings(db); const plan = plans[query.section];
+  const a = readAttempt(db, attemptId); const s = readSettings(db);
+  if (query.section === 'profiles') {
+    if (query.deliveryId && readDelivery(db, query.deliveryId).attemptId !== attemptId) throw new OperationError(404, 'DELIVERY_NOT_FOUND', 'The selected version does not belong to this attempt.');
+    const fingerprint = digest([s.installation_id, s.account_id, attemptId, 'profiles:captured-effective-instructions']);
+    const cursor = decodeCursor(query.cursor, fingerprint, 2); const limit = Number(query.limit ?? '25');
+    const capture = readCapture(db, attemptId); const context = profileContextSummary(capture);
+    const profiles = [
+      ['implementer', capture.configuration.implementer_profile],
+      ['reviewer', capture.configuration.reviewer_profile],
+    ] as const;
+    const rows = profiles.map(([role, profile]) => {
+      if (!profile) throw new StorageError('OPERATION_DATA_INVALID');
+      return { role, value: profileComposition(role, profile, context) };
+    }).filter((row) => row.role > cursor.after).slice(0, limit + 1);
+    const selected = rows.slice(0, limit); const last = selected.at(-1); const hasMore = rows.length > limit;
+    const items = selected.map(({ value }) => value);
+    if (items.some((item) => !Value.Check(DetailItem, item))) throw new StorageError('OPERATION_DATA_INVALID');
+    return { section: query.section, items, has_more: hasMore,
+      next_cursor: hasMore && last ? encodeCursor(fingerprint, cursor.ceiling, last.role) : null, event_cursor: eventCursor(db) };
+  }
+  const plan = plans[query.section];
   if (!plan) throw cursorError();
   const selected = query.deliveryId ?? (query.roundId ? db.prepare<[string, number], { id: string }>('SELECT delivery_version AS id FROM rounds WHERE attempt_id=? AND round_number=?').get(attemptId, Number(query.roundId))?.id : a.deliveryId) ?? null;
   if (query.deliveryId && readDelivery(db, query.deliveryId).attemptId !== attemptId) throw new OperationError(404, 'DELIVERY_NOT_FOUND', 'The selected version does not belong to this attempt.');

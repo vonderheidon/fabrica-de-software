@@ -2,8 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import {
   CatalogQuery, ConfigurationOptions, ConfigurationOptionsQuery, ConfigurationSaved, ConfigurationUpdate, ConfigurationView, ExecutionCatalog, GitHubSetupOptions,
-  EmptyQuery, ErrorResponse, ProjectDetail, ProjectPage, ProjectParams, ProjectRegistered, ProjectRegistration,
-  NativeSelectionRequest, NativeSelectionResult, SettingsSaved, SettingsUpdate, SettingsView,
+  EmptyQuery, ErrorResponse, OperationAccepted, ProjectDetail, ProjectPage, ProjectParams, ProjectRegistered, ProjectRegistration,
+  StorageTransitionCommand,
+  NativeSelectionRequest, NativeSelectionResult, SettingsSaved, SettingsUpdate, SettingsView, ToolOptions,
 } from '#contracts';
 import type { Projects } from '../../modules/projects/index.js';
 import { commandHeaders } from '../security/index.js';
@@ -32,6 +33,10 @@ export function installProjectRoutes(instance: FastifyInstance, projects: Projec
     handlerTimeout: 35_000,
     schema: { querystring: EmptyQuery, response: { 200: ExecutionCatalog, ...errors } },
   }, async () => projects.getExecutionOptions());
+  app.get('/api/v1/settings/tool-options', {
+    handlerTimeout: 20_000,
+    schema: { querystring: EmptyQuery, response: { 200: ToolOptions, ...errors } },
+  }, async () => projects.getToolOptions());
   app.put('/api/v1/settings', { schema: { querystring: EmptyQuery, body: SettingsUpdate, response: { 200: SettingsSaved, ...errors } } }, async (request, reply) => {
     const result = await projects.saveSettings(request.body, commandHeaders(request));
     return reply.header('ETag', result.etag).send({ ...result.view, operation_id: result.operationId, receipt: result.receipt,
@@ -58,12 +63,19 @@ export function installProjectRoutes(instance: FastifyInstance, projects: Projec
     }
   });
   app.get('/api/v1/projects/:projectId/configuration', { schema: { params: ProjectParams, querystring: EmptyQuery, response: { 200: ConfigurationView, ...errors } } }, async (request, reply) => {
-    const result = projects.getConfiguration(request.params.projectId);
+    const result = await projects.getConfiguration(request.params.projectId);
     return reply.header('ETag', result.etag).send(result.view);
   });
   app.put('/api/v1/projects/:projectId/configuration', { schema: { params: ProjectParams, querystring: EmptyQuery, body: ConfigurationUpdate, response: { 200: ConfigurationSaved, ...errors } } }, async (request, reply) => {
     const result = await projects.saveConfiguration(request.params.projectId, request.body, commandHeaders(request));
     return reply.header('ETag', result.etag).send({ ...result.view, operation_id: result.operationId, receipt: result.receipt });
+  });
+  app.post('/api/v1/projects/:projectId/storage-transition', { schema: { params: ProjectParams, querystring: EmptyQuery,
+    body: StorageTransitionCommand, response: { 202: OperationAccepted, ...errors } } }, async (request, reply) => {
+    const operation = await projects.transitionStorage(request.params.projectId, request.body, commandHeaders(request));
+    const statusUrl = `/api/v1/operations/${operation.operation_id}`;
+    return reply.code(202).header('Location', statusUrl).send({ operation_id: operation.operation_id, resource: operation.resource,
+      status_url: statusUrl, ...(operation.receipt ? { receipt: operation.receipt } : {}), request_id: request.id });
   });
   app.get('/api/v1/projects/:projectId/configuration-options', { schema: { params: ProjectParams, querystring: ConfigurationOptionsQuery, response: { 200: ConfigurationOptions, ...errors } } }, async (request) => projects.getConfigurationOptions(request.params.projectId, request.query));
 }

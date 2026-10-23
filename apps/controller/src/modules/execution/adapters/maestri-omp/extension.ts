@@ -7,6 +7,8 @@ import { connectWire, executionLimits, type Wire } from './wire.js';
 // Structural view of the supported OMP extension API. OMP supplies these
 // objects; importing another OMP distribution would create a second runtime.
 interface Context {
+  isIdle?(): boolean;
+  hasPendingMessages?(): boolean;
   mode: string; hasUI: boolean; cwd: string; model?: { provider: string; id: string };
   sessionManager: { getSessionId(): string };
   ui: { notify(message: string, level: 'error' | 'info'): void };
@@ -31,7 +33,7 @@ interface ExtensionApi {
 }
 interface Launch {
   protocolVersion: 1; host: '127.0.0.1'; port: number; token: string; cwd: string; ompVersion: string;
-  role: { reference: { sha256: string }; instructions: string; resultSchema: Record<string, unknown>; questionSchema: Record<string, unknown> };
+  role: { reference: { sha256: string }; resultSchema: Record<string, unknown>; questionSchema: Record<string, unknown> };
   task: string; guidance: string; gitNexusRequired: boolean;
 }
 const object = (value: unknown): Record<string, unknown> => {
@@ -64,7 +66,9 @@ function loadLaunch(): Launch {
       typeof raw.task !== 'string' || typeof raw.guidance !== 'string' || typeof raw.ompVersion !== 'string' ||
       raw.ompVersion.length < 1 || raw.ompVersion.length > 128) throw new ExecutionError('RESOURCE_INVALID');
     const role = object(raw.role); const reference = object(role.reference);
-    if (typeof role.instructions !== 'string' || typeof reference.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(reference.sha256)) throw new ExecutionError('RESOURCE_INVALID');
+    if (Object.keys(role).sort().join(',') !== 'questionSchema,reference,resultSchema' ||
+      typeof reference.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(reference.sha256) ||
+      !role.resultSchema || typeof role.resultSchema !== 'object' || !role.questionSchema || typeof role.questionSchema !== 'object') throw new ExecutionError('RESOURCE_INVALID');
     return raw as unknown as Launch;
   } catch { throw new ExecutionError('RESOURCE_INVALID'); }
 }
@@ -79,6 +83,7 @@ export default function executionExtension(api: ExtensionApi): void {
   let trackedSession: string | undefined;
   let started = false;
   let alive = false;
+  let idleCheck = false;
   let context: Context | undefined;
   const lose = () => {
     alive = false;
@@ -137,12 +142,26 @@ export default function executionExtension(api: ExtensionApi): void {
         await wire?.send({ type: 'task-submitted' });
         const gitNexus = launch.gitNexusRequired ? `\nGitNexus is required. Analyze and query exactly this clone root: ${launch.cwd}. Confirm that the returned root matches.` : '';
         // This is the sole task submission. No CLI prompt, stdin piping or second hidden agent.
-        api.sendUserMessage(`${launch.role.instructions}\n\n${launch.guidance}\n${gitNexus}\n\n${launch.task}`);
+        api.sendUserMessage(`Instruções comportamentais efetivas do perfil capturado:\n${launch.guidance}\n\nContexto da tarefa e contrato técnico capturados:\n${gitNexus}\n\n${launch.task}`);
+      } else if (frame.type === 'continuation-check' && typeof frame.passageId === 'string' && /^[a-f0-9-]{36}$/.test(frame.passageId)) {
+        if (!ctx.isIdle || !ctx.hasPendingMessages || idleCheck || !alive || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');
+        idleCheck = true;
+        const isIdle = ctx.isIdle; const hasPendingMessages = ctx.hasPendingMessages;
+        // Do not block frame dispatch: replies already in flight must drain pending calls.
+        void (async () => {
+          const deadline = Date.now() + executionLimits.requestMs;
+          while (!isIdle.call(ctx) || hasPendingMessages.call(ctx) || activeTools.size || pending.size) {
+            if (!alive || !sameSession(ctx) || !sameProfile(ctx) || Date.now() >= deadline) throw new ExecutionError('TRACKING_LOST');
+            await new Promise<void>(resolve => setTimeout(resolve, 25));
+          }
+          if (!alive || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');
+          await wire?.send({ type: 'continuation-idle', passageId: frame.passageId });
+        })().catch(() => { wire?.close('TRACKING_LOST'); lose(); }).finally(() => { idleCheck = false; });
       } else if (frame.type === 'continuation' && typeof frame.passageId === 'string' && /^[a-f0-9-]{36}$/.test(frame.passageId) && typeof frame.task === 'string' && frame.task.length <= 1_000_000) {
         if (!alive || !sameSession(ctx) || !sameProfile(ctx) || continuations.has(frame.passageId) || continuations.size >= 5) throw new ExecutionError('TRACKING_LOST');
         continuations.add(frame.passageId);
-        await wire?.send({ type: 'continuation-receipt', passageId: frame.passageId });
         api.sendUserMessage(frame.task, { deliverAs: 'followUp' });
+        await wire?.send({ type: 'continuation-receipt', passageId: frame.passageId });
       } else if (frame.type === 'reply' && typeof frame.id === 'string') {
         const call = pending.get(frame.id);
         if (!call) throw new ExecutionError('FRAME_INVALID');

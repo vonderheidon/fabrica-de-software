@@ -150,6 +150,7 @@ const messages = {
   REFERENCE_INACCESSIBLE: ['A referenced object is inaccessible.', 'Verify access; do not dispatch from partial results.'],
   STATUS_FIELD_INACCESSIBLE: ['The configured Status field is absent or inaccessible.', 'Review the exact field ID; no substitute was selected.'],
   STATUS_OPTION_INACCESSIBLE: ['A configured Status option is absent or inaccessible.', 'Review the exact option IDs; no substitute was selected.'],
+  STATUS_MAPPING_INCOMPATIBLE: ['The observed Status options do not match the approved V3 names, order, and IDs.', 'Select the Status field again and map each approved V3 option to its observed ID.'],
   INPUT_INVALID: ['The query input is invalid.', 'Correct the reference or query parameters.'],
   BRANCH_NOT_FOUND: ['The selected GitHub branch does not exist or is inaccessible.', 'Select an existing branch and verify repository permissions.'],
 } satisfies Record<GitHubDiagnostic['code'], [string, string]>;

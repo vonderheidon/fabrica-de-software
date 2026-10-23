@@ -33,5 +33,5 @@ export function useAttempt(attemptId: string, query: string, reload: number): { 
     const timer = window.setInterval(() => { void read(); }, 15_000);
     return () => { active = false; window.clearInterval(timer); controller.abort(); };
   }, [attemptId, query, reload]);
-  return { selectionCurrent: state.id === identity, attempt: state.id.startsWith(`${attemptId}:`) ? state.value : null, etag: state.id === identity ? state.etag : null, error: state.id === identity ? state.error : null, errorDetails: state.id === identity ? state.errorDetails : null };
+  return { selectionCurrent: state.id === identity, attempt: state.id === identity ? state.value : null, etag: state.id === identity ? state.etag : null, error: state.id === identity ? state.error : null, errorDetails: state.id === identity ? state.errorDetails : null };
 }

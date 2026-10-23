@@ -9,6 +9,8 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 import { removeReviewSchema } from '../fixtures/review-schema.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
+import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
+import { removeSessionContinuitySchema } from '../fixtures/managed-terminal-schema.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
@@ -22,10 +24,11 @@ async function fixture(limit = 2) {
     const plan = f.storage.beginVerification(id); f.storage.finishVerification(plan.id);
   });
   f.dependencies.verification = { verifyDelivery: verify, getArtifact: vi.fn(async () => { throw new Error('Not exercised'); }) };
-  const materializeReview = vi.fn(async (d: { attemptId: string }, id: string) => join(f.directory, 'work', d.attemptId, 'reviews', id, 'checkout'));
+  const materializeReview = vi.fn(async (d: { attemptId: string }, _id: string) => join(f.directory, 'work', d.attemptId, 'implementation'));
   const captureDelivery = vi.fn(async (input: { deliveryId: string }) => ({ gitRef: `refs/factory/deliveries/${input.deliveryId}`,
     contentIdentity: digest(input).slice(0, 40), commitSha: digest({ commit: input }).slice(0, 40), hasDelta: true, warnings: [] }));
-  Object.assign(f.workspaces, { captureDelivery, materializeReview });
+  Object.assign(f.workspaces, { captureDelivery, materializeReview,
+    getDeliveryDiff: vi.fn(async () => ({ entries: [], nextCursor: null, hasMore: false })) });
   const preparation = await f.prepare(); const op = await f.pipeline.startAttempt(preparation.body, preparation.context); await f.pipeline.drain();
   const attemptId = op.resource.id;
   const status = () => f.storage.getAttempt(attemptId);
@@ -63,10 +66,11 @@ it('dispatches review after durable capture/checks, with exact profile/tree and 
   expect(f.verify).toHaveBeenCalledExactlyOnceWith(delivery.delivery.id, expect.any(AbortSignal));
   const calls = vi.mocked(f.execution.startPassage).mock.calls; expect(calls).toHaveLength(2);
   const request = calls[1]![0]; const task = JSON.parse(request.task) as Record<string, unknown>;
-  expect(request.binding.role).toBe('reviewer'); expect(request.cwd).toContain(join('reviews', review.id, 'checkout'));
-  expect(request.cwd).not.toBe(calls[0]![0].cwd); expect(request.binding.passageId).not.toBe(calls[0]![0].binding.passageId);
+  expect(request.binding.role).toBe('reviewer'); expect(request.cwd).toBe(calls[0]![0].cwd);
+  expect(request.binding.passageId).not.toBe(calls[0]![0].binding.passageId);
   expect(task).not.toHaveProperty('transcript'); expect(task).not.toHaveProperty('implementerResult');
-  expect(task.evidenceDirectory).toBe('.factory-evidence/');
+  expect(task).toHaveProperty('producerResult');
+  expect(task.evidenceDirectory).toBe(`.factory-evidence/${review.id}/`);
   expect(task.delivery).toEqual(delivery.delivery); expect(passage.effectiveProfile?.model).toBe(f.profile.model);
   expect(review.contentIdentity).toBe(delivery.verification?.contentIdentity);
   const accepted = f.accept(f.result()); await f.pipeline.drain();
@@ -92,8 +96,9 @@ it.each([0, 1, 2, 3, 4, 5])('exhausts correctionLimit=%i only after reviewing th
   }
   expect(f.status()).toMatchObject({ result: 'rejected', phase: 'finished', round: 1 + limit });
   expect(new Set(reviews).size).toBe(1 + limit);
-  expect(f.execution.continuePassage).toHaveBeenCalledTimes(limit);
-  expect(f.execution.startPassage).toHaveBeenCalledTimes(2 + limit); // One implementer session; every review is new.
+  expect(f.execution.continuePassage).toHaveBeenCalledTimes(2 * limit);
+  expect(f.execution.startPassage).toHaveBeenCalledTimes(2); // One initial launch per role.
+  expect(f.execution.preparePassageHandoff).toHaveBeenCalledTimes(1 + 2 * limit);
   expect(f.verify).toHaveBeenCalledTimes(1 + limit); expect(f.captureDelivery).toHaveBeenCalledTimes(1 + limit);
   for (const id of reviews) expect(f.storage.getReview(id)?.state).toBe('rejected');
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -114,6 +119,101 @@ it('approves a corrected new version only after independently resolving exact pr
   expect(f.storage.getReview(review.deliveryId)?.resolutions[0]?.findingId).toBe(first.findings[0]?.id);
   expect(f.storage.getReview(old.deliveryId)).toEqual(first); expect(review.deliveryId).not.toBe(old.deliveryId);
   expect(f.storage.getOpenFindings(f.attemptId, 3)).toEqual([]);
+});
+
+it('keeps two conversations and three independent versions through two corrections', async () => {
+  const f = await fixture(2);
+  const snapshots = [];
+  for (let round = 1; round <= 3; round++) {
+    f.implement(); await f.pipeline.drain();
+    const { review, passage } = f.reviewer();
+    expect(f.db.prepare("SELECT stop_state FROM resources WHERE passage_id=? AND kind='terminal'").get(passage.binding.passageId)).toEqual({ stop_state: 'not_requested' });
+    const request = round === 1 ? vi.mocked(f.execution.startPassage).mock.calls[1]![0]
+      : vi.mocked(f.execution.continuePassage).mock.calls.find(c => c[1].binding.role === 'reviewer' && c[1].binding.round === round)![1];
+    const task = JSON.parse(request.task) as { delivery: { id: string }; producerResult: { binding: { deliveryVersion: string }; result: ImplementerResult }; previousDelivery: string | null; previousDiff: unknown; findings: unknown[] };
+    expect(task.delivery.id).toBe(review.deliveryId);
+    expect(task.producerResult.binding.deliveryVersion).toBe(review.deliveryId);
+    expect(task.previousDelivery).toBe(snapshots.at(-1)?.binding.deliveryVersion ?? null);
+    expect(task.previousDiff).toEqual(round === 1 ? null : []);
+    if (round > 1) expect(task.producerResult.result.findingResponses?.length).toBeGreaterThan(0);
+    f.accept(f.result(round === 3)); await f.pipeline.drain();
+    snapshots.push({ binding: passage.binding, result: f.persistence.getResult(passage.handle) });
+  }
+  expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
+  expect(f.execution.continuePassage).toHaveBeenCalledTimes(4);
+  expect(new Set(f.materializeReview.mock.calls.map(c => c[1])).size).toBe(3);
+  const sessions = f.db.prepare('SELECT id,role,omp_session_id FROM attempt_sessions WHERE attempt_id=?').all(f.attemptId);
+  expect(sessions).toHaveLength(2);
+  const directories = f.db.prepare<[string], { role: string; session_directory_relative: string }>('SELECT role,session_directory_relative FROM attempt_sessions WHERE attempt_id=?').all(f.attemptId);
+  for (const session of directories) expect(session.session_directory_relative).toBe(`sessions/${f.attemptId}/${session.role}`);
+  for (const role of ['implementer','reviewer']) {
+    const bindings = f.db.prepare('SELECT DISTINCT attempt_session_id FROM passages WHERE attempt_id=? AND role=?').all(f.attemptId, role);
+    expect(bindings).toHaveLength(1);
+  }
+  for (const snapshot of snapshots) expect(f.persistence.getResult({ passageId: snapshot.binding.passageId })).toEqual(snapshot.result);
+});
+
+it('does not materialize the next reviewer checkout while the prior reviewer cannot be quiesced', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
+  vi.mocked(f.execution.preparePassageHandoff).mockRejectedValueOnce(new Error('Controlled busy producer'));
+  f.implement(); await f.pipeline.drain();
+  expect(f.materializeReview).toHaveBeenCalledOnce();
+  expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(f.execution.continuePassage).mock.calls.filter(c => c[1].binding.role === 'reviewer')).toEqual([]);
+  expect(f.status().diagnostic).toBe('CAPTURE_HANDOFF_FAILED');
+});
+
+it('migrates schema 33 without rewriting session identities, captures or accepted results', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
+  const existing = ['attempt_sessions','managed_terminals','terminal_occupancies','passages','passage_results','reviews','attempts'];
+  const before = existing.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+  removeSessionContinuitySchema(f.db);
+  expect(f.db.pragma('user_version', { simple: true })).toBe(33);
+  const ledger = f.db.prepare('SELECT * FROM schema_migrations ORDER BY version').all();
+  applyMigrations(f.db, loadMigrations(), () => { throw new Error('NO_RESEED'); });
+  expect(f.db.pragma('user_version', { simple: true })).toBe(34);
+  expect(existing.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
+  expect(f.db.prepare('SELECT * FROM schema_migrations WHERE version<=33 ORDER BY version').all()).toEqual(ledger);
+  expect(f.db.pragma('foreign_key_check')).toEqual([]);
+});
+
+it('refuses cross-role, foreign-attempt and lost-session continuation identities', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain();
+  const source = f.reviewer().passage;
+  f.accept(f.result(false)); await f.pipeline.drain();
+  const correction = f.producer();
+  const targetSession = f.db.prepare<[string], { attempt_session_id: string }>('SELECT attempt_session_id FROM passages WHERE id=?').get(correction.binding.passageId)!;
+  const insert = f.db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,
+    session_source_id,created_at_ms,attempt_session_id) VALUES (?,?,2,?,'implementer',?,'factory-test','starting','pending',?,0,?)`);
+  expect(() => insert.run(randomUUID(), f.attemptId, correction.binding.deliveryVersion, JSON.stringify(correction.roleResource), source.binding.passageId, targetSession.attempt_session_id)).toThrow();
+  expect(() => insert.run(randomUUID(), randomUUID(), correction.binding.deliveryVersion, JSON.stringify(correction.roleResource), correction.binding.passageId, targetSession.attempt_session_id)).toThrow();
+  const reviewerSession = f.persistence.getAttemptSession(source.handle);
+  expect(() => f.db.prepare('UPDATE managed_terminals SET generation=generation+1 WHERE id=?').run(reviewerSession.managedTerminalId)).toThrow('TERMINAL_CONVERSATION_IN_USE');
+  f.persistence.record(source.handle, 'interrupted', 'TRACKING_LOST', 'tracking-lost');
+  expect(() => f.db.prepare("UPDATE attempt_sessions SET state='completed' WHERE id=?").run(reviewerSession.id)).toThrow('SESSION_CONTINUITY_LOST');
+  expect(() => f.db.prepare('UPDATE attempt_sessions SET terminal_generation=terminal_generation+1 WHERE id=?').run(reviewerSession.id)).toThrow();
+  expect(f.status().result).toBe('interrupted');
+});
+
+it('keeps the captured guidance and profile revision through a correction after the live profile changes', async () => {
+  const f = await fixture();
+  const captured = f.storage.getAttemptCapture(f.attemptId);
+  const capturedProfile = captured.configuration.implementer_profile!;
+  const current = f.storage.getGlobalConfiguration();
+  f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: current.etag, changes: {},
+    body: { changes: {}, profile_changes: [{ action: 'update', id: f.profile.id, changes: { guidance: 'Future attempts use this new guidance.' } }] } });
+  expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(captured);
+
+  f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
+  expect(f.status()).toMatchObject({ round: 2, phase: 'implementing' });
+  expect(f.execution.continuePassage).toHaveBeenCalledTimes(1);
+  expect(f.execution.continuePassage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+    profile: expect.objectContaining({ guidance: capturedProfile.guidance }),
+  }));
+  const correction = vi.mocked(f.execution.continuePassage).mock.calls[0]![1];
+  expect(correction.profile.guidance).toBe('Profile guidance');
+  expect(correction.profile.guidance).not.toContain('Future attempts');
+  expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(captured);
 });
 
 it('refuses an unproven review and rejects empty/cross-criterion/duplicate findings without occupying a receipt', async () => {
@@ -180,7 +280,7 @@ it('migrates real SQLite v7 without reseeding, changing captured refs or fabrica
   await f.pipeline.close(); f.storage.close(); removeReviewSchema(f.db);
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(27); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(34); expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getDelivery(d)).toMatchObject({ delivery: old.delivery, verification: old.verification }); expect(reopened.getReview(d)).toBeNull();
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   } finally { reopened.close(); }
@@ -237,13 +337,12 @@ it('rolls back review intent under SQLite busy before any reviewer materializati
   expect(f.storage.beginReview(d)?.state).toBe('pending');
 });
 
-it('does not revoke a correction when the completed previous reviewer disconnects', async () => {
+it('interrupts a correction when its continuous reviewer conversation is lost between rounds', async () => {
   const f = await fixture(); f.implement(); await f.pipeline.drain(); const old = f.reviewer().passage;
   f.accept(f.result(false)); await f.pipeline.drain();
   f.persistence.record(old.handle, 'interrupted', 'TRACKING_LOST', 'tracking-lost');
-  expect(f.status()).toMatchObject({ round: 2, phase: 'implementing', suspension: null });
-  f.implement(); await f.pipeline.drain(); f.accept(f.result()); await f.pipeline.drain();
-  expect(f.status()).toMatchObject({ phase: 'publishing', result: null });
+  expect(f.status()).toMatchObject({ round: 2, phase: 'finished', result: 'interrupted' });
+  expect(f.storage.getReview(old.binding.deliveryVersion)?.state).toBe('rejected');
 });
 
 it('requires Implementer responses for the exact prior finding IDs without letting them resolve the findings', async () => {

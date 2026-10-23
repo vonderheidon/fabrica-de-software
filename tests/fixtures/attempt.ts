@@ -33,7 +33,7 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const implementerProfileId = profile.id;
   const reviewerProfileId = reviewerProfile.id;
   const repository = { id: 'R_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true };
-  const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_test', status_option_ids: { ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' } };
+  const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_test', status_option_ids: { backlog: 'BACKLOG', ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' } };
   function register() {
     const projectId = storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
       body: { name: 'Project', source: { kind: 'github', location: repository.url }, base_branch: 'main' },
@@ -51,7 +51,11 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
     assignees: [{ id: 'ACCOUNT_test', login: 'test-user' }], comments: [], blockers: [], references: [],
     memberships: [{ itemId: 'ITEM_test', projectId: mapping.id, archived: false, statusValues: [{ fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready, name: 'Ready' }] }] };
   const project: GitHubProjectDetails = { project: { id: mapping.id, number: 1, title: 'Project', url: 'https://github.com/orgs/test-org/projects/1', owner: { id: mapping.owner_id, login: 'test-org', kind: 'organization' }, closed: false },
-    singleSelectFields: [{ id: mapping.status_field_id, name: 'Status', options: Object.values(mapping.status_option_ids).map(id => ({ id, name: id })) }] };
+    singleSelectFields: [{ id: mapping.status_field_id, name: 'Status', options: [
+      { id: mapping.status_option_ids.backlog, name: 'Backlog' }, { id: mapping.status_option_ids.ready, name: 'Ready' },
+      { id: mapping.status_option_ids.in_progress, name: 'In progress' }, { id: mapping.status_option_ids.in_review, name: 'In review' },
+      { id: mapping.status_option_ids.delivered, name: 'Done' },
+    ] }] };
   const observation: OriginInspection = { state: 'identified', source: storage.getConfiguration(projectId).view.configuration.source,
     local: null, base: { branch: 'main', sha: baseSha, observedFrom: 'github' },
     remote: { name: null, url: repository.url, confirmed: true, repository, branch: { repositoryId: repository.id, name: 'main', sha: baseSha } }, diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false };
@@ -69,12 +73,16 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const persistence = storage.executionPersistence();
   const roles = [...loadRoleResources().values()].map(r => r.reference);
   const execution: Execution = {
+    preparePassageHandoff: vi.fn(async source => { persistence.recordStop(source, { passageId: source.passageId, state: 'confirmed' }); }),
     getCatalog: vi.fn(async () => ({ state: 'unavailable' as const, observed_at_ms: 1,
       diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Test catalog unavailable.', recovery: 'Use a controlled catalog fixture.' }] })),
-    continuePassage: vi.fn(async (source, input) => {
-      const original = persistence.getPassage(source); const handle = { passageId: input.binding.passageId };
+    continuePassage: vi.fn(async (_source, input) => {
+      const handle = { passageId: input.binding.passageId };
+      const session = persistence.getAttemptSession(handle, input.binding);
       persistence.reserve({ handle, binding: input.binding, requestHash: digest(input), state: 'starting', roleResource: input.roleResource,
-        terminalName: original.terminalName, diagnostic: null, effectiveProfile: null, executorVersion: null });
+        terminalName: `factory-${handle.passageId}`, diagnostic: null, effectiveProfile: null, executorVersion: null }, true);
+      persistence.confirmTerminal(handle, { workspaceId: session.workspaceId ?? randomUUID(), terminalId: session.terminalId ?? randomUUID(),
+        ompSessionId: session.ompSessionId ?? randomUUID() });
       persistence.confirmReady(handle, input.profile, '18.11.1');
       return persistence.getPassage(handle);
     }),
@@ -82,8 +90,11 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
     observeVersions: vi.fn(async () => []), preflight: vi.fn(async () => ({ ready: true, code: null, ompVersion: '18.11.1' })),
     startPassage: vi.fn(async (request: PassageRequest) => {
       const handle = { passageId: request.binding.passageId };
+      const session = persistence.getAttemptSession(handle, request.binding);
       persistence.reserve({ handle, binding: request.binding, requestHash: digest(request), state: 'starting', roleResource: request.roleResource,
-        terminalName: `factory-${handle.passageId}`, diagnostic: null, effectiveProfile: null, executorVersion: null });
+        terminalName: `factory-${handle.passageId}`, diagnostic: null, effectiveProfile: null, executorVersion: null }, true);
+      persistence.confirmTerminal(handle, { workspaceId: session.workspaceId ?? randomUUID(), terminalId: session.terminalId ?? randomUUID(),
+        ompSessionId: session.ompSessionId ?? randomUUID() });
       persistence.confirmReady(handle, request.profile, '18.11.1');
       return persistence.getPassage(handle);
     }),
@@ -107,3 +118,10 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
     async close() { try { await pipeline.close(); } finally { storage.close(); db.close(); rmSync(directory, { recursive: true }); } } };
 }
 export type AttemptFixture = Awaited<ReturnType<typeof attemptFixture>>;
+
+/** Controlled physical-stop observation; keep SQL occupancy and resource receipts in sync. */
+export function confirmTerminalStops(fixture: AttemptFixture, attemptId: string, persistence: AttemptFixture['persistence'] = fixture.persistence): void {
+  const handles = fixture.db.prepare<[string], { passageId: string}>(`SELECT passage_id AS passageId FROM resources
+    WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed' ORDER BY created_at_ms,id`).all(attemptId);
+  for (const handle of handles) persistence.recordStop(handle, { passageId: handle.passageId, state: 'confirmed' });
+}

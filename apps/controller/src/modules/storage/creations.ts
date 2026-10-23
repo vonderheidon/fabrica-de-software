@@ -10,6 +10,7 @@ import { readSettings } from './settings.js';
 import { OperationError, readOperation, type StoredOperation } from './operations.js';
 import { StorageError } from './errors.js';
 import { effectView, finishEffect } from './effects.js';
+import { interruptCreationBoardOperations, listCreationBoardOperations, markRunningCreationBoardOperationsUnknown } from './creation-board.js';
 
 export interface CreationCommand { operationId: string; body: CreateScaffold }
 interface Row { id: string; operation_id: string; project_id: string | null; plan_hash: string; plan_json: string; state: ProjectCreation['state']; baseline_sha: string | null; baseline_ref: string | null; diagnostic: string | null; revision: number; created_at_ms: number }
@@ -40,7 +41,7 @@ export function readCreation(db: Database.Database, id: string): CreationView {
   });
   const view = { creation: { id: r.id, operationId: r.operation_id, projectId: r.project_id, planHash: r.plan_hash, plan: JSON.parse(r.plan_json) as unknown,
     state: r.state, revision: r.revision, baselineSha: r.baseline_sha, baselineRef: r.baseline_ref, diagnostic: r.diagnostic, createdAtMs: r.created_at_ms },
-    effects,remoteEffects,
+    effects,remoteEffects, board_operations: listCreationBoardOperations(db,id),
     confirmedEffects: steps.filter(s => s.state === 'confirmed'), pendingEffects: steps.filter(s => s.state !== 'confirmed'), prerequisites: r.project_id ? readProject(db,r.project_id).prerequisites : [], diagnostics: r.diagnostic ? [r.diagnostic] : [], eventCursor: eventCursor(db) };
   if (!Value.Check(CreationView, view) || digest(view.creation.plan) !== r.plan_hash) throw new StorageError('OPERATION_DATA_INVALID');
   return view;
@@ -91,11 +92,30 @@ export function completeCreation(db: Database.Database, id: string): void {
     const confirmed = db.prepare<[string], { n: number }>("SELECT count(*) AS n FROM creation_steps WHERE creation_id=? AND state='confirmed'").get(id)!.n;
     const effects = readCreation(db,id).effects;
     const required = c.plan.input.creationMode === 'local' ? [] : c.plan.input.creationMode === 'remote_push' ? ['create_repository','associate_origin','baseline_push'] : ['create_repository','associate_origin'];
-    if (!['running','partial'].includes(c.state) || !c.baselineSha || c.plan.settingsETag !== configurationETag(readSettingsView(db)) || confirmed !== 4 || required.some(kind => !effects.some(e => e.kind === kind && e.state === 'confirmed'))) throw new OperationError(409,'SCAFFOLD_INCOMPLETE','The creation has unconfirmed effects.');
+    const boardOperations = listCreationBoardOperations(db,id);
+    const boardRequired = c.plan.input.creationMode !== 'local';
+    const boardKinds = ['create_board','configure_status','link_repository','configure_view','verify_board'] as const;
+    const verifiedBoard = boardOperations.find(item => item.kind === 'verify_board' && item.state === 'confirmed')?.receipt;
+    const repository = effects.find(effect => effect.kind === 'create_repository' && effect.state === 'confirmed')?.receipt;
+    if (!['running','partial'].includes(c.state) || !c.baselineSha || c.plan.settingsETag !== configurationETag(readSettingsView(db)) || confirmed !== 4 ||
+      required.some(kind => !effects.some(e => e.kind === kind && e.state === 'confirmed')) ||
+      (boardRequired && (boardOperations.filter(item => item.state === 'confirmed' && boardKinds.includes(item.kind)).length !== boardKinds.length ||
+        new Set(boardOperations.filter(item => item.state === 'confirmed' && boardKinds.includes(item.kind)).map(item => item.kind)).size !== boardKinds.length ||
+        !verifiedBoard?.project_id || !verifiedBoard.status_field_id || !verifiedBoard.status_options || verifiedBoard.status_options.length !== 5 ||
+        verifiedBoard.status_options.map(option => option.name).join('|') !== 'Backlog|Ready|In progress|In review|Done' ||
+        new Set(verifiedBoard.status_options.map(option => option.id)).size !== 5 || verifiedBoard.owner_id !== c.plan.input.remote?.ownerId ||
+        !repository?.repositoryId || !verifiedBoard.repository_ids?.includes(repository.repositoryId) || verifiedBoard.view_name !== 'Kanban' ||
+        verifiedBoard.view_layout !== 'BOARD_LAYOUT' || !verifiedBoard.visible_field_ids?.includes(verifiedBoard.status_field_id) ||
+        !verifiedBoard.group_by_field_ids?.includes(verifiedBoard.status_field_id)))) {
+      throw new OperationError(409,'SCAFFOLD_INCOMPLETE','The creation has unconfirmed repository or Kanban effects.');
+    }
     const remote = effects.find(e => e.kind === 'create_repository')?.receipt;
     const registration = registerProject(db,{ operationId: randomUUID(), expectedRevision: undefined,
       body: { name: c.plan.input.name, base_branch: c.plan.input.baseBranch, source: { kind: 'local',location: c.plan.destination } },
-      source: { kind: 'local',location: c.plan.destination, ...(remote ? { repository_id: remote.id, repository_url: remote.url! } : {}) },originNotes: [] });
+      source: { kind: 'local',location: c.plan.destination, ...(remote ? { repository_id: remote.id, repository_url: remote.url! } : {}) },originNotes: [],
+      ...(boardRequired && verifiedBoard ? { githubProject: { id: verifiedBoard.project_id!, owner_id: verifiedBoard.owner_id!, status_field_id: verifiedBoard.status_field_id!,
+        status_option_ids: { backlog: verifiedBoard.status_options![0]!.id, ready: verifiedBoard.status_options![1]!.id,
+          in_progress: verifiedBoard.status_options![2]!.id, in_review: verifiedBoard.status_options![3]!.id, delivered: verifiedBoard.status_options![4]!.id } } } : {}) });
     db.prepare("INSERT INTO creation_steps(creation_id,step,state) VALUES (?,'registration','confirmed')").run(id);
     db.prepare("UPDATE project_creations SET project_id=?,state='completed',diagnostic=NULL,revision=revision+1 WHERE id=?").run(registration.resource.id,id);
     creationEvent(db,id,'creation.completed');
@@ -105,12 +125,14 @@ export function failCreation(db: Database.Database, id: string, diagnostic: stri
   guarded(() => db.transaction(() => {
     if (!/^[A-Z0-9_]{1,128}$/.test(diagnostic)) throw new StorageError('OPERATION_DATA_INVALID');
     for (const effect of readCreation(db,id).effects.filter(e => e.state === 'running')) finishEffect(db,effect.operationId,effect.revision,'unknown',null,diagnostic);
+    markRunningCreationBoardOperationsUnknown(db,id,diagnostic);
     db.prepare("UPDATE creation_steps SET state='unknown' WHERE creation_id=? AND state='running'").run(id);
     const changed = db.prepare("UPDATE project_creations SET state=CASE WHEN EXISTS(SELECT 1 FROM creation_steps WHERE creation_id=?) THEN 'partial' ELSE 'failed' END,diagnostic=?,revision=revision+1 WHERE id=? AND state IN ('pending','running')").run(id,diagnostic,id);
     if (changed.changes) creationEvent(db,id,'creation.stopped');
   }).immediate());
 }
 export function interruptCreations(db: Database.Database): void {
+  interruptCreationBoardOperations(db);
   db.prepare("UPDATE creation_reconciliations SET state='unknown',diagnostic='CREATION_INTERRUPTED' WHERE state='accepted'").run();
   for (const { id } of db.prepare<[], { id: string }>("SELECT id FROM project_creations WHERE state IN ('pending','running')").all()) failCreation(db,id,'CREATION_INTERRUPTED');
 }

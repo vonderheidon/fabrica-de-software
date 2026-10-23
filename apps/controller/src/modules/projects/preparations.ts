@@ -9,6 +9,7 @@ import { OperationError, type PreparationCommand, type Storage } from '../storag
 import type { Workspaces } from '../workspaces/index.js';
 import { validateProjectConfiguration, type CommandContext } from './index.js';
 import { interpretIssue, preparationDigest } from '../pipeline/index.js';
+import { matchesObservedV3StatusMapping } from './status-mapping.js';
 
 type PreparationObservation = Omit<Preparation, 'issue'> & { issue: IssueContext | null };
 
@@ -19,13 +20,35 @@ export interface PreparationDependencies {
 }
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
 function prerequisite(code: string): Prerequisite {
+  if (code === 'PROFILE_COMPOSITION_REQUIRED') return { code,
+    message: 'Um dos perfis ainda não tem instruções efetivas compatíveis.',
+    recovery: 'Abra Configuração > Perfis, ajuste as instruções ao limite de 8.192 caracteres e salve o perfil antes de iniciar.' };
   if (code === 'PROJECT_DELETION_PENDING') return { code, message: 'Este projeto tem uma exclusão pendente.',
     recovery: 'Acompanhe a exclusão deste projeto e aguarde sua conclusão.' };
+  if (code === 'REMOTE_UNCONFIRMED') return { code, message: 'A origem GitHub do projeto ainda não foi confirmada.',
+    recovery: 'Configure um remoto GitHub acessível e confirme que ele identifica o repositório deste projeto.' };
+  if (code === 'CODE_NOT_PUBLISHED') return { code, message: 'O commit da branch-base ainda não está publicado e confirmado no GitHub.',
+    recovery: 'Publique a branch-base no repositório configurado e consulte a preparação novamente.' };
+  if (code === 'PROJECT_REQUIRED') return { code, message: 'O projeto ainda não tem um quadro GitHub vinculado.',
+    recovery: 'Selecione um GitHub Project acessível, vincule o repositório e configure o campo Status.' };
+  if (code === 'STATUS_MAPPING_LEGACY') return { code, message: 'O quadro está salvo com o mapeamento histórico de quatro valores.',
+    recovery: 'Selecione novamente o campo Status e confirme as cinco opções V3, incluindo Backlog.' };
+  if (code === 'STATUS_MAPPING_INVALID') return { code, message: 'O quadro ou uma das cinco opções de Status configuradas não está acessível.',
+    recovery: 'Confira o quadro, o campo Status e as cinco opções atuais na configuração do projeto.' };
+  if (code === 'BASE_BRANCH_INVALID') return { code, message: 'A branch-base configurada não corresponde à branch confirmada no remoto.',
+    recovery: 'Escolha uma branch existente e atualizada no repositório GitHub e salve a configuração.' };
   return { code, message: `Preparation requires attention: ${code}.`, recovery: 'Review the issue, account, committed base and configuration; refresh the preparation before starting.' };
 }
 function profileSnapshot(profile: StoredExecutionProfile) {
   const { profile_type: _profileType, ...snapshot } = profile;
-  return snapshot;
+  return { ...snapshot, guidance: redactProfileGuidance(snapshot.guidance) };
+}
+function redactProfileGuidance(value: string): string {
+  return value
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi, '[REDACTED PRIVATE KEY]')
+    .replace(/(https?:\/\/)[^/\s:@]+(?::[^/\s@]*)?@/gi, '$1[REDACTED]@')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b/g, '[REDACTED CREDENTIAL]')
+    .replace(/\b(authorization|cookie|set-cookie|x-csrf-token|password|secret|token|api[_-]?key)\b\s*[:=]\s*(?:bearer\s+)?(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi, '$1=[REDACTED]');
 }
 function effective(view: ConfigurationView, choices: PreparationChoices): { configuration: EffectiveConfiguration; reasons: string[] } {
   const overrides = choices.overrides; const reasons: string[] = [];
@@ -39,7 +62,7 @@ function effective(view: ConfigurationView, choices: PreparationChoices): { conf
   const sharedProfileId = implementerProfileId !== null && implementerProfileId === reviewerProfileId ? implementerProfileId : null;
   function profile(role: 'implementer' | 'reviewer') {
     const choice = overrides[`${role}_profile`];
-    if (choice?.kind === 'value') return structuredClone(choice.profile);
+    if (choice?.kind === 'value') return { ...structuredClone(choice.profile), guidance: redactProfileGuidance(choice.profile.guidance), composition_version: 1 };
     const id = selectedProfileId(role);
     const found = view.profiles.find((candidate) => candidate.id === id);
     if (found && found.profile_type !== role && id !== sharedProfileId) {
@@ -49,6 +72,7 @@ function effective(view: ConfigurationView, choices: PreparationChoices): { conf
     if (!found || (choice?.kind === 'reference' && found.revision !== choice.revision)) {
       reasons.push(choice ? 'PROFILE_REFERENCE_CHANGED' : 'PROFILES_REQUIRED'); return null;
     }
+    if (found.composition_version !== 1) { reasons.push('PROFILE_COMPOSITION_REQUIRED'); return null; }
     return structuredClone(profileSnapshot(found));
   }
   const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...project } = view.configuration;
@@ -96,21 +120,28 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     if (identity.data && identity.data.id !== view.settings.account_id) reasons.push('ACCOUNT_CHANGED');
     if (!view.settings.projects_root) reasons.push('PROJECTS_ROOT_REQUIRED');
     if (record.project_revision_id !== view.configuration.id) reasons.push('PROJECT_CONFIGURATION_CHANGED');
-    if (origin.state !== 'identified' || !origin.remote?.confirmed || !origin.base || !config.source.repository_id ||
-      origin.remote.repository?.id !== config.source.repository_id || origin.remote.repository.isArchived) reasons.push('REMOTE_UNCONFIRMED');
-    for (const diagnostic of origin.diagnostics) if (!['LOCAL_CHANGES_EXCLUDED', 'PROJECT_REQUIRED'].includes(diagnostic.code)) reasons.push(diagnostic.code);
-    if (origin.base?.branch !== config.base_branch) reasons.push('BASE_BRANCH_INVALID');
-    if (!origin.remote?.branch) reasons.push('BASE_UNCONFIRMED');
-    else if (origin.base && origin.remote.branch.sha !== origin.base.sha) reasons.push('REMOTE_MISMATCH');
+    const remoteConfirmed = origin.state === 'identified' && Boolean(origin.remote?.confirmed && origin.remote.repository && config.source.repository_id &&
+      origin.remote.repository.id === config.source.repository_id && !origin.remote.repository.isArchived);
+    if (!remoteConfirmed) reasons.push('REMOTE_UNCONFIRMED');
+    const basePublished = remoteConfirmed && Boolean(origin.base && origin.remote?.branch && origin.base.branch === config.base_branch &&
+      origin.remote.branch.name === config.base_branch && origin.remote.branch.repositoryId === config.source.repository_id &&
+      origin.remote.branch.sha === origin.base.sha);
+    if (remoteConfirmed && !basePublished) reasons.push('CODE_NOT_PUBLISHED');
+    for (const diagnostic of origin.diagnostics) {
+      if (['LOCAL_CHANGES_EXCLUDED', 'PROJECT_REQUIRED', 'REMOTE_MISSING', 'REMOTE_UNCONFIRMED', 'BRANCH_NOT_FOUND', 'BASE_UNCONFIRMED', 'REMOTE_MISMATCH'].includes(diagnostic.code)) continue;
+      if (diagnostic.code === 'BRANCH_INVALID') { reasons.push('BASE_BRANCH_INVALID'); continue; }
+      reasons.push(diagnostic.code);
+    }
     if (!config.github_project) reasons.push('PROJECT_REQUIRED');
+    else if (!('backlog' in config.github_project.status_option_ids)) reasons.push('STATUS_MAPPING_LEGACY');
     if (project && config.github_project) {
       reasons.push(...assessIssueReadiness({ identity, issue: issueResult, project,
         expectedAccountId: view.settings.account_id ?? '', repositoryId: config.source.repository_id ?? '',
         projectId: config.github_project.id, statusFieldId: config.github_project.status_field_id,
         readyOptionId: record.previous_attempt_id ? issue?.memberships.find(m => m.projectId === config.github_project?.id)?.statusValues.find(v => v.fieldId === config.github_project?.status_field_id)?.optionId ?? config.github_project.status_option_ids.ready : config.github_project.status_option_ids.ready }).reasons);
       if (project.data?.project.owner.id !== config.github_project.owner_id) reasons.push('PROJECT_OWNER_MISMATCH');
-      const field = project.data?.singleSelectFields.find((candidate) => candidate.id === config.github_project?.status_field_id);
-      if (!field || Object.values(config.github_project.status_option_ids).some((id) => !field.options.some((option) => option.id === id))) reasons.push('STATUS_MAPPING_INVALID');
+      if ('backlog' in config.github_project.status_option_ids &&
+          (!project.data || !matchesObservedV3StatusMapping(config.github_project, project.data))) reasons.push('STATUS_MAPPING_INVALID');
     }
     if (!issue || issue.id !== record.issue_id || issue.repository.id !== config.source.repository_id) reasons.push('ISSUE_CONTEXT_INVALID');
     if (issue?.repository.isArchived) reasons.push('REPOSITORY_ARCHIVED');

@@ -2,7 +2,7 @@ import { readOperationReceipt, serializeOperationReceipt, storeTimeDefaults } fr
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { OperationId, OperationReceipt, TimeDefaults, type OperationView, type ErrorResponse, type DeletionCompleted } from '#contracts';
+import { OperationId, OperationProgress, OperationReceipt, TimeDefaults, type OperationView, type ErrorResponse, type DeletionCompleted } from '#contracts';
 import { readSettings } from './settings.js';
 import { StorageError } from './errors.js';
 
@@ -95,6 +95,23 @@ export function readOperation(db: Database.Database, operationId: string): Store
     return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'project', id: row.resource_id },
       state: deletion.state === 'accepted' ? 'accepted' : deletion.state === 'running' || deletion.state === 'finalizing' ? 'running' : 'unknown', receipt };
   }
+  if (row.operation_kind === 'project.storage.transition' && row.resource_type === 'project') {
+    const transition = db.prepare<[string,string], { state: string; reason: string | null; step: string; generation: number; revision: number }>(
+      'SELECT state,reason,step,generation,revision FROM project_storage_transitions WHERE operation_id=? AND project_id=?').get(operationId, row.resource_id);
+    if (!transition || !receipt || !event || event.entity_type !== 'project' || event.entity_id !== row.resource_id ||
+        event.event_type !== 'project.storage_transition.accepted' || receipt.revision !== 1 || receipt.event_cursor !== String(event.seq)) {
+      throw new StorageError('OPERATION_DATA_INVALID');
+    }
+    const state: StoredOperation['state'] = transition.state === 'verified' ? 'succeeded' : transition.state === 'planned' ? 'accepted' :
+      transition.state === 'running' ? 'running' : transition.state === 'blocked' ? 'failed' : 'unknown';
+    const progress = { step: transition.step, state: transition.state, generation: transition.generation, revision: transition.revision };
+    if (!Value.Check(OperationProgress, progress)) throw new StorageError('OPERATION_DATA_INVALID');
+    return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'project', id: row.resource_id }, state, receipt,
+      progress,
+      ...(['failed','unknown'].includes(state) ? { error: { code: transition.reason ?? (state === 'unknown' ? 'STORAGE_TRANSITION_UNCERTAIN' : 'STORAGE_TRANSITION_BLOCKED'),
+        message: 'A transição preservou as localizações para conferência.', operation_id: operationId,
+        recovery: 'Consulte a configuração e retome a mesma operação para reconciliar origem e destino.' } } : {}) };
+  }
   if (isBindingOperation) {
     const expectedEvent = row.operation_kind === 'settings.account.bind' ? 'settings.account.bound' : 'settings.account.switched';
     const linkedAccount = row.result_account_id ? db.prepare<[string], { login: string }>(
@@ -133,6 +150,20 @@ export function readOperation(db: Database.Database, operationId: string): Store
     const state = creation.state === 'completed' ? 'succeeded' : creation.state === 'partial' ? 'unknown' : creation.state === 'failed' ? 'failed' : creation.state === 'pending' ? 'accepted' : 'running';
     return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'creation', id: row.resource_id }, state, receipt,
       ...(creation.diagnostic ? { error: { code: creation.diagnostic, message: 'Inspect the preserved local creation before any further action.', operation_id: operationId } } : {}) };
+  }
+  if (row.operation_kind === 'scaffold.board.effect' && row.resource_type === 'creation') {
+    const board = db.prepare<[string,string],{ kind: string; state: string; reason: string | null }>(
+      'SELECT kind,state,reason FROM creation_board_operations WHERE operation_id=? AND creation_id=?').get(operationId,row.resource_id);
+    if (!board || !receipt || !event || event.entity_type !== 'creation' || event.entity_id !== row.resource_id ||
+        event.event_type !== `creation.board.${board.kind}.accepted` || receipt.revision !== 1 || receipt.event_cursor !== String(event.seq)) {
+      throw new StorageError('OPERATION_DATA_INVALID');
+    }
+    const state: StoredOperation['state'] = board.state === 'confirmed' ? 'succeeded' : board.state === 'failed_known' ? 'failed' :
+      board.state === 'unknown' ? 'unknown' : board.state === 'running' ? 'running' : 'accepted';
+    return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'creation', id: row.resource_id }, state, receipt,
+      ...(['failed','unknown'].includes(state) ? { error: { code: board.reason ?? (state === 'unknown' ? 'BOARD_EFFECT_UNCERTAIN' : 'BOARD_EFFECT_FAILED'),
+        message: 'A configuração do quadro precisa ser conferida antes de continuar.', operation_id: operationId,
+        recovery: 'Consulte a criação e reconcilie os fatos observados antes de autorizar qualquer nova ação.' } } : {}) };
   }
   if (['publication.complete','publication.reconcile','publication.authorize-upgrade','attempt.revalidate','effect.execute'].includes(row.operation_kind)) {
     if (!receipt || !event || event.entity_id !== row.resource_id || event.entity_type !== row.resource_type || receipt.revision !== event.entity_revision || receipt.event_cursor !== String(event.seq)) throw new StorageError('OPERATION_DATA_INVALID');

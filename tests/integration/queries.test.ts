@@ -5,6 +5,7 @@ import { afterEach, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { AttemptDetail, DeliveryDetail, DetailPage, type DetailSection } from '#contracts';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
+import { confirmTerminalStops } from '../fixtures/attempt.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 
 const fixtures: PublicationFixture[] = [];
@@ -112,7 +113,7 @@ it('reads real check definitions and artifact metadata without accessing log byt
   const f = await fixture(false);
   // Configure a new attempt before its capture, preserving the first attempt's captured configuration.
   f.storage.interruptAttempts();
-  f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+  confirmTerminalStops(f, f.attemptId);
   expect(f.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
   const config = f.storage.getConfiguration(f.projectId);
   const { id: _id,project_id: _projectId,revision: _revision,created_at_ms: _created,...configuration } = config.view.configuration;

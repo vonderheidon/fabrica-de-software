@@ -197,17 +197,28 @@ describe('complete repository and Project queries', () => {
     expect(calls[0]?.variables.login).toBe('another-owner');
     expect(calls[1]?.variables.cursor).toBe('p2');
   });
-  it('loads all field pages and checks configured IDs without replacing inaccessible choices', async () => {
-    const responses = () => [
+  it('loads all field pages and validates V3 Status names, order and option identity', async () => {
+    const names = ['Backlog', 'Ready', 'In progress', 'In review', 'Done'];
+    const ids = ['BACKLOG', 'READY', 'PROGRESS', 'REVIEW', 'DONE'];
+    const responses = (options = names.map((name, index) => ({ id: ids[index]!, name })), fieldName = 'Status') => [
       http({ data: { node: { ...wireProject, __typename: 'ProjectV2' } } }),
       http({ data: { node: { fields: page([{ id: 'F_TEXT', __typename: 'ProjectV2Field' }], 'f2') } } }),
-      http({ data: { node: { fields: page([{ id: 'F_STATUS', name: 'Custom status', __typename: 'ProjectV2SingleSelectField', options: [{ id: 'READY', name: 'Pronto' }] }]) } } }),
+      http({ data: { node: { fields: page([{ id: 'F_STATUS', name: fieldName, __typename: 'ProjectV2SingleSelectField', options }]) } } }),
     ];
-    const good = await fixture(responses()).client.validateProjectSelection({ id: 'PVT_1', statusFieldId: 'F_STATUS', statusOptionIds: ['READY'] });
+    const selection = { id: 'PVT_1', statusFieldId: 'F_STATUS', statusOptionIds: ids };
+    const good = await fixture(responses()).client.validateProjectSelection(selection);
     expect(good.state).toBe('complete');
-    expect(good.data?.singleSelectFields[0]).toMatchObject({ id: 'F_STATUS', options: [{ id: 'READY' }] });
-    expect(await fixture(responses()).client.validateProjectSelection({ id: 'PVT_1', statusFieldId: 'old-field', statusOptionIds: [] })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_FIELD_INACCESSIBLE' }] });
-    expect(await fixture(responses()).client.validateProjectSelection({ id: 'PVT_1', statusFieldId: 'F_STATUS', statusOptionIds: ['old-option'] })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_OPTION_INACCESSIBLE' }] });
+    expect(good.data?.singleSelectFields[0]).toMatchObject({ id: 'F_STATUS', options: names.map((name, index) => ({ id: ids[index], name })) });
+    const wrongName = await fixture(responses(names.map((name, index) => ({ id: ids[index]!, name: index === 0 ? 'Icebox' : name })))).client.validateProjectSelection(selection);
+    expect(wrongName).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_MAPPING_INCOMPATIBLE' }] });
+    const wrongOrder = await fixture(responses([...names].reverse().map((name) => ({ id: ids[names.indexOf(name)]!, name })))).client.validateProjectSelection(selection);
+    expect(wrongOrder).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_MAPPING_INCOMPATIBLE' }] });
+    const wrongLink = await fixture(responses(names.map((name, index) => ({ id: ids[(index + 1) % ids.length]!, name })))).client.validateProjectSelection(selection);
+    expect(wrongLink).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_MAPPING_INCOMPATIBLE' }] });
+    const wrongField = await fixture(responses(undefined, 'Custom status')).client.validateProjectSelection(selection);
+    expect(wrongField).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_MAPPING_INCOMPATIBLE' }] });
+    expect(await fixture(responses()).client.validateProjectSelection({ id: 'PVT_1', statusFieldId: 'old-field', statusOptionIds: ids })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_FIELD_INACCESSIBLE' }] });
+    expect(await fixture(responses()).client.validateProjectSelection({ ...selection, statusOptionIds: ['BACKLOG', 'READY', 'PROGRESS', 'REVIEW', 'old-option'] })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'STATUS_OPTION_INACCESSIBLE' }] });
     expect(await fixture([http({ data: { node: null } })]).client.getProject('PVT_MISSING')).toMatchObject({ state: 'inaccessible', data: null });
   });
   it('keeps PR, draft and inaccessible cards explicitly non-executable', async () => {

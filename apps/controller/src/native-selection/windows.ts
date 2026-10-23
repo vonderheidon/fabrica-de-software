@@ -60,10 +60,11 @@ function runPicker(executable: string, cwd: string, kind: string, signal?: Abort
   });
 }
 
-export function createWindowsNativeSelection(_powershellExecutable: string, workingDirectory: string) {
+export function createWindowsNativeSelection(workingDirectory: string) {
   const executable = fileURLToPath(new URL('../../../../resources/native-selection/picker.exe', import.meta.url));
   return {
     selectProjectsDirectory: (signal?: AbortSignal) => runPicker(executable, workingDirectory, 'folder', signal),
     selectGitHubExecutable: (signal?: AbortSignal) => runPicker(executable, workingDirectory, 'github', signal),
+    selectExecutable: (signal?: AbortSignal) => runPicker(executable, workingDirectory, 'executable', signal),
   };
 }

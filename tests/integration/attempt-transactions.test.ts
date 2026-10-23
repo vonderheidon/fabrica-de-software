@@ -54,7 +54,7 @@ describe('atomic attempt acceptance', () => {
       body: { project_changes: { automation_enabled: true } }, configuration: { ...configuration, automation_enabled: true }, globalChanges: {} });
     const item: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true };
     vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([item]));
-    const queue = createQueue({ storage: f.storage, github: f.github, hostName: 'test-host' });
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
     f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe } });
     const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
     try {
@@ -109,7 +109,7 @@ describe('atomic attempt acceptance', () => {
       { id: 'ITEM_second', archived: false, kind: 'issue', contentId: secondIssueId, title: secondIssue.title, url: secondIssue.url, executable: true },
     ]));
 
-    const queue = createQueue({ storage: f.storage, github: f.github, hostName: 'test-host' });
+      const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
     const dispatchPipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe } });
     try {
       const observed = await queue.observe({ limit: '100' });
@@ -138,7 +138,7 @@ describe('atomic attempt acceptance', () => {
       diagnostics: [{ code: 'RATE_LIMITED', message: 'GitHub query rate limit reached.', recovery: 'Retry after the supplied reset time.' }],
       retryAtMs: Date.now() + 60_000 });
 
-    const queue = createQueue({ storage: f.storage, github: f.github, hostName: 'test-host' });
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
     const dispatchPipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe } });
     try {
       const observed = await queue.observe({ limit: '100' });
@@ -167,7 +167,7 @@ describe('atomic attempt acceptance', () => {
     } finally { db.close(); }
     const storage = openStorage({ dataDirectory: directory });
     try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(27); expect(storage.getSettings()).toMatchObject({ installation_id: identity, revision: 2 });
+    expect(storage.getDiagnostics().schemaVersion).toBe(34); expect(storage.getSettings()).toMatchObject({ installation_id: identity, revision: 2 });
       expect(storage.getOperation(operationId)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
       const probe = new Database(join(directory, 'factory.sqlite'));
       try {

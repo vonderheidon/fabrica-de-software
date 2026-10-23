@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { acceptCreation, acceptCreationReconciliation, finishCreationReconciliation, completeCreation, failCreation, interruptCreations, readCreation, recordCreationStep, recoverCreation, type CreationCommand, type ReconcileCreationCommand } from './creations.js';
-import type { CreationStep } from '#contracts';
+import { claimCreationBoardOperation, finishCreationBoardOperation, getCreationBoardOperation, markCreationBoardOperationSent, recordCreationBoardIntent, type BoardOperationIntent } from './creation-board.js';
+import type { CreationBoardOperation, CreationStep } from '#contracts';
 export type { CreationCommand } from './creations.js';
 import { readAttemptPage, readAttemptDetail, readDeliveryDetail } from './queries.js';
 import type { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery } from '#contracts';
@@ -24,9 +25,9 @@ export type { VerificationPlan, CheckCompletion } from './verification.js';
 import type { CatalogQuery, ConfigurationView, EventPage, EventQuery, FactorySettings, ProjectDetail, ProjectPage, SettingsView } from '#contracts';
 import { StorageError } from './errors.js';
 import { applyMigrations, inspectHistory, loadMigrations } from './migrations.js';
-import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, seedSettings } from './settings.js';
+import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, recordToolPreferenceValidation, seedSettings } from './settings.js';
 import { hasUncertainAccountCleanup, OperationError, readOperation, readCompletedProjectDeletion, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
-import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readCapture, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
+import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceReference, readCapture, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
 import { createExecutionPersistence } from './execution.js';
 import { acceptRecovery, recoverRecovery, finishRecovery, readResources, readOwnedPassage, resourceSnapshot, validatePreviousAttempt, type RecoveryCommand, type ResourceSnapshot } from './recovery.js';
 export type { RecoveryCommand, ResourceSnapshot } from './recovery.js';
@@ -52,6 +53,10 @@ import { createDeletionWorkerPersistence } from './project-deletion-worker.js';
 export type { DeletionWorker } from './project-deletion-worker.js';
 import type { ProjectDeletionInventory } from './project-deletion-inventory.js';
 import { readProjectDeletionPaths } from './project-deletion-paths.js';
+import { createProjectStorageLocations } from './project-storage-locations.js';
+import { acceptStorageTransition, advanceStorageTransition, claimStorageTransition, completeStorageTransition, interruptStorageTransitions,
+  readStorageTransition, storageTransitionView, assertStorageTransitionQuiescent, type AcceptStorageTransition, type StorageTransition } from './project-storage-transitions.js';
+import type { ProjectStorageObjectIdentity, ProjectStorageRootObservation } from '#contracts';
 import { acceptProjectDeletion, recoverProjectDeletion, readProjectDeletion, type AcceptProjectDeletion, type ProjectDeletionCommand } from './project-deletion-acceptance.js';
 export type { AcceptProjectDeletion, ProjectDeletionCommand } from './project-deletion-acceptance.js';
 export type { FinalizeProjectDeletion } from './project-deletions.js';
@@ -82,8 +87,22 @@ export interface Storage {
   getProjectDeletion(operationId: string): ReturnType<typeof readProjectDeletion>;
   getProjectDeletionPaths(projectId: string): ReturnType<typeof readProjectDeletionPaths>;
   getProjectDeletionInventory(projectId: string): ProjectDeletionInventory;
+  getProjectStorageLocations(projectId: string): ReturnType<ReturnType<typeof createProjectStorageLocations>['locations']>;
+  getProjectStorageView(projectId: string): ReturnType<typeof storageTransitionView>;
+  getStorageTransition(operationId: string): ReturnType<typeof readStorageTransition>;
+  assertStorageTransitionQuiescent(projectId: string): void;
+  acceptStorageTransition(input: AcceptStorageTransition): StoredOperation;
+  claimStorageTransition(operationId: string): StorageTransition;
+  advanceStorageTransition(operationId: string, generation: number, step: StorageTransition['step'], state: StorageTransition['state'], reason: string | null, destinationIdentity?: ProjectStorageObjectIdentity): void;
+  completeStorageTransition(operationId: string, generation: number, destination: ProjectStorageObjectIdentity): void;
+  interruptStorageTransitions(): void;
+  recordProjectStorageLocation(observation: ProjectStorageRootObservation): ReturnType<ReturnType<typeof createProjectStorageLocations>['record']>;
+  assertProjectStorageLocation(observation: ProjectStorageRootObservation): void;
+  getAttemptProjectId(attemptId: string): string;
+  getAttemptWorkspaceReference(attemptId: string): string;
   finalizeProjectDeletion(command: FinalizeProjectDeletion): { operation_id: string; state: 'succeeded' };
   captureLocalHost(): void;
+  recordToolPreferenceValidation(paths: Readonly<Partial<Record<'git' | 'maestri' | 'omp' | 'powershell', string>>>): void;
   getOperationSummary(query: OperationSummaryQuery): ReturnType<typeof readOperationSummary>;
   getContextDiagnostics(context: DiagnosticContext): ReturnType<typeof readContextDiagnostics>;
   getDiagnosticContext(context: DiagnosticContext): ReturnType<typeof diagnosticContext>;
@@ -100,6 +119,11 @@ export interface Storage {
   completeCreation(id: string): void;
   failCreation(id: string, diagnostic: string): void;
   interruptCreations(): void;
+  recordCreationBoardIntent(input: BoardOperationIntent): CreationBoardOperation;
+  getCreationBoardOperation(operationId: string): CreationBoardOperation;
+  claimCreationBoardOperation(operationId: string, revision: number): CreationBoardOperation | null;
+  markCreationBoardOperationSent(operationId: string, revision: number): CreationBoardOperation;
+  finishCreationBoardOperation(operationId: string, revision: number, state: 'confirmed' | 'failed_known' | 'unknown', receipt: NonNullable<CreationBoardOperation['receipt']> | null, reason: string | null): CreationBoardOperation;
   listAttempts(query: AttemptListQuery): ReturnType<typeof readAttemptPage>;
   getAttemptDetail(id: string, query: AttemptDetailQuery): ReturnType<typeof readAttemptDetail>;
   getDeliveryDetail(id: string, query: DeliveryDetailQuery): ReturnType<typeof readDeliveryDetail>;
@@ -226,8 +250,10 @@ export function openStorage(options: StorageOptions): Storage {
     }
     const connection = db;
     const projectDeletions = createProjectDeletionPersistence(connection);
+      const projectStorageLocations = createProjectStorageLocations(connection);
     const resultListeners = new Set<(binding: PassageBinding) => void>();
     applyMigrations(connection, migrations, () => seedSettings(connection));
+    interruptStorageTransitions(connection);
     const tables = connection.prepare<[], { name: string; strict: number }>(
       "SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND name NOT LIKE 'sqlite_%'",
     ).all();
@@ -246,8 +272,22 @@ export function openStorage(options: StorageOptions): Storage {
       recoverProjectDeletion: command => guarded(() => connection.transaction(() => recoverProjectDeletion(connection, command))()),
       getProjectDeletion: operationId => guarded(() => connection.transaction(() => readProjectDeletion(connection, operationId))()),
       getProjectDeletionInventory: projectId => guarded(() => projectDeletions.inventory(projectId)),
+      getProjectStorageLocations: projectId => guarded(() => connection.transaction(() => projectStorageLocations.locations(projectId))()),
+      getProjectStorageView: projectId => guarded(() => connection.transaction(() => storageTransitionView(connection, projectId))()),
+      getStorageTransition: operationId => guarded(() => connection.transaction(() => readStorageTransition(connection, operationId))()),
+      assertStorageTransitionQuiescent: projectId => guarded(() => connection.transaction(() => assertStorageTransitionQuiescent(connection, projectId))()),
+      acceptStorageTransition: input => guarded(() => acceptStorageTransition(connection, input)),
+      claimStorageTransition: operationId => guarded(() => claimStorageTransition(connection, operationId)),
+      advanceStorageTransition: (operationId, generation, step, state, reason, destinationIdentity) => guarded(() => advanceStorageTransition(connection, operationId, generation, step, state, reason, destinationIdentity)),
+      completeStorageTransition: (operationId, generation, destination) => guarded(() => completeStorageTransition(connection, operationId, generation, destination)),
+      interruptStorageTransitions: () => guarded(() => interruptStorageTransitions(connection)),
+      recordProjectStorageLocation: observation => guarded(() => projectStorageLocations.record(observation)),
+      assertProjectStorageLocation: observation => guarded(() => connection.transaction(() => projectStorageLocations.assertCurrent(observation))()),
+      getAttemptProjectId: id => guarded(() => readAttemptProjectId(connection, id)),
+      getAttemptWorkspaceReference: id => guarded(() => connection.transaction(() => readAttemptWorkspaceReference(connection, id))()),
       finalizeProjectDeletion: command => guarded(() => projectDeletions.finalize(command)),
       captureLocalHost: () => guarded(() => captureLocalHost(connection)),
+      recordToolPreferenceValidation: paths => guarded(() => recordToolPreferenceValidation(connection, paths)),
       listAttempts: query => guarded(() => connection.transaction(() => readAttemptPage(connection, query))()),
       getAttemptDetail: (id, query) => guarded(() => connection.transaction(() => readAttemptDetail(connection, id, query))()),
       getDeliveryDetail: (id, query) => guarded(() => connection.transaction(() => readDeliveryDetail(connection, id, query))()),
@@ -340,6 +380,11 @@ export function openStorage(options: StorageOptions): Storage {
       completeCreation: id => completeCreation(connection, id),
       failCreation: (id, diagnostic) => failCreation(connection, id, diagnostic),
       interruptCreations: () => interruptCreations(connection),
+      recordCreationBoardIntent: input => recordCreationBoardIntent(connection, input),
+      getCreationBoardOperation: id => guarded(() => connection.transaction(() => getCreationBoardOperation(connection, id))()),
+      claimCreationBoardOperation: (id, revision) => claimCreationBoardOperation(connection, id, revision),
+      markCreationBoardOperationSent: (id, revision) => markCreationBoardOperationSent(connection, id, revision),
+      finishCreationBoardOperation: (id, revision, state, receipt, reason) => finishCreationBoardOperation(connection, id, revision, state, receipt, reason),
       getSettings: () => readSettings(connection),
       getGitHubExecutablePath: () => guarded(() => readGitHubExecutablePath(connection)),
       getLinkedGitHubAccount: () => guarded(() => readLinkedGitHubAccount(connection)),

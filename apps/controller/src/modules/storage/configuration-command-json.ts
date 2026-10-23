@@ -24,8 +24,13 @@ function projectChanges(value: ProjectChanges) {
     ...(value.guidance === undefined ? {} : { guidance: value.guidance }),
   };
 }
-export function registrationCommandJson(value: ProjectRegistration) {
-  return { name: value.name, source: value.source, baseBranch: value.base_branch };
+export function registrationCommandJson(value: ProjectRegistration, githubProject?: NonNullable<import('#contracts').ProjectConfiguration['github_project']>) {
+  return { name: value.name, source: value.source, baseBranch: value.base_branch,
+    ...(githubProject === undefined ? {} : { githubProject: requireV3Mapping(githubProject) }) };
+}
+function requireV3Mapping(mapping: NonNullable<import('#contracts').ProjectConfiguration['github_project']>) {
+  if (!('backlog' in mapping.status_option_ids)) throw new Error('PROJECT_MAPPING_INVALID');
+  return { id: mapping.id, owner_id: mapping.owner_id, status_field_id: mapping.status_field_id, status_option_ids: mapping.status_option_ids };
 }
 function profileChangesJson(value: ProfileChanges) {
   return value.map((command) => command.action === 'create'
@@ -33,11 +38,19 @@ function profileChangesJson(value: ProfileChanges) {
     : command);
 }
 export function settingsCommandJson(value: SettingsUpdate) {
+  const preferences = value.tool_preferences;
   return { changes: value.changes,
     ...(value.onboarding_changes === undefined ? {} : { onboardingChanges: value.onboarding_changes }),
     ...(value.profile_changes === undefined ? {} : { profileChanges: profileChangesJson(value.profile_changes) }),
     ...(value.gh_executable_path === undefined ? {} : { gh_executable_path: value.gh_executable_path }),
     ...(value.account_binding === undefined ? {} : { account_binding: value.account_binding }),
+    ...(preferences === undefined ? {} : { tool_preferences: {
+      format_version: preferences.format_version,
+      git: { preferred_path: preferences.git.preferred_path },
+      maestri: { preferred_path: preferences.maestri.preferred_path },
+      omp: { preferred_path: preferences.omp.preferred_path },
+      powershell: { preferred_path: preferences.powershell.preferred_path },
+    } }),
   };
 }
 export function configurationCommandJson(value: ConfigurationUpdate) {

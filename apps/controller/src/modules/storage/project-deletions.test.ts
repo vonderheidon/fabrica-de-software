@@ -11,7 +11,7 @@ import { registerProject } from './configuration-writes.js';
 
 const directories: string[] = [];
 const resources: { close(): void }[] = [];
-const tables = ['project_deletions', 'project_deletion_targets', 'project_deletion_receipts'];
+const tables = ['project_deletions', 'project_deletion_targets', 'project_deletion_receipts', 'project_storage_locations'];
 function directory() {
   const path = mkdtempSync(join(tmpdir(), 'factory-deletion-foundation-'));
   directories.push(path);
@@ -49,9 +49,9 @@ afterEach(() => {
 });
 
 describe('project deletion persistence foundation', () => {
-  it('creates three empty STRICT tables and exactly the normative indexes on fresh storage', () => {
+  it('creates the deletion and managed-location tables as empty STRICT tables on fresh storage', () => {
     const path = directory(); const storage = open(path); const db = connect(path);
-    expect(storage.getDiagnostics().schemaVersion).toBe(27);
+    expect(storage.getDiagnostics().schemaVersion).toBe(34);
     for (const name of tables) {
       expect(db.prepare(`SELECT * FROM ${name}`).all()).toEqual([]);
       expect(db.prepare('SELECT strict FROM pragma_table_list WHERE name=?').get(name)).toEqual({ strict: 1 });
@@ -93,7 +93,7 @@ describe('project deletion persistence foundation', () => {
         /factory_project_deletion_row_allowed/.test(afterObjects.get({ name: object.name })?.sql ?? '')) continue;
       expect(afterObjects.get({ name: object.name })).toEqual(object);
     }
-    for (const name of tables) expect(db.prepare(`SELECT * FROM ${name}`).all()).toEqual([]);
+    for (const name of tables.filter(item => item !== 'project_storage_locations')) expect(db.prepare(`SELECT * FROM ${name}`).all()).toEqual([]);
     expect(db.pragma('foreign_key_check')).toEqual([]);
     const storage = open(path);
     const records = db.prepare('SELECT * FROM projects').all();

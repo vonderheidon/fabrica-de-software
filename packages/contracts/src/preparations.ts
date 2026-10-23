@@ -1,7 +1,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { ArtifactPolicy, DeliveryMode, OperationId, OperationReceipt, Page, TimeDefaults } from './base.js';
 import { GitHubDiagnostic, GitHubId, ConfigurationIssueContext, ConfigurationIssueOption } from './github.js';
-import { ExecutionProfileValue, Prerequisite, ProjectConfiguration, StoredExecutionProfileValue } from './projects.js';
+import { ComposedExecutionProfileValue, ExecutionProfileValue, Prerequisite, ProjectConfiguration, StoredExecutionProfileValue } from './projects.js';
 
 const closed = { additionalProperties: false } as const;
 const revision = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
@@ -45,8 +45,8 @@ export const ChoiceOrigins = Type.Object({
 }, closed);
 export const EffectiveConfiguration = Type.Object({
   configuration: ProjectConfiguration, project_revision_id: OperationId, settings_revision: revision,
-  implementer_profile: Type.Union([ExecutionProfileValue, StoredExecutionProfileValue, Type.Null()]),
-  reviewer_profile: Type.Union([ExecutionProfileValue, StoredExecutionProfileValue, Type.Null()]),
+  implementer_profile: Type.Union([ExecutionProfileValue, ComposedExecutionProfileValue, StoredExecutionProfileValue, Type.Null()]),
+  reviewer_profile: Type.Union([ExecutionProfileValue, ComposedExecutionProfileValue, StoredExecutionProfileValue, Type.Null()]),
   time_defaults: TimeDefaults, artifact_policy: ArtifactPolicy,
   guidance: Type.String({ maxLength: 16385 }),
   origins: ChoiceOrigins,

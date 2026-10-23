@@ -45,7 +45,7 @@ describe('durable immutable deliveries', () => {
     f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DROP TABLE capture_warnings; DROP TABLE capture_runs; DROP TABLE deliveries; DELETE FROM schema_migrations WHERE version>=6; PRAGMA user_version=5;');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(27); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(34); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(accepted);
       expect(reopened.getDelivery(f.binding.deliveryVersion).delivery).toMatchObject({ captureState: 'failed', diagnostic: 'CAPTURE_CONTINUITY_REVOKED', contentIdentity: null });
       const command = { operationId: randomUUID(), attemptId: f.a.id, deliveryId: f.binding.deliveryVersion, body: { producerPassageId: f.a.passageId },
@@ -142,6 +142,8 @@ describe('durable immutable deliveries', () => {
   });
   it.each(['deliveries', 'capture_warnings', 'capture_runs', 'events'] as const)('rolls back the corresponding capture transaction on %s failure', async table => {
     const f = await fixture();
+    // Isolate the manually claimed SQL transaction from a separately scheduled runtime handoff event.
+    vi.mocked(f.execution.preparePassageHandoff).mockResolvedValue();
     if (table === 'deliveries') {
       f.db.exec("CREATE TRIGGER fail_capture BEFORE INSERT ON deliveries BEGIN SELECT RAISE(ABORT,'fixture'); END");
       expect(() => f.accept()).toThrow('STORAGE_FAILED'); expect(f.persistence.getResult({ passageId: f.a.passageId })).toBeNull();

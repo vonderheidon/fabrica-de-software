@@ -126,23 +126,29 @@ export function createNative(host: ExecutionHost, cwd: string, run: CliRunner = 
       if (!version) throw new ExecutionError('CLI_UNSUPPORTED');
       return { anchor, ompVersion: version };
     },
-    async recruit(name: string, directory: string, command: string): Promise<void> {
-      await invoke(['recruit', name, '--command', command, '--dir', directory]);
+    async recruit(name: string, directory: string, command: string, replace = false): Promise<void> {
+      await invoke(['recruit', ...(replace ? ['--replace'] : []), name, '--command', command, '--dir', directory]);
     },
-    async stop(name: string): Promise<'confirmed' | 'uncertain'> {
+    async stop(name: string, identity?: { workspaceId: string; terminalId: string }, generation?: number): Promise<'confirmed' | 'uncertain'> {
       if (!name.startsWith('factory-') || !uuid.test(name.slice(8))) throw new ExecutionError('RESOURCE_INVALID');
       const anchor = inheritedAnchor(host);
-      await invoke(['dismiss', name]);
-      // CLI acceptance is not physical process/descendant termination proof.
-      if (host.confirmStoppedTerminal) {
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          const observed = await Promise.race([host.confirmStoppedTerminal({ workspaceId: anchor.workspaceId, terminalName: name }),
-            new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), executionLimits.cliMs); })]);
-          if (observed === true) return 'confirmed';
-        } catch { return 'uncertain'; }
-        finally { clearTimeout(timer); }
+      if (identity && (identity.workspaceId.toLowerCase() !== anchor.workspaceId || !uuid.test(identity.terminalId))) return 'uncertain';
+      if (host.stopPendingTerminal) {
+        try { if (await host.stopPendingTerminal({ workspaceId: anchor.workspaceId, terminalName: name, ...(generation === undefined ? {} : { generation }) }) === true) return 'confirmed'; }
+        catch { return 'uncertain'; }
       }
+      if (!identity) return 'uncertain';
+      if (identity.workspaceId.toLowerCase() !== anchor.workspaceId || !uuid.test(identity.terminalId) || !host.confirmStoppedTerminal || !host.stopTerminal) return 'uncertain';
+      // dismiss removes the canvas identity required by recruit --replace.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const reference = { workspaceId: anchor.workspaceId, terminalName: name, terminalId: identity.terminalId, ...(generation === undefined ? {} : { generation }) };
+        const stopped = async () => { await host.stopTerminal!(reference); return host.confirmStoppedTerminal!(reference); };
+        const observed = await Promise.race([stopped(),
+          new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), executionLimits.cliMs); })]);
+        if (observed === true) return 'confirmed';
+      } catch { return 'uncertain'; }
+      finally { clearTimeout(timer); }
       return 'uncertain';
     },
   };

@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CheckDefinition, ImplementerResult, SessionResponse } from '#contracts';
-import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
 import { captureFixture } from '../fixtures/capture.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { createVerification } from '../../apps/controller/src/modules/verification/index.js';
@@ -11,6 +11,7 @@ import { type CheckProcessResult } from '../../apps/controller/src/modules/verif
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
+import { createAttemptMaterializer } from '../../apps/controller/src/modules/workspaces/materialize.js';
 
 const fixtures: AttemptFixture[] = []; const apps: ReturnType<typeof createApp>[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const f of fixtures.splice(0)) await f.close(); });
@@ -25,15 +26,15 @@ async function fixture(auto = false, checks = definitions) {
   const prepared = await f.prepare(); const op = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
   const a = f.storage.getAttempt(op.resource.id); const binding = f.persistence.getPassage({ passageId: a.passageId }).binding;
   const captured = await captureFixture(f.directory, { attemptId: a.id, passageId: a.passageId, deliveryId: binding.deliveryVersion });
+  await mkdir(join(captured.implementation, 'src'));
   Object.assign(f.workspaces, { captureDelivery: captured.capture });
+  const shared = createAttemptMaterializer(f.directory, captured.run, async path => path);
   const materializeCheck = vi.fn(async (d, id: string) => {
     expect(d.contentIdentity).toBe(f.storage.getDelivery(binding.deliveryVersion).delivery.contentIdentity);
-    const path = join(f.directory, 'work', a.id, 'checks', id, 'checkout');
-    await mkdir(join(path, 'src'), { recursive: true }); await writeFile(join(path, 'captured.txt'), 'CAPTURED_VERSION');
-    return path;
+    return shared(d, id);
   });
   const runner = vi.fn(async (_command: string, cwd: string, _timeout: number, _signal: AbortSignal): Promise<CheckProcessResult> => {
-    expect(cwd).not.toContain('implementation');
+    expect(cwd).toContain('implementation');
     return { state: 'passed', exitCode: 0, diagnostic: null, endedAtMs: Date.now(), durationMs: 12, output: Buffer.from('<script>alert(1)</script>\nCheck passed 😀') };
   });
   const verification = createVerification({ storage: f.storage, workspaces: { materializeCheck }, dataDirectory: f.directory, logFailure: f.logFailure }, { runner, canonicalize: async p => p });
@@ -46,10 +47,10 @@ async function fixture(auto = false, checks = definitions) {
 }
 
 describe('controller verification and external evidence', () => {
-  it('runs captured definitions automatically only after result and capture commit, with a new checkout for every check', async () => {
+  it('runs captured definitions in the shared checkout and verifies integrity before and after every check', async () => {
     const f = await fixture(true); expect(f.runner).not.toHaveBeenCalled();
-    f.accept(); await writeFile(join(f.captured.implementation, 'tracked.txt'), 'MUTABLE_DIFFERENT'); await f.pipeline.drain();
-    expect(f.runner).toHaveBeenCalledTimes(2); expect(f.materializeCheck).toHaveBeenCalledTimes(2);
+    f.accept(); await f.pipeline.drain();
+    expect(f.runner).toHaveBeenCalledTimes(2); expect(f.materializeCheck).toHaveBeenCalledTimes(4);
     const page = f.storage.getCheckHistory(f.binding.deliveryVersion, {});
     expect(page.entries.map(c => c.command)).toEqual(expect.arrayContaining(definitions.map(c => c.command)));
     expect(page.entries.every(c => c.state === 'passed' && c.runNumber === 1 && c.contentIdentity === f.storage.getDelivery(c.deliveryId).delivery.contentIdentity)).toBe(true);
@@ -69,7 +70,7 @@ describe('controller verification and external evidence', () => {
     const previous = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
     await f.run();
     f.storage.interruptAttempts();
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.a.id);
+    confirmTerminalStops(f, f.a.id);
     expect(f.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
     const c = f.storage.getConfiguration(f.projectId); const { id: _id, project_id: _p, revision: _r, created_at_ms: _t, ...configuration } = c.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: c.etag, projectId: f.projectId, body: { project_changes: { checks: [] } }, configuration: { ...configuration, checks: [] }, globalChanges: {} });
@@ -173,7 +174,7 @@ describe('controller verification and external evidence', () => {
     f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DELETE FROM schema_migrations WHERE version=7; PRAGMA user_version=6');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(27); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(34); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getDelivery(old.id)).toMatchObject({ delivery: old, verification: null });
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(result);
       expect(reopened.getCheckHistory(old.id, {}).entries).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);

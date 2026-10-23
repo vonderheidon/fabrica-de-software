@@ -1,0 +1,2758 @@
+{
+  "project": {
+    "id": "62dbf6e4d5b353125f96b015a553dfeb",
+    "name": "Pacote V3 - entrega, agentes e operação",
+    "description": "Implementar o pacote completo definido em FEEDBACK-PROXIMO-PACOTE-V3.md, fonte de verdade do escopo aprovado: detecção automática de ferramentas e inicializador acessível; criação de projetos com GitHub, push inicial e Projects/Kanban obrigatórios; modos ICR, commit local e PR com continuação posterior e preservação do trabalho; nomes descritivos de branches e commits; arquivos gerenciados agrupados por projeto com transição segura; exclusão compacta e otimização medida; instruções editáveis e versionadas nos perfis; continuidade das sessões de Implementador/Revisor e reutilização segura de terminais Maestri entre tentativas; melhorias do ciclo de correção, recorrência, checks, contestações e aprovação consolidada; acompanhamento, notificações locais, encerramento guiado, busca e comparação no histórico e indicador de conexão. Ler integralmente o V3 e as fontes normativas pertinentes antes de propor alterações. Resolver no discovery as lacunas explicitamente registradas, sem inventar decisões de produto: colunas/ordem do Kanban, alcance em Adicionar existente, destino local de projetos por URL, transição dos arquivos existentes, critérios de recorrência e divergência. Preservar alterações existentes e trabalhar no repositório canônico, sem worktrees concorrentes de desenvolvimento. Separar provas controladas, UI por Playwright e integração real Maestri/OMP/GitHub. A autorização registrada permite usar Shell #5 do Maestri para servidor na porta 4310 e testes necessários quando a implementação estiver autorizada. Não fazer staging, commits, push ou publicação deste repositório sem autorização correspondente. Condução semiautomática com gates de controle escalados ao usuário.",
+    "path": "C:\\Users\\jeffe\\Documents\\Apps\\nova-fabrica-software",
+    "stack": [],
+    "config": {
+      "max_rounds_per_sprint": 3,
+      "use_playwright": false,
+      "evaluator_agent_id": "harness-evaluator",
+      "planner_agent_id": "harness-planner"
+    }
+  },
+  "sprints": [
+    {
+      "id": "sprint-001",
+      "index": 0,
+      "name": "Fundação incremental, compatibilidade e continuidade dos Coders",
+      "description": "Estabelecer a base verificável da evolução V3 sobre o produto existente, sem recriar o scaffold ou antecipar todas as persistências. Cobrir RNF-04, RNF-05, RNF-08, RNF-16 e RNF-17 como obrigações transversais.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "SQLite",
+        "TypeBox",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-001",
+          "name": "Compatibilidade normativa e técnica da evolução",
+          "description": "Conferir a base atual e registrar as condições documentais e técnicas obrigatórias antes da ativação dos fluxos V3.",
+          "acceptance_criteria": [
+            "SPEC_PROGRESS.md identifica as fontes atuais, os comandos realmente configurados, a última migration existente e os conflitos documentais encontrados; não usa como contrato atual as referências históricas a seções ausentes.",
+            "A evolução de sessão por papel/passagem para sessão por papel/tentativa possui proposta de compatibilização rastreável em INTEGRACAO-MAESTRI-OMP.md; sua ativação depende da decisão documental exigida, sem aprovação presumida pelo plano.",
+            "A estratégia de transição de diretórios está documentada antes de qualquer movimento, abrangendo leitores legados, identidade, ambientes em uso, recuperação, retenção, publicação e exclusão."
+          ]
+        },
+        {
+          "id": "feat-002",
+          "name": "Contrato transversal de implementação e passagem de contexto",
+          "description": "Disponibilizar o registro consumido pelos Coders seguintes e a validação da fundação existente.",
+          "acceptance_criteria": [
+            "SPEC_PROGRESS.md contém um contrato transversal V3: repositório canônico, preservação de alterações, ausência de Git de escrita sem autorização, fronteiras públicas, migrações aditivas, imutabilidade histórica e atualização do inventário de exclusão em cada sprint que introduzir dados exclusivos.",
+            "A base executável é conferida com typecheck, lint, testes e build pertinentes; falhas preexistentes são identificadas com evidência e não apresentadas como sucesso ou corrigidas por ampliação silenciosa de escopo.",
+            "O registro de cada sprint passa a informar caminhos e interfaces efetivamente entregues, critérios atendidos, evidências e pendências, distinguindo testes controlados, UI, Windows/Git local e integrações reais.",
+            "O contrato registra que use_playwright=false não executa automaticamente provas visuais nem dispensa INT-11; gates externos sem autorização ou capacidade permanecem explicitamente pendentes."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "AGENTS.md",
+          "SPEC.md",
+          "SPEC_PROGRESS.md",
+          "GLOSSARY.md",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "FEEDBACK-PROXIMO-PACOTE-V3.md",
+          "docs/Docs20261023_014848/PRD20261023_014848.md",
+          "docs/Docs20261023_014848/stories-requisitos20261023_014848.md",
+          "package.json",
+          "apps/controller/src/modules/storage/migrations.ts"
+        ],
+        "key_interfaces": [
+          "Storage",
+          "Execution",
+          "Workspaces",
+          "OperationAccepted",
+          "OperationView"
+        ],
+        "architecture_notes": "A SPEC atual existe e coincide com o artefato V3 em docs/Docs20261023_014848. Evoluir o produto existente. SQL permanece em storage; contratos não têm IO. Novas tabelas e DTOs pertencem às sprints consumidoras. Não iniciar pipeline, providers ou efeitos externos nesta preparação. As sprints seguintes devem consultar este contrato transversal em SPEC_PROGRESS.md e registrar nele a continuidade."
+      },
+      "dependencies": [],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-002",
+      "index": 1,
+      "name": "Localizações gerenciadas e novos arquivos por projeto",
+      "description": "Entregar a organização dos novos recursos exclusivos por projeto e sua resolução em todos os consumidores pertinentes. Cobrir US-15.C1–C3, RF-64–66 e RNF-16.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "SQLite",
+        "Git"
+      ],
+      "features": [
+        {
+          "id": "feat-003",
+          "name": "Identidade e leitura das localizações",
+          "description": "Disponibilizar localizações de projeto compatíveis com referências novas e legadas.",
+          "acceptance_criteria": [
+            "project_storage_locations registra raízes verificadas, revisão e localização corrente por chave; caminhos com escape ou identidade compartilhada são recusados.",
+            "Projetos com nomes iguais recebem raízes exclusivas; renomear o projeto preserva a resolução das referências existentes.",
+            "Referências históricas e o contrato repository_relative das entregas continuam legíveis sem reescrita de capturas ou fabricação de localização observada."
+          ]
+        },
+        {
+          "id": "feat-004",
+          "name": "Alocação integrada sob a raiz do projeto",
+          "description": "Agrupar os novos recursos gerenciados exclusivos mantendo suas identidades de execução.",
+          "acceptance_criteria": [
+            "Novos Git internos, bootstraps, ambientes de implementação, checks, revisão, publicação e artefatos exclusivos ficam sob a raiz gerenciada do projeto, com separação por tentativa, passagem e versão pertinente.",
+            "Criação, leitura, execução, recuperação, retenção, publicação, abertura de recursos e exclusão resolvem as referências novas e legadas pelos contratos públicos correspondentes.",
+            "Banco e recursos compartilhados permanecem globais; a pasta original permanece no local cadastrado e nenhum checkout, índice ou cache é copiado para persistência auxiliar."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/workspaces/prepare.ts",
+          "apps/controller/src/modules/workspaces/capture.ts",
+          "apps/controller/src/modules/workspaces/materialize.ts",
+          "apps/controller/src/modules/workspaces/retention.ts",
+          "apps/controller/src/modules/execution/adapters/maestri-omp/bootstrap.ts",
+          "apps/controller/src/modules/storage/project-deletion-inventory.ts"
+        ],
+        "key_interfaces": [
+          "Storage",
+          "Workspaces",
+          "createWorkspaces",
+          "HttpDelivery",
+          "ProjectStorageView"
+        ],
+        "architecture_notes": "Aplicar o contrato transversal da sprint-001 e a estratégia documental de transição. Esta sprint cria recursos novos e leitura compatível; não move ambientes legados. Respeitar os contratos lógicos de referências existentes, independentemente da localização física."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-003",
+      "index": 2,
+      "name": "Transição retomável dos diretórios legados",
+      "description": "Entregar a transição física autorizada e a consulta operacional das localizações sem perder entregas ou evidências. Cobrir US-15.C4, RF-67–68 e RNF-18.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "SQLite",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-005",
+          "name": "Plano e operação de transição",
+          "description": "Disponibilizar plano verificável e comando de transição por projeto.",
+          "acceptance_criteria": [
+            "ConfigurationView.storage apresenta localizações e plano com hash; V08 aceita somente o plano vigente, sem destino arbitrário fornecido pelo cliente.",
+            "A aceitação recusa atividade, revisão em uso, publicação pendente, efeitos incertos, exclusão concorrente, revisão divergente e identidade substituída, sem chamada de movimento.",
+            "project_storage_transitions preserva intenção, etapas, geração e observações; a nova localização corrente só é publicada após verificação do destino."
+          ]
+        },
+        {
+          "id": "feat-006",
+          "name": "Reconciliação e continuidade após interrupção",
+          "description": "Preservar a operação e o único exemplar válido durante falhas e reinícios.",
+          "acceptance_criteria": [
+            "Interrupções antes, durante e depois do movimento conservam estado bloqueado ou incerto e permitem reconciliar origem e destino sem seguir links ou apagar o único exemplar válido.",
+            "Após transição completa ou parcial e reinício, leitura, retomada, publicação, retenção, artefatos, recuperação e exclusão encontram as referências corretas.",
+            "Troca de worker ou geração impede publicação tardia de localização; exclusão incorpora ambas as localizações pertinentes e invalida preview incompatível."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/workspaces/recovery.ts",
+          "apps/controller/src/modules/workspaces/retention.ts",
+          "apps/controller/src/modules/workspaces/deletion.ts",
+          "apps/controller/src/modules/storage/project-deletion-paths.ts",
+          "apps/controller/src/http/configuration-views.ts"
+        ],
+        "key_interfaces": [
+          "ProjectStorageView",
+          "StorageTransitionPlan",
+          "StorageTransitionCommand",
+          "OperationProgress",
+          "Workspaces"
+        ],
+        "architecture_notes": "Usar as localizações entregues na sprint-002. Uma transação SQLite não torna filesystem atômico; nenhuma transação permanece aberta durante movimento ou verificação física. SQL não movimenta arquivos em migration."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-004",
+      "index": 3,
+      "name": "Inicialização acessível e detecção de ferramentas",
+      "description": "Entregar o backend do inicializador e das preferências revalidáveis. Cobrir RF-01–06, US-01 e RNF-15.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "JavaScript",
+        "TypeScript",
+        "Node.js 24",
+        "SQLite",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-007",
+          "name": "Inicialização sem caminhos obrigatórios",
+          "description": "Permitir acessar o controlador e sua configuração em uma instalação limpa ou incompleta.",
+          "acceptance_criteria": [
+            "O inicializador abre o acesso ao wizard sem exigir quatro caminhos absolutos, inclusive com Git, Maestri, OMP ou PowerShell indisponíveis.",
+            "A resolução usa a instalação e a máquina atuais, incluindo caminhos com espaços e Unicode, sem diretórios pessoais fixos.",
+            "Indisponibilidade de ferramenta mantém configuração acessível e bloqueia somente as operações dependentes."
+          ]
+        },
+        {
+          "id": "feat-008",
+          "name": "Observação, seleção e revalidação das ferramentas",
+          "description": "Detectar as cinco ferramentas e persistir escolhas sem converter preferência em capacidade.",
+          "acceptance_criteria": [
+            "Git, Maestri, OMP, PowerShell e GitHub CLI apresentam candidatos validados; falta ou ambiguidade não resolvida permite seleção manual.",
+            "tool_preferences_json conserva preferências e instantes pertinentes; gh_executable_path permanece a fonte do GitHub CLI, sem duplicação ou restauração dos campos removidos pela migration 020.",
+            "Reinício revalida disponibilidade; localizar Maestri não confirma conexão, e HTTP não concede elevação, keyring ou capacidade de host.",
+            "NativeSelectionRequest e as respostas selected, cancelled e unavailable aceitam os mesmos sete kinds, conservam o kind solicitado e só selected apresenta caminho."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "scripts/start-host.mjs",
+          "apps/controller/src/config.ts",
+          "apps/controller/src/main.ts",
+          "apps/controller/src/modules/projects/index.ts",
+          "apps/controller/src/modules/diagnostics/index.ts",
+          "packages/contracts/src/projects.ts"
+        ],
+        "key_interfaces": [
+          "ToolPreferences",
+          "ToolObservation",
+          "NativeSelectionKind",
+          "NativeSelectionResult",
+          "ExecutionHost"
+        ],
+        "architecture_notes": "Aplicar a fundação da sprint-001. Não confundir validação Wire de ensaio com conexão nativa do produto. Consultar documentação atual de CLI via Context7 quando a implementação exigir sintaxe ou capacidades específicas."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-005",
+      "index": 4,
+      "name": "Wizard de ferramentas e correção da instalação",
+      "description": "Integrar a detecção ao wizard e à configuração existente. Completar a superfície de US-01.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS",
+        "Vite"
+      ],
+      "features": [
+        {
+          "id": "feat-009",
+          "name": "Resumo compacto e correção contextual",
+          "description": "Apresentar observações e ações de configuração por ferramenta.",
+          "acceptance_criteria": [
+            "O wizard apresenta resumo das opções válidas e solicita seleção manual apenas para ausência ou ambiguidade não resolvida.",
+            "Cada impedimento apresenta causa e próxima ação na etapa responsável; falha conserva wizard e rascunhos.",
+            "Maestri localizado e conexão confirmada aparecem como fatos distintos; cancelamento ou indisponibilidade do seletor não confirmam ferramenta nem apagam caminho válido anterior."
+          ]
+        },
+        {
+          "id": "feat-010",
+          "name": "Retomada do onboarding distribuído",
+          "description": "Conservar escolhas e permitir correção após reinício.",
+          "acceptance_criteria": [
+            "Salvar, reabrir e reiniciar conserva escolhas persistidas e apresenta a revalidação atual, incluindo caminho anteriormente válido que deixou de existir.",
+            "Respostas tardias de detecção ou diagnóstico não substituem outro contexto nem sobrescrevem rascunhos editados.",
+            "Há prova renderizada do percurso de instalação limpa, correção manual e reinício; a prova real de conexão Maestri/OMP é registrada separadamente."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/onboarding/InitialSetupDialog.tsx",
+          "apps/web/src/features/onboarding/useOnboarding.ts",
+          "apps/web/src/features/projects/useNativeSelection.ts",
+          "apps/web/src/features/projects/useConfiguration.ts"
+        ],
+        "key_interfaces": [
+          "ToolObservation",
+          "SettingsView",
+          "HttpDiagnosticsView",
+          "NativeSelectionResult",
+          "useOnboarding"
+        ],
+        "architecture_notes": "Consumir os contratos entregues na sprint-004 com conversores explícitos. Preservar layout, tokens, CustomSelect e lifecycle de salvamento existentes. Prova visual segue o gate registrado na sprint-001."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-004"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-006",
+      "index": 5,
+      "name": "Mapeamento V3 e capacidades reais do Kanban",
+      "description": "Entregar os contratos e operações GitHub responsáveis pelo quadro completo. Cobrir RF-09–11 e a compatibilidade de leitura e escrita.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "GitHub",
+        "TypeBox",
+        "SQLite"
+      ],
+      "features": [
+        {
+          "id": "feat-011",
+          "name": "Mapeamentos novos e históricos",
+          "description": "Distinguir o mapeamento V3 de cinco opções do mapeamento legado de quatro.",
+          "acceptance_criteria": [
+            "ProjectMapping exige cinco IDs não vazios e distintos; ReadProjectMapping aceita também o legado com exatamente quatro propriedades e sem backlog.",
+            "ProjectChanges aceita somente mapeamento V3 ou null; leitura de configuração, preparação e histórico preserva o legado sem sintetizar Backlog ou reescrever revisões.",
+            "Conversores preservam ready, inProgress, inReview e delivered no documento privado e suas chaves HTTP correspondentes; backlog só aparece quando persistido."
+          ]
+        },
+        {
+          "id": "feat-012",
+          "name": "Quadro e diário de efeitos específicos",
+          "description": "Disponibilizar criação, configuração, vínculo e verificação do quadro por capacidades comprovadas.",
+          "acceptance_criteria": [
+            "creation_board_operations registra autorização, identidade, estado e recibos dos cinco tipos aprovados, sem ampliar os enums fechados de effects ou creation_steps.",
+            "A verificação confirma visualização Kanban, vínculo ao repositório e exatamente Backlog, Ready, In progress, In review e Done, nessa ordem visível.",
+            "Recibos só confirmam fatos observados; incapacidade de configurar ou verificar uma capacidade mantém impedimento explícito, sem substituir GitHub Projects por quadro local.",
+            "Testes cobrem IDs cruzados, ordem incorreta, opção extra, vínculo ausente e resposta perdida, verificando ausência de repetição indevida de efeitos."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/github/index.ts",
+          "apps/controller/src/modules/github/scaffold.ts",
+          "apps/controller/src/modules/storage/configuration-json.ts",
+          "apps/controller/src/http/configuration-views.ts",
+          "packages/contracts/src/projects.ts"
+        ],
+        "key_interfaces": [
+          "ProjectMapping",
+          "ReadProjectMapping",
+          "CreationBoardOperation",
+          "GitHub",
+          "ConfigurationView"
+        ],
+        "architecture_notes": "Aplicar a fundação da sprint-001. GitHub executa efeitos; projects coordena. Verificar capacidades de fornecedor na documentação atual sem presumir API para visualização. Provas controladas e observação real do quadro são gates diferentes."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-007",
+      "index": 6,
+      "name": "Criação completa e retomada sem duplicação",
+      "description": "Entregar o percurso backend obrigatório de remoto, push e quadro. Cobrir RF-07–13 e US-02.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify 5",
+        "SQLite",
+        "Git",
+        "GitHub"
+      ],
+      "features": [
+        {
+          "id": "feat-013",
+          "name": "Plano estrito de criação V3",
+          "description": "Restringir novas criações ao plano completo autorizado.",
+          "acceptance_criteria": [
+            "E53 oferece somente remote_push; E54 e E55 exigem remote, board_name e criação completa, recusando modos local, remote_no_push e quadro opcional.",
+            "HttpScaffoldPlanV3 é estruturalmente compartilhado entre planejamento, escrita e leitura V3; o hash abrange o plano completo apresentado.",
+            "Planos legados permanecem legíveis sem board_name obrigatório e sem alteração de bytes ou hash; a união de leitura não é aceita como nova escrita V3."
+          ]
+        },
+        {
+          "id": "feat-014",
+          "name": "Orquestração parcial e conclusão verificável",
+          "description": "Coordenar os efeitos locais, remotos e de quadro conservando seus recibos.",
+          "acceptance_criteria": [
+            "Nova criação só conclui após confirmar remoto/origin, push inicial, quadro configurado, vínculo e visualização verificada.",
+            "Falha após cada efeito conserva criação parcial, identidades e próxima ação; reinício e E57 reconciliam incertos antes de repetir e reaproveitam confirmados.",
+            "Reapresentar operação não duplica repositório, quadro ou push; plano ou conta divergentes são recusados antes do adapter.",
+            "Leitura de criação conserva integralmente plan.input; board_name legado só é exibido quando comprovado, sem reconstrução a partir do nome do projeto."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/projects/scaffold.ts",
+          "apps/controller/src/modules/workspaces/scaffold.ts",
+          "apps/controller/src/modules/workspaces/remote-scaffold.ts",
+          "apps/controller/src/http/routes/scaffold.ts",
+          "packages/contracts/src/scaffold.ts",
+          "tests/integration/remote-scaffold.test.ts"
+        ],
+        "key_interfaces": [
+          "HttpScaffoldInput",
+          "HttpScaffoldPlanV3",
+          "HttpCreationView",
+          "CreationBoardOperation",
+          "OperationAccepted"
+        ],
+        "architecture_notes": "Usar organização nova da sprint-002 e operações de quadro da sprint-006. Preservar recursos legados confirmados; adequação ao V3 requer plano e autorização pertinentes, sem ampliar autorização antiga."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-006"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-008",
+      "index": 7,
+      "name": "Cadastro incompleto e prontidão efetiva",
+      "description": "Entregar elegibilidade coerente entre cadastro, preparação, início manual e fila. Cobrir US-03 e RF-14–17.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify 5",
+        "SQLite",
+        "GitHub"
+      ],
+      "features": [
+        {
+          "id": "feat-015",
+          "name": "Cadastro sem prontidão presumida",
+          "description": "Permitir cadastrar existente incompleto e projetar pendências específicas.",
+          "acceptance_criteria": [
+            "E29 aceita pasta local sem remoto GitHub, código publicado ou quadro vinculado, sem criar esses recursos ou habilitar automação.",
+            "Projeto e preparação apresentam os requisitos ausentes com causa e próxima ação; mapeamento legado continua consultável e exige adequação observada ao V3.",
+            "Salvar alteração que conserve mapeamento legado não o promove a V3 nem altera capturas históricas."
+          ]
+        },
+        {
+          "id": "feat-016",
+          "name": "Mesmas barreiras nos dois inícios",
+          "description": "Aplicar prontidão nos serviços chamados por início manual e seleção automática.",
+          "acceptance_criteria": [
+            "Chamadas diretas de início manual e da fila são recusadas quando falta remoto GitHub, código publicado ou quadro válido, sem executar preparação física ou recrutar papel.",
+            "Mover issue para Ready não habilita automação e não ignora bloqueios de conta, atribuição, consumo ou tentativa ativa.",
+            "Com requisitos atendidos e automação explicitamente habilitada, a fila seleciona Ready pelas regras existentes sem exigir início manual por issue."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/projects/index.ts",
+          "apps/controller/src/modules/projects/preparations.ts",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/modules/storage/queue.ts",
+          "apps/controller/src/http/routes/queue.ts"
+        ],
+        "key_interfaces": [
+          "ProjectRegistration",
+          "Prerequisite",
+          "Preparation",
+          "HttpStartAttempt",
+          "HttpQueueObservation"
+        ],
+        "architecture_notes": "Usar a distinção de mapeamentos da sprint-006. Ready é elegibilidade, conforme GLOSSARY.md. A recusa precisa existir no domínio, independentemente da UI."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-006"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-009",
+      "index": 8,
+      "name": "Criação completa, cadastro e área gerenciada na UI",
+      "description": "Integrar projetos à UI existente com criação obrigatória, prontidão explícita e localização consultável. Cobrir superfícies de US-02, US-03 e US-15.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-017",
+          "name": "Formulário de criação e retomada",
+          "description": "Apresentar a única criação completa e acompanhar sua operação.",
+          "acceptance_criteria": [
+            "O formulário não oferece criação local, remoto sem push ou desativação do quadro; board_name começa com o nome do projeto e edição manual não é sobrescrita por sugestão posterior.",
+            "Plano e resultado apresentam etapas obrigatórias, quadro e destino; parcial ou unknown não aparecem como conclusão.",
+            "Retomada consulta a mesma operação e reaproveita recursos confirmados, sem gerar nova criação por refresh, reconexão ou fechamento do diálogo."
+          ]
+        },
+        {
+          "id": "feat-018",
+          "name": "Cadastro incompleto com ações pertinentes",
+          "description": "Permitir salvar cadastro e explicar os bloqueios operacionais.",
+          "acceptance_criteria": [
+            "Adicionar existente permite salvar projeto incompleto e apresenta separadamente remoto, publicação inicial e quadro ausentes.",
+            "Preparação, início e automação mostram as recusas do servidor com causa e próxima ação; Ready não é apresentado como habilitação de automação.",
+            "Configuração legada de quatro opções é consultável e exige adequação explícita, sem ser reenviada como mapeamento V3."
+          ]
+        },
+        {
+          "id": "feat-019",
+          "name": "Localização gerenciada consultável",
+          "description": "Expor as localizações e o acompanhamento da transição no contexto do projeto.",
+          "acceptance_criteria": [
+            "Configuração identifica pasta gerenciada e pasta original separadamente, preservando caminhos completos e links de abertura pertinentes.",
+            "Estado legado, transição, bloqueio ou incerteza exibe causa e próxima ação; comando de transição só fica disponível quando seu backend tiver sido entregue e a capacidade for atual.",
+            "A prova renderizada cobre rascunhos, estados parciais, teclado, janela baixa, largura estreita e zoom sem cortar ações."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/projects/ProjectCreationDialog.tsx",
+          "apps/web/src/features/projects/useConfiguration.ts",
+          "apps/web/src/features/projects/useNativeSelection.ts",
+          "apps/web/src/features/preparations/PreparationDialog.tsx",
+          "apps/web/src/app/useDialogs.ts"
+        ],
+        "key_interfaces": [
+          "HttpCreationView",
+          "ProjectDetail",
+          "ConfigurationView",
+          "ProjectStorageView",
+          "NativeSelectionResult"
+        ],
+        "architecture_notes": "Consumir as sprints-004 a sprint-008 e as localizações da sprint-002. A transição física da sprint-003 não é dependência desta consulta: sua ação permanece indisponível até existir capacidade entregue. Preservar design e controles compartilhados."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-010",
+      "index": 9,
+      "name": "Instruções efetivas versionadas no backend",
+      "description": "Entregar migração e composição capturada dos perfis sem alterar permissões. Cobrir RF-36–40 e US-08.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "TypeBox",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-020",
+          "name": "Composição migrada sem perda",
+          "description": "Tornar guidance a fonte comportamental efetiva dos perfis existentes e novos.",
+          "acceptance_criteria": [
+            "A migração idempotente conserva o conteúdo comportamental atual e guidance existente uma única vez, com composition_version e sem duplicação.",
+            "O perfil efetivo usa o conteúdo editável; nenhum prompt comportamental oculto posterior anula a edição.",
+            "Perfis ativos, revisões, limites de corpo e conflitos são respeitados; conteúdo excessivo ou incompatível não é truncado silenciosamente nem amplia limites globais."
+          ]
+        },
+        {
+          "id": "feat-021",
+          "name": "Captura e consulta da composição histórica",
+          "description": "Vincular a execução às instruções efetivas capturadas no início.",
+          "acceptance_criteria": [
+            "Nova tentativa captura perfil, revisão e instruções efetivas; editar perfil depois não altera captura, correções ou passagens dessa tentativa.",
+            "A composição consultável apresenta instruções, contexto e resumo do contrato técnico com credenciais redigidas e carregamento sob demanda.",
+            "Texto malicioso de instrução não altera schemas, autorização, isolamento, papéis, critérios ou limites; testes verificam a ausência dos efeitos proibidos."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "resources/roles/implementer.v1.json",
+          "resources/roles/reviewer.v1.json",
+          "apps/controller/src/modules/execution/roles.ts",
+          "apps/controller/src/modules/execution/adapters/maestri-omp/extension.ts",
+          "apps/controller/src/modules/storage/configuration-writes.ts",
+          "apps/controller/src/modules/pipeline/start.ts"
+        ],
+        "key_interfaces": [
+          "ExecutionProfileValue",
+          "StoredExecutionProfile",
+          "HistoricalEffectiveProfile",
+          "PassageRequest",
+          "Storage"
+        ],
+        "architecture_notes": "Aplicar a fundação da sprint-001. guidance comportamental e contrato técnico têm responsabilidades distintas. Capturas legadas não são reescritas; campos históricos ausentes continuam distinguíveis."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-011",
+      "index": 10,
+      "name": "Editor de instruções e perfil histórico",
+      "description": "Entregar edição e consulta das instruções efetivamente usadas. Completar a superfície de US-08.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-022",
+          "name": "Instruções editáveis dos dois papéis",
+          "description": "Integrar guidance efetivo ao editor existente de perfis.",
+          "acceptance_criteria": [
+            "Implementador e Revisor permitem consultar e salvar instruções junto a executor, provider, modelo e esforço, usando os contratos efetivos do backend.",
+            "O editor informa que alterações afetam novas tentativas e não mudam permissões ou schemas técnicos.",
+            "Conflito de revisão, erro de campo ou corpo excessivo preserva rascunho; polling não substitui edição nem apresenta sucesso antecipado."
+          ]
+        },
+        {
+          "id": "feat-023",
+          "name": "Consulta histórica da composição",
+          "description": "Apresentar o perfil capturado da tentativa sem substituí-lo pelo perfil atual.",
+          "acceptance_criteria": [
+            "O detalhe sob demanda mostra composição, revisão e papel históricos; dados legados ausentes aparecem como indisponíveis.",
+            "Editar o perfil atual não altera a composição exibida de tentativa iniciada.",
+            "A prova renderizada cobre texto longo, mensagens de limite, foco, edição e histórico sem exposição de credenciais."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/projects/ProfileForm.tsx",
+          "apps/web/src/features/projects/profile-editor.ts",
+          "apps/web/src/features/projects/useConfiguration.ts",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx"
+        ],
+        "key_interfaces": [
+          "StoredExecutionProfile",
+          "HistoricalEffectiveProfile",
+          "ProfilePatch",
+          "useConfiguration"
+        ],
+        "architecture_notes": "Usar a composição entregue na sprint-010. Não criar perfil paralelo ou armazenamento de instruções somente no diálogo. Respeitar o lifecycle de save e o limite UTF-8 existentes."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-010"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-012",
+      "index": 11,
+      "name": "Terminais próprios e ocupação segura",
+      "description": "Distinguir terminal físico, sessão lógica e ocupação, com reutilização entre tentativas. Cobrir RF-45–49 e US-10.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Maestri",
+        "OMP",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-024",
+          "name": "Identidade, reserva e disponibilidade dos terminais",
+          "description": "Localizar ou criar terminal próprio por papel sem adotar recursos manuais.",
+          "acceptance_criteria": [
+            "managed_terminals e terminal_occupancies preservam instalação, host, posse, papel e geração, com exclusividade de ocupação de terminal e sessão.",
+            "Terminal próprio ausente pode ser criado; existente só é reservado após conferência atual de identidade e disponibilidade.",
+            "Terminal manual, ativo, substituído ou incerto não é adotado, ocupado ou reiniciado; timeout e lease vencido não liberam ocupação."
+          ]
+        },
+        {
+          "id": "feat-025",
+          "name": "Nova tentativa e recuperação conservadora",
+          "description": "Reutilizar recurso físico sem transferir conversa, resultados ou autoridade.",
+          "acceptance_criteria": [
+            "Outra tentativa recebe sessão OMP nova e ambiente próprio, mesmo quando reutiliza o terminal físico do mesmo papel.",
+            "Reinício reencontra identidade e exige nova observação de disponibilidade, sem declarar sessão, acompanhamento ou autoridade restaurados.",
+            "Terminal ocioso após entrega não bloqueia configuração por si só; atividade, publicação pendente e efeitos incertos continuam bloqueantes.",
+            "Remoção de ambientes continua exigindo confirmação de parada pertinente; exclusão de projeto preserva managed_terminals compartilhados."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/execution/index.ts",
+          "apps/controller/src/modules/execution/adapters/maestri-omp/adapter.ts",
+          "apps/controller/src/modules/execution/adapters/maestri-omp/native.ts",
+          "apps/controller/src/modules/storage/execution.ts",
+          "apps/controller/src/modules/storage/project-configuration-lock.ts"
+        ],
+        "key_interfaces": [
+          "Execution",
+          "ExecutionHost",
+          "ExecutionPersistence",
+          "PassageRecord",
+          "HttpAttemptResource"
+        ],
+        "architecture_notes": "Usar raízes da sprint-002 e captura de perfis da sprint-010. A ativação respeita a compatibilização documental da sprint-001. Persistência identifica recursos; disponibilidade e continuidade exigem observação real."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-013",
+      "index": 12,
+      "name": "Sessões contínuas por papel na tentativa",
+      "description": "Entregar continuidade real do Implementador e do Revisor com versões e ambientes separados. Cobrir RF-41–44, RF-47 e US-09.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Maestri",
+        "OMP",
+        "Git"
+      ],
+      "features": [
+        {
+          "id": "feat-026",
+          "name": "Continuidade vinculada à tentativa",
+          "description": "Retomar a conversa do mesmo papel preservando passagens e resultados próprios.",
+          "acceptance_criteria": [
+            "attempt_sessions mantém uma sessão por tentativa e papel; passagens de correção vinculam a mesma sessão sem perder identidade de rodada e versão.",
+            "Implementador e Revisor retomam suas sessões separadas; sessão de outro papel ou tentativa é recusada, incluindo vínculos adulterados.",
+            "Perda de sessão ou acompanhamento interrompe coordenação automática, conserva recursos e não é reparada por incremento de geração ou reencontro de terminal."
+          ]
+        },
+        {
+          "id": "feat-027",
+          "name": "Ambiente e contexto atualizado do Revisor",
+          "description": "Revisar cada versão fixa em ambiente conferido e fora de uso anterior.",
+          "acceptance_criteria": [
+            "Antes de nova revisão, o ambiente separado só é atualizado após deixar de estar em uso e é conferido contra a referência imutável correspondente.",
+            "Retomada recebe versão atual, diff para a anterior, respostas, achados pendentes e checks atualizados sem usar arquivos remanescentes como versão nova.",
+            "Revisor continua impedido de alterar produto ou publicar; resultados e evidências pertencem à passagem, rodada e versão corretas.",
+            "Há testes controlados de duas correções, atualização concorrente recusada e perda/reinício; prova das duas conversas reais permanece identificada como gate próprio."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "apps/controller/src/modules/execution/index.ts",
+          "apps/controller/src/modules/execution/adapters/maestri-omp/adapter.ts",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/modules/workspaces/review.ts",
+          "apps/controller/src/modules/storage/execution.ts"
+        ],
+        "key_interfaces": [
+          "Execution.continuePassage",
+          "PassageRequest",
+          "PassageBinding",
+          "ExecutionPersistence",
+          "Workspaces"
+        ],
+        "architecture_notes": "Usar sessões e ocupações da sprint-012. Não ativar sem a pré-condição documental da sprint-001. Preservar TUI, ferramentas nativas, perguntas e resultados estruturados existentes."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-012"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-014",
+      "index": 13,
+      "name": "Sessões, recursos e recuperação na interface",
+      "description": "Apresentar continuidade observada e recursos físicos sem confundir disponibilidade, parada ou autoridade. Completar superfícies de US-09 e US-10.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-028",
+          "name": "Detalhe dos papéis e superfícies reais",
+          "description": "Exibir sessão, passagem e ocupação pertinentes sem diagnóstico bruto como explicação principal.",
+          "acceptance_criteria": [
+            "Detalhe e recursos distinguem papel, rodada, sessão contínua, terminal e estado de acompanhamento, com ausências legadas explícitas.",
+            "Abrir interação usa a superfície existente vinculada à passagem; não apresenta conversa nova como retomada.",
+            "Troca de tentativa ou versão descarta respostas tardias e não mistura recursos ou perfis históricos."
+          ]
+        },
+        {
+          "id": "feat-029",
+          "name": "Recuperação e configuração por fatos atuais",
+          "description": "Apresentar impedimentos e capacidades de recurso de forma coerente.",
+          "acceptance_criteria": [
+            "Perda de acompanhamento apresenta interrupção e próxima ação, sem declarar parada física ou autoridade recuperada.",
+            "Terminal apenas ocioso não mantém configuração bloqueada; atividade, publicação pendente ou efeito incerto exibem o impedimento atual do backend.",
+            "Prova renderizada cobre recursos ativo, ocioso, incerto e perdido, ações indisponíveis acessíveis e preservação após fechar diálogo."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx",
+          "apps/web/src/features/attempts/useAttempt.ts",
+          "apps/web/src/features/attempts/useAttemptActions.ts",
+          "apps/web/src/features/projects/useConfiguration.ts"
+        ],
+        "key_interfaces": [
+          "HttpPassageSummary",
+          "HttpAttemptResources",
+          "HttpPassageInteraction",
+          "HistoricalEffectiveProfile"
+        ],
+        "architecture_notes": "Consumir perfis da sprint-011 e lifecycle das sprints-012 e sprint-013. Disponibilidade para reutilização não substitui parada confirmada para limpeza."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-015",
+      "index": 14,
+      "name": "Pacote verificável de correção",
+      "description": "Entregar achados e contexto de correção com prioridade, evidência e versão. Cobrir US-11 e RF-50–52.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "TypeBox",
+        "SQLite",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-030",
+          "name": "Achados completos e identidade de origem",
+          "description": "Preservar o mesmo problema entre revisões sem associação por semelhança textual.",
+          "acceptance_criteria": [
+            "Achado novo exige identidade, problema, evidência, esperado, prioridade, critérios e versão revisada; prioridade legada ausente permanece null.",
+            "origin_finding_id referencia origem estável da mesma tentativa, sem ciclos; IDs de outro contexto e referências incompatíveis são recusados.",
+            "Resultados estruturados têm vínculos atribuídos pelo controlador e leitura compatível do legado, sem permitir que o modelo escolha identidades privadas."
+          ]
+        },
+        {
+          "id": "feat-031",
+          "name": "Contexto pertinente para correção e revisão",
+          "description": "Entregar falhas e respostas necessárias sem reconstrução indevida de diagnóstico.",
+          "acceptance_criteria": [
+            "Pacote de correção inclui resultados e logs pertinentes dos checks da versão, distinguindo erro técnico de execução de defeito comprovado.",
+            "Resultado do Implementador informa respostas aos achados e justificativa consultável quando houver alterações adicionais; ausência legítima é null.",
+            "Artefatos permanecem limitados e vinculados por escopo, tamanho e hash; logs e histórico completos não entram em resumos ou polling.",
+            "A extensão preserva execution_complete e execution_question, deduplicação e persistência antes do recibo."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "packages/contracts/src/reviews.ts",
+          "packages/contracts/src/execution.ts",
+          "apps/controller/src/modules/storage/reviews.ts",
+          "apps/controller/src/modules/execution/adapters/maestri-omp/extension.ts",
+          "apps/controller/src/modules/pipeline/start.ts"
+        ],
+        "key_interfaces": [
+          "HttpFinding",
+          "HttpImplementerResult",
+          "PassageResult",
+          "HttpProducerResult",
+          "HttpArtifact"
+        ],
+        "architecture_notes": "Usar captura da sprint-010 e continuidade da sprint-013. Achado, falha técnica e declaração do executor são fatos distintos. Não acrescentar requisito de produto durante correção."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-016",
+      "index": 15,
+      "name": "Revisão focada e aprovação completa por versão",
+      "description": "Entregar revisão incremental com validação independente e checks obrigatórios preservados. Cobrir US-12, RF-53–56 e RNF-03/RNF-09.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Git",
+        "Vitest",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-032",
+          "name": "Checks e reutilização de evidência pertinente",
+          "description": "Vincular verificações à versão e registrar repetições justificadas.",
+          "acceptance_criteria": [
+            "Cada correção produz nova versão e executa todos os checks configurados; evidência de outra versão não satisfaz a verificação atual.",
+            "Repetição de comando com evidência válida da mesma versão exige motivo concreto em checks.repeat_reason ou no resultado estruturado do Revisor, conforme executor responsável.",
+            "Resultados, motivos, duração e consumo quando disponível são consultáveis, sem remover checks obrigatórios ou inventar medição ausente."
+          ]
+        },
+        {
+          "id": "feat-033",
+          "name": "Parecer independente e guarda de aprovação",
+          "description": "Permitir foco nas alterações sem aprovar critérios ou achados por omissão.",
+          "acceptance_criteria": [
+            "Primeira revisão cobre todos os critérios; seguintes recebem diff, pendências e regressões pertinentes, com possibilidade de ampliar a conferência.",
+            "Aprovação final exige cobertura de todos os critérios atuais na versão correspondente, independência válida e zero bloqueantes pendentes, incluindo achados de revisões anteriores.",
+            "Critério omitido, not_verified, evidência inválida, bloqueante não resolvido ou aprovação afetada por mudança impede aprovação também no backend.",
+            "Compilação, typecheck e evidência antiga não substituem prova visual requerida; registros anteriores permanecem íntegros."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/verification/index.ts",
+          "apps/controller/src/modules/storage/reviews.ts",
+          "apps/controller/src/modules/storage/migrations/008_reviews.sql",
+          "apps/controller/src/modules/workspaces/review.ts",
+          "packages/contracts/src/http-execution/reviews.ts"
+        ],
+        "key_interfaces": [
+          "HttpReview",
+          "HttpCriterionOutcome",
+          "HttpCheckRun",
+          "ReviewCommandRepetition",
+          "HttpVerificationSummary"
+        ],
+        "architecture_notes": "Usar pacote da sprint-015 e sessões da sprint-013. Revisão focada não transporta aprovação automaticamente. Preservar guardas SQL existentes e complementar cobertura ausente, sem editar migrations aplicadas."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-017",
+      "index": 16,
+      "name": "Progresso verificável e bloqueio de recorrência",
+      "description": "Interromper correções sem progresso sobre o mesmo bloqueante. Cobrir RF-57–60 e US-13.C1/C2/C4.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "TypeBox",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-034",
+          "name": "Avaliações históricas do mesmo problema",
+          "description": "Registrar progresso por origem estável, revisão e versão.",
+          "acceptance_criteria": [
+            "finding_assessments é imutável e vincula origem canônica, tentativa, revisão, rodada e versão coerentes.",
+            "proven ou partial só conta como progresso com evidência verificável; mera edição, declaração, none ou not_assessable não zera sequência.",
+            "Achado novo não apaga recorrência anterior; revisão sem resultado válido não conta como correção concluída nem autoriza continuidade automática."
+          ]
+        },
+        {
+          "id": "feat-035",
+          "name": "Interrupção determinística e limite preservado",
+          "description": "Produzir bloqueio rastreável quando o primeiro limite aplicável for atingido.",
+          "acceptance_criteria": [
+            "Duas correções consecutivas concluídas sem progresso verificável no mesmo bloqueante interrompem a repetição antes de recrutar outra passagem.",
+            "Bloqueio preserva identidade, revisão, versão, evidências, correções utilizadas e limite capturado; primeira condição atingida permanece a causa determinante.",
+            "Limite total continua válido, inclusive zero, sem ampliação automática, troca automática de perfil ou contorno por orientação posterior."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/modules/storage/reviews.ts",
+          "apps/controller/src/modules/storage/attempts.ts",
+          "packages/contracts/src/reviews.ts",
+          "packages/contracts/src/http-execution/attempts.ts"
+        ],
+        "key_interfaces": [
+          "FindingAssessment",
+          "AttemptBlock",
+          "HttpFinding",
+          "HttpReview"
+        ],
+        "architecture_notes": "Usar origens da sprint-015 e pareceres completos da sprint-016. Não inferir identidade por texto semelhante. Bloqueio é distinto de cancelamento, parada e limpeza."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-018",
+      "index": 17,
+      "name": "Contestações e divergência encaminhada",
+      "description": "Entregar contestação fundamentada e resposta selada do Revisor. Cobrir US-14 e RF-61–63.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "TypeBox",
+        "OMP"
+      ],
+      "features": [
+        {
+          "id": "feat-036",
+          "name": "Contestação vinculada à versão",
+          "description": "Registrar a posição do Implementador sem resolver o achado.",
+          "acceptance_criteria": [
+            "Resposta disputed exige justificativa e evidência e produz contestação vinculada ao achado, passagem do Implementador e versão pertinentes.",
+            "Contestação não resolve achado, não aprova entrega e não aceita identidade de outro papel ou tentativa.",
+            "Repetição do resultado não duplica contestação e seus campos originais permanecem imutáveis."
+          ]
+        },
+        {
+          "id": "feat-037",
+          "name": "Resposta única e interrupção por desacordo",
+          "description": "Preservar a decisão do Revisor e encaminhar divergência persistente.",
+          "acceptance_criteria": [
+            "Revisor registra uma resposta completa maintained ou resolved com justificativa e evidências; após selada, a resposta não pode ser substituída.",
+            "A versão original contestada permanece íntegra e a versão da resposta é derivada da revisão correspondente, inclusive quando posterior.",
+            "Contestação fundamentada mantida bloqueia repetição automática com desacordo e evidências, respeitando a precedência do primeiro bloqueio e o limite total.",
+            "Resolução efetiva permanece em finding_resolutions e aprovação continua sujeita às guardas completas da versão."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/storage/reviews.ts",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/modules/execution/adapters/maestri-omp/extension.ts",
+          "packages/contracts/src/execution.ts",
+          "packages/contracts/src/http-execution/reviews.ts"
+        ],
+        "key_interfaces": [
+          "FindingDispute",
+          "HttpImplementerResult",
+          "HttpReview",
+          "AttemptBlock"
+        ],
+        "architecture_notes": "Usar pacotes da sprint-015, guardas da sprint-016 e bloqueios da sprint-017. Extensão de resultado não cria ferramenta de autorização humana nem novo endpoint de agente."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-019",
+      "index": 18,
+      "name": "Decisões humanas e preparação sucessora",
+      "description": "Entregar V02 para orientação contextual, troca de perfil e encerramento explícito. Cobrir US-08.C3, US-13.C3 e RF-38/RF-59–60.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify 5",
+        "SQLite",
+        "TypeBox"
+      ],
+      "features": [
+        {
+          "id": "feat-038",
+          "name": "Decisão durável sobre bloqueio corrente",
+          "description": "Aceitar somente escolha humana vigente e autorizada.",
+          "acceptance_criteria": [
+            "V02 valida bloqueio, revisão, entrega, escopo, If-Match e operação idempotente; decisão vencida ou cruzada não produz efeito.",
+            "attempt_decisions conserva ação e autorização imutáveis; replay recupera a decisão original antes do CAS e pedido divergente recebe conflito.",
+            "guidance registra orientação separada de captura e perfil, permitindo somente continuidade compatível com sessão, bloqueios e limites existentes."
+          ]
+        },
+        {
+          "id": "feat-039",
+          "name": "Troca de perfil e encerramento sem inferência",
+          "description": "Preparar nova tentativa ou encerrar explicitamente sem transportar autoridade.",
+          "acceptance_criteria": [
+            "change_profile valida papel e revisão do perfil e cria preparação sucessora do mesmo projeto e issue com nova escolha, sem iniciar execução.",
+            "A tentativa anterior mantém histórico e continuidade automática interrompida; início futuro da sucessora exige ação explícita, nova captura, nova sessão e exclusividade da issue.",
+            "end aplica somente o encerramento pertinente autorizado, distinguindo resultado lógico, cancelamento, parada física e limpeza.",
+            "Nenhuma opção amplia limite total ou é aplicada automaticamente; capacidades recusam guidance que contornaria limite já atingido."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/projects/preparations.ts",
+          "apps/controller/src/modules/storage/preparations.ts",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/modules/pipeline/recovery.ts",
+          "apps/controller/src/http/routes/attempts.ts"
+        ],
+        "key_interfaces": [
+          "MakeAttemptDecision",
+          "AttemptDecisionView",
+          "AttemptBlock",
+          "PreparationChoices",
+          "OperationProgress"
+        ],
+        "architecture_notes": "Usar perfis da sprint-010, recorrência da sprint-017 e contestações da sprint-018. Sessão técnica não identifica pessoa nem transforma resultado do agente em decisão humana."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-020",
+      "index": 19,
+      "name": "Achados, progresso, contestações e decisões na UI",
+      "description": "Integrar o ciclo de correção ao detalhe existente sem novos fluxos de autoridade. Completar superfícies de US-11–14.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-040",
+          "name": "Evidências e histórico de correção sob demanda",
+          "description": "Apresentar o pacote e a evolução do problema por versão.",
+          "acceptance_criteria": [
+            "Achado mostra problema, prioridade, esperado, critérios, versão, evidências e resoluções, com progresso e contestação consultados nas seções pertinentes.",
+            "Checks distinguem falha de produto, erro técnico e não verificado; motivos de repetição e justificativas adicionais ficam acessíveis sem logs brutos no resumo.",
+            "Histórico anterior é preservado e ausência legada permanece explícita, sem misturar dados de outra seleção de tentativa, rodada ou entrega."
+          ]
+        },
+        {
+          "id": "feat-041",
+          "name": "Escolha humana com rascunho e operação preservados",
+          "description": "Apresentar alternativas permitidas para o bloqueio vigente.",
+          "acceptance_criteria": [
+            "Bloqueio apresenta causa, evidências e ações de orientar, trocar perfil ou encerrar conforme capacidades atuais, sem seleção automática.",
+            "Orientação e troca de perfil explicam seus efeitos distintos; sucessora preparada não aparece como iniciada nem encerra a anterior por inferência.",
+            "Revisão vencida preserva rascunho e exige rever a ação; duplo envio é bloqueado e resposta perdida consulta a mesma operação.",
+            "Prova renderizada cobre recorrência, parcial comprovado, desacordo, limite total, ação indisponível e preservação ao reabrir."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx",
+          "apps/web/src/features/attempts/useAttempt.ts",
+          "apps/web/src/features/attempts/useDelivery.ts",
+          "apps/web/src/features/attempts/useDecision.ts",
+          "apps/web/src/features/operations/useOperation.ts"
+        ],
+        "key_interfaces": [
+          "AttemptBlock",
+          "AttemptDecisionView",
+          "FindingAssessment",
+          "FindingDispute",
+          "HttpReview"
+        ],
+        "architecture_notes": "Consumir lifecycle visual da sprint-014 e contratos das sprints-015 a sprint-019. Manter histórico e detalhes fora do polling de resumos e não resolver achado por ação visual."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-021",
+      "index": 20,
+      "name": "Intenção de destino na preparação e captura",
+      "description": "Entregar E2-a antes de qualquer operação de clone de entrega. Cobrir RF-23–24/RF-28 e US-05.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify 5",
+        "SQLite",
+        "TypeBox"
+      ],
+      "features": [
+        {
+          "id": "feat-042",
+          "name": "Escolha durável sem efeito de clonagem",
+          "description": "Persistir intenção de destino na revisão da preparação e no resumo autorizado.",
+          "acceptance_criteria": [
+            "E21–E23 aceitam e devolvem PublicationTargetIntent; omissão na criação equivale a null, omissão na atualização preserva e null limpa a escolha.",
+            "Alterar ou limpar destino cria revisão e hash novos; resumo inclui intenção integral, repositório e clonagem futura quando solicitada.",
+            "Salvar, selecionar ou consultar não cria diretório, clone, tentativa, entrega ou autorização; legado ausente permanece null sem migração silenciosa."
+          ]
+        },
+        {
+          "id": "feat-043",
+          "name": "Captura imutável e barreiras de início",
+          "description": "Vincular o destino exato ao início autorizado sem caminho alternativo.",
+          "acceptance_criteria": [
+            "Início confere revisão e hash e captura v3_delivery por valor, incluindo hash da intenção e authorization_operation_id atribuído pelo controlador.",
+            "Projeto somente por URL em commit/pr sem destino válido é recusado no início manual e na fila; preparação incompleta continua salvável.",
+            "ICR não exige destino local nem autoriza cloná-lo por intenção guardada; origem local pode usar clone cadastrado conferido.",
+            "HttpAttemptDetail projeta intenção capturada e hash sem observar checkout; edição posterior da preparação não altera a captura."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "packages/contracts/src/preparations.ts",
+          "apps/controller/src/modules/projects/preparations.ts",
+          "apps/controller/src/modules/storage/preparations.ts",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/http/routes/preparations.ts"
+        ],
+        "key_interfaces": [
+          "PublicationTargetIntent",
+          "PublicationTargetChoice",
+          "CapturedPublicationTarget",
+          "HttpStartAttempt",
+          "PreparationChanges"
+        ],
+        "architecture_notes": "Usar prontidão da sprint-008. Preservar envelopes privados formatVersion=1 e chaves históricas; novo subdocumento usa seu formato aprovado. Não criar operação com IDs futuros nem chamar V01 durante preparação."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-006",
+        "sprint-008"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-022",
+      "index": 21,
+      "name": "Seleção e clonagem autorizada do destino",
+      "description": "Entregar V01 com identidades reais, diário e reconciliação. Cobrir US-05, E2-a e RF-23–24/RF-28.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify 5",
+        "SQLite",
+        "Git",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-044",
+          "name": "Destino existente ou clone seguro",
+          "description": "Conferir clone correspondente ou executar clonagem especificamente autorizada.",
+          "acceptance_criteria": [
+            "V01 exige tentativa, entrega e repositório reais e coerentes; publicação_target_selections registra intenção, autorização e identidade esperada antes do efeito.",
+            "Clone existente precisa corresponder ao repositório capturado; clone novo não sobrescreve pasta ocupada, substituída ou incompatível.",
+            "Seleção não concede commit, push ou PR; estado confirmado exige identidade observada correspondente e trabalho local permanece preservado."
+          ]
+        },
+        {
+          "id": "feat-045",
+          "name": "Origem autorizadora e retomada da seleção",
+          "description": "Reutilizar autorização exata de início ou ação posterior sem duplicação.",
+          "acceptance_criteria": [
+            "Autorização derivada de início valida operação de origem, captura, revisão, hash, modo, repositório, seleção e efeito exato descrito; adulteração é recusada antes de clonar.",
+            "Início que autorizou exatamente a clonagem permite operação derivada posterior sem segundo clique; início ICR não autoriza clone de continuação.",
+            "Ação posterior do operador pode autorizar seleção própria sem referência de início inexistente; sua origem permanece distinguível.",
+            "Resposta perdida, concorrência e reinício consultam ou reconciliam a mesma seleção; estado unknown impede nova seleção concorrente e não duplica clone."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/publication/index.ts",
+          "apps/controller/src/modules/workspaces/index.ts",
+          "apps/controller/src/modules/workspaces/inspect.ts",
+          "apps/controller/src/modules/storage/publication.ts",
+          "apps/controller/src/http/routes/publication.ts"
+        ],
+        "key_interfaces": [
+          "SetPublicationTarget",
+          "PublicationTargetSelection",
+          "CapturedPublicationTarget",
+          "OperationProgress",
+          "Workspaces"
+        ],
+        "architecture_notes": "Usar intenção capturada da sprint-021 e resolução da sprint-002. Não ampliar publication_requests.kind: seleção possui o diário específico aprovado. Aceitação durável e reconciliação precedem repetição."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-006",
+        "sprint-008",
+        "sprint-021"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-023",
+      "index": 22,
+      "name": "Integração local e identidade descritiva da entrega",
+      "description": "Entregar commit no clone local cadastrado sem tocar no checkout do operador. Cobrir US-04.C2/C3/C5, US-07 e RF-19–21/RF-32–35.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Git",
+        "SQLite",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-046",
+          "name": "Destino selado e identificação da tarefa",
+          "description": "Preservar identidade da branch, base e versão antes do efeito.",
+          "acceptance_criteria": [
+            "delivery_targets sela repositório, destino, identidade local, base, versão aprovada, tipo, descrição e branch, com registro imutável.",
+            "Novas branches seguem <tipo>/<numero>-<descricao-em-kebab-case> e commits <tipo>: <descricao> (#<numero>), com tipo coerente e descrição específica em português.",
+            "Normalização produz ref válida, minúscula e sem acentos; colisão preserva ref anterior e usa sufixo curto estável da tentativa.",
+            "Retomada usa identidade registrada mesmo após mudança de título; branches antigas e commits existentes não são renomeados ou reescritos."
+          ]
+        },
+        {
+          "id": "feat-047",
+          "name": "ICR preservado e commit no repositório local",
+          "description": "Transportar somente a versão aprovada para a branch própria de entrega.",
+          "acceptance_criteria": [
+            "ICR mantém resultado aprovado separado e inspecionável, sem commit de entrega no clone do operador; referências Git necessárias permanecem retidas.",
+            "Modo commit integra a versão aprovada em branch própria no clone local correspondente e confirma o commit por recibo, sem considerar suficiente um commit apenas interno.",
+            "Conta, repositório, base, destino e trabalho local são reconferidos antes do efeito e após IO pertinente; incompatibilidade bloqueia e preserva a versão aprovada."
+          ]
+        },
+        {
+          "id": "feat-048",
+          "name": "Preservação verificável do trabalho do operador",
+          "description": "Comprovar ausência de incorporação ou sobrescrita do estado local.",
+          "acceptance_criteria": [
+            "Provas Git com alterações tracked, staged e untracked conservam conteúdo, índice, branch aberta e checkout antes/depois; nenhuma alteração preexistente entra no commit da tarefa.",
+            "A integração não copia arquivos por cima do checkout, não limpa não rastreados e não troca sua branch de forma prejudicial.",
+            "Metacaracteres, Unicode e nomes inválidos são tratados como dados ou recusados sem interpolação shell; recibo perdido é reconciliado antes de repetir commit."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/workspaces/publication.ts",
+          "apps/controller/src/modules/workspaces/git.ts",
+          "apps/controller/src/modules/storage/publication.ts",
+          "apps/controller/src/modules/storage/publication-modes.ts",
+          "tests/integration/local-publication.test.ts"
+        ],
+        "key_interfaces": [
+          "LocalCommitResult",
+          "Workspaces",
+          "HttpEffectReceipt",
+          "DeliverySummaryView",
+          "PublicationTargetSelection"
+        ],
+        "architecture_notes": "Usar seleção da sprint-022 e referências da sprint-002. Conteúdo permanece no Git. Existência de branch/commit não significa atualização dos arquivos do checkout aberto; checkout_updated permanece false."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-006",
+        "sprint-008",
+        "sprint-021",
+        "sprint-022"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-024",
+      "index": 23,
+      "name": "Adaptação de integração com nova revisão",
+      "description": "Entregar o caminho de integração que altera conteúdo sem transportar aprovação indevida. Cobrir RF-29, US-06.C4 e RNF-09.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Git",
+        "SQLite",
+        "OMP",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-049",
+          "name": "Integração direta e versão adaptada",
+          "description": "Distinguir reaproveitamento válido de aprovação de conteúdo que exige nova avaliação.",
+          "acceptance_criteria": [
+            "Integração direta preservando a versão aprovada reaproveita o parecer sem repetir implementação e revisão desnecessariamente.",
+            "Adaptação ou resolução de conflito produz nova rodada e referência imutável vinculadas à mesma tentativa, sem sobrescrever a entrega anterior.",
+            "Versão adaptada não autoriza commit/push/PR de entrega antes dos checks e parecer independente correspondentes."
+          ]
+        },
+        {
+          "id": "feat-050",
+          "name": "Revalidação e recuperação do resultado integrado",
+          "description": "Aplicar ao conteúdo adaptado as mesmas exigências do ciclo de revisão.",
+          "acceptance_criteria": [
+            "Nova versão executa checks obrigatórios e revisão pelos contratos das sprints de execução e aprovação, incluindo prova visual quando exigida.",
+            "Limites e bloqueios capturados continuam válidos; adaptação não cria correções ilimitadas nem transferência automática de aprovação.",
+            "Falha, limite ou interrupção preserva versão anterior aprovada e trabalho local, mantendo integração pendente com próxima ação.",
+            "Resposta perdida ou reinício não duplica rodada, captura ou commit e não publica versão apenas parcialmente avaliada."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/workspaces/publication.ts",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/modules/storage/reviews.ts",
+          "apps/controller/src/modules/verification/index.ts",
+          "apps/controller/src/modules/publication/index.ts"
+        ],
+        "key_interfaces": [
+          "HttpDelivery",
+          "PassageRequest",
+          "HttpReview",
+          "HttpVerificationSummary",
+          "Publication"
+        ],
+        "architecture_notes": "Usar integração da sprint-023, continuidade da sprint-013 e aprovação da sprint-016. Mesma tentativa não significa mesma versão; preservar os dois históricos."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-006",
+        "sprint-008",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-025",
+      "index": 24,
+      "name": "Continuação autorizada, push e PR reconciliáveis",
+      "description": "Completar os três modos e a continuação na mesma tentativa. Cobrir RF-18/RF-22/RF-25–31 e US-04/US-06.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Git",
+        "GitHub",
+        "Fastify 5"
+      ],
+      "features": [
+        {
+          "id": "feat-051",
+          "name": "Autorização dos efeitos restantes",
+          "description": "Disponibilizar continuação pelo estado confirmado e pelo hash vigente.",
+          "acceptance_criteria": [
+            "ICR aprovado oferece commit ou commit com PR; commit confirmado oferece push e PR; PR confirmado oferece seu destino, sem ações incompatíveis.",
+            "authorize-upgrade e complete preservam tentativa, modo original, resultado ICR, versão e histórico; o clique descrito autoriza os efeitos restantes sem confirmação redundante.",
+            "Destino, versão, base, conta ou plano alterado invalida a ação antiga; autoridade vencida mantém pendência para revalidação sem efeito adicional."
+          ]
+        },
+        {
+          "id": "feat-052",
+          "name": "Publicação e reconciliação por recibos",
+          "description": "Publicar somente a branch aprovada e abrir PR sem duplicação.",
+          "acceptance_criteria": [
+            "Modo pr publica branch e abre PR para a base conferida, sem merge automático ou force-push e sem publicar bytes diferentes dos aprovados.",
+            "Efeitos confirmados são reutilizados; efeito incerto é reconciliado por identidade antes de repetição, incluindo commit, push e PR.",
+            "Resposta perdida e reinício nas fronteiras de cada efeito não duplicam recursos; publicação parcial não é marcada completa.",
+            "Retenção preserva referências e conteúdo necessário à continuação, revisão e efeitos pendentes sem snapshot auxiliar de checkout."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/publication/index.ts",
+          "apps/controller/src/modules/workspaces/remote-publication.ts",
+          "apps/controller/src/modules/storage/publication-modes.ts",
+          "apps/controller/src/http/routes/publication.ts",
+          "tests/integration/pr-publication.test.ts"
+        ],
+        "key_interfaces": [
+          "HttpAuthorizeUpgrade",
+          "HttpCompletePublication",
+          "HttpReconcilePublication",
+          "HttpPublicationSummary",
+          "HttpModeUpgradeSummary"
+        ],
+        "architecture_notes": "Usar seleção da sprint-022, destino selado da sprint-023 e revisão de adaptações da sprint-024. Status/comentário conservam autorização própria; não implicam commit/push/PR. Efeitos reais exigem a autorização correspondente."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-006",
+        "sprint-008",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-026",
+      "index": 25,
+      "name": "Destino, modos e resumo consolidado da entrega",
+      "description": "Integrar preparação, continuação e resumo único por fatos confirmados. Cobrir US-04–07 e US-17, RF-74–75.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-053",
+          "name": "Modos e intenção de destino na preparação",
+          "description": "Apresentar escolhas de entrega e salvar destino sem clonar.",
+          "acceptance_criteria": [
+            "Os rótulos são ICR, ICR + commit e ICR + commit + PR com descrições curtas dos efeitos.",
+            "Destino de entrega distingue clone existente e clonagem futura, mostra a intenção persistida e a ajuda Salvar guarda o destino; não cria o clone.",
+            "Salvar, reabrir e reiniciar conserva intenção; mudar ou limpar atualiza revisão/hash e o resumo de início explicita eventual clonagem autorizada.",
+            "Erro de campo ou revisão preserva rascunho; não é emitido V01 com identidades inventadas durante preparação."
+          ]
+        },
+        {
+          "id": "feat-054",
+          "name": "Continuação compacta e operação incerta",
+          "description": "Executar o protocolo existente com um clique autorizador e acompanhamento correto.",
+          "acceptance_criteria": [
+            "Continuar entrega oferece somente ações atuais e seus efeitos; não abre confirmação redundante após clique já autorizador.",
+            "Duplo envio é bloqueado, 202 aparece como aceitação e resposta perdida conserva a operação para consulta ou reconciliação.",
+            "Intenção capturada, clone confirmado e destino selado aparecem como fatos distintos; incompatibilidade ou revisão de adaptação pendente mostra causa e próxima ação."
+          ]
+        },
+        {
+          "id": "feat-055",
+          "name": "Resultado único por versão e recibos",
+          "description": "Consolidar resultado e evidências sem apresentar parcial como sucesso.",
+          "acceptance_criteria": [
+            "Resumo mostra resultado, localização, branch, commit e PR conforme recibos, com pendências e acesso somente a destinos disponíveis.",
+            "Critérios, checks, achados resolvidos, limitações e referência fixa distinguem comprovado, não verificado e observações não bloqueantes; texto do executor não concede aprovação.",
+            "Continuação atualiza o mesmo resultado e preserva histórico sem avisos duplicados; commit local não é apresentado como checkout aberto atualizado.",
+            "Prova renderizada cobre os três modos, continuação, adaptação, legado, falha de refresh e telas estreita/baixa com ações acessíveis."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/preparations/PreparationDialog.tsx",
+          "apps/web/src/features/preparations/preparation-requests.ts",
+          "apps/web/src/features/attempts/useDelivery.ts",
+          "apps/web/src/features/attempts/PublicationDialog.tsx",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx"
+        ],
+        "key_interfaces": [
+          "PublicationTargetIntent",
+          "PublicationTargetSelection",
+          "DeliverySummaryView",
+          "HttpPublicationSummary",
+          "useDelivery"
+        ],
+        "architecture_notes": "Consumir projetos da sprint-009, perfis da sprint-011 e entrega das sprints-021 a sprint-025. Manter um resumo por contexto e detalhes sob demanda. Preservar tokens e layout aprovado."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-027",
+      "index": 26,
+      "name": "Baseline e meta verificável da exclusão",
+      "description": "Medir os custos atuais antes da otimização e fixar a comparação exigida por US-16.C5, RF-73 e RNF-01.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "SQLite",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-056",
+          "name": "Cenário representativo e medição por etapa",
+          "description": "Disponibilizar evidência reproduzível dos custos de exclusão.",
+          "acceptance_criteria": [
+            "O baseline registra cenário, volume de tentativas, arquivos, caches, ambiente e condições de execução para organização nova e legado pertinente.",
+            "Medições distinguem SQL/inventário/finalização, conferências, remoção física, tempo total e resposta da interface, sem converter uma medição na outra.",
+            "Evidências de ensaio ficam fora de telemetria permanente de produto e não contêm credenciais ou conteúdo de checkout."
+          ]
+        },
+        {
+          "id": "feat-057",
+          "name": "Meta posterior ao baseline e oráculo de correção",
+          "description": "Definir o resultado mensurável esperado e as garantias que não podem regredir.",
+          "acceptance_criteria": [
+            "A meta de desempenho é registrada depois do baseline e justificada pelo custo observado, antes da otimização.",
+            "O cenário verifica separadamente remoção de todos os destinos autorizados, preservação de caminhos protegidos e dados finais previstos.",
+            "O registro identifica o custo a reduzir e o procedimento comparável de reexecução; apenas medir permanece explicitamente insuficiente para concluir RF-73."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/storage/project-deletion-worker.ts",
+          "apps/controller/src/modules/storage/project-deletion-inventory.ts",
+          "apps/controller/src/modules/workspaces/deletion.ts",
+          "tests/native/project-deletion.proof.ts",
+          "tests/native/project-deletion.integration.proof.ts"
+        ],
+        "key_interfaces": [
+          "DeletionInspection",
+          "DeletionPreview",
+          "DeletionStatus",
+          "Storage"
+        ],
+        "architecture_notes": "Usar layout e transição das sprints-002 e sprint-003. Não otimizar antes de registrar o baseline. Não impor remoção da raiz como técnica nem inventar percentual de ganho."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-028",
+      "index": 27,
+      "name": "Otimização efetiva e exclusão recuperável",
+      "description": "Aplicar melhoria orientada ao baseline conservando autorização e proteção de caminhos. Cobrir US-16.C3–C5 e RF-71–73.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "SQLite",
+        "Windows"
+      ],
+      "features": [
+        {
+          "id": "feat-058",
+          "name": "Remoção otimizada com garantias preservadas",
+          "description": "Reduzir o custo medido sem enfraquecer exclusão ou finalização.",
+          "acceptance_criteria": [
+            "Há alteração efetiva no custo identificado e comparação antes/depois sob condições equivalentes frente à meta da sprint-027.",
+            "Autorização durável, inventário, geração, posse e barreiras por atividade ou efeitos incertos continuam exigidos antes da remoção e finalização.",
+            "Windows nativo comprova proteção de caminho compartilhado ou substituído, ancestrais e links/junctions sem seguir destino não autorizado; acesso negado não é ausência.",
+            "Tempo total, resposta da UI e correção são relatados separadamente; meta não atingida permanece pendente e nenhum ganho é declarado sem prova."
+          ]
+        },
+        {
+          "id": "feat-059",
+          "name": "Parcial, retomada e recibo final completo",
+          "description": "Preservar operação até conferir todos os destinos e dados.",
+          "acceptance_criteria": [
+            "Falha parcial e reinício conservam autorização e estado, reconciliam destinos e permitem retomada sem repetir remoção já confirmada.",
+            "Mudança de layout, identidade ou inventário invalida autorização incompatível; worker antigo não remove nem finaliza.",
+            "Tabelas exclusivas V3 e localizações legadas pertinentes participam do inventário e ordem de finalização; terminais compartilhados permanecem preservados.",
+            "Recibo de sucesso só é emitido após conferir todos os destinos autorizados e dados previstos; remoção parcial permanece explícita."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/storage/project-deletion-acceptance.ts",
+          "apps/controller/src/modules/storage/project-deletion-barrier.ts",
+          "apps/controller/src/modules/storage/project-deletion-worker.ts",
+          "apps/controller/src/modules/storage/project-deletion-paths.ts",
+          "apps/controller/src/modules/storage/migrations/026_project_deletion_finalization.sql",
+          "apps/controller/src/modules/workspaces/deletion.ts"
+        ],
+        "key_interfaces": [
+          "DeletionInspection",
+          "DeletionStatus",
+          "DeletionConfirmation",
+          "DeletionResume"
+        ],
+        "architecture_notes": "Usar medições e meta da sprint-027, localizações da sprint-002 e transição da sprint-003. Preservar a capacidade restrita de finalização existente; novas migrations não removem suas garantias."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-027"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-029",
+      "index": 28,
+      "name": "Confirmação compacta e acompanhamento da exclusão",
+      "description": "Entregar confirmação curta com destinos completos e inventário nos registros. Cobrir US-16.C1/C2 e RF-69–70.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-060",
+          "name": "Destinos principais e ação alcançável",
+          "description": "Apresentar remoção integral sem lista extensa de subpastas.",
+          "acceptance_criteria": [
+            "Confirmação mostra pasta gerenciada e remoção integral; pasta original e quaisquer outros destinos autorizados aparecem separadamente, sem omissão.",
+            "A ação de confirmação é alcançável sem percorrer lista extensa de subpastas; inventário detalhado continua consultável nos registros.",
+            "Bloqueios apresentam causa e próxima ação sem repetição e caminhos longos não cortam controles nem causam rolagem horizontal da aplicação."
+          ]
+        },
+        {
+          "id": "feat-061",
+          "name": "Operação parcial e retomada observável",
+          "description": "Conservar o acompanhamento da exclusão sem sucesso otimista.",
+          "acceptance_criteria": [
+            "202 significa operação aceita; parcial, reconfirmação necessária, falha e sucesso final apresentam estados distintos.",
+            "Fechar/reabrir diálogo e resposta perdida conservam a identidade e consultam a mesma operação; retomada usa capacidade e revisão atuais.",
+            "Prova renderizada cobre muitas tentativas, janela baixa, largura estreita, zoom, foco e rodapé acessível; resultado físico é comprovado separadamente."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/projects/ProjectDeletionDialog.tsx",
+          "apps/web/src/features/projects/project-deletion-observer.ts",
+          "apps/web/src/api/project-deletion.ts",
+          "apps/web/src/app/project-deletion-navigation.test.ts"
+        ],
+        "key_interfaces": [
+          "DeletionPreview",
+          "DeletionStatus",
+          "DeletionBlocker",
+          "useOperation"
+        ],
+        "architecture_notes": "Usar superfícies de projeto da sprint-009 e exclusão das sprints-027 e sprint-028. Compactar apresentação não reduz inventário, autorização ou verificação."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-027",
+        "sprint-028"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-030",
+      "index": 29,
+      "name": "Busca global paginada de tentativas",
+      "description": "Entregar pesquisa histórica por título, número e período com semântica Unicode e fuso definidos. Cobrir RF-84–85, US-21 e RNF-02.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Fastify 5",
+        "TypeBox"
+      ],
+      "features": [
+        {
+          "id": "feat-062",
+          "name": "Cabeçalhos históricos e filtros combinados",
+          "description": "Pesquisar o conjunto completo antes da paginação.",
+          "acceptance_criteria": [
+            "issue_number e issue_title são capturados e imutáveis; backfill usa somente captura validada, mantendo ausências explícitas.",
+            "Número e título são filtros separados combinados por AND com projeto, resultado e período; correspondência fora da página inicial é encontrada.",
+            "Título usa substring literal, NFC e comparação Unicode sem distinção de caixa, mantendo acentos distintos e escapando curingas."
+          ]
+        },
+        {
+          "id": "feat-063",
+          "name": "Calendário, fuso e cursor do recorte",
+          "description": "Definir fronteiras temporais e navegação estável sobre a data de início.",
+          "acceptance_criteria": [
+            "Qualquer limite de data exige fuso IANA válido; datas impossíveis e intervalo invertido são recusados com orientação.",
+            "Período usa created_at_ms: primeiro dia inclusivo e início do dia posterior ao último exclusivo, pelo calendário do fuso, incluindo limite único e transições de offset sem soma fixa de 24 horas.",
+            "Cursor vincula conta, filtros, fuso, fronteiras, ordem, teto de inserção e desempate; cursor incompatível é recusado e refresh inicia novo recorte."
+          ]
+        },
+        {
+          "id": "feat-064",
+          "name": "Consulta leve e plano medido",
+          "description": "Preservar custo proporcional ao resumo consultado.",
+          "acceptance_criteria": [
+            "Busca e paginação retornam resumos sem ler checkouts, caches, logs completos ou capturas completas por linha.",
+            "EXPLAIN QUERY PLAN e medições representativas cobrem primeira página, seguintes, vazio e combinações de filtros; índices novos têm justificativa e redundância avaliada.",
+            "Testes incluem caracteres de LIKE, caixa Unicode, acentos, injeção e conta cruzada; B-tree ou NOCASE padrão não são aceitos como prova da semântica exigida."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/storage/queries.ts",
+          "apps/controller/src/modules/queries/index.ts",
+          "apps/controller/src/modules/storage/attempts.ts",
+          "apps/controller/src/http/routes/attempts.ts",
+          "packages/contracts/src/queries.ts",
+          "packages/contracts/src/http-execution/queries.ts"
+        ],
+        "key_interfaces": [
+          "HttpAttemptListQuery",
+          "HttpAttemptPage",
+          "AttemptSearchContext",
+          "createQueries"
+        ],
+        "architecture_notes": "Aplicar a fundação da sprint-001. Não usar eventos como substituto da busca nem presumir FTS. Número histórico não é título remoto atual."
+      },
+      "dependencies": [
+        "sprint-001"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-031",
+      "index": 30,
+      "name": "Comparação histórica da mesma issue",
+      "description": "Entregar V03 com diferenças capturadas e ausência explícita. Cobrir US-22 e RF-86–87.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Fastify 5",
+        "TypeBox"
+      ],
+      "features": [
+        {
+          "id": "feat-065",
+          "name": "Par elegível e valores históricos",
+          "description": "Comparar tentativas usando somente suas capturas e referências pertinentes.",
+          "acceptance_criteria": [
+            "V03 aceita somente tentativas da mesma conta, projeto, repositório e issue; par cruzado ou inacessível é recusado.",
+            "Resposta apresenta motivo de falha anterior, resultado posterior e diferenças relevantes de configuração e versão com identidades de tentativa, rodada e entrega.",
+            "Editar configuração ou perfil atuais não modifica a comparação histórica."
+          ]
+        },
+        {
+          "id": "feat-066",
+          "name": "Limitações e consulta sem efeitos",
+          "description": "Preservar ausências e impedir interpretações indevidas.",
+          "acceptance_criteria": [
+            "Campo ausente ou não comparável usa unavailable ou not_comparable com motivo, sem preencher pela configuração atual.",
+            "Comparação não atribui causalidade ao resultado posterior nem transfere conteúdo, aprovação, sessão ou autoridade entre tentativas.",
+            "GET só carrega a comparação solicitada, sem iniciar operações ou incluir históricos completos em listagem e polling."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/storage/historical-configuration.ts",
+          "apps/controller/src/modules/storage/queries.ts",
+          "apps/controller/src/modules/queries/index.ts",
+          "packages/contracts/src/http-execution/queries.ts"
+        ],
+        "key_interfaces": [
+          "AttemptComparison",
+          "AttemptComparisonSide",
+          "HistoricalComparisonValue",
+          "AttemptComparisonQuery"
+        ],
+        "architecture_notes": "Usar cabeçalhos e escopo histórico da sprint-030. Comparação é leitura sob demanda; não cria mecanismo de retomada entre tentativas."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-030"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-032",
+      "index": 31,
+      "name": "Busca e comparação no histórico da interface",
+      "description": "Entregar filtros persistidos na navegação e comparação responsiva. Completar superfícies de US-21 e US-22.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-067",
+          "name": "Filtros globais e paginação preservada",
+          "description": "Consumir busca do servidor com rascunho e recorte explícitos.",
+          "acceptance_criteria": [
+            "Campos separados de número, título, projeto, resultado e datas mostram o fuso local IANA; não há heurística de texto numérico ou filtro apenas da página.",
+            "Buscar, limpar e atualizar iniciam recorte previsível; paginação, abrir detalhe e voltar conservam filtros aplicados na URL.",
+            "Intervalo inválido preserva entrada e associa erro ao campo; nenhum histórico, nenhuma correspondência e falha de consulta são estados distintos.",
+            "Respostas tardias de outro filtro são descartadas; refresh com falha identifica dados anteriores sem apresentá-los como atuais."
+          ]
+        },
+        {
+          "id": "feat-068",
+          "name": "Comparação sob demanda e navegação acessível",
+          "description": "Mostrar duas tentativas elegíveis sem misturar configurações.",
+          "acceptance_criteria": [
+            "Seleção de par explica elegibilidade e abre attempt-comparison com identidades preservadas; dados só são carregados ao abrir.",
+            "Lados mostram falha, resultado, configuração, rodada e versão históricas; ausência é explícita e a UI não afirma causalidade.",
+            "Layout usa pares alinhados em tela larga e empilhados em estreita, preservando foco e filtros ao fechar.",
+            "Prova renderizada encontra tentativa fora da primeira página e cobre comparação após edição atual, vazio, erro e resposta tardia."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/attempts/AttemptListPanel.tsx",
+          "apps/web/src/features/attempts/useAttempt.ts",
+          "apps/web/src/app/useHashRoute.ts",
+          "apps/web/src/app/useDialogs.ts",
+          "apps/web/src/app/PrincipalScreen.tsx"
+        ],
+        "key_interfaces": [
+          "HttpAttemptPage",
+          "AttemptSearchContext",
+          "AttemptComparison",
+          "useHashRoute",
+          "useDialogs"
+        ],
+        "architecture_notes": "Consumir busca da sprint-030 e comparação da sprint-031. Preservar hash navigation e resumos leves; não colocar capturas, instruções ou segredos na URL."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-030",
+        "sprint-031"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-033",
+      "index": 32,
+      "name": "Etapas, espera e atividade observada",
+      "description": "Entregar intervalos duráveis e projeções de tempo sem previsão fictícia. Cobrir US-18, RF-76–77 e RNF-10.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Fastify 5"
+      ],
+      "features": [
+        {
+          "id": "feat-069",
+          "name": "Intervalos vinculados aos eventos",
+          "description": "Registrar execução, espera humana e perda de acompanhamento sem duplicar contadores.",
+          "acceptance_criteria": [
+            "attempt_stage_intervals mantém no máximo um intervalo aberto por tentativa, com evento, rodada e versão coerentes.",
+            "Replay do evento não duplica intervalo; transições temporais são válidas e passage_measurements permanece a fonte de seus próprios contadores.",
+            "Atividade só avança por observação confirmada; relógio da UI, heartbeat genérico e silêncio não provam trabalho nem parada."
+          ]
+        },
+        {
+          "id": "feat-070",
+          "name": "Projeções de duração e disponibilidade",
+          "description": "Disponibilizar StageActivity nas consultas pertinentes.",
+          "acceptance_criteria": [
+            "E01 e detalhes pertinentes apresentam etapa, tempo decorrido, última atividade e prazo/restante somente quando configurado.",
+            "Execução demorada, waiting_decision e tracking_lost são distintos; legado sem eventos suficientes informa duração indisponível.",
+            "Reinício e falha de observação não fabricam atividade, duração histórica ou conclusão; resumo permanece leve e dados extensos são sob demanda."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/storage/events.ts",
+          "apps/controller/src/modules/storage/measurements.ts",
+          "apps/controller/src/modules/storage/queries.ts",
+          "apps/controller/src/modules/storage/operation-summary.ts",
+          "apps/controller/src/http/execution-views.ts"
+        ],
+        "key_interfaces": [
+          "StageActivity",
+          "HttpAttemptMeasurements",
+          "MeasuredValue",
+          "ConfiguredLimit",
+          "HttpControllerEvent"
+        ],
+        "architecture_notes": "Integrar os fatos entregues de execução, decisões e publicação pelas sprints-013, sprint-019 e sprint-025. Não criar estimativa de conclusão ou percentual de progresso."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-006",
+        "sprint-008",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-034",
+      "index": 33,
+      "name": "Acompanhamento visual e conexão coerente",
+      "description": "Entregar tempo por etapa e corrigir o indicador pela observação aplicada e renderizada. Cobrir US-18/US-23 e RF-76–77/RF-88.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS",
+        "SSE"
+      ],
+      "features": [
+        {
+          "id": "feat-071",
+          "name": "Etapa e tempo sem estimativas inventadas",
+          "description": "Apresentar atividade pertinente no dashboard e detalhe.",
+          "acceptance_criteria": [
+            "A interface mostra etapa, tempo decorrido e última atividade; prazo restante aparece somente com prazo configurado e ausência permanece indisponível.",
+            "Espera por decisão, acompanhamento perdido e execução demorada têm textos distintos; inatividade não é apresentada como parada física.",
+            "Relógio visual não altera atividade persistida, não cria percentual ou previsão e não gera anúncio acessível contínuo."
+          ]
+        },
+        {
+          "id": "feat-072",
+          "name": "Indicador de conexão baseado no estado aplicado",
+          "description": "Conferir a transição completa de saúde, falha e recuperação.",
+          "acceptance_criteria": [
+            "Falha de conexão ou atualização apresenta ponto vermelho e texto; verde fica reservado ao estado saudável confirmado.",
+            "Reconexão tem estado intermediário explícito e só muda para saudável após atualização válida; health HTTP isolado não confirma acompanhamento Maestri/OMP.",
+            "Prova visual na aplicação servida cobre saudável, falha, reconexão e recuperação, conferindo estado aplicado e renderização completa, sem aceitar CSS isolado como prova."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/features/operations/DashboardPanel.tsx",
+          "apps/web/src/features/attempts/AttemptDetailDialog.tsx",
+          "apps/web/src/app/useControllerEvents.ts",
+          "apps/web/src/app/controller-events.ts",
+          "apps/web/src/app/EventConnectionStatus.tsx"
+        ],
+        "key_interfaces": [
+          "StageActivity",
+          "HttpAttemptMeasurements",
+          "HttpControllerEventFrame",
+          "EventConnectionStatus"
+        ],
+        "architecture_notes": "Usar detalhes das sprints-014, sprint-020 e sprint-026 e medições da sprint-033. Preservar pendências e dados anteriores explicitamente stale durante falha de atualização."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-033"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-035",
+      "index": 34,
+      "name": "Reservas duráveis de notificação local",
+      "description": "Entregar V06/V07 com direito único de envio por evento e consumidor. Cobrir RF-78–80, RNF-11 e backend de US-19.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify 5",
+        "SQLite",
+        "TypeBox"
+      ],
+      "features": [
+        {
+          "id": "feat-073",
+          "name": "Elegibilidade e reserva exclusiva",
+          "description": "Autorizar uma apresentação local sem duplicação em replay.",
+          "acceptance_criteria": [
+            "Somente pergunta pendente, falha e conclusão elegíveis do escopo podem ser reservadas em notification_dispatches.",
+            "send_allowed=true é entregue somente ao vencedor da nova inserção exclusiva; concorrência, replay e resposta recuperada devolvem false.",
+            "Reserva conservada em reserved, confirmed ou uncertain não concede novo direito de envio, inclusive após reinício ou perda da resposta."
+          ]
+        },
+        {
+          "id": "feat-074",
+          "name": "Recibos observados e conteúdo mínimo",
+          "description": "Registrar resultado sem prometer entrega exatamente uma vez.",
+          "acceptance_criteria": [
+            "V07 valida dispatch, revisão e escopo e registra confirmed, uncertain ou unavailable por transição permitida, sem reabrir envio.",
+            "Conteúdo de notificação contém somente identificação da fábrica, tipo e destino local validado; não inclui título de issue, projeto, caminho, prompt, log ou credencial.",
+            "Falha ou ausência de suporte não altera pergunta, falha ou conclusão originais; pendência continua consultável na UI.",
+            "Retenção e finalização preservam deduplicação pertinente e não tornam replay antigo elegível como novo evento."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/modules/storage/events.ts",
+          "apps/controller/src/modules/storage/operations.ts",
+          "apps/controller/src/http/routes/events.ts",
+          "packages/contracts/src/http-observation/events.ts",
+          "packages/contracts/src/operation.ts"
+        ],
+        "key_interfaces": [
+          "ClaimNotification",
+          "NotificationClaim",
+          "RecordNotificationReceipt",
+          "NotificationReceipt",
+          "HttpControllerEvent"
+        ],
+        "architecture_notes": "Usar eventos e contexto das sprints-019, sprint-025 e sprint-033. consumer_id não concede autoridade. Não adicionar serviço externo ou renovar direito de envio por timeout."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-006",
+        "sprint-008",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-033"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-036",
+      "index": 35,
+      "name": "Notificações locais e acesso à tentativa",
+      "description": "Integrar suporte, permissão e apresentação local deduplicada. Completar US-19.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "Notificações do navegador",
+        "SSE"
+      ],
+      "features": [
+        {
+          "id": "feat-075",
+          "name": "Disponibilidade, permissão e consumidor estável",
+          "description": "Permitir ativação explícita conforme capacidade do host.",
+          "acceptance_criteria": [
+            "Configuração verifica suporte e solicita permissão somente por ação explícita; negado ou indisponível mantém pendências acessíveis.",
+            "consumer_id é estável por instalação, origem e superfície, compartilhado entre abas; reconexão não gera consumidor novo.",
+            "Somente resposta atual com send_allowed=true produz apresentação; resultado é registrado sem persistir direito de reenvio."
+          ]
+        },
+        {
+          "id": "feat-076",
+          "name": "Replay, abas e abertura segura",
+          "description": "Conservar uma apresentação por evento e navegação pertinente.",
+          "acceptance_criteria": [
+            "Múltiplas abas, atualização, replay SSE, resync e reconexão não duplicam o mesmo evento; evento diferente continua elegível.",
+            "Queda após reserva ou envio e perda do recibo mantêm incerteza sem reenvio automático ou sucesso inventado.",
+            "Clique abre a tentativa correspondente por destino local validado sem executar mutação; suporte, permissão, conteúdo e link são comprovados no host alvo.",
+            "Fechar a aplicação não é apresentado como garantia de entrega posterior; falhas de notificação preservam a pendência visual original."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/app/AppShell.tsx",
+          "apps/web/src/app/useControllerEvents.ts",
+          "apps/web/src/app/useHashRoute.ts",
+          "apps/web/src/features/attempts/QuestionDecisionCard.tsx",
+          "apps/web/src/api/http.ts"
+        ],
+        "key_interfaces": [
+          "NotificationClaim",
+          "NotificationReceipt",
+          "HttpControllerEventFrame",
+          "useHashRoute"
+        ],
+        "architecture_notes": "Usar canal e estados da sprint-034 e reservas da sprint-035. Não guardar cookie ou CSRF no armazenamento do consumidor. Prova controlada de deduplicação não substitui prova da superfície real."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-033",
+        "sprint-034",
+        "sprint-035"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-037",
+      "index": 36,
+      "name": "Pausa durável e drenagem do controlador",
+      "description": "Entregar V04/V05 para bloquear novos inícios e acompanhar trabalhos antes do fechamento. Cobrir RF-81–83 e US-20.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Fastify 5",
+        "SQLite",
+        "Node.js 24"
+      ],
+      "features": [
+        {
+          "id": "feat-077",
+          "name": "Pausa serializada com aceitação de trabalho",
+          "description": "Persistir a barreira de encerramento sem confundi-la com automação desligada.",
+          "acceptance_criteria": [
+            "pause_starts aceita operação, desliga automação e persiste pausa/revisão/geração no diário específico aprovado em operation_requests.receipt_json.",
+            "Fila e início manual consultam a pausa durável na aceitação; corrida entre início e pausa produz uma ordem válida sem início aceito depois da barreira.",
+            "Reinício recompõe pausa antes de aceitar novos inícios; GET, renovação de sessão e fechamento de diálogo não retiram pausa."
+          ]
+        },
+        {
+          "id": "feat-078",
+          "name": "Inventário completo de trabalho e fechamento ocioso",
+          "description": "Drenar sem cancelar ou presumir parada.",
+          "acceptance_criteria": [
+            "ShutdownView inclui tentativas, execução, publicação, criação, exclusão, transição e operações aceitas/incertas pertinentes, com paginação, contagem e bloqueios.",
+            "has_more ou primeira página vazia não comprova ociosidade; close_when_idle confere o conjunto inteiro e mantém acompanhamento enquanto houver trabalho dependente.",
+            "Pedido de encerramento não cancela tentativas nem remove recursos; recursos ativos ou incertos permanecem identificados e preservados.",
+            "Fechamento registra estado durável antes de encerrar controlador; cancelamento, parada física e limpeza continuam ações e fatos separados."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/controller/src/main.ts",
+          "apps/controller/src/modules/storage/operations.ts",
+          "apps/controller/src/modules/storage/settings.ts",
+          "apps/controller/src/modules/storage/operation-summary.ts",
+          "apps/controller/src/modules/pipeline/start.ts",
+          "apps/controller/src/modules/pipeline/recovery.ts"
+        ],
+        "key_interfaces": [
+          "ShutdownView",
+          "ShutdownCommand",
+          "ShutdownQuery",
+          "OperationProgress",
+          "OperationAccepted"
+        ],
+        "architecture_notes": "Integrar trabalhos entregues pelas sprints-003, sprint-007, sprint-012, sprint-019, sprint-022, sprint-025 e sprint-028. Não criar tabela concorrente de shutdown. Nenhuma transação permanece aberta durante espera ou IO."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-027",
+        "sprint-028"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-038",
+      "index": 37,
+      "name": "Retomada de novos inícios e revogação do fechamento",
+      "description": "Completar E1-a com revogação durável e proteção contra callbacks tardios. Cobrir RF-81–83 e aceite adicional de US-20.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "SQLite",
+        "Fastify 5",
+        "Node.js 24",
+        "Vitest"
+      ],
+      "features": [
+        {
+          "id": "feat-079",
+          "name": "Retomada explícita com automação desligada",
+          "description": "Retirar somente a barreira imposta pelo encerramento.",
+          "acceptance_criteria": [
+            "resume_starts aceita somente pausa/drenagem pertinente antes de fechamento comprometido, avança geração/revisão e revoga drenagem pendente na mesma aceitação durável.",
+            "Após aceitação, starts_paused=false, estado running e automation_enabled=false; nenhum cancelamento, reinício, publicação ou habilitação de fila é produzido.",
+            "Replay recupera operação original antes de CAS e não revoga drenagem posterior; chave divergente recebe 409 e revisão vencida recebe 412.",
+            "Pausa ou retirada aceita é preservada no reinício sem ressuscitar drenagem revogada; instância nova não repete fechamento comprometido por processo anterior."
+          ]
+        },
+        {
+          "id": "feat-080",
+          "name": "Barreira final de fechamento e gerações",
+          "description": "Impedir fechamento tardio após retomada aceita.",
+          "acceptance_criteria": [
+            "Worker conserva operação, instância e geração e revalida após esperas/IO e imediatamente antes de comprometer fechamento.",
+            "Se resume_starts vence a corrida, worker, timers e callbacks antigos não fecham controlador nem restabelecem pausa.",
+            "Se fechamento é comprometido primeiro, retomada é recusada antes de 202; novos trabalhos também não são aceitos após a barreira final.",
+            "ShutdownView expõe geração, closing_committed e capacidades correntes; operação revogada apresenta revoked sem adulterar recibo histórico."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "SPEC.md",
+          "apps/controller/src/main.ts",
+          "apps/controller/src/modules/storage/settings.ts",
+          "apps/controller/src/modules/storage/operations.ts",
+          "apps/controller/src/modules/pipeline/start.ts"
+        ],
+        "key_interfaces": [
+          "ShutdownView",
+          "ShutdownCommand",
+          "OperationProgress",
+          "OperationReceipt"
+        ],
+        "architecture_notes": "Estender o controle entregue na sprint-037 conforme E1-a integral. Geração vem da ordem de controle persistida, não de timestamps, timers ou navegador. Aceitar retomada e fechar depois é comportamento inválido."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-010",
+        "sprint-012",
+        "sprint-013",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-027",
+        "sprint-028",
+        "sprint-037"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    },
+    {
+      "id": "sprint-039",
+      "index": 38,
+      "name": "Encerramento guiado e retomada na interface",
+      "description": "Entregar ShutdownDialog com pausa, drenagem, retomada e distinção de parada física. Completar US-20 e E1-a.",
+      "coder_agent_id": "frontend-developer",
+      "stack": [
+        "React 18",
+        "TypeScript",
+        "CSS"
+      ],
+      "features": [
+        {
+          "id": "feat-081",
+          "name": "Pausa, trabalhos ativos e decisões explícitas",
+          "description": "Apresentar o estado durável e as providências necessárias.",
+          "acceptance_criteria": [
+            "A ação de encerramento apresenta pausa solicitada, aceita ou incerta e lista paginada com contagem dos trabalhos dependentes e próximas ações.",
+            "Cancelar tentativa permanece comando separado; fechar diálogo ou aba não é apresentado como cancelamento, parada ou fechamento do controlador.",
+            "Recursos ativos/incertos e seus ambientes permanecem visíveis; has_more não habilita fechamento por lista parcial."
+          ]
+        },
+        {
+          "id": "feat-082",
+          "name": "Retomar novos inícios com resultado confirmado",
+          "description": "Integrar E1-a sem confirmação redundante ou sucesso otimista.",
+          "acceptance_criteria": [
+            "Ação Retomar novos inícios usa capacidade, revisão e operação atuais, bloqueia duplo envio e não exige segundo diálogo redundante.",
+            "Sucesso confirmado informa Novos inícios liberados. Automação permanece desligada.; resposta perdida consulta a mesma operação e não anuncia retomada.",
+            "Fechamento comprometido ou capacidade vencida mostra causa e próxima ação; abrir/fechar diálogo não muda pausa ou automação.",
+            "Prova renderizada cobre pausa, retomada, corrida recusada, reinício, operação revogada e distinção entre fechamento da interface e controlador."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "apps/web/src/app/AppShell.tsx",
+          "apps/web/src/app/useDialogs.ts",
+          "apps/web/src/app/useHashRoute.ts",
+          "apps/web/src/features/operations/useOperation.ts",
+          "apps/web/src/features/attempts/useAttemptActions.ts"
+        ],
+        "key_interfaces": [
+          "ShutdownView",
+          "ShutdownCommand",
+          "OperationProgress",
+          "useDialogs",
+          "useOperation"
+        ],
+        "architecture_notes": "Usar acompanhamento da sprint-034 e controle das sprints-037 e sprint-038. A configuração use_playwright=false permanece preservada; prova visual exigida deve ter evidência própria ou pendência explícita."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-027",
+        "sprint-028",
+        "sprint-033",
+        "sprint-034",
+        "sprint-037",
+        "sprint-038"
+      ],
+      "complexity": "medium",
+      "estimated_rounds": 2
+    },
+    {
+      "id": "sprint-040",
+      "index": 39,
+      "name": "Aceite integrado, distribuição e fechamento das evidências",
+      "description": "Consolidar o percurso V3 sem substituir validações de domínio já exigidas. Fechar rastreabilidade de US-01–23, RF-01–88, RNF-01–18 e critérios INT pertinentes.",
+      "coder_agent_id": "backend-developer",
+      "stack": [
+        "TypeScript",
+        "Node.js 24",
+        "React 18",
+        "SQLite",
+        "Windows",
+        "Git",
+        "Maestri",
+        "OMP",
+        "GitHub"
+      ],
+      "features": [
+        {
+          "id": "feat-083",
+          "name": "Regressão integrada e segurança das fronteiras",
+          "description": "Comprovar contratos e recusas sobre a versão final integrada.",
+          "acceptance_criteria": [
+            "Os comandos configurados pertinentes de typecheck, lint, testes, HTTP, aceitação, build e distribuição passam ou têm falha reproduzível explicitamente pendente; a suíte padrão não chama providers nem produz efeitos externos.",
+            "Provas negativas abrangem sessão/Origin/CSRF, limites, propriedades extras, IDs cruzados, CAS, replay, autorização alterada após IO, links maliciosos e segredos fictícios, conferindo ausência de chamadas proibidas aos adapters.",
+            "Upgrade suportado e instalação limpa preservam constraints, checksums, foreign_key_check, capturas e recibos; caches volumosos não causam cópia proporcional para SQLite/JSON.",
+            "Cada nova tabela exclusiva participa do inventário e finalização; recursos compartilhados e recibos históricos permanecem protegidos."
+          ]
+        },
+        {
+          "id": "feat-084",
+          "name": "Percursos reais e visuais separados",
+          "description": "Registrar evidência operacional das capacidades que testes controlados não comprovam.",
+          "acceptance_criteria": [
+            "Distribuição limpa comprova inicializador, Unicode, correção manual e reinício; Git/Windows comprova preservação tracked/staged/untracked, transição parcial e exclusão segura com comparação frente à meta.",
+            "Quando autorizadas e disponíveis, provas Maestri/OMP cobrem dois papéis contínuos, nova tentativa com sessões novas, terminais ativo/incerto recusados, perfil efetivo, perda de acompanhamento e cancelamento representativo; Wire de ensaio não é apresentado como conexão nativa do produto.",
+            "Provas GitHub autorizadas comprovam cinco colunas/ordem/visualização/vínculo, criação parcial retomada e commit/push/PR sem duplicação; ausência de autorização ou capacidade mantém o gate pendente.",
+            "Provas renderizadas usam aplicação com assets atuais na porta 4310 e cobrem superfícies alteradas, foco, teclado, tela baixa/estreita, zoom, conexão e notificações no host; nenhuma fixture é apresentada como prova real."
+          ]
+        },
+        {
+          "id": "feat-085",
+          "name": "Rastreabilidade final e limites de entrega",
+          "description": "Entregar registro final verificável para avaliação independente e operação.",
+          "acceptance_criteria": [
+            "SPEC_PROGRESS.md relaciona cada US-nn.Cn, RF e RNF às sprints, arquivos e evidências correspondentes, sem declarar concluído critério com prova parcial ou gate pendente.",
+            "O registro identifica a versão avaliada, mudanças efetivas, riscos observados, comandos executados e fronteiras ainda sem validação; resultados anteriores não são sobrescritos.",
+            "README e instruções operacionais pertinentes refletem inicialização, modos, diretórios, recuperação, notificações e encerramento implementados, sem caminhos pessoais, segredos ou aprovação de fase presumida.",
+            "Nenhum staging, commit, push, publicação deste repositório ou efeito externo adicional é executado como consequência do fechamento documental."
+          ]
+        }
+      ],
+      "hints": {
+        "existing_files": [
+          "SPEC_PROGRESS.md",
+          "SPEC.md",
+          "README.md",
+          "package.json",
+          "INTEGRACAO-MAESTRI-OMP.md",
+          "ensaios-fabrica/MANUAL-MAESTRI-WIRE.md",
+          "ensaios-fabrica/casos/validacoes.json",
+          "ensaios-fabrica/evidencias/relatorio-validacao.md",
+          "tests/native/project-deletion.integration.proof.ts",
+          "tests/integration/pr-publication.test.ts"
+        ],
+        "key_interfaces": [
+          "Storage",
+          "Execution",
+          "Workspaces",
+          "Publication",
+          "DeliverySummaryView",
+          "ShutdownView",
+          "AttemptComparison"
+        ],
+        "architecture_notes": "Consultar as interfaces efetivamente registradas por todas as sprints anteriores. A autorização operacional de Shell #5/porta 4310 vale quando a implementação estiver autorizada e não concede publicação externa deste repositório. Não repetir gates já válidos sem alteração ou dúvida concreta; fechar somente os que dependem da composição final."
+      },
+      "dependencies": [
+        "sprint-001",
+        "sprint-002",
+        "sprint-003",
+        "sprint-004",
+        "sprint-005",
+        "sprint-006",
+        "sprint-007",
+        "sprint-008",
+        "sprint-009",
+        "sprint-010",
+        "sprint-011",
+        "sprint-012",
+        "sprint-013",
+        "sprint-014",
+        "sprint-015",
+        "sprint-016",
+        "sprint-017",
+        "sprint-018",
+        "sprint-019",
+        "sprint-020",
+        "sprint-021",
+        "sprint-022",
+        "sprint-023",
+        "sprint-024",
+        "sprint-025",
+        "sprint-026",
+        "sprint-027",
+        "sprint-028",
+        "sprint-029",
+        "sprint-030",
+        "sprint-031",
+        "sprint-032",
+        "sprint-033",
+        "sprint-034",
+        "sprint-035",
+        "sprint-036",
+        "sprint-037",
+        "sprint-038",
+        "sprint-039"
+      ],
+      "complexity": "high",
+      "estimated_rounds": 3
+    }
+  ],
+  "metadata": {
+    "version": 1,
+    "created_at": "2026-10-23T11:44:55.212Z",
+    "total_sprints": 40,
+    "total_features": 85
+  }
+}

@@ -4,6 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { Delivery as DeliverySchema, DeliveryDiffQuery as QuerySchema, type Delivery, type DeliveryDiff, type DeliveryDiffQuery, type DiffEntry } from '#contracts';
 import type { GitReader } from './git.js';
 import { CaptureError, gitPath, managedRoot, metadataBytes, noBorrowedObjects, nul, plainDirectory, sha256, verifyRetained } from './capture.js';
+import type { AttemptRootResolver } from './project-storage.js';
 
 interface Change { path: string; oldPath: string | null; status: string; oldMode: string; newMode: string; oldOid: string; newOid: string }
 export function parseChanges(raw: string): Change[] {
@@ -17,13 +18,16 @@ export function parseChanges(raw: string): Change[] {
   }
   return entries;
 }
-export function createDeliveryDiff(dataDirectory?: string, git?: GitReader, canonicalize: (p: string) => Promise<string> = realpath) {
-  return async (delivery: Delivery, query: DeliveryDiffQuery): Promise<DeliveryDiff> => {
+export function createDeliveryDiff(dataDirectory?: string, git?: GitReader, canonicalize: (p: string) => Promise<string> = realpath,
+  resolveAttemptRoot?: AttemptRootResolver) {
+  return async (delivery: Delivery, query: DeliveryDiffQuery, previous?: Delivery): Promise<DeliveryDiff> => {
     if (!Value.Check(DeliverySchema, delivery) || !Value.Check(QuerySchema, query)) throw new CaptureError('DIFF_INPUT_INVALID');
     if (delivery.captureState !== 'captured' || !delivery.gitRef || !delivery.contentIdentity) throw new CaptureError('DELIVERY_NOT_CAPTURED');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
+    if (previous && (!Value.Check(DeliverySchema, previous) || previous.id === delivery.id || previous.attemptId !== delivery.attemptId ||
+        previous.round !== delivery.round - 1 || previous.captureState !== 'captured')) throw new CaptureError('DIFF_INPUT_INVALID');
     try {
-      const data = await managedRoot(dataDirectory, canonicalize); const root = resolve(data, 'git'); const repository = resolve(root, `${delivery.attemptId}.git`);
+      const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory, canonicalize); const root = resolve(data, 'git'); const repository = resolve(root, `${delivery.attemptId}.git`);
       await plainDirectory(root, canonicalize); await plainDirectory(repository, canonicalize); await noBorrowedObjects(repository);
       if ((await metadataBytes(resolve(repository, 'factory-owner'), 36)).toString('utf8') !== delivery.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
       const run = async (args: string[]) => {
@@ -31,8 +35,10 @@ export function createDeliveryDiff(dataDirectory?: string, git?: GitReader, cano
         if (reply.exitCode !== 0) throw new CaptureError('DELIVERY_GIT_UNAVAILABLE'); return reply.stdout;
       };
       await verifyRetained(run, delivery);
-      const changes = parseChanges(await run(['diff', '--raw', '-z', '--no-abbrev', '--no-ext-diff', '--no-textconv', '--find-renames=100%', delivery.baseSha, delivery.gitRef, '--']));
-      const identity = sha256(JSON.stringify([delivery.id, delivery.baseSha, delivery.contentIdentity, changes]));
+      if (previous) await verifyRetained(run, previous);
+      const base = previous?.commitSha ?? delivery.baseSha;
+      const changes = parseChanges(await run(['diff', '--raw', '-z', '--no-abbrev', '--no-ext-diff', '--no-textconv', '--find-renames=100%', base, delivery.gitRef, '--']));
+      const identity = sha256(JSON.stringify([delivery.id, base, delivery.contentIdentity, changes]));
       let offset = 0;
       if (query.cursor) {
         let parsed: unknown;
@@ -50,13 +56,13 @@ export function createDeliveryDiff(dataDirectory?: string, git?: GitReader, cano
           if (!Number.isSafeInteger(n) || n < 0) throw new CaptureError('DELIVERY_INTEGRITY_FAILED'); size += n;
         }
         const paths = change.oldPath ? [change.oldPath, change.path] : [change.path];
-        const stats = await run(['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', delivery.baseSha, delivery.gitRef, '--', ...paths]);
+        const stats = await run(['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', base, delivery.gitRef, '--', ...paths]);
         entry.binary = stats.startsWith('-\t-\t');
         if (entry.binary) entry.unsupported = 'BINARY_CONTENT';
         else if (size > 65536) entry.unsupported = 'PATCH_TOO_LARGE';
         else {
           let patch: string | null = null;
-          try { patch = await run(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=3', delivery.baseSha, delivery.gitRef, '--', ...paths]); }
+          try { patch = await run(['diff', '--no-color', '--no-ext-diff', '--no-textconv', '--no-renames', '--unified=3', base, delivery.gitRef, '--', ...paths]); }
           catch (error) { if (error instanceof Error && error.message === 'GIT_ENCODING_UNSUPPORTED') entry.unsupported = 'NON_UTF8_CONTENT'; else throw error; }
           if (patch !== null) {
             if (patch.length > 262_144 || Buffer.byteLength(patch) > 262_144) entry.unsupported = 'PATCH_TOO_LARGE';
@@ -68,8 +74,9 @@ export function createDeliveryDiff(dataDirectory?: string, git?: GitReader, cano
       }
       // Confirm retention identity again after IO; detail never falls back to the mutable checkout.
       await verifyRetained(run, delivery);
+      if (previous) await verifyRetained(run, previous);
       const next = offset + entries.length; const hasMore = next < changes.length;
-      return { deliveryId: delivery.id, baseSha: delivery.baseSha, contentIdentity: delivery.contentIdentity, entries,
+      return { deliveryId: delivery.id, baseSha: base, contentIdentity: delivery.contentIdentity, entries,
         hasMore, nextCursor: hasMore ? Buffer.from(JSON.stringify([identity, next])).toString('base64url') : null };
     } catch (error) {
       if (error instanceof CaptureError) throw error;

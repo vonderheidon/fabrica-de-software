@@ -6,11 +6,11 @@ import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import {
   ConfigurationUpdate, FactorySettings, GlobalChanges, GitHubAccount, OperationId, ProjectConfiguration, ProjectRegistration, SettingsUpdate,
-  OnboardingChanges, type ProfileChanges, type ProfileCreate, type ProfileType, type SettingsView,
+  OnboardingChanges, ToolPreferences, ProjectMapping, type ProfileChanges, type ProfileCreate, type ProfileType, type SettingsView,
 } from '#contracts';
 import { OperationError, readOperation, type StoredOperation } from './operations.js';
 import { StorageError } from './errors.js';
-import { readSettings } from './settings.js';
+import { readSettings, readToolPreferences } from './settings.js';
 import { configurationETag, digest, guarded, readConfiguration, readSettingsView } from './configuration-reads.js';
 import { assertProjectProfileRoles } from './profile-integrity.js';
 import { assertProjectAvailable, assertDeletionPathsAvailable } from './project-deletion-barrier.js';
@@ -72,12 +72,12 @@ function activeAttemptCountUsingProfile(db: Database.Database, profileId: string
 
 interface CommandIdentity { readonly operationId: string; readonly expectedRevision: string | undefined }
 export type ConfigurationCommand = CommandIdentity & (
-  { kind: 'project.register'; body: ProjectRegistration } |
+  { kind: 'project.register'; body: ProjectRegistration; githubProject?: NonNullable<ProjectConfiguration['github_project']> } |
   { kind: 'settings.update' | 'settings.onboarding.update'; body: SettingsUpdate } |
   { kind: 'settings.account.bind' | 'settings.account.switch'; body: SettingsUpdate } |
   { kind: 'project.configuration.update'; projectId: string; body: ConfigurationUpdate }
 );
-export interface RegisterProject extends CommandIdentity { body: ProjectRegistration; source: ProjectConfiguration['source']; originNotes: readonly string[] }
+export interface RegisterProject extends CommandIdentity { body: ProjectRegistration; source: ProjectConfiguration['source']; originNotes: readonly string[]; githubProject?: NonNullable<ProjectConfiguration['github_project']> }
 export interface SaveSettings extends CommandIdentity {
   body: SettingsUpdate;
   changes: GlobalChanges;
@@ -98,7 +98,7 @@ function commandHash(command: ConfigurationCommand): string {
   let route: string;
   let body: unknown;
   if (command.kind === 'project.register') {
-    route = '/api/v1/projects'; body = registrationCommandJson(command.body);
+    route = '/api/v1/projects'; body = registrationCommandJson(command.body, command.githubProject);
   } else if (command.kind === 'settings.update' || command.kind === 'settings.onboarding.update' || command.kind === 'settings.account.bind' || command.kind === 'settings.account.switch') {
     route = '/api/v1/settings'; body = settingsCommandJson(command.body);
   } else {
@@ -222,8 +222,8 @@ function writeProfiles(db: Database.Database, view: SettingsView, changes: Profi
       if (liveName.get(nameKey, null)) throw new OperationError(409, 'PROFILE_NAME_CONFLICT', 'A live profile already uses this name.');
       const now = Date.now();
       db.prepare(`INSERT INTO execution_profiles(id, name, profile_type, name_key, executor, provider, model, effort,
-        guidance, revision, created_at_ms, updated_at_ms, deleted_at_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)`)
+        guidance, revision, created_at_ms, updated_at_ms, deleted_at_ms, composition_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL, 1)`)
         .run(randomUUID(), profile.name, profile.profile_type, nameKey, profile.executor, profile.provider, profile.model,
           profile.effort, profile.guidance, now, now);
       changed = true;
@@ -232,6 +232,12 @@ function writeProfiles(db: Database.Database, view: SettingsView, changes: Profi
     if (Object.keys(command.changes).length === 0) throw new OperationError(400, 'PROFILE_PATCH_EMPTY', 'Profile updates require at least one changed field.');
     const previous = view.profiles.find((profile) => profile.id === command.id);
     if (!previous) throw new OperationError(404, 'PROFILE_NOT_FOUND', 'Profile not found.');
+    if (previous.composition_version === null && !Object.hasOwn(command.changes, 'guidance')) {
+      throw new OperationError(409, 'PROFILE_COMPOSITION_REQUIRED', 'Este perfil precisa de instruções efetivas antes de ser usado.', {
+        facts: { profile_id: previous.id }, affected_requirements: ['RF-36', 'RF-37', 'RF-38'],
+        recovery: 'Edite as instruções do perfil para caber no limite de 8.192 caracteres e salve uma composição efetiva.',
+      });
+    }
     const next = { ...previous, ...command.changes };
     if (next.profile_type !== previous.profile_type) {
       const projectUsesCompatibleRole = projectChange !== undefined &&
@@ -247,7 +253,7 @@ function writeProfiles(db: Database.Database, view: SettingsView, changes: Profi
       digest({ name: next.name, profile_type: next.profile_type, executor: next.executor, provider: next.provider, model: next.model, effort: next.effort, guidance: next.guidance })) continue;
     const now = Math.max(Date.now(), previous.updated_at_ms, previous.created_at_ms);
     const result = db.prepare(`UPDATE execution_profiles SET name = ?, name_key = ?, profile_type = ?, executor = ?, provider = ?, model = ?, effort = ?,
-      guidance = ?, revision = revision + 1, updated_at_ms = ? WHERE id = ? AND revision = ? AND deleted_at_ms IS NULL`)
+      guidance = ?, composition_version = 1, revision = revision + 1, updated_at_ms = ? WHERE id = ? AND revision = ? AND deleted_at_ms IS NULL`)
       .run(next.name, next.name.trim().toLowerCase(), next.profile_type, next.executor, next.provider, next.model, next.effort,
         next.guidance, now, previous.id, previous.revision);
     if (result.changes !== 1) throw new OperationError(412, 'REVISION_CONFLICT', 'Profile changed.');
@@ -310,10 +316,23 @@ function writeOnboarding(db: Database.Database, view: SettingsView, changes: Onb
   return true;
 }
 
+function writeToolPreferences(db: Database.Database, view: SettingsView, preferences: SettingsUpdate['tool_preferences']): boolean {
+  if (!preferences || !Value.Check(ToolPreferences, preferences)) throw new OperationError(400, 'TOOL_PREFERENCES_INVALID', 'Tool preferences are invalid.');
+  const current = readToolPreferences(db);
+  if (digest(current) === digest(preferences)) return false;
+  const result = db.prepare(`UPDATE factory_settings SET tool_preferences_json = ?, revision = revision + 1, updated_at_ms = ?
+    WHERE id = 'local' AND revision = ?`).run(JSON.stringify(preferences), Math.max(Date.now(), view.settings.updated_at_ms), view.settings.revision);
+  if (result.changes !== 1) throw new OperationError(412, 'REVISION_CONFLICT', 'Settings changed.');
+  return true;
+}
+
 export function insertRevision(db: Database.Database, projectId: string, revisionId: string, revision: number, c: ProjectConfiguration, notes: readonly string[]): void {
   assertProjectAvailable(db, projectId);
   if (c.source.kind === 'local') assertDeletionPathsAvailable(db, [c.source.location]);
   if (!Value.Check(ProjectConfiguration, c) || notes.length > 50 || !notes.every((n) => /^[A-Z_]{1,128}$/.test(n))) throw new OperationError(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');
+  if (c.github_project && 'backlog' in c.github_project.status_option_ids && new Set(Object.values(c.github_project.status_option_ids)).size !== 5) {
+    throw new OperationError(400, 'STATUS_MAPPING_INVALID', 'A V3 Status mapping requires five distinct option IDs.');
+  }
   assertProjectProfileRoles(db, c);
   db.prepare(`INSERT INTO project_revisions(id, project_id, revision_number, source_kind, source_location, repository_id, repository_url, base_branch, github_project_id, github_project_owner_id, status_field_id, status_options_json, implementer_profile_id, reviewer_profile_id, checks_json, correction_limit, default_delivery_mode, automation_enabled, queue_order_json, guidance, origin_notes_json, created_at_ms)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -322,6 +341,10 @@ export function insertRevision(db: Database.Database, projectId: string, revisio
       c.implementer_profile_id, c.reviewer_profile_id, JSON.stringify(c.checks.map(storeCheck)), c.correction_limit, c.default_delivery_mode, Number(c.automation_enabled), JSON.stringify(storeQueueOrder(c.queue_order)), c.guidance, JSON.stringify(notes), Date.now());
 }
 export function registerProject(db: Database.Database, input: RegisterProject): StoredOperation {
+  if (input.githubProject !== undefined && (!Value.Check(ProjectMapping, input.githubProject) ||
+      new Set(Object.values(input.githubProject.status_option_ids)).size !== 5)) {
+    throw new OperationError(400, 'PROJECT_MAPPING_INVALID', 'A newly registered Project mapping must contain five distinct status options.');
+  }
   const command: ConfigurationCommand = { ...input, kind: 'project.register' };
   return guarded(() => db.transaction(() => {
     const recovered = recoverConfigurationCommand(db, command); if (recovered) return recovered;
@@ -331,7 +354,7 @@ export function registerProject(db: Database.Database, input: RegisterProject): 
     ]);
     const s = readSettings(db); const id = randomUUID(); const revisionId = randomUUID(); const now = Date.now();
     db.prepare('INSERT INTO projects(id, account_id, name, current_revision_id, revision, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, 1, ?, ?)').run(id, s.account_id, input.body.name, revisionId, now, now);
-    insertRevision(db, id, revisionId, 1, { source: input.source, base_branch: input.body.base_branch, github_project: null,
+    insertRevision(db, id, revisionId, 1, { source: input.source, base_branch: input.body.base_branch, github_project: input.githubProject ?? null,
       implementer_profile_id: null, reviewer_profile_id: null, checks: [], correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
       queue_order: { priority_field_id: null, priority_direction: 'asc', use_board_position: true }, guidance: '' }, input.originNotes);
     return record(db, command, id, 1);
@@ -348,7 +371,7 @@ export function saveSettings(db: Database.Database, input: SaveSettings): Stored
     const recovered = recoverConfigurationCommand(db, command); if (recovered) return recovered;
     const view = readSettingsView(db); checkRevision(configurationETag(view), input.expectedRevision);
     if (binding) {
-      if (Object.keys(input.body.changes).length > 0 || input.body.profile_changes !== undefined || input.body.gh_executable_path !== undefined || input.body.onboarding_changes !== undefined) {
+      if (Object.keys(input.body.changes).length > 0 || input.body.profile_changes !== undefined || input.body.gh_executable_path !== undefined || input.body.onboarding_changes !== undefined || input.body.tool_preferences !== undefined) {
         throw new OperationError(400, 'SETTINGS_COMMAND_INVALID', 'Account binding must be the only settings command.');
       }
       if (!input.account || !Value.Check(GitHubAccount, input.account) || input.account.id !== binding.account_id) {
@@ -378,7 +401,7 @@ export function saveSettings(db: Database.Database, input: SaveSettings): Stored
     }
     checkExplicitGlobals(input.body.changes, input.changes);
     if (input.body.gh_executable_path !== undefined) {
-      if (Object.keys(input.body.changes).length > 0 || (input.body.profile_changes?.length ?? 0) > 0 || input.body.onboarding_changes !== undefined) {
+      if (Object.keys(input.body.changes).length > 0 || (input.body.profile_changes?.length ?? 0) > 0 || input.body.onboarding_changes !== undefined || input.body.tool_preferences !== undefined) {
         throw new OperationError(400, 'SETTINGS_COMMAND_INVALID', 'Save the GitHub executable as a separate settings command.');
       }
       const current = db.prepare<[], { gh_executable_path: string | null }>(
@@ -393,12 +416,20 @@ export function saveSettings(db: Database.Database, input: SaveSettings): Stored
       return record(db, command, 'local', readSettings(db).revision);
     }
     if (input.body.onboarding_changes !== undefined) {
-      if (Object.keys(input.body.changes).length > 0 || input.body.profile_changes !== undefined || input.body.gh_executable_path !== undefined || input.body.account_binding !== undefined) {
+      if (Object.keys(input.body.changes).length > 0 || input.body.profile_changes !== undefined || input.body.gh_executable_path !== undefined || input.body.account_binding !== undefined || input.body.tool_preferences !== undefined) {
         throw new OperationError(400, 'SETTINGS_COMMAND_INVALID', 'Onboarding changes must be the only settings command.');
       }
       if (!writeOnboarding(db, view, input.body.onboarding_changes, input.onboardingValidation)) {
         throw new OperationError(409, 'NO_CHANGES', 'No onboarding changes were supplied.');
       }
+      return record(db, command, 'local', readSettings(db).revision);
+    }
+    if (input.body.tool_preferences !== undefined) {
+      if (Object.keys(input.body.changes).length > 0 || input.body.profile_changes !== undefined || input.body.gh_executable_path !== undefined ||
+        input.body.onboarding_changes !== undefined || input.body.account_binding !== undefined) {
+        throw new OperationError(400, 'SETTINGS_COMMAND_INVALID', 'Tool preferences must be the only settings command.');
+      }
+      if (!writeToolPreferences(db, view, input.body.tool_preferences)) throw new OperationError(409, 'NO_CHANGES', 'No tool preferences changed.');
       return record(db, command, 'local', readSettings(db).revision);
     }
     const globalsChanged = writeGlobals(db, view, input.changes);

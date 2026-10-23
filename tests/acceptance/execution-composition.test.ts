@@ -23,6 +23,7 @@ function contractExecutor(port: ExecutionPersistence, roles: RoleResourceReferen
     return port.getPassage(record.handle);
   };
   return {
+    preparePassageHandoff: async () => {},
     getCatalog: async () => ({ state: 'unavailable', observed_at_ms: 1,
       diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Controlled catalog unavailable.', recovery: 'No catalog call is required by this acceptance.' }] }),
     roleResources: () => structuredClone(roles), preflight: async () => ({ ready: true, code: null, ompVersion: 'contract-test' }), observeVersions: async () => [],

@@ -2,8 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, realpath, unlink, writeFile } from 'node:fs/promises';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { GitObjectId, OperationId, type CaptureWarning, type Delivery } from '#contracts';
+import { GitObjectId, OperationId, Delivery, type CaptureWarning } from '#contracts';
 import type { GitInput, GitReader } from './git.js';
+import type { AttemptRootResolver } from './project-storage.js';
 
 export class CaptureError extends Error { constructor(readonly code: string) { super(code); } }
 export interface CaptureInput { attemptId: string; passageId: string; deliveryId: string; baseSha: string; declaredFiles: string[] }
@@ -66,8 +67,9 @@ interface FileVersion { path: string; mode: string; hash: string; size: number }
 interface Observation { files: FileVersion[]; digest: string; warnings: CaptureWarning[] }
 
 /** Raw bytes enter only the Git object database; the manifest is transient hashes and modes. */
-export function createCapturer(dataDirectory?: string, git?: GitReader, canonicalize: (p: string) => Promise<string> = realpath) {
-  return async (input: CaptureInput): Promise<CapturedContent> => {
+export function createCapturer(dataDirectory?: string, git?: GitReader, canonicalize: (p: string) => Promise<string> = realpath,
+  resolveAttemptRoot?: AttemptRootResolver) {
+  return async (input: CaptureInput, expectedDelivery?: Delivery): Promise<CapturedContent> => {
     if (!Value.Check(OperationId, input.attemptId) || !Value.Check(OperationId, input.passageId) || !Value.Check(OperationId, input.deliveryId) ||
       !Value.Check(GitObjectId, input.baseSha) || input.declaredFiles.length > 1000 || input.declaredFiles.some(p => !gitPath(p))) throw new CaptureError('CAPTURE_INPUT_INVALID');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
@@ -76,7 +78,7 @@ export function createCapturer(dataDirectory?: string, git?: GitReader, canonica
       const r = await git(cwd, args, options); if (r.exitCode !== 0) throw new CaptureError('CAPTURE_GIT_FAILED'); return r.stdout;
     };
     try {
-      const data = await managedRoot(dataDirectory, canonicalize);
+      const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(input.attemptId) : dataDirectory, canonicalize);
       const work = resolve(data, 'work'); const attempt = resolve(work, input.attemptId); const implementation = resolve(attempt, 'implementation');
       for (const path of [work, attempt, implementation, resolve(implementation, '.git')]) await plainDirectory(path, canonicalize);
       const metadata = resolve(implementation, '.git'); await noBorrowedObjects(metadata);
@@ -171,6 +173,30 @@ export function createCapturer(dataDirectory?: string, git?: GitReader, canonica
         return { files, warnings, digest: sha256(JSON.stringify({ head, index: sha256(index), stages, flags, untracked, files, warnings })) };
       }
       const before = await observe();
+      if (expectedDelivery) {
+        if (!Value.Check(Delivery, expectedDelivery) || expectedDelivery.captureState !== 'captured' || expectedDelivery.attemptId !== input.attemptId || expectedDelivery.id !== input.deliveryId || expectedDelivery.producerPassageId !== input.passageId || expectedDelivery.baseSha !== input.baseSha) throw new CaptureError('DELIVERY_INTEGRITY_FAILED');
+        const repository = resolve(data, 'git', `${input.attemptId}.git`);
+        await plainDirectory(repository, canonicalize); await noBorrowedObjects(repository);
+        if ((await metadataBytes(resolve(repository, 'factory-owner'), 36)).toString('utf8') !== input.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
+        const retained = (args: string[]) => run(repository, [`--git-dir=${repository}`, '-c', 'core.bare=true', ...args]);
+        await verifyRetained(retained, expectedDelivery);
+        const entries = nul(await retained(['ls-tree', '-r', '-z', expectedDelivery.commitSha!]));
+        const expected = new Map<string, { mode: string; oid: string }>();
+        for (const entry of entries) {
+          const match = /^(100644|100755) blob ([a-f0-9]{40}|[a-f0-9]{64})\t([\s\S]+)$/.exec(entry);
+          if (!match || !gitPath(match[3]!)) throw new CaptureError('REVIEW_TREE_UNSUPPORTED');
+          expected.set(match[3]!, { mode: match[1]!, oid: match[2]! });
+        }
+        if (expected.size !== before.files.length) throw new CaptureError('DELIVERY_INTEGRITY_FAILED');
+        for (const file of before.files) {
+          const prior = expected.get(file.path); const value = await bytes(file.path);
+          if (!prior || !value || sha256(value) !== file.hash || prior.mode !== file.mode ||
+            createHash(prior.oid.length === 64 ? 'sha256' : 'sha1').update(`blob ${value.length}\0`).update(value).digest('hex') !== prior.oid) throw new CaptureError('DELIVERY_INTEGRITY_FAILED');
+        }
+        if ((await observe()).digest !== before.digest) throw new CaptureError('CAPTURE_CONCURRENT_CHANGE');
+        await verifyRetained(retained, expectedDelivery);
+        return { gitRef: expectedDelivery.gitRef!, contentIdentity: expectedDelivery.contentIdentity!, commitSha: expectedDelivery.commitSha!, hasDelta: expectedDelivery.hasDelta!, warnings: expectedDelivery.warnings };
+      }
       const gitRoot = resolve(data, 'git'); await ensureDirectory(gitRoot); await plainDirectory(gitRoot, canonicalize);
       const repository = resolve(gitRoot, `${input.attemptId}.git`);
       let created = false;

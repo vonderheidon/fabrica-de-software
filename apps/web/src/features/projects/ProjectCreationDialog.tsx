@@ -15,16 +15,17 @@ type FormState = {
   templateId: string;
   destinationRelative: string;
   baseBranch: string;
-  creationMode: CreationMode;
+  creationMode: 'remote_push';
   ownerId: string;
   remoteName: string;
+  boardName: string;
   visibility: 'private' | 'public';
 };
 type CreationLoad = { status: 'loading' } | { status: 'error'; creationId: string; message: string } | { status: 'ready'; view: CreationView; etag: string | null; error?: string };
 
 const initialForm: FormState = {
-  name: '', templateId: '', destinationRelative: '', baseBranch: 'main', creationMode: 'local',
-  ownerId: '', remoteName: '', visibility: 'private',
+  name: '', templateId: '', destinationRelative: '', baseBranch: 'main', creationMode: 'remote_push',
+  ownerId: '', remoteName: '', boardName: '', visibility: 'private',
 };
 const modeLabels: Record<CreationMode, string> = {
   local: 'Somente local', remote_no_push: 'Remoto sem push', remote_push: 'Remoto com push',
@@ -38,6 +39,7 @@ const stepLabels: Record<string, string> = {
   directory: 'Pasta', files: 'Arquivos do template', git: 'Repositório Git local', baseline: 'Commit inicial', registration: 'Cadastro do projeto',
   create_repository: 'Criar repositório remoto', associate_origin: 'Vincular repositório remoto', baseline_push: 'Publicar commit inicial',
   create_directory: 'Criar destino', write_template_and_engineering: 'Gravar template e engenharia', initialize_git: 'Inicializar Git', create_conventional_baseline: 'Criar commit inicial', register_local_project: 'Cadastrar projeto',
+  create_board: 'Criar quadro Kanban', configure_status: 'Configurar as cinco colunas', link_repository: 'Vincular quadro ao repositório', configure_view: 'Configurar visualização Kanban', verify_board: 'Conferir quadro e colunas',
 };
 
 function suggestedPath(name: string): string {
@@ -75,11 +77,19 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   const [reconcileNotice, setReconcileNotice] = useState('');
   const [destinationEdited, setDestinationEdited] = useState(false);
   const [remoteNameEdited, setRemoteNameEdited] = useState(false);
+  const boardNameEditedRef = useRef(false);
   const ownerEditedRef = useRef(false);
   const planVersion = useRef(0);
   const formRef = useRef(form);
   const reconcileOperationId = useRef<string | null>(null);
+  const lifecycle = useRef({ active: true, creationId });
+  lifecycle.current.creationId = creationId;
   formRef.current = form;
+
+  useEffect(() => {
+    lifecycle.current.active = true;
+    return () => { lifecycle.current.active = false; planVersion.current += 1; };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -99,12 +109,13 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   }, [optionsReload]);
 
   useEffect(() => {
-    const pendingOperations = readUncertainOperations().filter((item) => item.kind === 'scaffold-create' || (creationId && item.kind === 'scaffold-reconcile')).sort((left, right) => left.recordedAt - right.recordedAt);
+    const pendingOperations = readUncertainOperations().filter((item) => (!creationId && item.kind === 'scaffold-create') || (creationId && item.kind === 'scaffold-reconcile')).sort((left, right) => left.recordedAt - right.recordedAt);
     const pending = pendingOperations[pendingOperations.length - 1];
     if (!pending) return;
     setActiveOperationId(pending.operationId);
     setUncertain(pending.kind === 'scaffold-create');
     setReconcileUncertain(pending.kind === 'scaffold-reconcile');
+    if (pending.kind === 'scaffold-reconcile') reconcileOperationId.current = pending.operationId;
     setOperationNotice('Uma criação anterior está sem confirmação. Consulte seu resultado antes de continuar. O envio não será repetido automaticamente.');
   }, [creationId]);
 
@@ -120,6 +131,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
         const response = await requestJsonWithMetadata<CreationView>(`/api/v1/scaffold/creations/${encodeURIComponent(creationId)}`);
         if (!active) return;
         setCreation({ status: 'ready', view: response.data, etag: response.etag });
+        resolveUncertainOperation(response.data.creation.operation_id);
         if (['pending', 'running'].includes(response.data.creation.state)) timer = setTimeout(() => void load(), 2500);
       } catch (error: unknown) {
         if (active) setCreation((prior) => prior.status === 'ready' && prior.view.creation.id === creationId
@@ -168,15 +180,16 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   }, [creationId, reconcileAccepted]);
 
   const modeCapability = options?.creation_modes.find((item) => item.mode === form.creationMode)?.capability;
-  const remoteMode = form.creationMode !== 'local';
+  const remoteMode = true;
   const missingFields = [!form.name.trim() && 'nome do projeto', !form.destinationRelative.trim() && 'pasta do projeto',
     !form.baseBranch.trim() && 'branch-base', remoteMode && !form.ownerId.trim() && 'proprietário',
-    remoteMode && !form.remoteName.trim() && 'nome do repositório'].filter(Boolean);
+    remoteMode && !form.remoteName.trim() && 'nome do repositório', !form.boardName.trim() && 'nome do quadro'].filter(Boolean);
   const destinationPreview = options?.projects_root
     ? `${options.projects_root.replace(/[\\/]+$/, '')}${options.projects_root.includes('\\') ? '\\' : '/'}${form.destinationRelative.trim() || '(pasta do projeto)'}` : null;
   const currentView = creation.status === 'ready' && creation.view.creation.id === creationId && !creation.error ? creation.view : null;
   const canReconcile = Boolean(currentView && currentView.creation.state === 'partial' && creation.status === 'ready' && creation.etag &&
-    currentView.remote_effects.some((effect) => ['unknown', 'running', 'failed_known'].includes(effect.state)));
+    (currentView.remote_effects.some((effect) => ['unknown', 'running', 'failed_known'].includes(effect.state)) ||
+      currentView.board_operations.some((effect) => ['unknown', 'running', 'failed_known'].includes(effect.state))));
 
   function invalidatePlan(update: (current: FormState) => FormState): void {
     planVersion.current += 1;
@@ -190,15 +203,12 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   function inputFor(current: FormState): ScaffoldInput {
     const template = options?.templates.find((item) => item.id === current.templateId);
     if (!template) throw new Error('Selecione um template disponível.');
-    const base: ScaffoldInput = {
+    const base = {
       name: current.name.trim(), template_id: template.id, template_digest: template.digest,
-      destination_relative: current.destinationRelative.trim(), creation_mode: current.creationMode,
+      destination_relative: current.destinationRelative.trim(), creation_mode: 'remote_push' as const, board_name: current.boardName.trim(),
       base_branch: current.baseBranch.trim(), triage_enabled: true,
     };
-    return current.creationMode === 'local' ? base : {
-      ...base,
-      remote: { owner_id: current.ownerId.trim(), name: current.remoteName.trim(), visibility: current.visibility },
-    };
+    return { ...base, remote: { owner_id: current.ownerId.trim(), name: current.remoteName.trim(), visibility: current.visibility } };
   }
 
   async function reviewPlan(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -225,16 +235,19 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     const operationId = activeOperationId ?? crypto.randomUUID();
     setSubmitting(true); setOperationNotice(''); setUncertain(false); setActiveOperationId(operationId);
     try {
+      recordUncertainOperation({ operationId, kind: 'scaffold-create', recordedAt: Date.now() });
       const accepted = await requestJson<OperationAccepted>('/api/v1/scaffold/creations', {
         method: 'POST', headers: { 'Idempotency-Key': operationId },
         body: JSON.stringify(createScaffoldRequest(stablePlan)),
       });
+      if (!lifecycle.current.active || lifecycle.current.creationId !== null) return;
       if (accepted.operation_id !== operationId || accepted.resource.type !== 'creation') throw new Error('O recibo aceito não corresponde à criação solicitada.');
-      resolveUncertainOperation(operationId);
       setUncertain(false);
       onCreationId(accepted.resource.id);
     } catch (error: unknown) {
+      if (!lifecycle.current.active || lifecycle.current.creationId !== null) return;
       if (error instanceof HttpError && error.status < 500) {
+        resolveUncertainOperation(operationId);
         setActiveOperationId(null);
         setPlanError(error.message);
       } else {
@@ -242,7 +255,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
         setUncertain(true);
         setOperationNotice('A resposta da criação não foi confirmada. Consulte o estado atual antes de iniciar outra criação.');
       }
-    } finally { setSubmitting(false); }
+    } finally { if (lifecycle.current.active) setSubmitting(false); }
   }
 
   async function consultOperation(): Promise<void> {
@@ -250,8 +263,9 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     setSubmitting(true);
     try {
       const operation = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(activeOperationId)}`);
-      if (operation.state === 'succeeded' && operation.resource.type === 'creation') {
-        resolveUncertainOperation(activeOperationId);
+      if (!lifecycle.current.active || lifecycle.current.creationId !== null) return;
+      if (operation.operation_id !== activeOperationId) throw new Error('A consulta retornou outra operação.');
+      if (operation.resource.type === 'creation') {
         setUncertain(false);
         setOperationNotice('A operação foi aceita. Consultando os efeitos persistidos da criação.');
         onCreationId(operation.resource.id);
@@ -264,33 +278,36 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
         setOperationNotice(`Situação: ${operatorState(operation.state).label}. Consulte novamente; a criação não será reenviada.`);
       }
     } catch (error: unknown) {
+      if (!lifecycle.current.active || lifecycle.current.creationId !== null) return;
       if (error instanceof HttpError && error.status === 404 && error.code === 'OPERATION_NOT_FOUND') {
-        resolveUncertainOperation(activeOperationId);
-        setUncertain(false);
-        setActiveOperationId(null);
-        setOperationNotice('O controlador não encontrou essa operação na conta atual. Revise o plano antes de solicitar uma nova criação. Nenhuma criação foi reenviada.');
+        setOperationNotice('A operação ainda não foi localizada na conta atual. Confirme a conta e consulte novamente. A identidade foi preservada para evitar outra criação.');
         return;
       }
       setOperationNotice(errorMessage(error, 'Não foi possível consultar a operação. A identidade foi preservada; não repita a criação.'));
-    } finally { setSubmitting(false); }
+    } finally { if (lifecycle.current.active) setSubmitting(false); }
   }
 
   async function reconcile(): Promise<void> {
-    if (!creationId || creation.status !== 'ready' || !creation.etag || !canReconcile || reconciling) return;
+    if (!creationId || creation.status !== 'ready' || !creation.etag || !canReconcile || reconciling || reconcileAccepted || reconcileUncertain) return;
+    const expectedCreationId = creationId;
     const operationId = reconcileOperationId.current ?? crypto.randomUUID();
     reconcileOperationId.current = operationId;
     setReconciling(true); setReconcileNotice('');
     try {
+      recordUncertainOperation({ operationId, kind: 'scaffold-reconcile', recordedAt: Date.now() });
       const accepted = await requestJson<OperationAccepted>(`/api/v1/scaffold/creations/${encodeURIComponent(creationId)}/reconcile`, {
         method: 'POST', headers: { 'If-Match': creation.etag, 'Idempotency-Key': operationId }, body: '{}',
       });
-      if (accepted.operation_id !== operationId || accepted.resource.id !== creationId) throw new Error('A reconciliação retornou outra criação.');
+      if (!lifecycle.current.active || lifecycle.current.creationId !== expectedCreationId) return;
+      if (accepted.operation_id !== operationId || accepted.resource.type !== 'creation' || accepted.resource.id !== creationId) throw new Error('A reconciliação retornou outra criação.');
       recordUncertainOperation({ operationId, kind: 'scaffold-reconcile', recordedAt: Date.now() });
       setReconcileAccepted(true);
       setReconcileNotice('Reconciliação aceita. A mesma criação será consultada novamente.');
       setCreationReload((value) => value + 1);
     } catch (error: unknown) {
+      if (!lifecycle.current.active || lifecycle.current.creationId !== expectedCreationId) return;
       if (error instanceof HttpError && error.status < 500) {
+        resolveUncertainOperation(operationId);
         reconcileOperationId.current = null;
         setReconcileNotice(error.message);
       } else {
@@ -298,15 +315,22 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
         setReconcileUncertain(true);
         setReconcileNotice('A conferência dos efeitos ficou sem confirmação. Consulte o resultado antes de continuar.');
       }
-    } finally { setReconciling(false); }
+    } finally { if (lifecycle.current.active && lifecycle.current.creationId === expectedCreationId) setReconciling(false); }
   }
 
   async function consultReconcile(): Promise<void> {
+    const expectedCreationId = creationId;
     const operationId = reconcileOperationId.current ?? activeOperationId;
     if (!operationId || reconciling) return;
     setReconciling(true);
     try {
       const operation = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(operationId)}`);
+      if (!lifecycle.current.active || lifecycle.current.creationId !== expectedCreationId) return;
+      if (operation.operation_id !== operationId || operation.resource.type !== 'creation') throw new Error('A consulta retornou outra operação.');
+      if (operation.resource.id !== creationId) {
+        onCreationId(operation.resource.id);
+        return;
+      }
       if (operation.state === 'succeeded' && operation.resource.type === 'creation' && operation.resource.id === creationId) {
         resolveUncertainOperation(operationId);
         reconcileOperationId.current = null;
@@ -324,12 +348,13 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
         setReconcileNotice(`Situação da conferência: ${operatorState(operation.state).label}. Consulte novamente; não será reenviada.`);
       }
     } catch (error: unknown) {
+      if (!lifecycle.current.active || lifecycle.current.creationId !== expectedCreationId) return;
       setReconcileNotice(errorMessage(error, 'Não foi possível consultar a operação de reconciliação. A identidade foi preservada.'));
-    } finally { setReconciling(false); }
+    } finally { if (lifecycle.current.active && lifecycle.current.creationId === expectedCreationId) setReconciling(false); }
   }
 
   if (creationId) return <CreationResult key={creationId} creationId={creationId} load={creation} onRefresh={() => setCreationReload((value) => value + 1)}
-    onOpenProject={onOpenProject} canReconcile={canReconcile} reconciling={reconciling} reconcileUncertain={reconcileUncertain} reconcileNotice={reconcileNotice} onReconcile={() => void reconcile()} onConsultReconcile={() => void consultReconcile()} />;
+    onOpenProject={onOpenProject} canReconcile={canReconcile} reconciling={reconciling || reconcileAccepted} reconcileUncertain={reconcileUncertain} reconcileNotice={reconcileNotice} onReconcile={() => void reconcile()} onConsultReconcile={() => void consultReconcile()} />;
 
   if (plan) return <section className="creation-flow" aria-labelledby="creation-plan-title">
     <div className="creation-section-heading"><span className="eyebrow">Antes de criar</span><h3 id="creation-plan-title">Plano de criação</h3><p>Confira o destino, os arquivos e as ações que serão executadas ao criar.</p></div>
@@ -340,6 +365,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
       <div><small>Branch-base</small><code>{plan.plan.input.base_branch}</code></div>
       <div><small>Conta observada</small><b>{plan.plan.account.login ?? 'Não confirmada'}</b></div>
       {plan.plan.input.remote && <div><small>Repositório remoto</small><b>{plan.plan.owner_login ?? 'Proprietário selecionado'}/{plan.plan.input.remote.name}</b><span>{plan.plan.input.remote.visibility === 'private' ? 'Privado' : 'Público'}</span></div>}
+      <div><small>Quadro Kanban</small><b>{plan.plan.input.board_name}</b></div>
     </div>
     <div className="creation-resource-list"><h4>Arquivos planejados</h4>{plan.plan.files.map((file) => <div className="creation-resource-row" key={file.path}><code>{file.path}</code><span>{file.bytes} bytes</span></div>)}</div>
 
@@ -348,7 +374,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     {plan.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos ainda pendentes</b>{plan.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}<a href="#principal/configuracao">Corrigir condições globais na Configuração</a></div>}
     <label className="creation-authorization"><input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.currentTarget.checked)} />Confirmo este plano e autorizo as ações listadas.</label>
     {operationNotice && <div className="read-state" role="status">{operationNotice}</div>}
-    <div className="form-actions dialog-actions"><button type="button" onClick={() => { setPlan(null); setAuthorized(false); setPlanError(null); setActiveOperationId(null); onPlanEdit(); }}>Voltar e editar</button>
+    <div className="form-actions dialog-actions"><button type="button" disabled={submitting || uncertain} onClick={() => { setPlan(null); setAuthorized(false); setPlanError(null); setActiveOperationId(null); onPlanEdit(); }}>Voltar e editar</button>
       {uncertain && <button type="button" onClick={() => void consultOperation()} disabled={submitting}>{submitting ? 'Consultando…' : 'Consultar operação'}</button>}
       <button type="button" className="primary" disabled={!authorized || submitting || uncertain || modeCapability?.available !== true} onClick={() => void submitCreation()}>{submitting ? 'Enviando uma vez…' : 'Criar projeto'}</button></div>
   </section>;
@@ -360,19 +386,17 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     {operationNotice && <div className="read-state" role="status">{operationNotice}{uncertain && <button type="button" onClick={() => void consultOperation()} disabled={submitting}>{submitting ? 'Consultando…' : 'Consultar operação'}</button>}</div>}
     <div className="form-grid creation-form-grid">
       <div className="creation-group-heading field-full"><h3>Dados do projeto</h3><span>* Obrigatório</span></div>
-      <label className="form-field" htmlFor="creation-name">Nome do projeto *<input id="creation-name" value={form.name} required onChange={(event) => { const name = event.currentTarget.value; invalidatePlan((current) => ({ ...current, name, ...(!destinationEdited ? { destinationRelative: suggestedPath(name) } : {}), ...(!remoteNameEdited ? { remoteName: suggestedPath(name) } : {}) })); }} /></label>
+      <label className="form-field" htmlFor="creation-name">Nome do projeto *<input id="creation-name" value={form.name} required onChange={(event) => { const name = event.currentTarget.value; invalidatePlan((current) => ({ ...current, name, ...(!destinationEdited ? { destinationRelative: suggestedPath(name) } : {}), ...(!remoteNameEdited ? { remoteName: suggestedPath(name) } : {}), ...(!boardNameEditedRef.current ? { boardName: name } : {}) })); }} /></label>
       {options && options.templates.length > 1 && <div className="form-field"><label htmlFor="creation-template">Template *</label><CustomSelect id="creation-template" value={form.templateId} required onChange={(event) => { const templateId = event.currentTarget.value; invalidatePlan((current) => ({ ...current, templateId })); }}><option value="">Selecione…</option>{options.templates.map((template) => <option key={template.id} value={template.id}>{template.label}</option>)}</CustomSelect></div>}
       <label className="form-field" htmlFor="creation-destination">Pasta do projeto *<input id="creation-destination" placeholder="nome-do-projeto" value={form.destinationRelative} required aria-describedby="creation-destination-preview" onChange={(event) => { const destinationRelative = event.currentTarget.value; setDestinationEdited(true); invalidatePlan((current) => ({ ...current, destinationRelative })); }} /></label>
       <label className="form-field" htmlFor="creation-branch">Branch-base *<input id="creation-branch" value={form.baseBranch} required onChange={(event) => { const baseBranch = event.currentTarget.value; invalidatePlan((current) => ({ ...current, baseBranch })); }} /></label>
       {destinationPreview && <div className="creation-destination-preview field-full" id="creation-destination-preview"><span>O projeto será criado em</span><code>{destinationPreview}</code></div>}
-      <div className="creation-group-heading creation-repository-heading field-full"><h3>Repositório</h3><span>Local ou GitHub</span></div>
-      <div className="form-field field-full"><label htmlFor="creation-mode">Onde guardar o projeto</label><CustomSelect id="creation-mode" value={form.creationMode} aria-describedby="creation-mode-help" onChange={(event) => { const creationMode = event.currentTarget.value as CreationMode; invalidatePlan((current) => ({ ...current, creationMode })); }}>{(['local', 'remote_no_push', 'remote_push'] as const).map((mode) => {
-        const capability = options?.creation_modes.find((item) => item.mode === mode)?.capability;
-        return <option key={mode} value={mode}>{modeLabels[mode]}{capability && !capability.available ? ' · indisponível neste host' : ''}</option>;
-      })}</CustomSelect><small id="creation-mode-help">{modeDescriptions[form.creationMode]}</small>{modeCapability && !modeCapability.available && <small className="error">{modeCapability.reason} {modeCapability.recovery}</small>}</div>
+      <div className="creation-group-heading creation-repository-heading field-full"><h3>Repositório e quadro</h3><span>Criação completa obrigatória</span></div>
+      <div className="notice field-full"><b>Repositório GitHub com push inicial</b><p>{modeDescriptions.remote_push}</p>{modeCapability && !modeCapability.available && <small className="error">{modeCapability.reason} {modeCapability.recovery}</small>}</div>
       {remoteMode && <>
         <div className="form-field"><div className="form-field"><label htmlFor="creation-owner-account">Proprietário do repositório *</label><CustomSelect id="creation-owner-account" required value={form.ownerId === options?.account.id ? form.ownerId : ''} onChange={(event) => { const ownerId = event.currentTarget.value; ownerEditedRef.current = true; invalidatePlan((current) => ({ ...current, ownerId })); }}><option value="">Selecione…</option>{options?.account.id && options.account.login && <option value={options.account.id}>{options.account.login}</option>}</CustomSelect></div></div>
         <label className="form-field" htmlFor="creation-remote-name">Nome do repositório remoto *<input id="creation-remote-name" required value={form.remoteName} onChange={(event) => { const remoteName = event.currentTarget.value; setRemoteNameEdited(true); invalidatePlan((current) => ({ ...current, remoteName })); }} /></label>
+        <label className="form-field" htmlFor="creation-board-name">Nome do quadro Kanban *<input id="creation-board-name" required value={form.boardName} onChange={(event) => { const boardName = event.currentTarget.value; boardNameEditedRef.current = true; invalidatePlan((current) => ({ ...current, boardName })); }} /></label>
         <div className="form-field"><label htmlFor="creation-visibility">Visibilidade</label><CustomSelect id="creation-visibility" value={form.visibility} onChange={(event) => { const visibility = event.currentTarget.value as FormState['visibility']; invalidatePlan((current) => ({ ...current, visibility })); }}><option value="private">Privado</option><option value="public">Público</option></CustomSelect></div>
       </>}
     </div>
@@ -390,18 +414,21 @@ export function CreationResult({ creationId, load, onRefresh, onOpenProject, can
 }) {
   if (load.status === 'loading' || (load.status === 'ready' && load.view.creation.id !== creationId) || (load.status === 'error' && load.creationId !== creationId)) return <section className="creation-flow" aria-busy="true"><p role="status">Consultando a criação…</p></section>;
   if (load.status === 'error') return <section className="creation-flow"><div className="read-state" role="alert">{load.message}</div><p>A identidade da criação permanece na URL. Consulte novamente quando o controlador estiver acessível.</p><button type="button" onClick={onRefresh}>Tentar consulta</button></section>;
-  const { creation, confirmed_effects: confirmedEffects, pending_effects: pendingEffects, prerequisites, diagnostics } = load.view;
+  const { creation, confirmed_effects: confirmedEffects, pending_effects: pendingEffects, prerequisites, diagnostics, board_name: boardName, board_url: boardUrl, next_action: nextAction } = load.view;
   const complete = creation.state === 'completed';
   const heading = complete ? 'Criação concluída' : creation.state === 'partial' ? 'Criação parcial' : creation.state === 'failed' ? 'Criação falhou' : 'Criação em andamento';
   const visibleEffects = visibleCreationEffects(load.view);
   return <section className="creation-flow" aria-labelledby="creation-result-title">
     {load.error && <div role="alert">{load.error}<p>Resultado anterior. Atualize a leitura antes de uma nova ação.</p></div>}
     <div className={`creation-result-banner ${complete ? 'is-complete' : creation.state === 'partial' || creation.state === 'failed' ? 'is-problem' : ''}`}><span className="eyebrow">{creation.plan.input.name}</span><h3 id="creation-result-title">{heading}</h3><p>{complete ? 'O projeto foi criado e cadastrado. Abra sua configuração para conferir os pré-requisitos e preparar uma issue.' : 'O trabalho confirmado foi preservado. Confira as etapas pendentes e consulte novamente antes de continuar.'}</p></div>
-    <dl className="creation-result-grid"><div><dt>Pasta</dt><dd><code>{creation.plan.destination}</code></dd></div><div><dt>Modalidade</dt><dd>{modeLabels[creation.plan.input.creation_mode]}</dd></div><div><dt>Branch-base</dt><dd>{creation.plan.input.base_branch}</dd></div><div><dt>Conta</dt><dd>{creation.plan.account.login ?? 'Não confirmada'}</dd></div></dl>
+    <dl className="creation-result-grid"><div><dt>Pasta</dt><dd><code>{creation.plan.destination}</code></dd></div><div><dt>Modalidade</dt><dd>{modeLabels[creation.plan.input.creation_mode]}</dd></div><div><dt>Branch-base</dt><dd>{creation.plan.input.base_branch}</dd></div><div><dt>Conta</dt><dd>{creation.plan.account.login ?? 'Não confirmada'}</dd></div>
+      <div><dt>Quadro Kanban</dt><dd>{boardName ?? 'Aguardando confirmação'}</dd>{boardUrl && <a href={boardUrl} target="_blank" rel="noreferrer">Abrir quadro</a>}</div>
+      <div><dt>Próxima ação</dt><dd>{{ wait: 'Aguardar conclusão', reconcile: 'Reconciliar os efeitos incertos', create_new_plan: 'Revisar e autorizar um novo plano', review_effect: 'Revisar o efeito pendente', none: 'Nenhuma ação pendente' }[nextAction]}</dd></div></dl>
     {creation.plan.input.creation_mode === 'local' && <p>O projeto está somente nesta máquina. Confirme um remoto GitHub antes de iniciar uma issue.</p>}
     {creation.plan.input.creation_mode === 'remote_no_push' && <p>O repositório remoto foi solicitado sem envio do commit inicial. Confira os efeitos abaixo; a publicação do conteúdo local ainda precisa ser feita.</p>}
     <div className="creation-progress-grid"><div><h4>Etapas confirmadas</h4><ul>{confirmedEffects.map((item) => <li key={item.step}>{stepLabels[item.step]}: <OperatorState value={item.state} /></li>)}</ul></div><div><h4>Etapas locais pendentes ou incertas</h4><ul>{pendingEffects.map((item) => <li key={item.step}>{stepLabels[item.step]}: <OperatorState value={item.state} /></li>)}</ul>{pendingEffects.length === 0 && <p>Nenhuma etapa local pendente registrada.</p>}</div></div>
     <div className="creation-effect-list"><h4>Efeitos remotos e pendências</h4>{visibleEffects.length === 0 && <p>Nenhum efeito remoto solicitado.</p>}{visibleEffects.map((effect) => <div key={`${effect.kind}:${effect.operation_id}`}><div className="creation-effect-row"><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><span className={`pill ${effect.state === 'confirmed' ? '' : 'warn'}`}><OperatorState value={effect.state} /></span></div><small>{effect.source}</small>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state={effect.state === 'confirmed' ? 'passed' : 'blocked'} />}</div>)}</div>
+    {load.view.board_operations.length > 0 && <div className="creation-effect-list"><h4>Quadro Kanban e vínculo</h4>{load.view.board_operations.map((effect) => <div key={effect.operation_id}><div className="creation-effect-row"><b>{stepLabels[effect.kind]}</b><OperatorState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state="blocked" />}</div>)}</div>}
     <CreationConditions creationId={creationId} />
     {(creation.diagnostic || diagnostics.length > 0) && <div className="read-state" role="alert"><b>A criação precisa de atenção</b>{creation.diagnostic && ['SCAFFOLD_GIT_IDENTITY_REQUIRED', 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED', 'CREATION_REMOTE_DESCRIPTION_CHANGED'].includes(creation.diagnostic)
       ? <OperatorDiagnosticCard code={creation.diagnostic} state="blocked" />

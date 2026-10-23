@@ -26,6 +26,7 @@ async function mount(diagnostics = view(), github?: GitHubSetupOptions, accountI
     profiles: [], profile_counts: { all: 0, implementer: 0, reviewer: 0 }, event_cursor: '1',
     onboarding: { suppressed: true, completed_at_ms: null, first_incomplete_step: null, prerequisites: [] },
     selection_capabilities: { projects_root: { available: false }, gh_executable: { available: false } },
+    tool_preferences: { format_version: 1, git: { preferred_path: null, last_validated_at_ms: null }, maestri: { preferred_path: null, last_validated_at_ms: null }, omp: { preferred_path: null, last_validated_at_ms: null }, powershell: { preferred_path: null, last_validated_at_ms: null } },
   };
   request.mockImplementation(async (path: string, init?: RequestInit) => {
     if (path === '/api/v1/settings') return settings;

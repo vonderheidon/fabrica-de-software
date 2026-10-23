@@ -18,7 +18,7 @@ import { createDeletionInspector } from '../workspaces/index.js';
 import { createProjectDeletions, createQueue } from '../projects/index.js';
 import { createPipeline } from '../pipeline/index.js';
 import { recordQueueObservations } from './queue-cycles.js';
-import { attemptFixture, complete } from '../../../../../tests/fixtures/attempt.js';
+import { attemptFixture, complete, confirmTerminalStops } from '../../../../../tests/fixtures/attempt.js';
 import { publicationFixture } from '../../../../../tests/fixtures/publication.js';
 import { openStorage } from './index.js';
 
@@ -246,7 +246,7 @@ describe('durable project deletion acceptance and shared authorization barrier',
         body: { project_changes: { automation_enabled: true } }, configuration: { ...configuration, automation_enabled: true }, globalChanges: {} });
       vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([{ id: 'ITEM_test', archived: false, kind: 'issue',
         contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true }]));
-      const queue = createQueue({ storage: f.storage, github: f.github, hostName: 'test-host' });
+      const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
       expect((await queue.observe({})).items.filter(item => item.eligible)).toHaveLength(1);
       f.pipeline = createPipeline({ ...f.dependencies, queue });
     }
@@ -327,7 +327,7 @@ describe('durable project deletion acceptance and shared authorization barrier',
     await f.implement(); await f.approve();
     // Completed historical attempt, physically stopped under the controlled host.
     f.db.prepare("UPDATE attempts SET phase='finished',result='delivered' WHERE id=?").run(f.attemptId);
-    f.db.prepare("UPDATE resources SET stop_state='confirmed' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+    confirmTerminalStops(f, f.attemptId);
     const inspection = await inspector().inspectProjectDeletion(f.storage.getProjectDeletionPaths(f.projectId));
     expect(inspection.preview.blockers).toEqual([]);
     const deletion = { inspection, command: { operationId: randomUUID(), projectId: f.projectId,

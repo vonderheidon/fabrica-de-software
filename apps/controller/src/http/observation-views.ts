@@ -1,5 +1,5 @@
 import type { Static } from '@sinclair/typebox';
-import { DiagnosticCheck, HttpDiagnosticCheck, DiagnosticContext, HttpDiagnosticContext, DiagnosticChecks, HttpDiagnosticChecks, DiagnosticRequest, HttpDiagnosticRequest, ContextDiagnostic, HttpContextDiagnostic, DiagnosticReport, HttpDiagnosticReport, DiagnosticsView, HttpDiagnosticsView, OperationSummaryQuery, HttpOperationSummaryQuery, OperationSummary, HttpOperationSummary, QueueScope, HttpQueueScope, QueueReason, HttpQueueReason, QueueItem, HttpQueueItem, QueueDiagnostic, HttpQueueDiagnostic, QueueObservation, HttpQueueObservation, QueueQuery, HttpQueueQuery, QueueCommand, HttpQueueCommand, QueueSaved, HttpQueueSaved, CreationMode, HttpCreationMode, ScaffoldInput, HttpScaffoldInput, ScaffoldFile, HttpScaffoldFile, ScaffoldAccount, HttpScaffoldAccount, ScaffoldEngineering, HttpScaffoldEngineering, ScaffoldPlan, HttpScaffoldPlan, ScaffoldPlanned, HttpScaffoldPlanned, ScaffoldOptions, HttpScaffoldOptions, CreateScaffold, HttpCreateScaffold, CreationStep, HttpCreationStep, ProjectCreation, HttpProjectCreation, CreationEffectIdentity, HttpCreationEffectIdentity, CreationEffect, HttpCreationEffect, CreationView, HttpCreationView, ControllerEvent, HttpControllerEvent, EventQuery, HttpEventQuery, EventListQuery, HttpEventListQuery, EventStreamQuery, HttpEventStreamQuery, EventPage, HttpEventPage } from '#contracts';
+import { DiagnosticCheck, HttpDiagnosticCheck, DiagnosticContext, HttpDiagnosticContext, DiagnosticChecks, HttpDiagnosticChecks, DiagnosticRequest, HttpDiagnosticRequest, ContextDiagnostic, HttpContextDiagnostic, DiagnosticReport, HttpDiagnosticReport, DiagnosticsView, HttpDiagnosticsView, OperationSummaryQuery, HttpOperationSummaryQuery, OperationSummary, HttpOperationSummary, QueueScope, HttpQueueScope, QueueReason, HttpQueueReason, QueueItem, HttpQueueItem, QueueDiagnostic, HttpQueueDiagnostic, QueueObservation, HttpQueueObservation, QueueQuery, HttpQueueQuery, QueueCommand, HttpQueueCommand, QueueSaved, HttpQueueSaved, CreationMode, HttpCreationMode, ScaffoldInputV3, HttpScaffoldInput, ScaffoldFile, HttpScaffoldFile, ScaffoldAccount, HttpScaffoldAccount, ScaffoldEngineering, HttpScaffoldEngineering, ScaffoldPlan, ScaffoldPlanV3, HttpScaffoldPlan, HttpScaffoldPlanV3, ScaffoldPlanned, HttpScaffoldPlanned, ScaffoldOptions, HttpScaffoldOptions, CreateScaffold, HttpCreateScaffold, CreationStep, HttpCreationStep, ProjectCreation, HttpProjectCreation, CreationEffectIdentity, HttpCreationEffectIdentity, CreationEffect, HttpCreationEffect, CreationView, HttpCreationView, ControllerEvent, HttpControllerEvent, EventQuery, HttpEventQuery, EventListQuery, HttpEventListQuery, EventStreamQuery, HttpEventStreamQuery, EventPage, HttpEventPage } from '#contracts';
 import { toHttpAttemptSummary, toHttpEffectReceipt } from './execution-views.js';
 
 // Explicit projections preserve private documents and never traverse arbitrary facts or text.
@@ -88,12 +88,16 @@ export function toHttpCreationMode(value: Static<typeof CreationMode>): Static<t
   return value;
 }
 
-export function toHttpScaffoldInput(value: Static<typeof ScaffoldInput>): Static<typeof HttpScaffoldInput> {
-  return { name: value.name, template_id: value.templateId, template_digest: value.templateDigest, destination_relative: value.destinationRelative, creation_mode: value.creationMode, base_branch: value.baseBranch, triage_enabled: value.triageEnabled, ...(value.remote === undefined ? {} : { remote: { owner_id: value.remote.ownerId, name: value.remote.name, visibility: value.remote.visibility } }) };
+export function toHttpScaffoldInput(value: Static<typeof ScaffoldInputV3>): Static<typeof HttpScaffoldInput> {
+  return { name: value.name, template_id: value.templateId, template_digest: value.templateDigest, destination_relative: value.destinationRelative,
+    creation_mode: value.creationMode, base_branch: value.baseBranch, triage_enabled: value.triageEnabled,
+    remote: { owner_id: value.remote.ownerId, name: value.remote.name, visibility: value.remote.visibility }, board_name: value.boardName };
 }
 
-export function fromHttpScaffoldInput(value: Static<typeof HttpScaffoldInput>): Static<typeof ScaffoldInput> {
-  return { name: value.name, templateId: value.template_id, templateDigest: value.template_digest, destinationRelative: value.destination_relative, creationMode: value.creation_mode, baseBranch: value.base_branch, triageEnabled: value.triage_enabled, ...(value.remote === undefined ? {} : { remote: { ownerId: value.remote.owner_id, name: value.remote.name, visibility: value.remote.visibility } }) };
+export function fromHttpScaffoldInput(value: Static<typeof HttpScaffoldInput>): Static<typeof ScaffoldInputV3> {
+  return { name: value.name, templateId: value.template_id, templateDigest: value.template_digest, destinationRelative: value.destination_relative,
+    creationMode: value.creation_mode, baseBranch: value.base_branch, triageEnabled: value.triage_enabled,
+    remote: { ownerId: value.remote.owner_id, name: value.remote.name, visibility: value.remote.visibility }, boardName: value.board_name };
 }
 
 export function toHttpScaffoldFile(value: Static<typeof ScaffoldFile>): Static<typeof HttpScaffoldFile> {
@@ -109,11 +113,29 @@ export function toHttpScaffoldEngineering(value: Static<typeof ScaffoldEngineeri
 }
 
 export function toHttpScaffoldPlan(value: Static<typeof ScaffoldPlan>): Static<typeof HttpScaffoldPlan> {
-  return { format_version: value.formatVersion, input: toHttpScaffoldInput(value.input), installation_id: value.installationId, settings_e_tag: value.settingsETag, projects_root: value.projectsRoot, destination: value.destination, parent_identity: value.parentIdentity, template_digest: value.templateDigest, files: value.files, engineering: toHttpScaffoldEngineering(value.engineering), account: value.account, owner_id: value.ownerId, ...(value.ownerLogin === undefined ? {} : { owner_login: value.ownerLogin }), effects: value.effects };
+  const common = { format_version: value.formatVersion, installation_id: value.installationId, settings_e_tag: value.settingsETag,
+    projects_root: value.projectsRoot, destination: value.destination, parent_identity: value.parentIdentity, template_digest: value.templateDigest,
+    files: value.files, engineering: toHttpScaffoldEngineering(value.engineering), account: value.account, owner_id: value.ownerId,
+    ...(value.ownerLogin === undefined ? {} : { owner_login: value.ownerLogin }), effects: value.effects };
+  if ('boardName' in value.input && value.input.boardName && value.input.creationMode === 'remote_push' && value.input.remote) {
+    return { ...common, input: toHttpScaffoldInput(value.input as Static<typeof ScaffoldInputV3>) };
+  }
+  return { ...common, input: { name: value.input.name, template_id: value.input.templateId, template_digest: value.input.templateDigest,
+    destination_relative: value.input.destinationRelative, creation_mode: value.input.creationMode, base_branch: value.input.baseBranch,
+    triage_enabled: value.input.triageEnabled, ...(value.input.remote === undefined ? {} : { remote: { owner_id: value.input.remote.ownerId,
+      name: value.input.remote.name, visibility: value.input.remote.visibility } }) } };
+}
+
+export function toHttpScaffoldPlanV3(value: Static<typeof ScaffoldPlanV3>): Static<typeof HttpScaffoldPlanV3> {
+  return { format_version: value.formatVersion, input: toHttpScaffoldInput(value.input), installation_id: value.installationId,
+    settings_e_tag: value.settingsETag, projects_root: value.projectsRoot, destination: value.destination, parent_identity: value.parentIdentity,
+    template_digest: value.templateDigest, files: value.files, engineering: toHttpScaffoldEngineering(value.engineering), account: value.account,
+    owner_id: value.ownerId, ...(value.ownerLogin === undefined ? {} : { owner_login: value.ownerLogin }), effects: value.effects };
 }
 
 export function toHttpScaffoldPlanned(value: Static<typeof ScaffoldPlanned>): Static<typeof HttpScaffoldPlanned> {
-  return { plan_hash: value.planHash, plan: toHttpScaffoldPlan(value.plan), prerequisites: value.prerequisites };
+  if (!value.plan.input.boardName || value.plan.input.creationMode !== 'remote_push' || !value.plan.input.remote) throw new Error('Public scaffold plans must use V3.');
+  return { plan_hash: value.planHash, plan: toHttpScaffoldPlanV3(value.plan as Static<typeof ScaffoldPlanV3>), prerequisites: value.prerequisites };
 }
 
 export function toHttpScaffoldOptions(value: Static<typeof ScaffoldOptions>): Static<typeof HttpScaffoldOptions> {
@@ -121,7 +143,8 @@ export function toHttpScaffoldOptions(value: Static<typeof ScaffoldOptions>): St
 }
 
 export function toHttpCreateScaffold(value: Static<typeof CreateScaffold>): Static<typeof HttpCreateScaffold> {
-  return { plan_hash: value.planHash, plan: toHttpScaffoldPlan(value.plan), authorized: value.authorized };
+  if (!value.plan.input.boardName || value.plan.input.creationMode !== 'remote_push' || !value.plan.input.remote) throw new Error('Public scaffold commands must use V3.');
+  return { plan_hash: value.planHash, plan: toHttpScaffoldPlanV3(value.plan as Static<typeof ScaffoldPlanV3>), authorized: value.authorized };
 }
 
 export function fromHttpCreateScaffold(value: Static<typeof HttpCreateScaffold>): Static<typeof CreateScaffold> {
@@ -144,8 +167,55 @@ export function toHttpCreationEffect(value: Static<typeof CreationEffect>): Stat
   return { operation_id: value.operationId, attempt_id: value.attemptId, creation_id: value.creationId, delivery_id: value.deliveryId, kind: value.kind, scope_key: value.scopeKey, state: value.state, expected_identity: toHttpCreationEffectIdentity(value.expectedIdentity), confirmed_identity: value.confirmedIdentity === null ? null : toHttpEffectReceipt(value.confirmedIdentity), receipt: value.receipt === null ? null : toHttpEffectReceipt(value.receipt), reason: value.reason, authorized: value.authorized, revision: value.revision, sent_at_ms: value.sentAtMs, confirmed_at_ms: value.confirmedAtMs };
 }
 
+function confirmedGitHubUrl(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'github.com' && !url.username && !url.password && !url.search && !url.hash
+      ? url.toString() : null;
+  } catch { return null; }
+}
+
 export function toHttpCreationView(value: Static<typeof CreationView>): Static<typeof HttpCreationView> {
-  return { creation: toHttpProjectCreation(value.creation), confirmed_effects: value.confirmedEffects, pending_effects: value.pendingEffects, effects: value.effects.map(entry1 => (toHttpCreationEffect(entry1))), remote_effects: value.remoteEffects.map(entry1 => ({ kind: entry1.kind, state: entry1.state, operation_id: entry1.operationId, identity: toHttpCreationEffectIdentity(entry1.identity), reason: entry1.reason })), prerequisites: value.prerequisites, diagnostics: value.diagnostics, event_cursor: value.eventCursor };
+  const board_operations = value.board_operations.map(item => ({ operation_id: item.operation_id, creation_id: item.creation_id, kind: item.kind,
+    scope_key: item.scope_key, state: item.state, revision: item.revision, request_hash: item.request_hash,
+    authorization: { format_version: item.authorization.format_version, source_operation_id: item.authorization.source_operation_id,
+      plan_hash: item.authorization.plan_hash, account_id: item.authorization.account_id, creation_id: item.authorization.creation_id, actions: item.authorization.actions },
+    expected_identity: { format_version: item.expected_identity.format_version, owner_id: item.expected_identity.owner_id,
+      board_name: item.expected_identity.board_name, marker: item.expected_identity.marker, repository_id: item.expected_identity.repository_id,
+      project_id: item.expected_identity.project_id, status_field_id: item.expected_identity.status_field_id,
+      expected_status_names: item.expected_identity.expected_status_names, view_id: item.expected_identity.view_id,
+      view_name: item.expected_identity.view_name, view_layout: item.expected_identity.view_layout },
+    receipt: item.receipt ? { format_version: item.receipt.format_version, observed_at_ms: item.receipt.observed_at_ms,
+      ...(item.receipt.project_id === undefined ? {} : { project_id: item.receipt.project_id }),
+      ...(item.receipt.owner_id === undefined ? {} : { owner_id: item.receipt.owner_id }),
+      ...(item.receipt.title === undefined ? {} : { title: item.receipt.title }),
+       ...(item.receipt.project_url === undefined ? {} : { project_url: item.receipt.project_url }),
+      ...(item.receipt.repository_ids === undefined ? {} : { repository_ids: item.receipt.repository_ids }),
+      ...(item.receipt.status_field_id === undefined ? {} : { status_field_id: item.receipt.status_field_id }),
+      ...(item.receipt.status_field_name === undefined ? {} : { status_field_name: item.receipt.status_field_name }),
+      ...(item.receipt.status_options === undefined ? {} : { status_options: item.receipt.status_options }),
+      ...(item.receipt.view_id === undefined ? {} : { view_id: item.receipt.view_id }),
+      ...(item.receipt.view_name === undefined ? {} : { view_name: item.receipt.view_name }),
+      ...(item.receipt.view_layout === undefined ? {} : { view_layout: item.receipt.view_layout }),
+      ...(item.receipt.group_by_field_ids === undefined ? {} : { group_by_field_ids: item.receipt.group_by_field_ids }),
+      ...(item.receipt.visible_field_ids === undefined ? {} : { visible_field_ids: item.receipt.visible_field_ids }) } : null,
+    reason: item.reason, created_at_ms: item.created_at_ms, sent_at_ms: item.sent_at_ms, confirmed_at_ms: item.confirmed_at_ms }));
+  const verifiedBoard = value.board_operations.find(item => item.kind === 'verify_board' && item.state === 'confirmed')?.receipt;
+  const createdBoard = value.board_operations.find(item => item.kind === 'create_board' && item.state === 'confirmed')?.receipt;
+  const provenBoard = verifiedBoard ?? createdBoard;
+  const board_name = value.creation.plan.input.boardName ?? provenBoard?.title ?? null;
+  const board_url = confirmedGitHubUrl(provenBoard?.project_url);
+  const uncertain = value.effects.some(item => item.state === 'running' || item.state === 'unknown') ||
+    value.board_operations.some(item => item.state === 'running' || item.state === 'unknown');
+  const next_action = value.creation.state === 'completed' ? 'none' as const
+    : ['pending','running'].includes(value.creation.state) ? 'wait' as const
+      : value.creation.diagnostic === 'LEGACY_CREATION_REPLAN_REQUIRED' ? 'create_new_plan' as const
+        : uncertain ? 'reconcile' as const : 'review_effect' as const;
+  return { creation: toHttpProjectCreation(value.creation), confirmed_effects: value.confirmedEffects, pending_effects: value.pendingEffects,
+    effects: value.effects.map(entry1 => (toHttpCreationEffect(entry1))),
+    remote_effects: value.remoteEffects.map(entry1 => ({ kind: entry1.kind, state: entry1.state, operation_id: entry1.operationId, identity: toHttpCreationEffectIdentity(entry1.identity), reason: entry1.reason })),
+    prerequisites: value.prerequisites, diagnostics: value.diagnostics, board_operations, board_name, board_url, next_action, event_cursor: value.eventCursor };
 }
 
 export function toHttpControllerEvent(value: Static<typeof ControllerEvent>): Static<typeof HttpControllerEvent> {
@@ -191,7 +261,11 @@ export function fromHttpQueueScope(value: Static<typeof HttpQueueScope>): Static
 }
 
 export function fromHttpScaffoldPlan(value: Static<typeof HttpScaffoldPlan>): Static<typeof ScaffoldPlan> {
-  return { formatVersion: value.format_version, input: fromHttpScaffoldInput(value.input), installationId: value.installation_id, settingsETag: value.settings_e_tag, projectsRoot: value.projects_root, destination: value.destination, parentIdentity: value.parent_identity, templateDigest: value.template_digest, files: value.files, engineering: fromHttpScaffoldEngineering(value.engineering), account: value.account, ownerId: value.owner_id, ...(value.owner_login === undefined ? {} : { ownerLogin: value.owner_login }), effects: value.effects };
+  if (!('board_name' in value.input)) throw new Error('A new scaffold command requires the V3 board name.');
+  return { formatVersion: value.format_version, input: fromHttpScaffoldInput(value.input), installationId: value.installation_id,
+    settingsETag: value.settings_e_tag, projectsRoot: value.projects_root, destination: value.destination, parentIdentity: value.parent_identity,
+    templateDigest: value.template_digest, files: value.files, engineering: fromHttpScaffoldEngineering(value.engineering), account: value.account,
+    ownerId: value.owner_id, ...(value.owner_login === undefined ? {} : { ownerLogin: value.owner_login }), effects: value.effects };
 }
 
 export function fromHttpScaffoldEngineering(value: Static<typeof HttpScaffoldEngineering>): Static<typeof ScaffoldEngineering> {

@@ -1,6 +1,7 @@
 import { serializeOperationReceipt } from './common-json.js';
 import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { AttemptCapture, AttemptStatus, OperationId, StartAttempt, type RoleResourceReference } from '#contracts';
@@ -58,6 +59,20 @@ export function readAttempt(db: Database.Database, id: string): AttemptStatus {
   const status = { ...row, eventCursor: eventCursor(db) };
   if (!Value.Check(AttemptStatus, status)) throw new StorageError('OPERATION_DATA_INVALID');
   return status;
+}
+export function readAttemptWorkspaceReference(db: Database.Database, id: string): string {
+  if (!Value.Check(OperationId, id)) throw new OperationError(400, 'ATTEMPT_ID_INVALID', 'Attempt ID is invalid.');
+  if (!db.prepare<[string], { id: string }>('SELECT id FROM attempts WHERE id=?').get(id)) throw new OperationError(404, 'ATTEMPT_NOT_FOUND', 'Attempt not found.');
+  const row = db.prepare<[string], { reference: string }>(`SELECT reference FROM resources
+    WHERE attempt_id=? AND kind='implementation'`).get(id);
+  if (!row) throw new StorageError('OPERATION_DATA_INVALID');
+  return row.reference;
+}
+export function readAttemptProjectId(db: Database.Database, id: string): string {
+  if (!Value.Check(OperationId, id)) throw new OperationError(400, 'ATTEMPT_ID_INVALID', 'Attempt ID is invalid.');
+  const row = db.prepare<[string], { project_id: string }>('SELECT project_id FROM attempts WHERE id=?').get(id);
+  if (!row) throw new OperationError(404, 'ATTEMPT_NOT_FOUND', 'Attempt not found.');
+  return row.project_id;
 }
 export function readCapture(db: Database.Database, id: string): AttemptCapture {
   readAttempt(db, id);
@@ -134,12 +149,39 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     if (input.queueCycle) consumeQueueCycle(db, input.queueCycle.accountId, input.queueCycle.projectId, input.queueCycle.issueId, input.queueCycle.cycleNumber, id);
     for (const c of capture.criteria) db.prepare('INSERT INTO attempt_criteria(attempt_id,criterion_id,occurrence_index,text) VALUES (?,?,?,?)').run(id, c.id, c.occurrence_index, c.text);
     db.prepare('INSERT INTO rounds(attempt_id,round_number,delivery_version,created_at_ms) VALUES (?,1,?,?)').run(id, deliveryVersion, now);
+    const hostName = hostname();
+    const sessions = new Map<'implementer' | 'reviewer', string>();
+    for (const role of ['implementer', 'reviewer'] as const) {
+      let terminal = db.prepare<[string, string, string], { id: string; generation: number; state: 'planned' | 'available' }>(
+        `SELECT t.id,t.generation,t.state FROM managed_terminals t WHERE t.installation_id=? AND t.host_name=? AND t.role=?
+          AND NOT EXISTS (SELECT 1 FROM attempt_sessions s JOIN attempts a ON a.id=s.attempt_id
+            WHERE s.managed_terminal_id=t.id AND a.result IS NULL)
+          AND (t.state='available' OR (t.state='planned' AND NOT EXISTS (
+            SELECT 1 FROM terminal_occupancies o WHERE o.managed_terminal_id=t.id AND o.state IN ('occupied','uncertain')
+          ))) ORDER BY CASE t.state WHEN 'available' THEN 0 ELSE 1 END,t.updated_at_ms DESC,t.id LIMIT 1`,
+      ).get(settings.installation_id, hostName, role);
+      if (!terminal) {
+        const terminalId = randomUUID();
+        const terminalName = `factory-${terminalId}`;
+        db.prepare(`INSERT INTO managed_terminals(id,installation_id,host_name,role,owner,generation,terminal_name,state,created_at_ms,updated_at_ms)
+          VALUES (?,?,?,?,'factory',1,?,'planned',?,?)`).run(terminalId, settings.installation_id, hostName, role, terminalName, now, now);
+        terminal = { id: terminalId, generation: 1, state: 'planned' };
+      }
+      const sessionGeneration = terminal.state === 'available' ? terminal.generation + 1 : terminal.generation;
+      const sessionId = randomUUID();
+      sessions.set(role, sessionId);
+      db.prepare(`INSERT INTO attempt_sessions(id,attempt_id,role,managed_terminal_id,session_directory_relative,terminal_generation,state,created_at_ms,updated_at_ms)
+        VALUES (?,?,?,?,?,?,'reserved',?,?)`).run(sessionId, id, role, terminal.id,
+        `sessions/${id}/${role}`, sessionGeneration, now, now);
+    }
     const resource: RoleResourceReference = roles.get('implementer')!;
+    // passages.terminal_name remains a unique per-passage resource reference; the shared
+    // physical Maestri terminal identity lives in managed_terminals.
     const terminalName = `factory-${passageId}`;
-    db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,created_at_ms)
-      VALUES (?,?,1,?,'implementer',?,?,'starting','pending',?)`).run(passageId, id, deliveryVersion, JSON.stringify(resource), terminalName, now);
+    db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,created_at_ms,attempt_session_id)
+      VALUES (?,?,1,?,'implementer',?,?,'starting','pending',?,?)`).run(passageId, id, deliveryVersion, JSON.stringify(resource), terminalName, now, sessions.get('implementer')!);
     db.prepare(`INSERT INTO resources(id,attempt_id,passage_id,kind,reference,owned,launch_state,created_at_ms) VALUES (?,?,?,'implementation',?,0,'planned',?)`)
-      .run(randomUUID(), id, passageId, `work/${id}/implementation`, now);
+      .run(randomUUID(), id, passageId, `projects/${preparation.view.project_id}/v1/managed/work/${id}/implementation`, now);
     db.prepare(`INSERT INTO resources(id,attempt_id,passage_id,kind,reference,owned,launch_state,created_at_ms) VALUES (?,?,?,'terminal',?,0,'planned',?)`)
       .run(randomUUID(), id, passageId, terminalName, now);
     attemptEvent(db, id, 'attempt.accepted');
@@ -183,6 +225,9 @@ export function interruptAttempts(db: Database.Database): void {
     db.prepare("UPDATE resource_removals SET state='unknown',diagnostic='REMOVAL_INTERRUPTED' WHERE state='accepted'").run();
     db.prepare("UPDATE native_open_requests SET state='unknown' WHERE state='accepted'").run();
     db.prepare("UPDATE resources SET stop_state='uncertain',diagnostic='TRACKING_LOST' WHERE kind='terminal' AND owned=1 AND stop_state<>'confirmed'").run();
+    db.prepare("UPDATE terminal_occupancies SET state='uncertain',reason='TRACKING_LOST' WHERE state='occupied'").run();
+    db.prepare("UPDATE managed_terminals SET state='uncertain',updated_at_ms=? WHERE state='occupied'").run(Date.now());
+    db.prepare("UPDATE attempt_sessions SET state='interrupted',updated_at_ms=? WHERE state IN ('reserved','active')").run(Date.now());
     db.prepare("UPDATE checks SET state='error',diagnostic='VERIFICATION_INTERRUPTED',ended_at_ms=?,duration_ms=0 WHERE state IN ('pending','running')").run(Date.now());
     db.prepare("UPDATE verification_runs SET state='error',diagnostic='VERIFICATION_INTERRUPTED',ended_at_ms=? WHERE state='running'").run(Date.now());
     db.prepare("UPDATE capture_runs SET state='failed',diagnostic='CAPTURE_CONTINUITY_REVOKED',ended_at_ms=? WHERE state='running'").run(Date.now());

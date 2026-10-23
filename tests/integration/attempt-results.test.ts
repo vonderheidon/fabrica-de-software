@@ -102,6 +102,7 @@ describe('durable official results', () => {
     f.storage.recordReviewWorkspace(f.binding.deliveryVersion, true, null);
     const binding = { ...f.binding, passageId: id, role: 'reviewer' as const }; const handle = { passageId: id };
     f.persistence.reserve({ handle, binding, requestHash: 'a'.repeat(64), state: 'starting', roleResource: reviewer, terminalName: `factory-${id}`, diagnostic: null, effectiveProfile: null, executorVersion: null });
+    f.persistence.confirmTerminal(handle, { workspaceId: randomUUID(), terminalId: randomUUID(), ompSessionId: randomUUID() });
     const { id: _id, revision: _revision, created_at_ms: _created, updated_at_ms: _updated, ...profile } = f.reviewerProfile;
     f.persistence.confirmReady(handle, profile, '18.11.1');
     f.storage.recordReviewIntegrity(binding, true);
@@ -120,7 +121,8 @@ describe('durable official results', () => {
       VALUES (?,?,?,'terminal','cross-linked',0,'planned',?)`).run(randomUUID(), a, f.handle.passageId, Date.now())).toThrow(/FOREIGN KEY/);
     const secondBinding = f.persistence.getPassage({ passageId: f.storage.getAttempt(a).passageId }).binding;
     expect(() => f.db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,created_at_ms)
-      VALUES (?,?,1,?,'reviewer',?,'cross-linked','starting','pending',?)`).run(randomUUID(), f.status.id, secondBinding.deliveryVersion, JSON.stringify(f.roles[1]), Date.now())).toThrow(/FOREIGN KEY/);
+      VALUES (?,?,1,?,'reviewer',?,'cross-linked','starting','pending',?)`).run(randomUUID(), f.status.id, secondBinding.deliveryVersion, JSON.stringify(f.roles[1]), Date.now()))
+      .toThrow(/PASSAGE_SESSION_BINDING_INVALID/);
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
 });

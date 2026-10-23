@@ -11,10 +11,9 @@ vi.mock('react', async (importOriginal) => ({
   useState: (initial: unknown) => {
     const index = deferred.stateIndex++;
     const state = index === 1 ? {
-      templates: [{ id: 'engineering', label: 'Engineering' }, { id: 'other', label: 'Other' }],
-      creation_modes: [], account: { id: 'fixture-user', login: 'operator' }, prerequisites: [], projects_root: null,
-    } : typeof initial === 'object' && initial !== null && 'creationMode' in initial
-      ? { ...initial, creationMode: 'remote_no_push' } : initial;
+       templates: [{ id: 'engineering', label: 'Engineering' }, { id: 'other', label: 'Other' }],
+       creation_modes: [{ mode: 'remote_push', capability: { available: true } }], account: { id: 'fixture-user', login: 'operator' }, prerequisites: [], projects_root: null,
+     } : initial;
     return [state, (update: unknown) => {
       if (typeof update === 'function') deferred.updates.push(() => update(state));
     }];
@@ -47,8 +46,8 @@ it.each([
   ['creation-template', 'templateId', 'engineering'],
   ['creation-destination', 'destinationRelative', 'project'],
   ['creation-branch', 'baseBranch', 'release'],
-  ['creation-mode', 'creationMode', 'remote_no_push'],
   ['creation-remote-name', 'remoteName', 'remote-project'],
+  ['creation-board-name', 'boardName', 'Project Kanban'],
   ['creation-visibility', 'visibility', 'public'],
   ['creation-owner-account', 'ownerId', 'fixture-owner'],
 ])('preserves %s after React clears the event currentTarget', (id, property, value) => {

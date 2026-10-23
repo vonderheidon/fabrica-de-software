@@ -1,4 +1,6 @@
 import { AttemptConditions } from './AttemptConditions.js';
+import { HistoricalProfile } from './HistoricalProfile.js';
+import { PassageFacts } from './PassageFacts.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptSelection } from './execution-requests.js';
@@ -17,7 +19,7 @@ import { operatorCodeLabel, operatorErrorMessage, operatorFactLabel, operatorSta
 const sections: readonly DetailSection[] = ['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources'];
 const labels: Record<DetailSection, string> = {
   rounds: 'Rodadas e versões', passages: 'Passagens', criteria: 'Critérios e evidências', checks: 'Checks e logs',
-  reviews: 'Pareceres', findings: 'Achados e resoluções', questions: 'Perguntas', effects: 'Efeitos remotos', resources: 'Recursos e limpeza',
+  reviews: 'Pareceres', findings: 'Achados e resoluções', questions: 'Perguntas', effects: 'Efeitos remotos', resources: 'Recursos e limpeza', profiles: 'Perfis capturados',
 };
 type SectionErrorDetails = { code: string; requestId: string | null; facts: Readonly<Record<string, string | number | boolean | null>> | null; affectedRequirements: readonly string[] } | null;
 type SectionState = { page: DetailPage | null; error: string | null; errorDetails: SectionErrorDetails; loading: boolean };
@@ -81,7 +83,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
   const attemptMatchesRound = !selectedRound || String(attempt?.selected_round) === selectedRound;
   const effectiveDeliveryId = selectedDeliveryId ?? (selectionCurrent && attemptMatchesRound ? attempt?.selected_delivery_id : null) ?? null;
   const { delivery, status: deliveryState, error: deliveryError } = useDelivery(effectiveDeliveryId, reload + (attempt?.revision ?? 0));
-  const actions = useAttemptActions(attemptId, attempt, attemptEtag, effectiveDeliveryId, delivery?.delivery.capture_state === 'failed');
+  const actions = useAttemptActions(attemptId, attempt, attemptEtag, effectiveDeliveryId, delivery?.delivery.capture_state === 'failed', selectedRound);
   const [confirmedResources, setConfirmedResources] = useState<Record<string, string>>({});
   const refreshDetail = useCallback(() => setReload((value) => value + 1), []);
   const sectionIdentity = `${attemptId}:${selectedRound ?? ''}:${effectiveDeliveryId ?? ''}`;
@@ -248,6 +250,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       {Object.entries(actions.actionErrors).map(([key, message]) => <div className="queue-error" role="alert" key={key}><p>{message}</p><p>{key.startsWith('copy:') ? 'A falha permanece visível até uma nova tentativa de cópia.' : 'A falha permanece visível até uma nova tentativa desta ação ser aceita.'}</p></div>)}
       {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Consultar ambiente novamente</button></div>}
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
+      <HistoricalProfile key={attemptId} attemptId={attemptId} />
       <details className="attempt-axis-card card attempt-disclosure"><summary>Ver alterações da entrega</summary>
         {deliveryState === 'loading' && <p role="status">Consultando a versão selecionada…</p>}
         {deliveryState === 'not-captured' && <p className="muted">Esta rodada ainda não tem uma versão capturada.</p>}
@@ -281,6 +284,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       })}</section></details>
       {actions.resources && <details className="attempt-axis-card card attempt-disclosure"><summary id="attempt-environment">Ambiente e terminais <span className="muted">{actions.resources.entries.length} recursos · limpeza {cleanupLabel(attempt.cleanup).toLocaleLowerCase('pt-BR')}</span></summary>
         <div className="line"><h3 id="attempt-resources-title">Recursos da tentativa</h3><button type="button" onClick={() => void actions.refresh()}>Atualizar recursos</button></div>
+        <p className="muted">Recursos atuais de toda a tentativa. Cada terminal indica a passagem vinculada; o histórico da versão permanece na seção Passagens. Disponibilidade para reutilização não comprova parada para limpeza.</p>
         <AttemptConditions attempt={attempt} resources />
         {actions.cancelStatus && <div className={actions.cancelStatus === 'cleanup-uncertain' ? 'queue-error' : 'notice'} role="status">
           <b>{actions.cancelStatus === 'accepted' ? 'Pedido de cancelamento aceito' : actions.cancelStatus === 'stopped' ? 'Parada dos terminais comprovada' : actions.cancelStatus === 'cleanup-uncertain' ? 'Limpeza incerta' : 'Estado do pedido de parada incerto'}</b>
@@ -290,9 +294,11 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           const plan = actions.plans[resource.id];
           const folder = actions.folders[resource.id];
           const interaction = actions.interactions[resource.passage_id];
+          const passage = actions.passages.find(item => item.id === resource.passage_id);
           const terminalLabel = resource.stop_state === 'confirmed' ? 'Parada comprovada' : resource.stop_state === 'uncertain' ? 'Parada sem confirmação' : resource.stop_state === 'requested' ? 'Parada solicitada' : resource.launch_state === 'ready' ? resource.kind === 'terminal' ? 'Parada não solicitada' : 'Disponível' : `Inicialização: ${operatorState(resource.launch_state).label}`;
           return <article className="attempt-resource" key={resource.id}>
             <div className="line"><div><h4>{resource.kind === 'terminal' ? 'Terminal Maestri' : 'Ambiente de implementação'}</h4><span className="muted">{resource.removed ? 'Removido' : resource.owned ? terminalLabel : 'Vínculo do recurso sem confirmação'}</span></div></div>
+            {passage ? <PassageFacts passage={passage} /> : <p className="muted">Passagem e sessão indisponíveis no histórico deste recurso.</p>}
             {resource.diagnostic && <div className="notice"><b>{operatorCodeLabel(resource.diagnostic)}</b><p>Consulte o estado dos recursos antes de repetir qualquer ação.</p></div>}
 
             {resource.stop_state && !operatorState(resource.stop_state).known && <UnknownState value={resource.stop_state} />}
@@ -300,9 +306,8 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
             {actions.surfaceErrors[resource.id] && <p className="muted" role="status">{actions.surfaceErrors[resource.id]}</p>}
             {resource.kind === 'terminal' && <div className="attempt-recovery-actions">
               {interaction && <>
-                <button type="button" onClick={() => actions.openTerminal(resource.passage_id)} disabled={!interaction.open_capability.available || actions.busy} title={interaction.open_capability.available ? undefined : 'Abertura do terminal indisponível'}>Abrir terminal</button>{!interaction.open_capability.available && <><p className="muted">Não foi possível abrir o terminal nesta sessão do host.</p></>}</>}
+                <button type="button" onClick={() => actions.openTerminal(resource.passage_id)} disabled={!interaction.open_capability.available || actions.busy} aria-describedby={`terminal-capability-${resource.id}`}>Abrir terminal</button><p id={`terminal-capability-${resource.id}`} className="muted">{interaction.open_capability.available ? 'Abre a superfície existente desta passagem. Não inicia uma conversa nem recupera autoridade.' : interaction.open_capability.reason ? operatorCodeLabel(interaction.open_capability.reason) : 'Abertura indisponível. Atualize os recursos para consultar a capacidade atual.'}</p></>}
               {!interaction && <span className="muted">Capacidade do terminal indisponível; atualize para consultar o motivo.</span>}
-              {interaction && !interaction.open_capability.available && <span className="muted">{interaction.open_capability.reason}</span>}
             </div>}
             {resource.kind === 'implementation' && <div className="attempt-recovery-actions">
               {folder && <><button type="button" aria-label="Copiar local da pasta" onClick={() => void actions.copyReference(`folder:${resource.id}`, folder.location_display)}>Copiar local</button>{actions.copied === `folder:${resource.id}` && <span className="success" role="status">Local copiado.</span>}
@@ -348,6 +353,7 @@ function renderRecord(section: DetailSection, item: DetailItem, index: number, e
   const recordId = typeof record.id === 'string' ? record.id : typeof record.delivery_id === 'string' ? record.delivery_id : null;
   const round = typeof record.round === 'number' ? record.round : index + 1;
   const role = record.role === 'implementer' ? 'Implementador' : record.role === 'reviewer' ? 'Revisor' : null;
+  if (section === 'passages') return <article className="attempt-record" key={recordId ?? index}><h4>Passagem · {role ?? 'papel registrado'}</h4><PassageFacts passage={item as import('./PassageFacts.js').PassageFactsProps['passage']} /></article>;
   const heading = section === 'rounds' ? `Rodada ${round}`
     : section === 'criteria' ? 'Critério de aceite'
       : section === 'checks' ? `Check ${index + 1}`

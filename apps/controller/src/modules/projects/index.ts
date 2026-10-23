@@ -4,16 +4,19 @@ import { access, open, realpath, stat, unlink } from 'node:fs/promises';
 import { basename, isAbsolute, join, resolve, win32 } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import {
-  ConfigurationOptionsQuery, ConfigurationUpdate, NativeSelectionRequest, ProjectConfiguration, ProjectRegistration, SettingsUpdate,
-  ExecutionCatalog, GitHubSetupOptions, ProfileChanges, type CatalogQuery, type ConfigurationOptions, type GlobalChanges, type OriginInspection,
+  ConfigurationOptionsQuery, ConfigurationUpdate, NativeSelectionRequest, ProjectConfiguration, ProjectRegistration, SettingsUpdate, ToolOptions,
+  ExecutionCatalog, GitHubSetupOptions, ProfileChanges, StorageTransitionCommand, type StorageTransitionCommand as StorageTransitionCommandValue,
+  V3StatusMapping, type CatalogQuery, type ConfigurationOptions, type GlobalChanges, type OriginInspection,
   type OnboardingChanges, type SelectionCapabilities, type StoredExecutionProfile,
   type NativeSelectionResult,
 } from '#contracts';
 import { OperationError, type ConfigurationCommand, type Storage, type StoredOperation } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import type { Workspaces } from '../workspaces/index.js';
-import type { Execution } from '../execution/index.js';
+import { ExecutionError, type Execution } from '../execution/index.js';
+import { createToolDetector, type ManagedTool, type ToolDetector } from '../tools/index.js';
 import { createQueue } from './queue.js';
+import { matchesObservedV3StatusMapping } from './status-mapping.js';
 export { createPreparations, type Preparations, type PreparationDependencies } from './preparations.js';
 export { createProjectDeletions } from './project-deletions.js';
 export { createDeletionCoordinator } from './deletion.js';
@@ -25,11 +28,13 @@ export interface ProjectDependencies {
   storage: Storage;
   github: Pick<GitHub, 'getIdentity' | 'getProjectOwner' | 'listProjects' | 'getProject' | 'validateProjectSelection' | 'listProjectItems' | 'getIssueContextById'>;
   githubSetup?: Pick<GitHub, 'resolveExecutable' | 'validateExecutable' | 'activateExecutable' | 'getAuthenticationAccounts'>;
-  execution?: Pick<Execution, 'getCatalog'>;
-  workspaces: Pick<Workspaces, 'inspectOrigin'>;
+  execution?: Pick<Execution, 'getCatalog'> & Partial<Pick<Execution, 'preflight'>>;
+  workspaces: Pick<Workspaces, 'inspectOrigin'> & Partial<Pick<Workspaces, 'inspectProjectStorageTransition' | 'moveProjectStorageTransition'>>;
   directoryBase: string;
   selectProjectsDirectory?: (signal?: AbortSignal) => Promise<string | null>;
   selectGitHubExecutable?: (signal?: AbortSignal) => Promise<string | null>;
+  selectExecutable?: (signal?: AbortSignal) => Promise<string | null>;
+  toolDetector?: ToolDetector;
 }
 export interface CommandContext { operationId: string; expectedRevision: string | undefined }
 export { createQueue, QueueSummaryChanged } from './queue.js';
@@ -91,6 +96,13 @@ async function canonicalGitHubExecutable(supplied: string): Promise<string> {
   await access(executable, constants.R_OK);
   return executable;
 }
+async function canonicalNativeExecutable(supplied: string): Promise<string> {
+  if (!isAbsolute(supplied) || /[\x00-\x1f\x7f]/.test(supplied) || /^(?:\\\\|\/\/)/.test(supplied)) throw new Error('EXECUTABLE_INVALID');
+  const executable = await realpath(supplied);
+  if (!isAbsolute(executable) || /^(?:\\\\|\/\/)/.test(executable) || !(await stat(executable)).isFile()) throw new Error('EXECUTABLE_INVALID');
+  await access(executable, constants.R_OK);
+  return executable;
+}
 function precondition(actual: string, expected: string | undefined): void {
   if (expected === undefined) fail(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
   if (actual !== expected) fail(412, 'REVISION_CONFLICT', 'Configuration changed. Reload current data and reapply your draft.');
@@ -100,6 +112,10 @@ function receipt(operation: StoredOperation) {
   return operation.receipt;
 }
 export function validateProjectConfiguration(configuration: ProjectConfiguration): void {
+  if (configuration.github_project && 'backlog' in configuration.github_project.status_option_ids &&
+      new Set(Object.values(configuration.github_project.status_option_ids)).size !== 5) {
+    fail(400, 'STATUS_MAPPING_INVALID', 'A V3 Status mapping requires five distinct option IDs.');
+  }
   if (!Value.Check(ProjectConfiguration, configuration)) fail(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');
   const ids = configuration.checks.map((c) => c.id);
   if (new Set(ids).size !== ids.length) fail(400, 'CHECK_DUPLICATED', 'Checks require distinct IDs.');
@@ -107,10 +123,10 @@ export function validateProjectConfiguration(configuration: ProjectConfiguration
     const cwd = check.cwd_relative;
     if (isAbsolute(cwd) || win32.isAbsolute(cwd) || /[:\x00-\x1f\x7f]/.test(cwd) || cwd.split(/[\\/]/).includes('..')) fail(400, 'CHECK_CWD_INVALID', 'Check cwd must stay relative to the attempt environment.');
   }
-  if (configuration.github_project && new Set(Object.values(configuration.github_project.status_option_ids)).size !== 4) fail(400, 'STATUS_MAPPING_INVALID', 'Status roles require four distinct option IDs.');
 }
-export function createProjects({ storage, github, githubSetup, execution, workspaces, directoryBase, selectProjectsDirectory, selectGitHubExecutable }: ProjectDependencies) {
-  const queue = createQueue({ storage, github });
+export function createProjects({ storage, github, githubSetup, execution, workspaces, directoryBase, selectProjectsDirectory, selectGitHubExecutable,
+  selectExecutable, toolDetector = createToolDetector() }: ProjectDependencies) {
+  const queue = createQueue({ storage, github, workspaces });
   const unavailableSelection = (target: string): SelectionCapabilities['projects_root'] => ({
     available: false,
     reason_code: 'NATIVE_SELECTION_UNAVAILABLE',
@@ -125,9 +141,31 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     const editable = storage.getGlobalConfiguration();
     return { ...editable, view: { ...editable.view, selection_capabilities: selectionCapabilities } };
   }
-  function configurationView(projectId: string) {
+  async function configurationView(projectId: string) {
     const editable = storage.getConfiguration(projectId);
-    return { ...editable, view: { ...editable.view, selection_capabilities: selectionCapabilities } };
+    const baseStorage = storage.getProjectStorageView(projectId);
+    let storageView = baseStorage;
+    const location = baseStorage.locations.find(item => item.location_key === 'managed' && item.current);
+    if (location && baseStorage.active_transition_operation_id === null) {
+      try {
+        storage.assertStorageTransitionQuiescent(projectId);
+        const project = storage.getProject(projectId).view.project;
+        if (!workspaces.inspectProjectStorageTransition) throw new Error('STORAGE_TRANSITION_UNAVAILABLE');
+        const observed = await workspaces.inspectProjectStorageTransition(projectId, location.path, location.layout_version);
+        const planHash = hash([project.id, project.revision, location.path, JSON.stringify(observed.source.object_identity),
+          observed.destination_relative, location.location_key]);
+        storageView = { ...baseStorage, transition_plan: { location_key: location.location_key, source_location_id: location.id,
+          destination_relative: observed.destination_relative, plan_hash: planHash, capability: { available: true } } };
+      } catch (error) {
+        const reason = error instanceof Error && /^[A-Z0-9_]{1,128}$/.test(error.message) ? error.message : 'STORAGE_TRANSITION_UNAVAILABLE';
+        storageView = { ...baseStorage, transition_plan: { location_key: location.location_key, source_location_id: location.id,
+          destination_relative: `var/factory/projects/${projectId}/v${location.layout_version + 1}/managed`,
+          plan_hash: hash([projectId, location.id, location.verified_at_ms, reason]),
+          capability: { available: false, reason_code: reason, reason: 'A origem ou o destino não pôde ser conferido com segurança.',
+            recovery: 'Confira a pasta gerenciada e consulte novamente antes de autorizar a transição.' } } };
+      }
+    }
+    return { ...editable, view: { ...editable.view, storage: storageView, selection_capabilities: selectionCapabilities } };
   }
   let activeSelection: ActiveSelection | null = null;
   async function normalizedGlobals(changes: GlobalChanges): Promise<GlobalChanges> {
@@ -147,8 +185,9 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
   async function selectSetting(input: NativeSelectionRequest, callerSignal?: AbortSignal): Promise<NativeSelectionResult> {
     if (!Value.Check(NativeSelectionRequest, input)) fail(400, 'NATIVE_SELECTION_INVALID', 'Choose a supported native selection.');
     if (activeSelection) throw new OperationError(409, activeSelection.diagnostic ?? 'NATIVE_SELECTION_IN_PROGRESS', selectionConflictMessage);
-    const select = input.kind !== 'gh_executable' ? selectProjectsDirectory : selectGitHubExecutable;
-    if (!select) return { state: 'unavailable', kind: input.kind, path: null, diagnostic: 'NATIVE_SELECTION_UNAVAILABLE' };
+    const isDirectory = input.kind === 'projects_root' || input.kind === 'project_directory';
+    const select = isDirectory ? selectProjectsDirectory : input.kind === 'gh_executable' ? selectGitHubExecutable : selectExecutable;
+    if (!select) return { state: 'unavailable', kind: input.kind, diagnostic: 'NATIVE_SELECTION_UNAVAILABLE' };
 
     const controller = new AbortController();
     const current: ActiveSelection = { diagnostic: null };
@@ -170,22 +209,33 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     if (callerSignal?.aborted) onCallerAbort();
     try {
       const candidate = await Promise.resolve().then(() => select(controller.signal));
-      if (controller.signal.aborted) return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_CANCELLED' };
-      if (candidate === null) return { state: 'cancelled', kind: input.kind, path: null };
+      if (controller.signal.aborted) return { state: 'unavailable', kind: input.kind, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_CANCELLED' };
+      if (candidate === null) return { state: 'cancelled', kind: input.kind };
       try {
-        const path = input.kind === 'project_directory'
+        let path = input.kind === 'project_directory'
           ? await readableProjectDirectory(candidate)
           : input.kind === 'projects_root'
           ? await canonicalProjectsRoot(directoryBase, candidate)
-          : await canonicalGitHubExecutable(candidate);
-        if (controller.signal.aborted) return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_CANCELLED' };
+          : input.kind === 'gh_executable' ? await canonicalGitHubExecutable(candidate) : await canonicalNativeExecutable(candidate);
+        if (input.kind === 'gh_executable') {
+          if (!githubSetup) throw new Error('GITHUB_CONTEXT_UNAVAILABLE');
+          const validated = await githubSetup.validateExecutable(path);
+          if (validated.state !== 'observed') throw new Error('GITHUB_EXECUTABLE_UNAVAILABLE');
+          path = validated.path;
+        } else if (input.kind.endsWith('_executable')) {
+          const tool = input.kind.slice(0, -11) as ManagedTool;
+          const validated = await toolDetector.validate(path, tool);
+          if (!validated) throw new Error('TOOL_EXECUTABLE_UNAVAILABLE');
+          path = validated.path;
+        }
+        if (controller.signal.aborted) return { state: 'unavailable', kind: input.kind, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_CANCELLED' };
         return { state: 'selected', kind: input.kind, path, observed_at_ms: Date.now() };
       } catch {
-        return { state: 'unavailable', kind: input.kind, path: null,
-          diagnostic: input.kind === 'project_directory' ? 'PROJECT_DIRECTORY_UNAVAILABLE' : input.kind === 'projects_root' ? 'PROJECTS_ROOT_UNAVAILABLE' : 'GITHUB_EXECUTABLE_UNAVAILABLE' };
+        return { state: 'unavailable', kind: input.kind, diagnostic: input.kind === 'project_directory' ? 'PROJECT_DIRECTORY_UNAVAILABLE' :
+          input.kind === 'projects_root' ? 'PROJECTS_ROOT_UNAVAILABLE' : input.kind === 'gh_executable' ? 'GITHUB_EXECUTABLE_UNAVAILABLE' : 'TOOL_EXECUTABLE_UNAVAILABLE' };
       }
     } catch {
-      return { state: 'unavailable', kind: input.kind, path: null, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_FAILED' };
+      return { state: 'unavailable', kind: input.kind, diagnostic: cancellationDiagnostic ?? 'NATIVE_SELECTION_FAILED' };
     } finally {
       if (closeConfirmationTimer) clearTimeout(closeConfirmationTimer);
       callerSignal?.removeEventListener('abort', onCallerAbort);
@@ -199,26 +249,59 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       fail(400, 'ORIGIN_INVALID', 'Origin or base branch is invalid.');
     }
     if (observation.state !== 'identified') fail(503, 'ORIGIN_UNAVAILABLE', 'Origin inspection could not finish.');
-    if (observation.diagnostics.some((d) => d.code === 'BRANCH_INVALID' || d.code === 'BRANCH_NOT_FOUND')) fail(400, 'BASE_BRANCH_INVALID', 'Choose an existing base branch.');
+    if (observation.diagnostics.some((d) => d.code === 'BRANCH_INVALID') ||
+      (observation.diagnostics.some((d) => d.code === 'BRANCH_NOT_FOUND') && !(observation.base && observation.remote?.confirmed && observation.remote.repository))) {
+      fail(400, 'BASE_BRANCH_INVALID', 'Choose an existing local base branch.');
+    }
     const remote = observation.remote;
     return { source: { ...observation.source, ...(remote?.confirmed && remote.repository ? { repository_id: remote.repository.id, repository_url: remote.repository.url } : {}) },
       notes: observation.diagnostics.map((d) => d.code).filter((code) => code !== 'PROJECT_REQUIRED') };
   }
   async function validateMapping(configuration: ProjectConfiguration): Promise<void> {
     const mapping = configuration.github_project;
-    if (!mapping) return;
-    const result = await github.validateProjectSelection({ id: mapping.id, statusFieldId: mapping.status_field_id, statusOptionIds: Object.values(mapping.status_option_ids) });
+    if (!mapping || !('backlog' in mapping.status_option_ids)) return;
+    const optionIds = mapping.status_option_ids;
+    const statusOptionIds = V3StatusMapping.map(({ key }) => optionIds[key]);
+    const result = await github.validateProjectSelection({ id: mapping.id, statusFieldId: mapping.status_field_id, statusOptionIds });
     if (result.state !== 'complete' || !result.data) {
-      const invalid = result.diagnostics.some((d) => ['STATUS_FIELD_INACCESSIBLE', 'STATUS_OPTION_INACCESSIBLE', 'NOT_FOUND_OR_INACCESSIBLE'].includes(d.code));
+      const invalid = result.diagnostics.some((d) => ['STATUS_FIELD_INACCESSIBLE', 'STATUS_OPTION_INACCESSIBLE', 'STATUS_MAPPING_INCOMPATIBLE', 'NOT_FOUND_OR_INACCESSIBLE'].includes(d.code));
       fail(invalid ? 400 : 503, invalid ? 'STATUS_MAPPING_INVALID' : 'GITHUB_VALIDATION_UNAVAILABLE', 'The exact Project and Status mapping could not be validated.');
     }
-    if (result.data.project.id !== mapping.id || result.data.project.owner.id !== mapping.owner_id || result.data.project.closed) fail(400, 'PROJECT_MAPPING_INVALID', 'The Project owner or state is invalid.');
+    if (!matchesObservedV3StatusMapping(mapping, result.data)) fail(400, 'STATUS_MAPPING_INVALID', 'The observed Status field does not match the five approved V3 options and their order.');
+  }
+  async function requireAutomationReadiness(configuration: ProjectConfiguration): Promise<void> {
+    if (!configuration.source.repository_id) {
+      throw new OperationError(409, 'REMOTE_UNCONFIRMED', 'Confirme um repositório GitHub para o projeto antes de habilitar a automação.',
+        { affected_requirements: ['RF-15'], recovery: 'Configure um remoto GitHub acessível e confirme a identidade do repositório.' });
+    }
+    if (!configuration.github_project) {
+      throw new OperationError(409, 'PROJECT_REQUIRED', 'Vincule um quadro GitHub válido antes de habilitar a automação.',
+        { affected_requirements: ['RF-15'], recovery: 'Selecione o quadro do projeto, vincule o repositório e configure as cinco opções de Status V3.' });
+    }
+    if (!('backlog' in configuration.github_project.status_option_ids)) {
+      throw new OperationError(409, 'STATUS_MAPPING_LEGACY', 'O quadro ainda usa um mapeamento histórico de quatro valores.',
+        { affected_requirements: ['RF-15'], recovery: 'Selecione novamente o campo Status e confirme as cinco opções V3, incluindo Backlog.' });
+    }
+    const origin = await workspaces.inspectOrigin({ source: configuration.source, baseBranch: configuration.base_branch });
+    const remoteConfirmed = origin.state === 'identified' && Boolean(origin.remote?.confirmed && origin.remote.repository &&
+      origin.remote.repository.id === configuration.source.repository_id && !origin.remote.repository.isArchived);
+    if (!remoteConfirmed) {
+      throw new OperationError(409, 'REMOTE_UNCONFIRMED', 'O remoto GitHub não pôde ser confirmado para este projeto.',
+        { affected_requirements: ['RF-15'], recovery: 'Confira a pasta, o remoto e o acesso ao repositório GitHub antes de habilitar a automação.' });
+    }
+    const published = Boolean(origin.base && origin.remote?.branch && origin.base.branch === configuration.base_branch &&
+      origin.remote.branch.name === configuration.base_branch && origin.remote.branch.repositoryId === configuration.source.repository_id &&
+      origin.remote.branch.sha === origin.base.sha);
+    if (!published) {
+      throw new OperationError(409, 'CODE_NOT_PUBLISHED', 'O commit da branch-base ainda não está publicado e confirmado no GitHub.',
+        { affected_requirements: ['RF-15'], recovery: 'Publique a branch-base configurada e confira se o commit remoto corresponde ao commit observado na origem.' });
+    }
   }
   function settingsResponse(operation: StoredOperation, warnings?: Array<{ code: string; message: string }>) {
     return { ...settingsView(), operationId: operation.operation_id, receipt: receipt(operation), ...(warnings?.length ? { warnings } : {}) };
   }
-  function configurationResponse(projectId: string, operation: StoredOperation) {
-    return { ...configurationView(projectId), operationId: operation.operation_id, receipt: receipt(operation) };
+  async function configurationResponse(projectId: string, operation: StoredOperation) {
+    return { ...await configurationView(projectId), operationId: operation.operation_id, receipt: receipt(operation) };
   }
   async function getGitHubOptions(): Promise<GitHubSetupOptions> {
     const linkedAccount = storage.getLinkedGitHubAccount();
@@ -299,6 +382,21 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       message: 'A observação do catálogo OMP está vazia, parcial ou incompatível.', recovery: 'Confira o runtime OMP antes de salvar perfis.' }] };
     return catalog;
   }
+  async function getToolOptions(): Promise<ToolOptions> {
+    const settings = storage.getGlobalConfiguration().view;
+    const tools = await toolDetector.detect(settings.tool_preferences, storage.getGitHubExecutablePath());
+    let connection: ToolOptions['maestri_connection'] = { state: 'not_checked', diagnostic: null };
+    if (execution?.preflight) {
+      try {
+        const preflight = await execution.preflight();
+        connection = preflight.ready ? { state: 'connected', diagnostic: null }
+          : { state: 'unavailable', diagnostic: preflight.code ?? 'MAESTRI_CONNECTION_UNAVAILABLE' };
+      } catch (error) { connection = { state: 'unavailable', diagnostic: error instanceof ExecutionError ? error.code : 'MAESTRI_CONNECTION_UNAVAILABLE' }; }
+    }
+    const result: ToolOptions = { tools, maestri_connection: connection, observed_at_ms: Date.now() };
+    if (!Value.Check(ToolOptions, result)) fail(503, 'TOOL_OPTIONS_INVALID', 'Tool observations could not be projected.');
+    return result;
+  }
   async function validateProfileChanges(changes: ProfileChanges | undefined, profiles: readonly StoredExecutionProfile[]): Promise<void> {
     if (!changes?.length) return;
     const commandIds = changes.flatMap((command) => command.action === 'create' ? [] : [command.id]);
@@ -377,8 +475,72 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     },
     getGitHubOptions,
     getExecutionOptions,
+    getToolOptions,
     selectSetting,
     getConfiguration: configurationView,
+    async transitionStorage(projectId: string, body: StorageTransitionCommandValue, context: CommandContext) {
+      if (!Value.Check(StorageTransitionCommand, body)) fail(400, 'STORAGE_TRANSITION_INVALID', 'A autorização de transição é inválida.');
+      const prior = storage.getStorageTransition(context.operationId);
+      let input;
+      if (prior) {
+        input = { operationId: context.operationId, projectId, expectedRevision: context.expectedRevision, command: body,
+          destinationRelative: prior.destination_relative, sourceIdentity: prior.source_identity };
+      } else {
+        const current = await configurationView(projectId);
+        const plan = current.view.storage.transition_plan;
+        if (!plan || !plan.capability.available) throw new OperationError(409, 'STORAGE_TRANSITION_UNAVAILABLE',
+          'O plano de transição não está disponível para confirmação.', { recovery: plan?.capability.recovery ?? 'Consulte novamente a configuração do projeto.' });
+        if (body.location_key !== plan.location_key || body.source_location_id !== plan.source_location_id || body.plan_hash !== plan.plan_hash) {
+          throw new OperationError(409, 'STORAGE_TRANSITION_PLAN_CHANGED', 'O plano exibido não é mais o plano vigente.', {
+            affected_requirements: ['RF-67','RF-68'], recovery: 'Consulte novamente a configuração do projeto antes de confirmar.' });
+        }
+        const location = current.view.storage.locations.find(item => item.id === plan.source_location_id);
+        if (!location) throw new OperationError(409, 'STORAGE_TRANSITION_SOURCE_CHANGED', 'A origem não está mais registrada como localização corrente.');
+        if (!workspaces.inspectProjectStorageTransition || !workspaces.moveProjectStorageTransition) throw new OperationError(503, 'STORAGE_TRANSITION_UNAVAILABLE', 'A capacidade local de transição não está disponível.');
+        const observed = await workspaces.inspectProjectStorageTransition(projectId, location.path, location.layout_version);
+        const project = storage.getProject(projectId).view.project;
+        if (observed.destination_relative !== plan.destination_relative || hash([project.id, project.revision,
+            location.path, JSON.stringify(observed.source.object_identity), observed.destination_relative, location.location_key]) !== plan.plan_hash) {
+          throw new OperationError(409, 'STORAGE_TRANSITION_PLAN_CHANGED', 'A origem, revisão ou destino mudou durante a confirmação.');
+        }
+        input = { operationId: context.operationId, projectId, expectedRevision: context.expectedRevision, command: body,
+          destinationRelative: observed.destination_relative, sourceIdentity: observed.source.object_identity };
+      }
+      let operation = storage.acceptStorageTransition(input);
+      let transition = storage.getStorageTransition(context.operationId);
+      if (!transition) throw new Error('PROJECT_STORAGE_TRANSITION_DATA_INVALID');
+      if (transition.state === 'verified') return operation;
+      transition = storage.claimStorageTransition(context.operationId);
+      if (transition.state === 'verified') return storage.getOperation(context.operationId) ?? operation;
+      const generation = transition.generation;
+      try {
+        storage.assertStorageTransitionQuiescent(projectId);
+        if (!workspaces.moveProjectStorageTransition) throw new Error('STORAGE_TRANSITION_UNAVAILABLE');
+        const stepOrder = ['planned','quiescence_checked','moving','verifying','publishing_location'] as const;
+        let stepIndex = stepOrder.indexOf(transition.step);
+        if (stepIndex < 1) { storage.advanceStorageTransition(context.operationId, generation, 'quiescence_checked', 'running', null); stepIndex = 1; }
+        if (stepIndex < 2) { storage.advanceStorageTransition(context.operationId, generation, 'moving', 'running', null); stepIndex = 2; }
+        const destination = await workspaces.moveProjectStorageTransition({ project_id: projectId,
+          source_relative: transition.source_relative, destination_relative: transition.destination_relative, source_identity: transition.source_identity });
+        if (transition.destination_identity && JSON.stringify(transition.destination_identity) !== JSON.stringify(destination.object_identity)) {
+          throw new OperationError(409, 'STORAGE_TRANSITION_DESTINATION_CHANGED', 'A identidade do destino mudou durante a retomada.');
+        }
+        if (stepIndex < 3) { storage.advanceStorageTransition(context.operationId, generation, 'verifying', 'running', null, destination.object_identity); stepIndex = 3; }
+        if (stepIndex < 4) storage.advanceStorageTransition(context.operationId, generation, 'publishing_location', 'running', null, destination.object_identity);
+        storage.completeStorageTransition(context.operationId, generation, destination.object_identity);
+      } catch (error) {
+        const reason = error instanceof Error && /^[A-Z0-9_]{1,128}$/.test(error.message) ? error.message : 'STORAGE_TRANSITION_INTERRUPTED';
+        const current = storage.getStorageTransition(context.operationId);
+        if (current && current.state !== 'verified') {
+          try { storage.advanceStorageTransition(context.operationId, generation, current.step, 'uncertain', reason); }
+          catch (fenceError) {
+            if (!(fenceError instanceof OperationError && fenceError.code === 'STORAGE_TRANSITION_GENERATION_STALE')) throw fenceError;
+          }
+        }
+      }
+      operation = storage.getOperation(context.operationId) ?? operation;
+      return operation;
+    },
     getQueue: queue.read,
     saveQueue: queue.save,
     async registerProject(body: ProjectRegistration, context: CommandContext) {
@@ -410,7 +572,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       }
       precondition(storage.getGlobalConfiguration().etag, context.expectedRevision);
       if (onboardingChanges) {
-        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.gh_executable_path !== undefined || accountBinding !== undefined) {
+        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.gh_executable_path !== undefined || accountBinding !== undefined || body.tool_preferences !== undefined) {
           fail(400, 'SETTINGS_COMMAND_INVALID', 'Onboarding changes must be the only settings command.');
         }
         const current = storage.getGlobalConfiguration();
@@ -471,7 +633,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
         return settingsResponse(storage.saveSettings({ ...context, body, changes: {}, ...(onboardingValidation ? { onboardingValidation } : {}) }));
       }
       if (accountBinding) {
-        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.gh_executable_path !== undefined || body.onboarding_changes !== undefined) {
+        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.gh_executable_path !== undefined || body.onboarding_changes !== undefined || body.tool_preferences !== undefined) {
           fail(400, 'SETTINGS_COMMAND_INVALID', 'Account binding must be the only settings command.');
         }
         if (!githubSetup) throw new OperationError(503, 'GITHUB_CONTEXT_UNAVAILABLE', 'The authorized GitHub host context is unavailable.');
@@ -493,7 +655,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
         return settingsResponse(operation, warnings);
       }
       if (body.gh_executable_path !== undefined) {
-        if (Object.keys(body.changes).length > 0 || (body.profile_changes?.length ?? 0) > 0 || body.onboarding_changes !== undefined) {
+        if (Object.keys(body.changes).length > 0 || (body.profile_changes?.length ?? 0) > 0 || body.onboarding_changes !== undefined || body.tool_preferences !== undefined) {
           fail(400, 'SETTINGS_COMMAND_INVALID', 'Save the GitHub executable as a separate settings command.');
         }
         if (!githubSetup) throw new OperationError(503, 'GITHUB_CONTEXT_UNAVAILABLE', 'The authorized GitHub host context is unavailable.');
@@ -506,6 +668,26 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
         githubSetup.activateExecutable(validated);
         return settingsResponse(operation);
       }
+      if (body.tool_preferences !== undefined) {
+        if (Object.keys(body.changes).length > 0 || body.profile_changes !== undefined || body.onboarding_changes !== undefined || accountBinding !== undefined) {
+          fail(400, 'SETTINGS_COMMAND_INVALID', 'Tool preferences must be saved as an isolated settings command.');
+        }
+        const currentPreferences = storage.getGlobalConfiguration().view.tool_preferences;
+        const changedPaths: Partial<Record<ManagedTool, string | null>> = {};
+        for (const tool of ['git', 'maestri', 'omp', 'powershell'] as const) {
+          if (body.tool_preferences[tool].preferred_path !== currentPreferences[tool].preferred_path) {
+            changedPaths[tool] = body.tool_preferences[tool].preferred_path;
+          }
+        }
+        let preferences: SettingsUpdate['tool_preferences'];
+        try {
+          preferences = await toolDetector.stamp(currentPreferences, changedPaths);
+        } catch {
+          throw new OperationError(400, 'TOOL_PREFERENCE_INVALID', 'Uma ou mais ferramentas selecionadas não passaram pela validação local.');
+        }
+        const normalizedBody: SettingsUpdate = { ...body, tool_preferences: preferences };
+        return settingsResponse(storage.saveSettings({ ...context, body: normalizedBody, changes: {} }));
+      }
       const changes = await normalizedGlobals(body.changes);
       await validateProfileChanges(body.profile_changes, storage.getGlobalConfiguration().view.profiles);
       return settingsResponse(storage.saveSettings({ ...context, body, changes }));
@@ -514,7 +696,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       if (!Value.Check(ConfigurationUpdate, body)) fail(400, 'CONFIGURATION_INVALID', 'Configuration changes are invalid.');
       const command: ConfigurationCommand = { ...context, kind: 'project.configuration.update', projectId, body };
       const recovered = storage.recoverConfigurationCommand(command);
-      if (recovered) return configurationResponse(projectId, recovered);
+      if (recovered) return await configurationResponse(projectId, recovered);
       const current = storage.getConfiguration(projectId);
       const deletion = current.view.prerequisites.find(item => item.code === 'PROJECT_DELETION_PENDING');
       if (deletion) throw new OperationError(409, deletion.code, deletion.message, { recovery: deletion.recovery });
@@ -535,9 +717,10 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       }
       validateProjectConfiguration(configuration);
       await validateMapping(configuration);
+      if (!previous.automation_enabled && configuration.automation_enabled) await requireAutomationReadiness(configuration);
       const globalChanges = await normalizedGlobals(body.global_changes ?? {});
       const operation = storage.saveConfiguration({ ...context, projectId, body, configuration, globalChanges, ...(originNotes ? { originNotes } : {}) });
-      return configurationResponse(projectId, operation);
+      return await configurationResponse(projectId, operation);
     },
     async getConfigurationOptions(projectId: string, query: ConfigurationOptionsQuery): Promise<ConfigurationOptions> {
       if (!Value.Check(ConfigurationOptionsQuery, query)) fail(400, 'OPTIONS_QUERY_INVALID', 'Configuration options query is invalid.');

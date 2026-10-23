@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Socket } from 'node:net';
 import { describe, expect, it, vi } from 'vitest';
-import type { ExecutionEvent, ExecutionHost, ExecutionPersistence, PassageRecord, QuestionRecord, ResultRecord, AnswerRecord, PassageRequest } from './index.js';
+import type { AttemptSessionIdentity, ExecutionEvent, ExecutionHost, ExecutionPersistence, PassageRecord, QuestionRecord, ResultRecord, AnswerRecord, PassageRequest } from './index.js';
 import { createExecution, ExecutionError } from './index.js';
 import { digest, loadRoleResources } from './roles.js';
 import { createMaestriOmp } from './adapters/maestri-omp/adapter.js';
@@ -17,9 +17,39 @@ function fixtureStore() {
   const results = new Map<string, ResultRecord>();
   const questions = new Map<string, QuestionRecord>();
   const answers = new Map<string, AnswerRecord>();
+  const sessionRows = new Map<string, AttemptSessionIdentity>();
   const events: ExecutionEvent[] = [];
   const store: ExecutionPersistence = {
     claimAnswer: () => true,
+    getAttemptSession: (handle, binding) => {
+      const passage = records.get(handle.passageId);
+      const sessionBinding = passage?.binding ?? binding;
+      if (!sessionBinding) throw new Error('NOT_FOUND');
+      let session = sessionRows.get(sessionBinding.attemptId);
+      if (!session) {
+        const managedTerminalId = randomUUID();
+        session = { id: randomUUID(), attemptId: sessionBinding.attemptId, role: sessionBinding.role, managedTerminalId,
+          terminalName: `factory-${managedTerminalId}`, terminalId: null, workspaceId: null, generation: 1, terminalState: 'planned',
+          state: 'reserved', ompSessionId: null, sessionDirectoryRelative: `work/${sessionBinding.attemptId}/sessions/${sessionBinding.role}` };
+        sessionRows.set(sessionBinding.attemptId, session);
+      }
+      return structuredClone(session);
+    },
+    allocateTerminal: (handle, binding) => {
+      const session = store.getAttemptSession(handle, binding);
+      const managedTerminalId = randomUUID();
+      const replacement: AttemptSessionIdentity = { ...session, managedTerminalId, terminalName: `factory-${managedTerminalId}`,
+        terminalId: null, workspaceId: null, generation: 1, terminalState: 'planned', state: 'reserved', ompSessionId: null };
+      sessionRows.set(replacement.attemptId, replacement);
+      return structuredClone(replacement);
+    },
+    confirmTerminal: vi.fn((handle, observation) => {
+      const passage = records.get(handle.passageId); if (!passage) return;
+      const session = sessionRows.get(passage.binding.attemptId); if (!session) return;
+      Object.assign(session, { terminalId: observation.terminalId, workspaceId: observation.workspaceId, ompSessionId: observation.ompSessionId,
+        terminalState: 'occupied' as const, state: 'active' as const });
+    }),
+    claimContinuation: vi.fn(), releaseOccupancy: vi.fn(),
     reserve: input => {
       const prior = records.get(input.handle.passageId);
       if (prior && prior.requestHash !== input.requestHash) throw new ExecutionError('RESULT_CONFLICT');
@@ -35,7 +65,10 @@ function fixtureStore() {
       const prior = results.get(input.binding.passageId);
       if (prior && prior.sha256 !== input.sha256) throw new ExecutionError('RESULT_CONFLICT');
       if (prior) return prior;
-      const result = { ...input, receiptId: randomUUID() }; results.set(input.binding.passageId, result); return result;
+      const result = { ...input, receiptId: randomUUID() }; results.set(input.binding.passageId, result);
+      const session = sessionRows.get(input.binding.attemptId);
+      if (session) Object.assign(session, { state: 'completed', terminalState: 'available' });
+      return result;
     },
     getResult: h => results.get(h.passageId) ?? null,
     raiseQuestion: input => {
@@ -58,18 +91,21 @@ function fixtureStore() {
     },
     recordStop: vi.fn(),
   };
-  return { store, records, results, questions, answers };
+  return { store, records, results, questions, answers, sessionRows };
 }
 const anchorId = randomUUID();
 const workspaceId = randomUUID();
+const confirmStoppedTerminal = vi.fn(async () => true);
 const host: ExecutionHost = {
   maestriExecutable: 'C:\\Ferramentas ç\\maestri.exe', ompExecutable: 'C:\\Ferramentas ç\\omp.exe',
   powershellExecutable: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe',
   inheritedEnvironment: { MAESTRI_PIPE: '\\\\.\\pipe\\test-only', MAESTRI_TERMINAL_ID: anchorId, MAESTRI_WORKSPACE_ID: workspaceId },
+  confirmStoppedTerminal,
 };
 const payload = () => ({ formatVersion: 1 as const, summary: 'Implementação concluída 😀', writesStopped: true as const,
   criteria: [{ criterionId: 'ac-1', verdict: 'passed' as const, evidence: ['Teste observado'] }], checks: [] });
 function fixture(role: 'implementer' | 'reviewer' = 'implementer', effort: string | null = 'high', ompVersion = '18.11.1') {
+  confirmStoppedTerminal.mockReset(); confirmStoppedTerminal.mockResolvedValue(true);
   const journal = fixtureStore();
   const resources = loadRoleResources();
   const request: PassageRequest = {
@@ -87,7 +123,7 @@ function fixture(role: 'implementer' | 'reviewer' = 'implementer', effort: strin
     getCatalog: vi.fn(async () => ({ state: 'unavailable' as const, observed_at_ms: 1,
       diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Controlled catalog unavailable.', recovery: 'Configure a catalog fixture.' }] })),
     validate: vi.fn(async () => ({ anchor: { terminalId: anchorId, workspaceId }, ompVersion })),
-    recruit: vi.fn(async () => {}), stop: vi.fn(async () => 'uncertain' as const),
+    recruit: vi.fn(async () => {}), stop: vi.fn(async (): Promise<'confirmed' | 'uncertain'> => 'uncertain'),
   };
   const execution = createMaestriOmp({ dataDirectory: 'C:\\Dados', host: { ...host, openExistingTerminal }, persistence: journal.store, validateReviewerResult: async () => {} }, resources, {
     native: runtime,
@@ -102,7 +138,7 @@ function fixture(role: 'implementer' | 'reviewer' = 'implementer', effort: strin
   const call = async (tool: string, value: unknown, extra = {}) => {
     await callbacks!.frame({ type: 'call', id: randomUUID(), tool, payload: value, ...extra }); return frames.at(-1);
   };
-  return { ...journal, execution, request, runtime, hello, frames, removed, close, openExistingTerminal, start, waitLaunch, call, callbacks: () => callbacks! };
+  return { ...journal, execution, request, runtime, hello, frames, removed, close, openExistingTerminal, confirmStoppedTerminal, start, waitLaunch, call, callbacks: () => callbacks! };
 }
 
 describe('distributed role contracts', () => {
@@ -147,6 +183,80 @@ describe('shutdown coordination', () => {
 });
 
 describe('correction in the same tracked session', () => {
+  it.each(['role','attempt','session'] as const)('refuses a %s binding that does not belong to the live conversation', async kind => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload());
+    const binding = { ...f.request.binding, passageId: randomUUID(), round: 2, deliveryVersion: randomUUID(),
+      ...(kind === 'role' ? { role: 'reviewer' as const } : {}), ...(kind === 'attempt' ? { attemptId: randomUUID() } : {}) };
+    if (kind === 'session') {
+      const original = f.store.getAttemptSession;
+      vi.spyOn(f.store, 'getAttemptSession').mockImplementation((handle, value) => {
+        const session = original(handle, value);
+        return handle.passageId === binding.passageId ? { ...session, id: randomUUID() } : session;
+      });
+    }
+    const { cwd: _cwd, ...input } = { ...f.request, binding };
+    await expect(f.execution.continuePassage({ passageId: f.request.binding.passageId }, input)).rejects.toThrow('TRACKING_LOST');
+    expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    expect(f.frames.some(frame => frame && typeof frame === 'object' && 'type' in frame && frame.type === 'continuation')).toBe(false);
+    await f.execution.close();
+  });
+  it('rejects a new OMP conversation instead of silently accepting it as reviewer continuation', async () => {
+    const f = fixture('reviewer'); await f.start();
+    await f.call('execution_complete', { formatVersion: 1, summary: 'Review', verdict: 'rejected',
+      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Observed'] }], findings: [], resolutions: [] });
+    f.runtime.stop.mockResolvedValue('confirmed');
+    const source = { passageId: f.request.binding.passageId };
+    const preparing = f.execution.preparePassageHandoff(source);
+    await vi.waitFor(() => expect(f.frames.at(-1)).toMatchObject({ type: 'continuation-check' }));
+    await f.callbacks().frame({ type: 'continuation-idle', passageId: source.passageId }); await preparing;
+    const request = { ...f.request,
+      binding: { ...f.request.binding, passageId: randomUUID(), round: 2, deliveryVersion: randomUUID() } };
+    const pending = f.execution.continuePassage(source, request);
+    const assertion = expect(pending).rejects.toThrow('TRACKING_LOST');
+    await vi.waitFor(() => expect(f.runtime.recruit).toHaveBeenCalledTimes(2));
+    await expect(f.callbacks().hello({ ...f.hello, cwd: request.cwd, sessionId: randomUUID() })).rejects.toThrow('TRACKING_LOST');
+    f.callbacks().lost('TRACKING_LOST'); await assertion;
+    expect(f.store.getPassage({ passageId: request.binding.passageId }).state).not.toBe('ready');
+    expect(f.store.getResult(source)).not.toBeNull();
+    await f.execution.close();
+  });
+  it('quiesces a reviewer before resuming the exact OMP session in the same attempt checkout', async () => {
+    const f = fixture('reviewer'); await f.start();
+    const result = { formatVersion: 1, summary: 'Review rejected', verdict: 'rejected',
+      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Version one'] }], findings: [], resolutions: [] };
+    await f.call('execution_complete', result);
+    f.runtime.stop.mockResolvedValue('confirmed');
+    const source = { passageId: f.request.binding.passageId };
+    const preparation = f.execution.preparePassageHandoff(source);
+    await vi.waitFor(() => expect(f.frames.at(-1)).toMatchObject({ type: 'continuation-check', passageId: source.passageId }));
+    expect(f.runtime.stop).not.toHaveBeenCalled();
+    await f.callbacks().frame({ type: 'continuation-idle', passageId: source.passageId });
+    await preparation;
+    expect(f.runtime.stop).toHaveBeenCalledOnce();
+    const next = { ...f.request,
+      binding: { ...f.request.binding, passageId: randomUUID(), round: 2, deliveryVersion: randomUUID() } };
+    const continuation = f.execution.continuePassage(source, next);
+    await vi.waitFor(() => expect(f.runtime.recruit).toHaveBeenCalledTimes(2));
+    await f.callbacks().hello({ ...f.hello, cwd: next.cwd });
+    await f.callbacks().frame({ type: 'task-submitted' });
+    expect((await continuation).binding).toEqual(next.binding);
+    expect(f.store.getAttemptSession({ passageId: next.binding.passageId }).ompSessionId).toBe(f.hello.sessionId);
+    expect(f.store.getResult(source)?.binding).toEqual(f.request.binding);
+    await f.execution.close();
+  });
+  it('never resumes a reviewer when physical stop is uncertain', async () => {
+    const f = fixture('reviewer'); await f.start();
+    await f.call('execution_complete', { formatVersion: 1, summary: 'Review', verdict: 'rejected',
+      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Observed'] }], findings: [], resolutions: [] });
+    const pending = f.execution.preparePassageHandoff({ passageId: f.request.binding.passageId });
+    const assertion = expect(pending).rejects.toThrow('TRACKING_LOST');
+    await vi.waitFor(() => expect(f.frames.at(-1)).toMatchObject({ type: 'continuation-check' }));
+    await f.callbacks().frame({ type: 'continuation-idle', passageId: f.request.binding.passageId });
+    await assertion;
+    expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    expect(f.store.getPassage({ passageId: f.request.binding.passageId }).state).toBe('interrupted');
+    await f.execution.close();
+  });
   it('rebinds a new passage only after continuation ACK, without another recruit', async () => {
     const f = fixture(); await f.start(); await f.call('execution_complete', payload());
     const next = { ...f.request, binding: { ...f.request.binding, passageId: randomUUID(), round: 2, deliveryVersion: randomUUID() }, task: 'Structured correction context' };
@@ -216,17 +326,50 @@ describe('private UTF-8 framing', () => {
   });
 });
 describe('native Maestri and Windows launch', () => {
+  it('stops only a privately owned pending launch before terminal handshake', async () => {
+    const run = vi.fn<CliRunner>(async () => ({ exitCode: 0, stdout: '' })); const name = `factory-${randomUUID()}`;
+    const stopPendingTerminal = vi.fn(async () => true);
+    const native = createNative({ ...host, stopPendingTerminal }, 'C:\\Data', run);
+    expect(await native.stop(name)).toBe('confirmed');
+    expect(stopPendingTerminal).toHaveBeenCalledExactlyOnceWith({ workspaceId, terminalName: name });
+    stopPendingTerminal.mockResolvedValue(false);
+    expect(await native.stop(name)).toBe('uncertain');
+    stopPendingTerminal.mockResolvedValue(true);
+    expect(await native.stop(name, { workspaceId, terminalId: randomUUID() }, 2)).toBe('confirmed');
+    expect(stopPendingTerminal).toHaveBeenLastCalledWith({ workspaceId, terminalName: name, generation: 2 });
+    await expect(native.stop('manual')).rejects.toThrow('RESOURCE_INVALID');
+    expect(stopPendingTerminal).toHaveBeenCalledTimes(3); expect(run).not.toHaveBeenCalled();
+  });
   it('requires trusted observed termination to confirm stop and never accepts an arbitrary process target', async () => {
     const run = vi.fn<CliRunner>(async () => ({ exitCode: 0, stdout: '' })); const name = `factory-${randomUUID()}`;
     expect(await createNative(host, 'C:\\Data', run).stop(name)).toBe('uncertain');
-    const confirmStoppedTerminal = vi.fn(async () => true);
-    expect(await createNative({ ...host, confirmStoppedTerminal }, 'C:\\Data', run).stop(name)).toBe('confirmed');
-    expect(confirmStoppedTerminal).toHaveBeenCalledExactlyOnceWith({ workspaceId: workspaceId.toLowerCase(), terminalName: name });
+    expect(run).not.toHaveBeenCalled();
+    const confirmStoppedTerminal = vi.fn(async () => true); const identity = { workspaceId, terminalId: randomUUID() };
+    const stopTerminal = vi.fn(async () => {});
+    expect(await createNative({ ...host, confirmStoppedTerminal, stopTerminal }, 'C:\\Data', run).stop(name, identity)).toBe('confirmed');
+    expect(stopTerminal).toHaveBeenCalledExactlyOnceWith({ workspaceId: workspaceId.toLowerCase(), terminalName: name, terminalId: identity.terminalId });
+    expect(run).not.toHaveBeenCalled();
+    expect(confirmStoppedTerminal).toHaveBeenCalledExactlyOnceWith({ workspaceId: workspaceId.toLowerCase(), terminalName: name, terminalId: identity.terminalId });
     confirmStoppedTerminal.mockResolvedValue(false);
     expect(await createNative({ ...host, confirmStoppedTerminal }, 'C:\\Data', run).stop(name)).toBe('uncertain');
     const count = run.mock.calls.length;
     await expect(createNative(host, 'C:\\Data', run).stop('manual-terminal')).rejects.toMatchObject({ code: 'RESOURCE_INVALID' });
     expect(run.mock.calls.length).toBe(count);
+  });
+  it('preserves the terminal when native stop is unavailable, rejected or unconfirmed', async () => {
+    const run = vi.fn<CliRunner>(async () => ({ exitCode: 0, stdout: '' }));
+    const name = `factory-${randomUUID()}`; const identity = { workspaceId, terminalId: randomUUID() };
+    const confirmStoppedTerminal = vi.fn(async () => true);
+    expect(await createNative({ ...host, confirmStoppedTerminal }, 'C:\\Data', run).stop(name, identity)).toBe('uncertain');
+    expect(confirmStoppedTerminal).not.toHaveBeenCalled();
+    const stopTerminal = vi.fn<NonNullable<ExecutionHost['stopTerminal']>>(async () => { throw new Error('stop rejected'); });
+    expect(await createNative({ ...host, confirmStoppedTerminal, stopTerminal }, 'C:\\Data', run).stop(name, identity)).toBe('uncertain');
+    expect(confirmStoppedTerminal).not.toHaveBeenCalled();
+    stopTerminal.mockImplementation(async () => {}); confirmStoppedTerminal.mockResolvedValue(false);
+    expect(await createNative({ ...host, confirmStoppedTerminal, stopTerminal }, 'C:\\Data', run).stop(name, identity)).toBe('uncertain');
+    expect(await createNative({ ...host, confirmStoppedTerminal, stopTerminal }, 'C:\\Data', run).stop(name, { ...identity, workspaceId: randomUUID() })).toBe('uncertain');
+    expect(stopTerminal).toHaveBeenCalledTimes(2);
+    expect(run).not.toHaveBeenCalled();
   });
   it('diagnoses missing and stale inherited context without launching', async () => {
     const execution = createExecution({ dataDirectory: 'C:\\Data', persistence: fixtureStore().store });
@@ -286,11 +429,15 @@ describe('native Maestri and Windows launch', () => {
       .toMatchObject({ state: 'unavailable', diagnostics: [{ code: 'OMP_VERSION_UNAVAILABLE' }] });
     expect(missingVersion.mock.calls).toHaveLength(1);
   });
-  it('omits the thinking selector only when the profile has no applicable effort', () => {
+  it('uses a per-attempt OMP session directory and omits thinking only when no effort applies', () => {
     const f = fixture();
-    expect(buildOmpArguments(f.request, 'extension.js')).toEqual(['--provider', 'provider', '--model', 'model', '--thinking', 'high', '--extension', 'extension.js']);
-    expect(buildOmpArguments({ ...f.request, profile: { ...f.request.profile, effort: null } }, 'extension.js'))
-      .toEqual(['--provider', 'provider', '--model', 'model', '--extension', 'extension.js']);
+    expect(buildOmpArguments(f.request, 'extension.js', 'C:\\factory\\attempt-a\\sessions\\implementer')).toEqual([
+      '--provider', 'provider', '--model', 'model', '--thinking', 'high', '--session-dir', 'C:\\factory\\attempt-a\\sessions\\implementer', '--extension', 'extension.js',
+    ]);
+    expect(buildOmpArguments({ ...f.request, profile: { ...f.request.profile, effort: null } }, 'extension.js', 'C:\\factory\\attempt-b\\sessions\\implementer'))
+      .toEqual(['--provider', 'provider', '--model', 'model', '--session-dir', 'C:\\factory\\attempt-b\\sessions\\implementer', '--extension', 'extension.js']);
+    expect(buildOmpArguments({ ...f.request, binding: { ...f.request.binding, role: 'reviewer', round: 2 } }, 'extension.js', 'C:\\factory\\attempt-b\\sessions\\reviewer'))
+      .toContain('--continue');
   });
   it('encodes only a bootstrap path and preserves Unicode, quotes and spaces', () => {
     const own = "C:\\Dados ç 😀\\O'Brien\\launch.json";
@@ -305,6 +452,44 @@ describe('native Maestri and Windows launch', () => {
   });
 });
 describe('passage coordination under controlled native dependencies', () => {
+  it('accepts a confirmed terminal generation in another attempt without adopting its old conversation', async () => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload());
+    const old = f.store.getAttemptSession({ passageId: f.request.binding.passageId });
+    const request = { ...f.request, binding: { ...f.request.binding, attemptId: randomUUID(), passageId: randomUUID(), deliveryVersion: randomUUID() } };
+    f.sessionRows.set(request.binding.attemptId, { ...old, id: randomUUID(), attemptId: request.binding.attemptId, state: 'reserved', terminalState: 'available', ompSessionId: null, generation: old.generation + 1 });
+    const pending = f.execution.startPassage(request);
+    await vi.waitFor(() => expect(f.runtime.recruit).toHaveBeenCalledTimes(2));
+    await f.callbacks().hello({ ...f.hello, sessionId: randomUUID() });
+    await f.callbacks().frame({ type: 'task-submitted' });
+    expect((await pending).state).toBe('ready');
+    await f.execution.close();
+  });
+  it('keeps an unavailable managed terminal untouched and creates a distinct owned terminal', async () => {
+    const f = fixture(); const handle = { passageId: f.request.binding.passageId };
+    const session = f.store.getAttemptSession(handle, f.request.binding);
+    f.sessionRows.set(f.request.binding.attemptId, { ...session, terminalId: randomUUID(), workspaceId, ompSessionId: null,
+      terminalState: 'available', state: 'reserved', generation: 2 });
+    const priorTerminalId = f.store.getAttemptSession(handle, f.request.binding).managedTerminalId;
+    f.confirmStoppedTerminal.mockResolvedValue(false);
+    const record = await f.start(); const current = f.store.getAttemptSession(handle);
+    expect(record.state).toBe('ready'); expect(current.managedTerminalId).not.toBe(priorTerminalId);
+    expect(f.runtime.recruit).toHaveBeenCalledWith(current.terminalName, f.request.cwd, expect.any(String), false);
+    expect(f.confirmStoppedTerminal).toHaveBeenCalledOnce();
+  });
+  it('reuses only the confirmed factory terminal and starts a distinct OMP session', async () => {
+    const f = fixture(); const handle = { passageId: f.request.binding.passageId };
+    const session = f.store.getAttemptSession(handle, f.request.binding);
+    const previousOmpSessionId = randomUUID(); const physicalTerminalId = randomUUID();
+    const managed = { ...session, terminalId: physicalTerminalId, workspaceId, ompSessionId: null,
+      terminalState: 'available' as const, state: 'reserved' as const, generation: 2 };
+    f.sessionRows.set(f.request.binding.attemptId, managed);
+    f.hello.terminalId = physicalTerminalId;
+    const started = await f.start();
+    expect(started.state).toBe('ready');
+    expect(f.confirmStoppedTerminal).toHaveBeenCalledTimes(2); // Rechecked immediately before --replace.
+    expect(f.runtime.recruit).toHaveBeenCalledWith(managed.terminalName, f.request.cwd, expect.any(String), true);
+    expect(f.hello.sessionId).not.toBe(previousOmpSessionId);
+  });
   it('confirms a version without an effort and retains both facts exactly', async () => {
     const f = fixture('implementer', null, '19.0.0'); const ready = await f.start();
     expect(ready.state).toBe('ready'); expect(ready.effectiveProfile?.effort).toBeNull(); expect(ready.executorVersion).toBe('19.0.0');
@@ -417,7 +602,7 @@ describe('passage coordination under controlled native dependencies', () => {
     const receipts = await f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
     expect(receipts[0]?.state).toBe('requested'); expect((await promise).state).toBe('cancelled');
     expect(f.runtime.stop).not.toHaveBeenCalled(); returned();
-    await vi.waitFor(() => expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(`factory-${f.request.binding.passageId}`));
+    await vi.waitFor(() => expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(f.store.getAttemptSession({ passageId: f.request.binding.passageId }).terminalName, undefined, 1));
     expect(f.store.recordStop).toHaveBeenLastCalledWith({ passageId: f.request.binding.passageId }, { passageId: f.request.binding.passageId, state: 'uncertain' }); await f.execution.close();
   });
   it('shares one physical stop request across concurrent cancellations of a ready terminal', async () => {
@@ -426,7 +611,8 @@ describe('passage coordination under controlled native dependencies', () => {
     f.runtime.stop.mockImplementation(async () => { await stopped; return 'uncertain'; });
     const one = f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
     const two = f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
-    await vi.waitFor(() => expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(`factory-${f.request.binding.passageId}`));
+    await vi.waitFor(() => expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(f.store.getAttemptSession({ passageId: f.request.binding.passageId }).terminalName,
+      { workspaceId: f.hello.workspaceId, terminalId: f.hello.terminalId }, 1));
     release(); expect((await one)[0]?.state).toBe('uncertain'); expect((await two)[0]?.state).toBe('uncertain');
     await f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID()); expect(f.runtime.stop).toHaveBeenCalledTimes(1);
     expect(f.execution.interactionSurface({ passageId: f.request.binding.passageId }).available).toBe(false);
@@ -444,7 +630,7 @@ describe('passage coordination under controlled native dependencies', () => {
     const pending = f.execution.startPassage(f.request, signal.signal); await f.waitLaunch();
     await Promise.resolve(); signal.abort();
     expect((await pending).state).toBe('cancelled');
-    expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(`factory-${f.request.binding.passageId}`);
+    expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(f.store.getAttemptSession({ passageId: f.request.binding.passageId }).terminalName, undefined, 1);
     expect(f.frames).toHaveLength(0); await f.execution.close();
   });
   it('finishes a missing handshake with a finite diagnostic and releases the channel', async () => {
@@ -462,7 +648,7 @@ describe('passage coordination under controlled native dependencies', () => {
     await expect(f.execution.startPassage({ ...f.request, task: 'another task' })).rejects.toThrow('RESULT_CONFLICT');
     expect(f.runtime.recruit).toHaveBeenCalledOnce();
     const second = createMaestriOmp({ dataDirectory: 'C:\\Data', host, persistence: f.store }, loadRoleResources(), { native: f.runtime });
-    expect((await second.startPassage(f.request)).state).toBe('interrupted');
+    await expect(second.startPassage(f.request)).rejects.toThrow('TRACKING_LOST');
     expect(second.interactionSurface(record.handle).available).toBe(false); await f.execution.close(); await second.close();
   });
   it('does not mask a failure to persist ready as a ready receipt', async () => {

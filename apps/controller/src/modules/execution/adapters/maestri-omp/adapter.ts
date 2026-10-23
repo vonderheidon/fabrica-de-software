@@ -21,9 +21,12 @@ type Native = ReturnType<typeof createNative>;
 const profileValue = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
 export interface AdapterDependencies { native?: Native; channel?: ChannelFactory; bootstrap?: BootstrapWriter; runCli?: typeof runCli }
 interface LivePassage {
+  handoff?: boolean;
+  idle?: { resolve: () => void; reject: () => void } | undefined;
   continuation: { resolve: (record: PassageRecord) => void; reject: () => void } | undefined;
   request: PassageRequest; channel: PassageChannel | undefined; bootstrap: Bootstrap | undefined;
   native: Native; session: Hello | undefined; cancelled: boolean; stopped: boolean;
+  terminalGeneration: number;
   launchPending: boolean; launchIssued: boolean; storageFailed: boolean;
   stopResult?: Promise<StopReceipt>;
   ready: () => void; failed: (code: ExecutionCode) => void;
@@ -64,6 +67,8 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     catch { throw new ExecutionError('STORAGE_FAILED'); }
   };
   const interrupt = (entry: LivePassage, code: ExecutionCode) => {
+    if (entry.handoff) return;
+    entry.idle?.reject(); entry.idle = undefined;
     entry.continuation?.reject(); entry.continuation = undefined;
     entry.failed(code);
     for (const pending of entry.answers.values()) pending.reject();
@@ -81,7 +86,11 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     entry.stopResult = (async () => {
       let state: StopReceipt['state'] = entry.launchIssued ? 'uncertain' : 'confirmed';
       if (entry.launchIssued) {
-        try { state = await entry.native.stop(store.getPassage(handleOf(passageId)).terminalName); }
+        try {
+          const session = store.getAttemptSession(handleOf(passageId));
+          state = await entry.native.stop(session.terminalName, session.terminalId && session.workspaceId
+            ? { terminalId: session.terminalId, workspaceId: session.workspaceId } : undefined, entry.terminalGeneration);
+        }
         catch { state = 'uncertain'; }
       }
       const receipt = { passageId, state };
@@ -91,7 +100,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     return entry.stopResult;
   };
 
-  const start = async (request: PassageRequest, signal?: AbortSignal): Promise<PassageRecord> => {
+  const start = async (request: PassageRequest, signal?: AbortSignal, resumedSessionId?: string): Promise<PassageRecord> => {
     const host = options.host;
     if (!host) throw new ExecutionError('CONTEXT_MISSING');
     const runtime = native();
@@ -102,7 +111,22 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     const initial: PassageRecord = { handle: handleOf(request.binding.passageId), binding: request.binding,
       requestHash: digest(request), state: 'starting', roleResource: role.reference, terminalName, diagnostic: null,
       effectiveProfile: null, executorVersion: null };
-    const claim = store.reserve(initial);
+    let sessionCandidate = store.getAttemptSession(initial.handle, request.binding);
+    if (sessionCandidate.ompSessionId && sessionCandidate.ompSessionId !== resumedSessionId) throw new ExecutionError('TRACKING_LOST');
+    let terminalAvailabilityConfirmed = false;
+    if (sessionCandidate.terminalState === 'available') {
+      if (sessionCandidate.terminalId && sessionCandidate.workspaceId && host.confirmStoppedTerminal) {
+        try {
+          terminalAvailabilityConfirmed = await host.confirmStoppedTerminal({ workspaceId: sessionCandidate.workspaceId,
+            terminalId: sessionCandidate.terminalId, terminalName: sessionCandidate.terminalName, generation: sessionCandidate.generation });
+        } catch { terminalAvailabilityConfirmed = false; }
+      }
+      if (!terminalAvailabilityConfirmed) {
+        if (resumedSessionId) throw new ExecutionError('TRACKING_LOST');
+        sessionCandidate = store.allocateTerminal(initial.handle, request.binding);
+      }
+    }
+    const claim = store.reserve(initial, terminalAvailabilityConfirmed);
     if (!claim.created) {
       if (claim.record.state === 'ready' || claim.record.state === 'starting') store.record(initial.handle, 'interrupted', 'TRACKING_LOST', 'tracking-lost');
       return store.getPassage(initial.handle);
@@ -114,6 +138,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     const entry: LivePassage = {
       request, native: runtime, channel: undefined, bootstrap: undefined, session: undefined, continuation: undefined,
       cancelled: false, stopped: false, launchPending: false, launchIssued: false, storageFailed: false, answers: new Map(),
+      terminalGeneration: sessionCandidate.generation,
       ready: () => {
         if (settled) return;
         try { store.confirmReady(initial.handle, request.profile, validation.ompVersion); }
@@ -143,7 +168,17 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           if (hello.provider !== request.profile.provider || hello.model !== request.profile.model || hello.effort !== request.profile.effort) throw new ExecutionError('PROFILE_MISMATCH');
           if (hello.cwd !== request.cwd || hello.roleDigest !== role.reference.sha256 || hello.workspaceId.toLowerCase() !== validation.anchor.workspaceId ||
             hello.terminalId.toLowerCase() === validation.anchor.terminalId || !Value.Check(OperationId, hello.terminalId.toLowerCase()) || !Value.Check(OperationId, hello.sessionId.toLowerCase())) throw new ExecutionError('TRACKING_LOST');
-          if ([...live.values()].some(other => other !== entry && other.session && (other.session.sessionId.toLowerCase() === hello.sessionId.toLowerCase() || other.session.terminalId.toLowerCase() === hello.terminalId.toLowerCase()))) throw new ExecutionError('TRACKING_LOST');
+          if (resumedSessionId && hello.sessionId.toLowerCase() !== resumedSessionId.toLowerCase()) throw new ExecutionError('TRACKING_LOST');
+          if ((sessionCandidate.terminalId && hello.terminalId.toLowerCase() !== sessionCandidate.terminalId.toLowerCase()) ||
+            (sessionCandidate.workspaceId && hello.workspaceId.toLowerCase() !== sessionCandidate.workspaceId.toLowerCase())) throw new ExecutionError('TRACKING_LOST');
+          if ([...live.values()].some(other => {
+            if (other === entry || !other.session) return false;
+            if (other.session.sessionId.toLowerCase() === hello.sessionId.toLowerCase()) return true;
+            if (other.session.terminalId.toLowerCase() !== hello.terminalId.toLowerCase()) return false;
+            return !(terminalAvailabilityConfirmed && other.request.binding.attemptId !== request.binding.attemptId && other.terminalGeneration < sessionCandidate.generation);
+          })) throw new ExecutionError('TRACKING_LOST');
+          store.confirmTerminal(initial.handle, { workspaceId: hello.workspaceId.toLowerCase(), terminalId: hello.terminalId.toLowerCase(), ompSessionId: hello.sessionId.toLowerCase() });
+          host.bindTerminalProcess?.({ workspaceId: hello.workspaceId, terminalName: sessionCandidate.terminalName, terminalId: hello.terminalId, generation: sessionCandidate.generation });
           entry.session = hello;
           // The extension read the private bootstrap; revoke that file before authorizing the task.
           await entry.bootstrap?.removeSecret();
@@ -153,6 +188,10 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
         frame: async (frame) => {
           if (entry.cancelled || closed) throw new ExecutionError('CANCELLED');
           if (Value.Check(Lost, frame)) throw new ExecutionError('TRACKING_LOST');
+          if (frame && typeof frame === 'object' && 'type' in frame && frame.type === 'continuation-idle' &&
+              'passageId' in frame && frame.passageId === entry.request.binding.passageId && entry.idle) {
+            entry.idle.resolve(); entry.idle = undefined; return;
+          }
           if (Value.Check(Submitted, frame)) {
             if (!entry.session || settled) throw new ExecutionError('FRAME_INVALID');
             entry.ready(); return;
@@ -199,13 +238,28 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
         lost: (code) => { interrupt(entry, code); void entry.channel?.close().catch(() => { entry.storageFailed = true; }); },
       });
       entry.channel = channel;
-      entry.bootstrap = await (dependencies.bootstrap ?? writeBootstrap)(options.dataDirectory, request, host, role, channel, validation.ompVersion);
+      entry.bootstrap = await (dependencies.bootstrap ?? writeBootstrap)(options.dataDirectory, request, host, role, channel, validation.ompVersion,
+        options.projectStorageRootForAttempt, sessionCandidate.sessionDirectoryRelative);
       if (entry.cancelled || closed) return store.getPassage(initial.handle);
+      if (terminalAvailabilityConfirmed) {
+        const stillStopped = await host.confirmStoppedTerminal!({ workspaceId: sessionCandidate.workspaceId!, terminalId: sessionCandidate.terminalId!,
+          terminalName: sessionCandidate.terminalName, generation: sessionCandidate.generation });
+        if (!stillStopped) {
+          store.releaseOccupancy(initial.handle, 'uncertain', 'TERMINAL_AVAILABILITY_CHANGED');
+          throw new ExecutionError('TRACKING_LOST');
+        }
+      }
       timer = setTimeout(() => interrupt(entry, 'HANDSHAKE_TIMEOUT'), executionLimits.handshakeMs);
       // One launch only. Timeout/lost response retains the same identity, never recruits again.
+      const command = launchCommand(host.powershellExecutable, entry.bootstrap.path);
+      const preparedCommand = host.prepareTerminalLaunch ? await host.prepareTerminalLaunch({ workspaceId: validation.anchor.workspaceId, terminalName: sessionCandidate.terminalName, generation: sessionCandidate.generation }, command) : command;
+      if (entry.cancelled || closed) {
+        await host.stopPendingTerminal?.({ workspaceId: validation.anchor.workspaceId, terminalName: sessionCandidate.terminalName, generation: sessionCandidate.generation });
+        return store.getPassage(initial.handle);
+      }
       entry.launchPending = true;
       entry.launchIssued = true;
-      const launching = runtime.recruit(terminalName, request.cwd, launchCommand(host.powershellExecutable, entry.bootstrap.path));
+      const launching = runtime.recruit(sessionCandidate.terminalName, request.cwd, preparedCommand, terminalAvailabilityConfirmed);
       void launching.then(async () => {
         entry.launchPending = false;
         if (entry.cancelled || closed) await stop(entry);
@@ -232,6 +286,29 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   };
 
   return {
+    preparePassageHandoff: async source => {
+      const entry = live.get(source.passageId); const prior = store.getPassage(source);
+      if (entry?.handoff && entry.stopped && (await entry.stopResult)?.state === 'confirmed' && prior.state === 'ready') return;
+      if (closed || !entry?.session || !entry.channel || entry.cancelled || entry.idle || entry.handoff ||
+          prior.state !== 'ready' || !store.getResult(source)) throw new ExecutionError('TRACKING_LOST');
+      const session = store.getAttemptSession(source, prior.binding);
+      if (session.state !== 'completed' || session.terminalState !== 'available' || session.ompSessionId !== entry.session.sessionId) throw new ExecutionError('TRACKING_LOST');
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => entry.idle?.reject(), executionLimits.requestMs);
+          entry.idle = { resolve: () => { clearTimeout(timer); resolve(); }, reject: () => { clearTimeout(timer); reject(new ExecutionError('TRACKING_LOST')); } };
+          void entry.channel?.send({ type: 'continuation-check', passageId: source.passageId }).catch(() => entry.idle?.reject());
+        });
+        if (closed || entry.cancelled || store.getPassage(source).state !== 'ready') throw new ExecutionError('TRACKING_LOST');
+        entry.handoff = true;
+        const receipt = await stop(entry);
+        if (receipt.state !== 'confirmed') throw new ExecutionError('TRACKING_LOST');
+        await entry.channel.close();
+        if (closed || entry.cancelled || store.getPassage(source).state !== 'ready') throw new ExecutionError('TRACKING_LOST');
+      } catch (error) {
+        entry.handoff = false; entry.idle = undefined; interrupt(entry, 'TRACKING_LOST'); throw error;
+      }
+    },
     getCatalog: async () => {
       try { return await native().getCatalog(); }
       catch (error) {
@@ -242,14 +319,29 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     },
     continuePassage: async (source, input) => {
       const entry = live.get(source.passageId); const old = store.getPassage(source);
-      const request = { ...input, cwd: entry?.request.cwd ?? '' };
-      if (closed || !Value.Check(PassageRequest, request) || request.binding.role !== 'implementer') throw new ExecutionError('INPUT_INVALID');
+      const request = { ...input, cwd: input.cwd ?? entry?.request.cwd ?? '' };
+      if (closed || !Value.Check(PassageRequest, request)) throw new ExecutionError('INPUT_INVALID');
       if (!entry?.session || entry.cancelled || entry.continuation || !entry.channel || old.state !== 'ready' || !store.getResult(source) ||
-        request.binding.attemptId !== old.binding.attemptId || request.binding.round !== old.binding.round + 1 ||
+        request.binding.role !== old.binding.role || request.binding.attemptId !== old.binding.attemptId || request.binding.round !== old.binding.round + 1 ||
         canonical(request.profile) !== canonical(entry.request.profile) || canonical(request.roleResource) !== canonical(entry.request.roleResource)) throw new ExecutionError('TRACKING_LOST');
+      const previousSession = store.getAttemptSession(source, old.binding);
+      const nextSession = store.getAttemptSession(handleOf(request.binding.passageId), request.binding);
+      if (previousSession.id !== nextSession.id || previousSession.role !== request.binding.role || previousSession.attemptId !== request.binding.attemptId ||
+          nextSession.state !== 'completed' || nextSession.ompSessionId !== entry.session.sessionId || nextSession.generation !== previousSession.generation) throw new ExecutionError('TRACKING_LOST');
+      if (request.binding.role === 'reviewer' || entry.handoff) {
+        if (!entry.handoff || !entry.stopped || request.cwd !== entry.request.cwd) throw new ExecutionError('TRACKING_LOST');
+        live.delete(source.passageId);
+        try {
+          const resumed = await start(request, undefined, entry.session.sessionId);
+          if (resumed.state !== 'ready') throw new ExecutionError('TRACKING_LOST');
+          return resumed;
+        }
+        catch (error) { persistState(entry, 'interrupted', 'TRACKING_LOST', 'tracking-lost'); throw error; }
+      }
+      if (request.cwd !== entry.request.cwd || entry.handoff) throw new ExecutionError('TRACKING_LOST');
       const handle = handleOf(request.binding.passageId);
-      const reserved = store.reserve({ handle, binding: request.binding, requestHash: digest(request), terminalName: old.terminalName,
-        state: 'starting', roleResource: request.roleResource, diagnostic: null, effectiveProfile: null, executorVersion: null });
+      const reserved = store.reserve({ handle, binding: request.binding, requestHash: digest(request), terminalName: `factory-${request.binding.passageId}`,
+        state: 'starting', roleResource: request.roleResource, diagnostic: null, effectiveProfile: null, executorVersion: null }, true);
       if (!reserved.created) throw new ExecutionError('TRACKING_LOST'); // No blind replay after an uncertain send.
       live.delete(source.passageId); entry.request = structuredClone(request); live.set(handle.passageId, entry);
       try {
@@ -343,7 +435,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       const open = options.host?.openExistingTerminal;
       const session = entry?.session;
       const available = Boolean(open && session && record.state === 'ready' && !entry?.cancelled && !closed);
-      return { kind: 'terminal', reference: record.terminalName, available,
+      return { kind: 'terminal', reference: record.managedTerminalName ?? record.terminalName, available,
         reason: available ? null : 'Abra a sessão existente no Maestri do host executor; abertura programática indisponível neste contexto.',
         open: available && open && session ? async () => {
           if (closed || entry?.cancelled || store.getPassage(handle).state !== 'ready') throw new ExecutionError('INTERACTION_UNAVAILABLE');
@@ -363,6 +455,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           if (entry.storageFailed) throw new ExecutionError('STORAGE_FAILED');
         }));
         const failure = outcomes.find(outcome => outcome.status === 'rejected');
+        await options.host?.closeTerminalProcesses?.();
         if (failure?.status === 'rejected') throw new ExecutionError(codeOf(failure.reason, 'TRACKING_LOST'));
       })();
       return closing;

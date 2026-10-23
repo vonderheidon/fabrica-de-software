@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CreateScaffold, EffectReceipt, EffectView, GitHubMutationResult, ScaffoldInput, SessionResponse } from '#contracts';
+import { Value } from '@sinclair/typebox/value';
+import { HttpCreationView, HttpScaffoldInput, HttpScaffoldOptions, HttpScaffoldPlanned, type CreateScaffold, type EffectReceipt, type EffectView, type GitHubMutationResult, type ScaffoldInputV3, type SessionResponse } from '#contracts';
 import { createScaffold, type ScaffoldDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { acceptCreation, completeCreation, recordCreationStep } from '../../apps/controller/src/modules/storage/creations.js';
+import { acceptCreation } from '../../apps/controller/src/modules/storage/creations.js';
 import { readOperation } from '../../apps/controller/src/modules/storage/operations.js';
 import { removeRemoteScaffoldSchema } from '../fixtures/scaffold-schema.js';
+import { removeManagedTerminalSchema } from '../fixtures/managed-terminal-schema.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createRemoteScaffolder } from '../../apps/controller/src/modules/github/scaffold.js';
@@ -20,17 +22,31 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 const complete = <T>(data: T) => ({ state: 'complete' as const,data,diagnostics: [],retryAtMs: null });
 async function fixture(failure = '') {
   const directory = mkdtempSync(join(tmpdir(),'remote-scaffold-'));
-  cleanup.push(() => rmSync(directory,{ recursive: true })); const storage = openStorage({ dataDirectory: directory,busyTimeoutMs: 10 }); cleanup.push(() => storage.close());
+  cleanup.push(() => rmSync(directory,{ recursive: true })); let storage = openStorage({ dataDirectory: directory,busyTimeoutMs: 10 }); cleanup.push(() => storage.close());
   const db = new Database(join(directory,'factory.sqlite')); cleanup.push(() => { db.close(); }); db.pragma('foreign_keys=ON');
   db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('ACCOUNT_test','test-user',1,1,1);
   db.prepare("UPDATE factory_settings SET account_id='ACCOUNT_test'").run();
   storage.saveSettings({ operationId: randomUUID(),expectedRevision: storage.getGlobalConfiguration().etag,body: { changes: { projects_root: directory } },changes: { projects_root: directory } });
-  let accountId = 'ACCOUNT_test'; let remote: EffectReceipt | null = null; const sends: string[] = [];
+  let accountId = 'ACCOUNT_test'; let remote: EffectReceipt | null = null; const sends: string[] = []; const boardSends: string[] = [];
   const receipt = (e: EffectView): EffectReceipt => ({ id: e.kind === 'baseline_push' ? 'a'.repeat(40) : 'R_created',repositoryId: 'R_created',
     ownerId: 'OWNER_test',repositoryName: 'different-name',visibility: 'private',url: 'https://github.com/test-org/different-name',operationId: e.operationId,
     ...(e.kind === 'create_repository' ? {} : { commitSha: 'a'.repeat(40),branchRef: 'refs/heads/release/base' }) });
   const confirmed = (e: EffectView): GitHubMutationResult => ({ state: 'confirmed',receipt: receipt(e),reason: null,retryAtMs: null });
   const unknown = (): GitHubMutationResult => ({ state: 'unknown',receipt: null,reason: 'RESPONSE_LOST',retryAtMs: null });
+  const boardReceipt = (kind: string, identity: import('#contracts').CreationBoardOperation['expected_identity'], repositoryId: string) => {
+    const projectId = identity.project_id ?? 'PVT_board'; const fieldId = identity.status_field_id ?? 'FIELD_status';
+    const viewId = identity.view_id ?? 'VIEW_kanban';
+    const statusOptions = ['Backlog','Ready','In progress','In review','Done'].map((name,index) => ({ name,id: `OPTION_${index}` }));
+    return { format_version: 1 as const, observed_at_ms: Date.now(),
+      ...(kind === 'create_board' ? { project_id: projectId, owner_id: identity.owner_id, title: identity.board_name, project_url: 'https://github.com/users/test-user/projects/1' } : {}),
+      ...(kind === 'configure_status' ? { project_id: projectId, owner_id: identity.owner_id, status_field_id: fieldId, status_field_name: 'Status', status_options: statusOptions } : {}),
+      ...(kind === 'link_repository' ? { project_id: projectId, owner_id: identity.owner_id, repository_ids: [repositoryId] } : {}),
+      ...(kind === 'configure_view' ? { project_id: projectId, owner_id: identity.owner_id, status_field_id: fieldId, status_field_name: 'Status', status_options: statusOptions,
+        view_id: viewId, view_name: 'Kanban', view_layout: 'BOARD_LAYOUT' as const, visible_field_ids: [fieldId], group_by_field_ids: [fieldId] } : {}),
+      ...(kind === 'verify_board' ? { project_id: projectId, owner_id: identity.owner_id, title: identity.board_name, project_url: 'https://github.com/users/test-user/projects/1', repository_ids: [repositoryId], status_field_id: fieldId,
+        status_field_name: 'Status', status_options: statusOptions, view_id: viewId, view_name: 'Kanban', view_layout: 'BOARD_LAYOUT' as const,
+        visible_field_ids: [fieldId], group_by_field_ids: [fieldId] } : {}) };
+  };
   const github = {
     getIdentity: vi.fn(async () => complete({ id: accountId,login: 'test-user' })),
     scaffoldRemoteCapability: vi.fn<NonNullable<ScaffoldDependencies['github']['scaffoldRemoteCapability']>>(() => ({ available: true,reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' })),
@@ -49,6 +65,16 @@ async function fixture(failure = '') {
       await authorize();
       return failure === 'description' ? unknown() : confirmed(e);
     }),
+    scaffoldBoardCapability: vi.fn(() => ({ available: true, reason_code: 'BOARD_TARGET_NOT_AUTHORIZED' })),
+    createBoardOperation: vi.fn<NonNullable<ScaffoldDependencies['github']['createBoardOperation']>>(async (operation,_target,repositoryId,_account,authorize,markSent) => {
+      expect(storage.getCreationBoardOperation(operation.operation_id).state).toBe('running');
+      if (operation.kind !== 'verify_board') { await authorize(); markSent(); boardSends.push(operation.kind); }
+      if (failure === `${operation.kind}_throw`) throw new Error('Synthetic board transport error');
+      if (failure === operation.kind) return { state: 'unknown', receipt: null, reason: 'RESPONSE_LOST' };
+      return { state: 'confirmed', receipt: boardReceipt(operation.kind,operation.expected_identity,repositoryId), reason: null };
+    }),
+    reconcileBoardOperation: vi.fn(async operation => ({ state: 'confirmed' as const,
+      receipt: boardReceipt(operation.kind,operation.expected_identity,'R_created'), reason: null })),
   };
   const workspaces: ScaffoldDependencies['workspaces'] = {
     scaffoldCapability: () => ({ available: true }),
@@ -76,25 +102,28 @@ async function fixture(failure = '') {
   };
   const scaffold = createScaffold({ storage,github,workspaces,logFailure: vi.fn() }); cleanup.push(() => scaffold.close());
   const options = await scaffold.getOptions(); const template = options.templates[0]!;
-  const input: ScaffoldInput = { name: 'Local name',templateId: template.id,templateDigest: template.digest,destinationRelative: 'project',
-    creationMode: 'remote_push',baseBranch: 'release/base',triageEnabled: false,remote: { ownerId: 'OWNER_test',name: 'different-name',visibility: 'private' } };
-  const authorize = async (mode: ScaffoldInput['creationMode'] = 'remote_push'): Promise<CreateScaffold> => {
-    const planned = await scaffold.plan({ ...input,creationMode: mode }); return { planHash: planned.planHash,plan: planned.plan,authorized: true };
+  const input: ScaffoldInputV3 = { name: 'Local name',templateId: template.id,templateDigest: template.digest,destinationRelative: 'project',
+    creationMode: 'remote_push',baseBranch: 'release/base',triageEnabled: false,boardName: 'Kanban custom',
+    remote: { ownerId: 'OWNER_test',name: 'different-name',visibility: 'private' } };
+  const authorize = async (): Promise<CreateScaffold> => {
+    const planned = await scaffold.plan(input); return { planHash: planned.planHash,plan: planned.plan,authorized: true };
   };
-  return { directory,storage,db,github,workspaces,scaffold,input,authorize,sends,changeAccount: () => { accountId = 'OTHER'; },existingRemote: () => { remote = { id: 'R_existing' }; } };
+  return { directory,storage,db,github,workspaces,scaffold,input,authorize,sends,boardSends,setStorage: (value: typeof storage) => { storage = value; },changeAccount: () => { accountId = 'OTHER'; },
+    restoreAccount: () => { accountId = 'ACCOUNT_test'; },existingRemote: () => { remote = { id: 'R_existing' }; } };
 }
 const etag = (f: Awaited<ReturnType<typeof fixture>>,id: string) => { const c = f.storage.getCreation(id).creation; return `"creation:${id}:${c.revision}"`; };
 
 describe('remote scaffold journal and reconciliation with controlled adapters',() => {
-  it.each(['remote_no_push','remote_push'] as const)('preserves all %s effects when description confirmation is lost and finishes by reconciliation', async mode => {
-    const f = await fixture('description'); const body = await f.authorize(mode);
+  it('preserves all remote_push effects when description confirmation is lost and finishes by reconciliation', async () => {
+    const f = await fixture('description'); const body = await f.authorize();
     const operation = await f.scaffold.create(body,randomUUID()); await f.scaffold.drain();
     const partial = f.scaffold.getCreation(operation.resource.id);
     expect(partial.creation.state).toBe('partial'); expect(partial.effects.every(effect => effect.state === 'confirmed')).toBe(true);
     const sends = [...f.sends];
     f.github.describeScaffoldRepository.mockImplementation(async e => ({ state: 'confirmed', receipt: e.receipt, reason: null, retryAtMs: null }));
     await f.scaffold.reconcile(operation.resource.id,randomUUID(),etag(f,operation.resource.id)); await f.scaffold.drain();
-    expect(f.scaffold.getCreation(operation.resource.id).creation.state).toBe('completed'); expect(f.sends).toEqual(sends);
+    const reconciledCreation = f.scaffold.getCreation(operation.resource.id);
+    expect(reconciledCreation.creation.state, JSON.stringify(reconciledCreation)).toBe('completed'); expect(f.sends).toEqual(sends);
   });
   it('accepts creation when the event sequence exceeds retained events', async () => {
     const f = await fixture();
@@ -111,26 +140,51 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     const runner = vi.fn(async () => { throw new Error('Capability checks must not send requests'); });
     const adapter = createRemoteScaffolder(new GraphQLReader(runner), { kind: 'confirmed_plan' });
     f.github.scaffoldRemoteCapability.mockImplementation(adapter.scaffoldRemoteCapability);
+    expect((await f.scaffold.getOptions()).creationModes.map(mode => mode.mode)).toEqual(['remote_push']);
     expect((await f.scaffold.getOptions()).creationModes.every(mode => mode.capability.available)).toBe(true);
     await f.authorize();
     expect(f.sends).toEqual([]);
     expect(existsSync(join(f.directory, 'project'))).toBe(false);
     expect(runner).not.toHaveBeenCalled();
     f.changeAccount();
-    expect((await f.scaffold.getOptions()).creationModes.filter(mode => mode.mode !== 'local').every(mode => !mode.capability.available)).toBe(true);
+    expect((await f.scaffold.getOptions()).creationModes.every(mode => !mode.capability.available)).toBe(true);
   });
-  it.each(['remote_no_push','remote_push'] as const)('completes only the effects authorized by %s and registers the same branch',async mode => {
-    const f = await fixture(); const body = await f.authorize(mode); const operationId = randomUUID();
+  it('completes remote_push with its authorized board name and registers the same branch',async () => {
+    const f = await fixture(); const body = await f.authorize(); const operationId = randomUUID();
     const op = await f.scaffold.create(body,operationId); await f.scaffold.drain();
     const view = f.scaffold.getCreation(op.resource.id);
-    expect(view.creation).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });
-    expect(f.sends).toEqual(mode === 'remote_push' ? ['create_repository','associate_origin','baseline_push'] : ['create_repository','associate_origin']);
-    expect(view.remoteEffects.find(e => e.kind === 'baseline_push')?.state).toBe(mode === 'remote_push' ? 'confirmed' : 'not_requested');
+    expect(view.creation, JSON.stringify(view)).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });
+    expect(f.sends).toEqual(['create_repository','associate_origin','baseline_push']);
+    expect(view.remoteEffects.find(e => e.kind === 'baseline_push')?.state).toBe('confirmed');
+    expect(view.creation.plan.input.boardName).toBe('Kanban custom');
+    expect(view.board_operations.map(item => item.kind)).toEqual(['create_board','configure_status','link_repository','configure_view','verify_board']);
+    for (const boardOperation of view.board_operations) {
+      expect(boardOperation.state).toBe('confirmed');
+      expect(boardOperation.receipt).not.toBeNull();
+      expect(f.storage.getOperation(boardOperation.operation_id)?.state).toBe('succeeded');
+    }
     const config = f.storage.getConfiguration(view.creation.projectId!).view.configuration;
-    expect(config).toMatchObject({ base_branch: 'release/base',automation_enabled: false,github_project: null,source: { repository_id: 'R_created',repository_url: 'https://github.com/test-org/different-name' } });
+    expect(config).toMatchObject({ base_branch: 'release/base',automation_enabled: false,github_project: { id: 'PVT_board', owner_id: 'OWNER_test', status_field_id: 'FIELD_status',
+      status_option_ids: { backlog: 'OPTION_0', ready: 'OPTION_1', in_progress: 'OPTION_2', in_review: 'OPTION_3', delivered: 'OPTION_4' } }, source: { repository_id: 'R_created',repository_url: 'https://github.com/test-org/different-name' } });
+    expect(view.board_operations.map(item => item.kind)).toEqual(['create_board','configure_status','link_repository','configure_view','verify_board']);
     const before = [...f.sends]; expect((await f.scaffold.create(body,operationId)).operation_id).toBe(operationId); await f.scaffold.drain(); expect(f.sends).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
+    expect(() => f.db.prepare("UPDATE creation_board_operations SET kind='verify_board' WHERE operation_id=?").run(view.board_operations[0]!.operation_id)).toThrow();
+    expect(() => f.db.prepare("INSERT INTO creation_steps(creation_id,step,state) VALUES (?, 'create_board','confirmed')").run(view.creation.id)).toThrow();
     for (const e of view.effects) expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(e.operationId)).toThrow();
+  });
+  it('applies migrations 31 to 32 without inventing compositions or changing prior installation data', async () => {
+    const f = await fixture(); const before = f.db.prepare("SELECT installation_id,account_id,revision FROM factory_settings WHERE id='local'").get();
+    removeManagedTerminalSchema(f.db);
+    f.db.exec(`ALTER TABLE execution_profiles DROP COLUMN composition_version; DELETE FROM schema_migrations WHERE version=32; PRAGMA user_version=31;
+      DROP TRIGGER creation_board_operation_identity; DROP TRIGGER creation_board_operation_delete; DROP TRIGGER creation_board_completion_guard;
+      DROP TABLE creation_board_operations; DELETE FROM schema_migrations WHERE version=31; PRAGMA user_version=30;`);
+    const { applyMigrations, loadMigrations } = await import('../../apps/controller/src/modules/storage/migrations.js');
+    applyMigrations(f.db,loadMigrations(),() => { throw new Error('MUST_NOT_RESEED'); });
+    expect(f.db.pragma('user_version',{ simple:true })).toBe(34);
+    expect(f.db.prepare('SELECT installation_id,account_id,revision FROM factory_settings WHERE id=\'local\'').get()).toEqual(before);
+    expect(f.db.prepare('SELECT * FROM creation_board_operations').all()).toEqual([]);
+    expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
   it('refuses an existing remote and changed account before destination effects',async () => {
     const f = await fixture(); const body = await f.authorize(); f.changeAccount();
@@ -143,17 +197,136 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     const view = f.scaffold.getCreation(op.resource.id); expect(view.creation.state).toBe('partial'); expect(f.sends).toEqual(['create_repository']);
     expect(view.effects[0]?.state).toBe('confirmed'); expect(view.remoteEffects[1]?.state).toBe('not_started'); expect(existsSync(join(body.plan.destination,'README.md'))).toBe(true);
   });
-  it.each(['repository','associate_origin','baseline_push','throw'])('reconciles %s response loss without resending any effect',async failure => {
+  it.each(['repository','associate_origin','baseline_push','throw'])('reconciles %s response loss and resumes pending effects without duplicates',async failure => {
     const f = await fixture(failure); const body = await f.authorize(); const originalId = randomUUID(); const op = await f.scaffold.create(body,originalId); await f.scaffold.drain();
     const partial = f.scaffold.getCreation(op.resource.id); expect(partial.creation.state).toBe('partial'); expect(partial.effects.at(-1)?.state).toBe('unknown');
-    const sent = [...f.sends]; const reconciliationId = randomUUID(); const precondition = etag(f,op.resource.id);
+    const reconciliationId = randomUUID(); const precondition = etag(f,op.resource.id);
     const reconciled = await f.scaffold.reconcile(op.resource.id,reconciliationId,precondition); expect(reconciled.resource.type).toBe('creation'); await f.scaffold.drain();
-    expect(f.storage.getOperation(reconciliationId)?.state).toBe(failure === 'baseline_push' ? 'succeeded' : 'unknown');
-    expect(f.sends).toEqual(sent); const view = f.scaffold.getCreation(op.resource.id); expect(view.effects.at(-1)?.state).toBe('confirmed');
-    expect(view.creation.state).toBe(failure === 'baseline_push' ? 'completed' : 'partial');
+    expect(f.storage.getOperation(reconciliationId)?.state).toBe('succeeded');
+    expect(f.sends).toEqual(['create_repository','associate_origin','baseline_push']); const view = f.scaffold.getCreation(op.resource.id); expect(view.effects.every(effect => effect.state === 'confirmed')).toBe(true);
+    expect(view.creation.state).toBe('completed');
     expect((await f.scaffold.create(body,originalId)).operation_id).toBe(originalId);
-    expect((await f.scaffold.reconcile(op.resource.id,reconciliationId,precondition)).operation_id).toBe(reconciliationId); await f.scaffold.drain(); expect(f.sends).toEqual(sent);
+    expect((await f.scaffold.reconcile(op.resource.id,reconciliationId,precondition)).operation_id).toBe(reconciliationId); await f.scaffold.drain(); expect(f.sends).toEqual(['create_repository','associate_origin','baseline_push']);
     await expect(f.scaffold.reconcile(op.resource.id,reconciliationId,'"other"')).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
+  });
+  it.each(['create_board','configure_status','link_repository','configure_view','verify_board'])('reconciles a lost %s board effect without replaying it', async kind => {
+    const f = await fixture(kind); const body = await f.authorize(); const original = randomUUID();
+    const op = await f.scaffold.create(body,original); await f.scaffold.drain();
+    const partial = f.scaffold.getCreation(op.resource.id); expect(partial.creation.state).toBe('partial');
+    expect(partial.board_operations.find(item => item.kind === kind)?.state).toBe('unknown');
+    await f.scaffold.reconcile(op.resource.id,randomUUID(),etag(f,op.resource.id)); await f.scaffold.drain();
+    const finished = f.scaffold.getCreation(op.resource.id);
+    expect(finished.creation.state).toBe('completed'); expect(new Set(f.boardSends).size).toBe(f.boardSends.length);
+    expect(finished.board_operations.every(item => item.state === 'confirmed')).toBe(true);
+  });
+  it('reconciles a board adapter exception through E57 in the same controller without replaying the effect', async () => {
+    const f = await fixture('configure_view_throw'); const original = await f.scaffold.create(await f.authorize(),randomUUID()); await f.scaffold.drain();
+    const before = f.scaffold.getCreation(original.resource.id); expect(before.creation.state).toBe('partial');
+    expect(before.board_operations.find(item => item.kind === 'configure_view')?.state).toBe('unknown');
+    const sendsBeforeReconciliation = [...f.boardSends];
+    await f.scaffold.reconcile(original.resource.id,randomUUID(),etag(f,original.resource.id)); await f.scaffold.drain();
+    const finished = f.scaffold.getCreation(original.resource.id);
+    expect(finished.creation.state).toBe('completed'); expect(finished.board_operations.every(item => item.state === 'confirmed')).toBe(true);
+    expect(f.boardSends).toEqual(sendsBeforeReconciliation); expect(new Set(f.boardSends).size).toBe(f.boardSends.length);
+  });
+  it('reconciles a board effect when persisting its confirmation fails, without restarting the controller', async () => {
+    const f = await fixture();
+    f.db.exec(`CREATE TRIGGER fail_configure_view_confirmation BEFORE UPDATE OF state ON creation_board_operations
+      WHEN NEW.kind='configure_view' AND NEW.state='confirmed' BEGIN SELECT RAISE(ABORT,'synthetic confirmation failure'); END;`);
+    const original = await f.scaffold.create(await f.authorize(),randomUUID()); await f.scaffold.drain();
+    const partial = f.scaffold.getCreation(original.resource.id);
+    expect(partial.creation.state).toBe('partial'); expect(partial.board_operations.find(item => item.kind === 'configure_view')?.state).toBe('unknown');
+    const sendsBeforeReconciliation = [...f.boardSends]; f.db.exec('DROP TRIGGER fail_configure_view_confirmation');
+    await f.scaffold.reconcile(original.resource.id,randomUUID(),etag(f,original.resource.id)); await f.scaffold.drain();
+    const finished = f.scaffold.getCreation(original.resource.id);
+    expect(finished.creation.state).toBe('completed'); expect(finished.board_operations.every(item => item.state === 'confirmed')).toBe(true);
+    expect(f.boardSends).toEqual(sendsBeforeReconciliation); expect(new Set(f.boardSends).size).toBe(f.boardSends.length);
+  });
+  it('reconciles an uncertain board effect through E57 before completing without replay', async () => {
+    const f = await fixture('configure_view'); const original = await f.scaffold.create(await f.authorize(),randomUUID()); await f.scaffold.drain();
+    const before = f.scaffold.getCreation(original.resource.id); expect(before.creation.state).toBe('partial');
+    const beforeSends = [...f.boardSends]; const expectedEtag = etag(f,original.resource.id);
+    await f.scaffold.close(); f.storage.close();
+    const reopened = openStorage({ dataDirectory: f.directory,busyTimeoutMs: 10 }); cleanup.push(() => reopened.close());
+    f.storage = reopened; f.setStorage(reopened); f.storage.interruptCreations();
+    f.scaffold = createScaffold({ storage: reopened,github: f.github,workspaces: f.workspaces,logFailure: vi.fn() }); cleanup.push(() => f.scaffold.close());
+    const app = createApp(loadConfiguration({ FACTORY_DATA_DIR: f.directory,FACTORY_LOG_LEVEL: 'silent' },f.directory),f.storage,
+      undefined,undefined,undefined,undefined,{ github: f.github,workspaces: f.workspaces }); cleanup.push(() => app.close());
+    const base = { host: '127.0.0.1:4310',origin: 'http://127.0.0.1:4310','content-type': 'application/json','x-factory-client': 'web' };
+    const session = await app.inject({ method: 'POST',url: '/api/v1/session',headers: base,payload: {} });
+    const operationId = randomUUID();
+    const headers = { ...base,cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrf_token,
+      'idempotency-key': operationId,'if-match': expectedEtag };
+    const url = `/api/v1/scaffold/creations/${original.resource.id}/reconcile`;
+    const accepted = await app.inject({ method: 'POST',url,headers,payload: {} }); expect(accepted.statusCode).toBe(202);
+    let observed = await app.inject({ url: `/api/v1/operations/${operationId}`,headers });
+    for (let index = 0; index < 100 && !['succeeded','failed'].includes(observed.json<{ state: string }>().state); index += 1) {
+      await new Promise(resolve => setTimeout(resolve,5)); observed = await app.inject({ url: `/api/v1/operations/${operationId}`,headers });
+    }
+    expect(observed.json<{ state: string }>().state, JSON.stringify({ creation: f.scaffold.getCreation(original.resource.id), reconciliation: f.db.prepare('SELECT * FROM creation_reconciliations WHERE operation_id=?').get(operationId) })).toBe('succeeded');
+    const replay = await app.inject({ method: 'POST',url,headers,payload: {} }); expect(replay.statusCode).toBe(202);
+    const finished = f.scaffold.getCreation(original.resource.id);
+    expect(finished.creation.state).toBe('completed'); expect(finished.board_operations.every(item => item.state === 'confirmed')).toBe(true);
+    expect(f.boardSends).toEqual(expect.arrayContaining(beforeSends)); expect(new Set(f.boardSends).size).toBe(f.boardSends.length);
+    expect(f.storage.getOperation(operationId)?.state).toBe('succeeded');
+  });
+  it('serves strict V3 plans, requires board_name and resumes the same complete creation without duplicate effects', async () => {
+    const f = await fixture();
+    const app = createApp(loadConfiguration({ FACTORY_DATA_DIR: f.directory,FACTORY_LOG_LEVEL: 'silent' },f.directory),f.storage,
+      undefined,undefined,undefined,undefined,{ github: f.github,workspaces: f.workspaces }); cleanup.push(() => app.close());
+    const base = { host: '127.0.0.1:4310',origin: 'http://127.0.0.1:4310','content-type': 'application/json','x-factory-client': 'web' };
+    const session = await app.inject({ method: 'POST',url: '/api/v1/session',headers: base,payload: {} });
+    const headers = { ...base,cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrf_token };
+    const optionsResponse = await app.inject({ url: '/api/v1/scaffold/options',headers });
+    expect(optionsResponse.statusCode).toBe(200); expect(Value.Check(HttpScaffoldOptions,optionsResponse.json())).toBe(true);
+    expect(optionsResponse.json<HttpScaffoldOptions>().creation_modes.map(item => item.mode)).toEqual(['remote_push']);
+    const input: import('#contracts').HttpScaffoldInput = { name: f.input.name,template_id: f.input.templateId,template_digest: f.input.templateDigest,
+      destination_relative: f.input.destinationRelative,creation_mode: 'remote_push',base_branch: f.input.baseBranch,triage_enabled: true,
+      remote: { owner_id: f.input.remote!.ownerId,name: f.input.remote!.name,visibility: f.input.remote!.visibility },board_name: 'Delivery board' };
+    expect(Value.Check(HttpScaffoldInput,input)).toBe(true);
+    for (const invalid of [
+      { ...input,creation_mode: 'local' },
+      { ...input,creation_mode: 'remote_no_push' },
+      { ...input,board_name: undefined },
+      { ...input,remote: undefined },
+    ]) {
+      const response = await app.inject({ method: 'POST',url: '/api/v1/scaffold/plans',headers,payload: invalid });
+      expect(response.statusCode).toBe(400);
+    }
+    expect(f.sends).toEqual([]); expect(f.boardSends).toEqual([]);
+    const plannedResponse = await app.inject({ method: 'POST',url: '/api/v1/scaffold/plans',headers,payload: input });
+    expect(plannedResponse.statusCode).toBe(200);
+    const planned = plannedResponse.json<HttpScaffoldPlanned>();
+    expect(Value.Check(HttpScaffoldPlanned,planned)).toBe(true);
+    expect(planned.plan.input).toEqual(input);
+    const inspections = f.github.inspectScaffoldRemote.mock.calls.length;
+    const changedPlan = { plan_hash: planned.plan_hash,plan: { ...planned.plan,input: { ...planned.plan.input,board_name: 'Changed after authorization' } },authorized: true };
+    const changed = await app.inject({ method: 'POST',url: '/api/v1/scaffold/creations',headers: { ...headers,'idempotency-key': randomUUID() },payload: changedPlan });
+    expect(changed.statusCode).toBe(400);
+    f.changeAccount();
+    const staleAccount = await app.inject({ method: 'POST',url: '/api/v1/scaffold/creations',headers: { ...headers,'idempotency-key': randomUUID() },payload: { plan_hash: planned.plan_hash,plan: planned.plan,authorized: true } });
+    expect(staleAccount.statusCode).toBe(409); f.restoreAccount();
+    expect(f.github.inspectScaffoldRemote).toHaveBeenCalledTimes(inspections);
+    expect(f.github.createScaffoldRepository).not.toHaveBeenCalled(); expect(f.sends).toEqual([]); expect(f.boardSends).toEqual([]);
+    const operationId = randomUUID();
+    const command = { plan_hash: planned.plan_hash,plan: planned.plan,authorized: true };
+    const accepted = await app.inject({ method: 'POST',url: '/api/v1/scaffold/creations',headers: { ...headers,'idempotency-key': operationId },payload: command });
+    expect(accepted.statusCode).toBe(202);
+    const acceptedBody = accepted.json<{ resource: { id: string } }>();
+    let detail = await app.inject({ url: `/api/v1/scaffold/creations/${acceptedBody.resource.id}`,headers });
+    for (let index = 0; index < 100 && detail.json<HttpCreationView>().creation.state !== 'completed'; index += 1) {
+      await new Promise(resolve => setTimeout(resolve,5));
+      detail = await app.inject({ url: `/api/v1/scaffold/creations/${acceptedBody.resource.id}`,headers });
+    }
+    expect(detail.statusCode).toBe(200); expect(Value.Check(HttpCreationView,detail.json())).toBe(true);
+    const view = detail.json<HttpCreationView>();
+    expect(view.creation.plan.input).toEqual(input); expect(view.board_name).toBe('Delivery board');
+    expect(view.board_url).toBe('https://github.com/users/test-user/projects/1'); expect(view.next_action).toBe('none');
+    expect(view.creation.state).toBe('completed');
+    const sends = [...f.sends]; const boardSends = [...f.boardSends];
+    const replay = await app.inject({ method: 'POST',url: '/api/v1/scaffold/creations',headers: { ...headers,'idempotency-key': operationId },payload: command });
+    expect(replay.statusCode).toBe(202); expect(replay.json().operation_id).toBe(operationId);
+    expect(f.sends).toEqual(sends); expect(f.boardSends).toEqual(boardSends);
   });
   it('keeps an unobserved remote unknown and requires CAS before reconciliation',async () => {
     const f = await fixture('repository'); const op = await f.scaffold.create(await f.authorize(),randomUUID()); await f.scaffold.drain();
@@ -186,7 +359,7 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(f.storage.listProjects({}).items).toEqual([]);
   });
   it('requires exact scope, confirmed repository and remote_push in the journal',async () => {
-    const f = await fixture('repository'); const op = await f.scaffold.create(await f.authorize('remote_no_push'),randomUUID()); await f.scaffold.drain();
+    const f = await fixture('repository'); const op = await f.scaffold.create(await f.authorize(),randomUUID()); await f.scaffold.drain();
     const effect = f.scaffold.getCreation(op.resource.id).effects[0]!;
     expect(() => f.storage.finishEffect(effect.operationId,effect.revision,'confirmed',{ id: 'R_wrong',repositoryId: 'R_wrong',ownerId: 'OTHER',repositoryName: 'different-name',visibility: 'private',operationId: effect.operationId,url: 'https://github.com/test-org/different-name' },null)).toThrow();
     expect(() => f.db.prepare("INSERT INTO effects(operation_id,creation_id,attempt_id,kind,scope_key,authorization_json,expected_identity_json,state,created_at_ms) VALUES (?,? ,NULL,'push',?,'{}','{}','not_started',1)").run(randomUUID(),op.resource.id,op.resource.id)).toThrow();
@@ -202,21 +375,19 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(response.headers.location).toMatch(/^\/api\/v1\/operations\//);
     expect((await app.inject({ method: 'POST',url,headers,payload: { deliveryId: randomUUID() } })).statusCode).toBe(400);
   });
-  it('migrates actual v16 preserving completed local creation, baseline, identity and original receipt',async () => {
-    const f = await fixture(); const { remote: _remote, ...localInput } = f.input;
-    const planned = await f.scaffold.plan({ ...localInput, creationMode: 'local' });
-    const body: CreateScaffold = { planHash: planned.planHash, plan: planned.plan, authorized: true };
-    const originalId = randomUUID();
-    const accepted = acceptCreation(f.db,{ operationId: originalId,body });
-    for (const step of ['directory','files','git','baseline'] as const) { recordCreationStep(f.db,accepted.operation.resource.id,step,'running'); recordCreationStep(f.db,accepted.operation.resource.id,step,'confirmed',step === 'baseline' ? 'a'.repeat(40) : undefined); }
-    completeCreation(f.db,accepted.operation.resource.id);
+  it('migrates schema 16 to 32 without inventing board operations or changing a completed creation receipt',async () => {
+    const f = await fixture(); const { remote: _remote,boardName: _boardName,...localInput } = f.input;
+    const planned = await f.scaffold.plan({ ...localInput,creationMode: 'local' });
+    const body: CreateScaffold = { planHash: planned.planHash,plan: planned.plan,authorized: true };
+    const originalId = randomUUID(); const accepted = await f.scaffold.create(body,originalId); await f.scaffold.drain();
     const before = readOperation(f.db,originalId); const instance = f.db.prepare('SELECT installation_id FROM factory_settings').get();
     f.storage.close(); removeRemoteScaffoldSchema(f.db);
     const storage = openStorage({ dataDirectory: f.directory }); cleanup.push(() => storage.close());
-    expect(storage.getDiagnostics().schemaVersion).toBe(27); const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
+    expect(storage.getDiagnostics().schemaVersion).toBe(34); const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
     expect(probe.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(instance); expect(probe.pragma('foreign_key_check')).toEqual([]);
     expect(storage.getOperation(originalId)).toEqual(before);
-    expect(storage.getCreation(accepted.operation.resource.id).creation).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });
+    expect(storage.getCreation(accepted.resource.id).creation).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });
+    expect(storage.getCreation(accepted.resource.id).board_operations).toEqual([]);
     expect(probe.prepare('SELECT count(*) AS n FROM effects').get()).toEqual({ n: 0 }); expect(probe.prepare('SELECT count(*) AS n FROM creation_reconciliations').get()).toEqual({ n: 0 });
   });
 });

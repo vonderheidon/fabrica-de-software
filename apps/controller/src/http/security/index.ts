@@ -135,7 +135,7 @@ export function commandHeaders(request: FastifyRequest) {
 
 export function sendOperationAccepted(reply: FastifyReply, requestId: string, storage: Storage, operationId: string) {
   const operation = storage.getOperation(operationId);
-  const durableUncertainAnswer = operation && ['scaffold.create', 'scaffold.reconcile', 'question.answer', 'resource.remove', 'folder.open', 'interaction.open', 'publication.complete', 'publication.reconcile', 'attempt.revalidate'].includes(operation.kind) && operation.receipt !== undefined;
+  const durableUncertainAnswer = operation && ['scaffold.create', 'scaffold.reconcile', 'question.answer', 'resource.remove', 'folder.open', 'interaction.open', 'publication.complete', 'publication.reconcile', 'attempt.revalidate', 'project.storage.transition'].includes(operation.kind) && operation.receipt !== undefined;
   if (!operation || (operation.state === 'unknown' && !durableUncertainAnswer)) throw new HttpError(503, 'OPERATION_NOT_DURABLE', 'Operation acceptance could not be confirmed.');
   const statusUrl = `/api/v1/operations/${operation.operation_id}`;
   return reply.code(202).header('Location', statusUrl).send({

@@ -1,7 +1,7 @@
 import { captureRetryBody, removeResourceBody } from './execution-requests.js';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Static } from '@sinclair/typebox';
-import { HttpAttemptResources as AttemptResourcesSchema, HttpFolderSurface as FolderSurfaceSchema, HttpPassageInteraction as PassageInteractionSchema } from '#contracts';
+import { HttpAttemptResources as AttemptResourcesSchema, HttpFolderSurface as FolderSurfaceSchema, HttpPassageInteraction as PassageInteractionSchema, HttpPassageSummary } from '#contracts';
 import type { HttpAttemptDetail as AttemptDetail, HttpAttemptResource as AttemptResource, OperationAccepted, OperationView, HttpProducerResult as ProducerResult, HttpRemovalPlan as RemovalPlan } from '#contracts';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 
@@ -10,35 +10,40 @@ type FolderSurface = Static<typeof FolderSurfaceSchema>;
 type PassageInteraction = Static<typeof PassageInteractionSchema>;
 type OperationKind = 'cancel' | 'capture' | 'remove' | 'open-terminal' | 'open-folder';
 type ActionOperation = { kind: OperationKind; id: string; accepted: OperationAccepted | null; view: OperationView | null; uncertain: boolean };
-type Snapshot = { resources: AttemptResources | null; producerResult: ProducerResult; plans: Record<string, { value: RemovalPlan; etag: string | null }>; folders: Record<string, FolderSurface>; interactions: Record<string, PassageInteraction>; surfaceErrors: Record<string, string>; error: string | null };
-type ActionState = Snapshot & { operation: ActionOperation | null; busy: boolean; actionErrors: Record<string, string>; copied: string | null };
+type Snapshot = { passages: Static<typeof HttpPassageSummary>[]; resources: AttemptResources | null; producerResult: ProducerResult; plans: Record<string, { value: RemovalPlan; etag: string | null }>; folders: Record<string, FolderSurface>; interactions: Record<string, PassageInteraction>; surfaceErrors: Record<string, string>; error: string | null };
+type ActionState = Snapshot & { identity: string; operation: ActionOperation | null; busy: boolean; actionErrors: Record<string, string>; copied: string | null };
 
-const emptySnapshot = (): Snapshot => ({ resources: null, producerResult: null, plans: {}, folders: {}, interactions: {}, surfaceErrors: {}, error: null });
+const emptySnapshot = (): Snapshot => ({ passages: [], resources: null, producerResult: null, plans: {}, folders: {}, interactions: {}, surfaceErrors: {}, error: null });
 
 function messageFor(error: unknown): string {
   return error instanceof HttpError ? error.message : 'Não foi possível concluir a ação. Consulte a operação antes de tentar novamente.';
 }
 
-export function useAttemptActions(attemptId: string, attempt: AttemptDetail | null, attemptEtag: string | null, deliveryId: string | null, captureEligible: boolean) {
-  const [state, setState] = useState<ActionState>({ ...emptySnapshot(), operation: null, busy: false, actionErrors: {}, copied: null });
+export function useAttemptActions(attemptId: string, attempt: AttemptDetail | null, attemptEtag: string | null, deliveryId: string | null, captureEligible: boolean, selectedRound: string | null = null) {
+  const snapshotIdentity = `${attemptId}:${selectedRound ?? ''}:${deliveryId ?? ''}`;
+  const selection = useMemo(() => ({}), [snapshotIdentity]);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const [state, setState] = useState<ActionState>({ ...emptySnapshot(), identity: snapshotIdentity, operation: null, busy: false, actionErrors: {}, copied: null });
   const commandIds = useRef(new Map<string, string>());
   const active = useRef(true);
   const refreshSequence = useRef(0);
-  const snapshotIdentity = `${attemptId}:${deliveryId ?? ''}`;
   const [loadedIdentity, setLoadedIdentity] = useState('');
 
   const refresh = useCallback(async (): Promise<void> => {
     const sequence = ++refreshSequence.current;
-    const isCurrent = (): boolean => active.current && sequence === refreshSequence.current;
+    const isCurrent = (): boolean => active.current && selectionRef.current === selection && sequence === refreshSequence.current;
     const base = `/api/v1/attempts/${encodeURIComponent(attemptId)}` as const;
     try {
-      const [resources, producerResult] = await Promise.all([
+      const [resources, producerResult, passageDetail] = await Promise.all([
         requestJson<AttemptResources>(`${base}/resources`),
         deliveryId ? requestJson<ProducerResult>(`/api/v1/deliveries/${encodeURIComponent(deliveryId)}/producer-result`).catch(() => null) : Promise.resolve(null),
+        requestJson<AttemptDetail>(`${base}?section=passages&limit=100`),
       ]);
       if (!isCurrent()) return;
       setLoadedIdentity(snapshotIdentity);
-      setState(current => ({ ...current, resources, producerResult, error: null }));
+      const passages = (passageDetail.details?.items ?? []).filter((item): item is Static<typeof HttpPassageSummary> => 'tracking' in item && 'role' in item && 'id' in item);
+      setState(current => ({ ...current, passages, resources, producerResult, error: null }));
       const plans: Snapshot['plans'] = {};
       const folders: Snapshot['folders'] = {};
       const interactions: Snapshot['interactions'] = {};
@@ -63,10 +68,11 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
     } catch (reason: unknown) {
       if (isCurrent()) setState(current => ({ ...current, error: messageFor(reason) }));
     }
-  }, [attemptId, deliveryId]);
+  }, [attemptId, deliveryId, selection, snapshotIdentity]);
 
   useEffect(() => {
     active.current = true;
+    setState(current => current.identity === snapshotIdentity ? current : { ...emptySnapshot(), identity: snapshotIdentity, operation: null, busy: false, actionErrors: {}, copied: null });
     void refresh();
     const timer = window.setInterval(() => { void refresh(); }, 10_000);
     return () => { active.current = false; refreshSequence.current += 1; window.clearInterval(timer); };
@@ -81,12 +87,12 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
     const poll = async (): Promise<void> => {
       try {
         const view = await requestJson<OperationView>(`/api/v1/operations/${encodeURIComponent(operationId)}`);
-        if (!mounted) return;
+        if (!mounted || selectionRef.current !== selection) return;
         setState(current => current.operation?.id === operationId ? { ...current, operation: { ...current.operation, view, uncertain: view.state === 'unknown' } } : current);
         await refresh();
         if (view.state === 'accepted' || view.state === 'running' || view.state === 'unknown') schedule();
       } catch {
-        if (mounted) setState(current => current.operation?.id === operationId ? { ...current, operation: { ...current.operation, uncertain: true } } : current);
+        if (mounted && selectionRef.current === selection) setState(current => current.operation?.id === operationId ? { ...current, operation: { ...current.operation, uncertain: true } } : current);
         schedule();
       }
     };
@@ -101,6 +107,7 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
     setState(current => ({ ...current, busy: true, operation: null }));
     try {
       const { data } = await requestJsonWithMetadata<OperationAccepted>(path, { method: 'POST', headers: { ...headers, 'Idempotency-Key': id }, body: JSON.stringify(body) });
+      if (!active.current || selectionRef.current !== selection) return;
       if (data.operation_id !== id) throw new Error('O recibo não corresponde à operação solicitada.');
       setState(current => {
         const actionErrors = { ...current.actionErrors };
@@ -109,6 +116,7 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
       });
       void refresh();
     } catch (reason: unknown) {
+      if (!active.current || selectionRef.current !== selection) return;
       const error = reason instanceof HttpError && reason.status < 500 ? messageFor(reason) : null;
       if (error) commandIds.current.delete(key);
       setState(current => ({ ...current, busy: false, actionErrors: { ...current.actionErrors, [key]: messageFor(reason) }, operation: error ? current.operation : { kind, id, accepted: null, view: null, uncertain: true } }));
@@ -144,15 +152,17 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
   const copyReference = useCallback(async (key: string, reference: string): Promise<void> => {
     try {
       await navigator.clipboard.writeText(reference);
+      if (!active.current || selectionRef.current !== selection) return;
       setState(current => {
         const actionErrors = { ...current.actionErrors };
         delete actionErrors[`copy:${key}`];
         return { ...current, copied: key, actionErrors };
       });
     } catch {
+      if (!active.current || selectionRef.current !== selection) return;
       setState(current => ({ ...current, copied: null, actionErrors: { ...current.actionErrors, [`copy:${key}`]: 'A cópia foi recusada pelo navegador. Selecione a referência exibida e copie manualmente.' } }));
     }
-  }, []);
+  }, [selection]);
 
   const cancelStatus = state.operation?.kind === 'cancel'
     ? state.operation.view?.state === 'failed' ? 'failed'
@@ -161,5 +171,5 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
         : state.operation.accepted ? 'accepted' : 'uncertain'
     : null;
 
-  return { ...state, ...(loadedIdentity === snapshotIdentity ? {} : emptySnapshot()), refresh, cancel, retryCaptureFor, requestRemoval, openFolder, openTerminal, copyReference, cancelStatus };
+  return { ...state, ...(state.identity === snapshotIdentity ? {} : { operation: null, busy: false, actionErrors: {}, copied: null }), ...(loadedIdentity === snapshotIdentity ? {} : emptySnapshot()), refresh, cancel, retryCaptureFor, requestRemoval, openFolder, openTerminal, copyReference, cancelStatus: state.identity === snapshotIdentity ? cancelStatus : null };
 }

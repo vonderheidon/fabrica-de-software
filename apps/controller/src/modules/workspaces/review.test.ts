@@ -31,7 +31,8 @@ async function fixture() {
     if (args.includes('hash-object')) {
       expect(args).not.toContain('-w');
       if (afterHash) { const action = afterHash; afterHash = undefined; await action(); }
-      return { exitCode: 0, stdout: createHash('sha1').update(input!.input!).digest('hex') };
+      const bytes = Buffer.from(input!.input!);
+      return { exitCode: 0, stdout: createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex') };
     }
     return f.run(cwd, args, input);
   };

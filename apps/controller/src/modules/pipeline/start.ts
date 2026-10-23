@@ -34,9 +34,15 @@ type ExecutionCatalogResult = Awaited<ReturnType<Execution['getCatalog']>>;
 
 function validateSavedProfile(
   role: 'implementer' | 'reviewer',
-  value: ExecutionProfileValue,
+  value: ExecutionProfileValue & { composition_version?: number | null },
   catalog: ExecutionCatalogResult | null,
 ): void {
+  if (value.composition_version !== 1) {
+    throw new OperationError(409, 'PROFILE_COMPOSITION_REQUIRED', 'The execution profile has no compatible captured instruction composition.', {
+      facts: { profile_role: role, profile_id: value.id ?? null }, affected_requirements: ['RF-36', 'RF-37', 'RF-38'],
+      recovery: 'Edit and save the profile instructions within the existing 8,192-character limit, then refresh the preparation.',
+    });
+  }
   if (!catalog || catalog.state !== 'loaded') return;
   const available = catalog.models.find((model) => model.provider === value.provider && model.model === value.model);
   const effortIsValid = available !== undefined && (available.efforts.length === 0
@@ -243,7 +249,29 @@ export function createPipeline(deps: PipelineDependencies) {
       if (!workspaces.materializeReview) throw new CaptureError('REVIEW_MATERIALIZATION_UNAVAILABLE');
       const delivery = storage.getDelivery(deliveryId).delivery;
       const capture = storage.getAttemptCapture(delivery.attemptId);
+      const previousRound = storage.getRounds(delivery.attemptId).entries.find(r => r.round === delivery.round - 1);
+      const previousReview = previousRound?.deliveryId ? storage.getReview(previousRound.deliveryId) : null;
+      if (delivery.round > 1) {
+        if (!previousReview || previousReview.state === 'pending') throw new ExecutionError('TRACKING_LOST');
+      }
       const cwd = await workspaces.materializeReview(delivery, claimed.id);
+      let previousDiff: Awaited<ReturnType<NonNullable<typeof workspaces.getDeliveryDiff>>>['entries'] | null = null;
+      if (previousRound?.deliveryId) {
+        if (!workspaces.getDeliveryDiff) throw new CaptureError('CONTEXT_UNAVAILABLE');
+        const previous = storage.getDelivery(previousRound.deliveryId).delivery;
+        previousDiff = [];
+        let cursor: string | undefined;
+        const cursors = new Set<string>();
+        do {
+          const page = await workspaces.getDeliveryDiff(delivery, { limit: '100', ...(cursor ? { cursor } : {}) }, previous);
+          previousDiff.push(...page.entries);
+          if (Buffer.byteLength(JSON.stringify(previousDiff), 'utf8') > 524_288) throw new ExecutionError('RESOURCE_INVALID');
+          cursor = page.nextCursor ?? undefined;
+          if (page.hasMore && !cursor) throw new ExecutionError('RESOURCE_INVALID');
+          if (cursor && cursors.has(cursor)) throw new ExecutionError('RESOURCE_INVALID');
+          if (cursor) cursors.add(cursor);
+        } while (cursor);
+      }
       storage.recordReviewWorkspace(deliveryId, true, null);
       const launch = async (): Promise<void> => {
         if (publication && !await authorityReady(publication.observeAuthority(delivery.attemptId,'inReview'))) {
@@ -255,14 +283,17 @@ export function createPipeline(deps: PipelineDependencies) {
         const reviewer = capture.configuration.reviewer_profile; if (!reviewer) throw new ExecutionError('RESOURCE_INVALID');
         const findings = storage.getOpenFindings(delivery.attemptId, delivery.round);
         // Only structured scope, criteria, version, checks and findings. No implementer conversation.
-        await execution.startPassage({ binding: passage.binding, cwd, profile: profile(reviewer), criterionIds: capture.criteria.map(c => c.id),
+        const request: PassageRequest = { binding: passage.binding, cwd, profile: profile(reviewer), criterionIds: capture.criteria.map(c => c.id),
           previousFindingKeys: findings.map(f => f.id), previousBlockingFindingKeys: findings.filter(f => f.blocking).map(f => f.id), gitNexusRequired: false, roleResource: passage.roleResource,
           task: JSON.stringify({ formatVersion: 1, issue: { id: capture.issue.id, title: capture.issue.title, body: capture.issue.body },
             criteria: capture.criteria, delivery, verification: storage.getDelivery(deliveryId).verification,
             checks: storage.getCheckHistory(deliveryId, { limit: '100' }).entries.filter(c => c.verificationId === claimed.verificationId),
-            findings, guidance: capture.configuration.guidance, profileGuidance: reviewer.guidance,
-            evidenceDirectory: '.factory-evidence/',
-            authority: 'Review this immutable version independently. Never change product content. Save screenshots and review reports only in .factory-evidence/ inside this checkout, already ignored locally by Git. Never modify tracked files for evidence or use evidence files as product code. Resolve each prior finding using findingKey equal to its supplied id. A rejection needs concrete criterion evidence or an actionable blocking finding.' }) }, signalFor(delivery.attemptId));
+            findings, producerResult: storage.getProducerResult(deliveryId), previousDelivery: previousRound?.deliveryId ?? null, previousDiff,
+            guidance: capture.configuration.guidance,
+            evidenceDirectory: `.factory-evidence/${claimed.id}/`,
+            authority: 'Review this captured version independently in the single attempt checkout while the Implementer is stopped. Never change product content or publish. Conversation and earlier evidence are historical, never the current version. Save screenshots and reports only in the supplied evidenceDirectory, ignored locally by Git. Never overwrite earlier evidence, modify tracked files for evidence or use evidence as product code. Resolve each prior finding using findingKey equal to its supplied id. A rejection needs concrete criterion evidence or an actionable blocking finding.' }) };
+        if (previousReview) await execution.continuePassage({ passageId: previousReview.passageId }, request);
+        else await execution.startPassage(request, signalFor(delivery.attemptId));
       };
       await launch();
     } catch (error) {
@@ -290,6 +321,7 @@ export function createPipeline(deps: PipelineDependencies) {
   async function launchCorrection(plan: NonNullable<ReturnType<Storage['beginCorrection']>>): Promise<void> {
     const deliveryId = plan.review.deliveryId;
     try {
+      await execution.preparePassageHandoff({ passageId: plan.review.passageId });
       if (publication && !await authorityReady(publication.projectStage(plan.review.attemptId, 'inProgress'))) {
         waitingForAuthority.set(plan.review.attemptId,() => launchCorrection(plan)); return;
       }
@@ -345,6 +377,10 @@ export function createPipeline(deps: PipelineDependencies) {
         else await correct(binding.deliveryVersion);
         return;
       }
+      try { await execution.preparePassageHandoff({ passageId: binding.passageId }); }
+      catch (error) {
+        storage.recordDispatchFailure(binding.attemptId, error instanceof ExecutionError ? error.code : 'CAPTURE_HANDOFF_FAILED'); throw error;
+      }
       const claim = storage.beginCapture(binding.deliveryVersion); if (claim) await capture(claim);
     });
   });
@@ -374,7 +410,7 @@ export function createPipeline(deps: PipelineDependencies) {
         criterionIds: capture.criteria.map(c => c.id), previousFindingKeys: [], gitNexusRequired: false, roleResource: passage.roleResource,
         task: JSON.stringify({ formatVersion: 1, issue: { id: capture.issue.id, title: capture.issue.title, url: capture.issue.url },
           objective: capture.issue.body, criteria: capture.criteria, baseSha: capture.baseSha,
-          guidance: capture.configuration.guidance, profileGuidance: implementer.guidance, checks: capture.configuration.configuration.checks,
+          guidance: capture.configuration.guidance, checks: capture.configuration.configuration.checks,
           deliveryMode: capture.configuration.configuration.default_delivery_mode,
           authority: 'Implement in the owned checkout. Stop all owned product writers before execution_complete. Publication is performed only by the controller.' }) };
       await execution.startPassage(request, signalFor(id));

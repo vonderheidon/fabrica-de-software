@@ -3056,3 +3056,604 @@ Sprint-007 executada e pacote entregue ao checkpoint do usuário. Provas control
 
 ## Sprint 008 - Consolidar evidências e pendências da versão entregue [CONCLUIDA]
 - Comprovação final e registro dos limites: Consolidar evidências produzidas por superfície e conferir completude e limites, sem acumular novamente suas execuções.
+
+## Sprint — Fundação incremental, compatibilidade e continuidade dos Coders [DOCUMENTAÇÃO E BASE VALIDADA LOCALMENTE; ATIVAÇÃO V3 PENDENTE]
+
+Data: 2026-10-23. Trabalho documental no repositório canônico. Nenhuma migration, contrato HTTP, comportamento de sessão, caminho operacional ou schema foi alterado; não houve movimentação de diretórios, início de pipeline, provider ou efeito externo.
+
+### Fontes atuais, precedência e conflitos registrados
+
+- Referência técnica desta execução: `docs/Docs20261023_014848/SPEC20261023_014848.md`, também presente como `SPEC.md` na raiz. As fontes de produto aprovadas identificadas pela SPEC são `docs/Docs20261023_014848/PRD20261023_014848.md` e `docs/Docs20261023_014848/stories-requisitos20261023_014848.md`. Conforme a precedência expressa na SPEC e as instruções desta sprint, PRD governa produto/escopo e stories governam comportamento/aceite. `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md`, `AGENTS.md` e o código/configuração atuais definem termos, contrato vigente e limites de implementação. `FEEDBACK-PROXIMO-PACOTE-V3.md` não é fonte concorrente.
+- Conflito de existência: o preâmbulo das stories e a seção 1 da SPEC datada dizem que `SPEC.md` não existe/que sua ausência continua explícita, mas agora há um `SPEC.md` na raiz e ele contém a SPEC V3. O conflito foi registrado, sem escolher especificação histórica substituta ou reconstruir AC ausentes. A raiz e o artefato datado têm conteúdo correspondente; o artefato datado é a referência indicada para esta sprint.
+- Conflito de precedência: a seção 1 da SPEC estabelece PRD → produto/escopo e stories → comportamento/aceite; o preâmbulo das stories ainda chama o discovery de fonte canônica e lhe dá precedência sobre o feedback. Para esta execução vale a precedência explícita da SPEC, conforme instrução recebida. A confirmação do discovery continua pendente segundo os documentos e não é declarada por este registro.
+- Conflito de sessão: `INTEGRACAO-MAESTRI-OMP.md` §2 e INT-03/06 preservam sessão e resultados por papel/passagem; US-09/US-10 e RF-41–47 do V3 pedem sessão contínua por papel/tentativa e sessões novas entre tentativas. A proposta rastreável está na seção 10 do contrato de integração. Decisão documental explícita ainda pendente; não ativar nem inferir aprovação a partir deste plano.
+- Referências históricas de seções de SPEC em registros anteriores apontam a várias SPECs datadas e a estruturas que não necessariamente existem nesta SPEC. Permanecem como histórico das respectivas rodadas e não são usadas como contrato atual. Nenhum AC/INT é criado a partir dessas referências.
+
+### Base executável observada
+
+`package.json` configura estes scripts: `typecheck`, `lint`, `test`, `build`, `test:compiled`, `test:http`, `test:execution-compiled`, `test:verification-compiled`, `test:acceptance`, `test:persistence`, `proof:persistence`, `test:maintenance-native`, `test:deletion-persistence`, `test:deletion-native`, `acceptance:check`, `package:local`, `test:distribution`, `test:browser:deletion` e `start`. Os quatro checks-base executados correspondem a `npm.cmd run typecheck` (`tsc -p tsconfig.check.json --noEmit`), `npm.cmd run lint` (`node scripts/check-boundaries.mjs`), `npm.cmd test` (`vitest run`) e `npm.cmd run build` (`tsc -p tsconfig.json && vite build && node scripts/copy-resources.mjs`). A presença dos demais scripts não significa que foram executados nesta sprint. A última migration numerada em `apps/controller/src/modules/storage/migrations.ts` é `027_event_context.sql`, versão 27; não foi criada migration V3 nesta fundação.
+
+| Validação desta sprint | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript aprovadas. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; 1.663 testes aprovados, zero falhas, em 131 arquivos. |
+| `npm.cmd run build` | Exit 0; TypeScript, Vite e cópia dos recursos concluídos. Bundle JS: 1.016,68 kB (gzip 255,84 kB), acima do aviso configurado de 500 kB; sem mudança de escopo para otimização. |
+
+Esses checks cobrem a base executável controlada do checkout; não comprovam integração real Maestri/OMP/GitHub, migração futura, UI renderizada ou aceite integral AC/INT. Não havia falha preexistente reproduzível nesses quatro comandos nesta execução. Falhas históricas descritas em seções anteriores permanecem preservadas como evidência de suas versões e não foram reclassificadas.
+
+### Proposta de sessões e transição de diretórios
+
+- `INTEGRACAO-MAESTRI-OMP.md` seção 10 registra a proposta compatível de `attempt_session` por `(attempt_id, role)`, vínculo das passagens, continuidade nas correções/revisões, separação do terminal físico, leitura cautelosa de legados, migration aditiva futura e retomada sem restauração de conversa. Preserva INT atuais e vincula rastreabilidade a US-09/10 e RF-41–47. Nenhuma decisão foi simulada e nenhuma ativação ocorreu.
+- A mesma seção documenta transição antes de movimento: identidade por `project_id`/chave de localização/layout; banco e recursos compartilhados globais; pasta original preservada; leitores legados; bloqueio de ambientes/efeitos em uso ou incertos; plano/diário persistente anterior ao IO; verificação de origem/destino; recuperação pelos dois caminhos; referências de retenção/publicação; exclusão separada e inventário atualizado por sprint que introduza dados exclusivos. Não houve criação de tabela, plano operacional, cópia ou movimento.
+- Compatibilidade e evolução futuras devem manter API pública dos módulos (`Storage`, `Execution`, `Workspaces`, contratos `#contracts`), SQL privado em storage e fronteiras atuais. Persistência nova usa migrations numeradas aditivas; não editar migrations aplicadas, backfill inventado ou alterar JSON/resultados/recibos históricos. Toda família de dados exclusiva acrescentada por sprint deve ser incorporada ao inventário, às barreiras e à finalização de exclusão de projeto naquela sprint.
+
+### Contrato transversal para os próximos Coders
+
+1. Trabalhar no repositório canônico e preservar alterações preexistentes; consultar fontes atuais pertinentes antes de editar. Não criar checkout/floor concorrente.
+2. Git permanece somente leitura, salvo autorização explícita aplicável. Não executar commit, push, stage, reset, rebase, merge, force ou limpeza. Não iniciar pipeline, provider ou efeito externo sem autorização e alvo correspondentes.
+3. Respeitar interfaces públicas (`Storage`, `Execution`, `Workspaces`, `OperationAccepted`, `OperationView` e contratos compartilhados); manter SQL em storage e integrações em seus módulos donos. Implementação strict em TypeScript, sem `any` ou supressões.
+4. Persistência nova exige migration numerada aditiva, teste de upgrade preservador e leitura dos formatos históricos necessários. Nunca reescrever migrations aplicadas nem converter silenciosamente capturas, decisões, resultados, recibos ou identidades imutáveis.
+5. Identificar propriedade e referências dos dados exclusivos antes de introduzir persistência; atualizar inventário, bloqueios e finalização de exclusão na mesma sprint. Recursos compartilhados e pasta original permanecem preservados.
+6. Validar pelos comandos efetivamente configurados e registrar resultado/código de saída. Separar testes controlados, UI observada, Windows/Git local e integrações reais. Falha, interrupção, suite parcial ou build não equivalem a sucesso das outras superfícies.
+7. `use_playwright=false` significa que a prova visual não foi executada automaticamente; não dispensa INT-11 nem substitui o registro do aceite visual quando pertinente. Se Playwright/Chrome não estiver disponível ou autorizado, marcar a prova pendente.
+8. Registrar cada sprint com caminhos e interfaces realmente entregues, critérios atendidos, evidência por superfície e pendências. Atualizar este inventário de continuidade nas sprints seguintes sem sobrescrever resultados anteriores.
+
+Esta sprint não alterou frontend e não executou Playwright/Chrome, GitHub real, Maestri/OMP, provider, scaffold ou publicação. Sessões V3, transição física, migrations e aceites externos continuam pendentes. A sprint documental está concluída localmente; aprovação de pipeline, Design Lock ou mudança de fase não são declarados.
+
+### Critérios desta sprint
+
+- **Compatibilidade normativa/técnica:** fontes atuais, precedência, inconsistências, scripts realmente configurados e migration 027 registrados; referências antigas de seções são mantidas como histórico, sem tratá-las como contrato atual.
+- **Compatibilidade de sessão:** proposta por papel/tentativa rastreada a US-09/US-10 e RF-41–47 em `INTEGRACAO-MAESTRI-OMP.md` §10; ativação aguarda decisão documental explícita.
+- **Transição dos diretórios:** estratégia pré-movimento documentada para resolução legada, identidade, ambientes ativos/incertos, recuperação, retenção, publicação, exclusão e migrations futuras; nenhum dado foi movido.
+- **Contrato dos Coders/base:** regras transversais e limites de prova registrados nesta seção; typecheck, lint, suite completa e build executados. A prova visual segue pendente quando não executada; `use_playwright=false` não dispensa INT-11.
+
+## Sprint 001 - Fundação incremental, compatibilidade e continuidade dos Coders [CONCLUIDA]
+- Compatibilidade normativa e técnica da evolução: Conferir a base atual e registrar as condições documentais e técnicas obrigatórias antes da ativação dos fluxos V3.
+- Contrato transversal de implementação e passagem de contexto: Disponibilizar o registro consumido pelos Coders seguintes e a validação da fundação existente.
+
+## Sprint — Identidade e leitura das localizações gerenciadas [IMPLEMENTADA; VALIDAÇÃO LOCAL CONCLUÍDA]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`; SPEC V3 `docs/Docs20261023_014848/SPEC20261023_014848.md` (espelho `SPEC.md`), PRD, stories, `GLOSSARY.md` e `INTEGRACAO-MAESTRI-OMP.md`, incluindo a estratégia de transição pré-movimento. Escopo restrito à identidade, registro/leitura compatível e proteção da propriedade da nova família de dados. Não houve alocação integrada de novos recursos, adaptação transversal dos consumidores ou movimento de diretórios; esses itens pertencem à sprint-003 indicada no plano.
+
+### Entregáveis
+
+- Migration aditiva `028_project_storage_locations.sql`; schema passa a 28. `project_storage_locations` armazena projeto, chave estável, versão do layout, raiz relativa à instalação, identidade JSON v1 de volume/objeto/ancestrais, revisão, estado corrente e timestamps verificados. Índices garantem uma localização corrente por projeto/chave, caminho corrente exclusivo e identidade física corrente exclusiva. Triggers mantêm identidade histórica, monotonicidade da revisão e exclusão somente pela finalização autorizada do projeto.
+- Não há backfill: migration 27→28 cria a tabela vazia. Referências históricas não fabricam localização observada nem alteram `deliveries.repository_relative` ou capturas existentes.
+- `Storage` expõe `recordProjectStorageLocation`, `getProjectStorageLocations` e `getProjectStorageView`. O registro exige observação tipada, caminho canônico `var/factory/projects/<project_id>/v<layout>/<location_key>`, chave estável e identidade verificada; recusa identidade/caminho compartilhados e substituição corrente sem transição verificada. A raiz é derivada do ID do projeto, não do nome.
+- `Workspaces`/`createWorkspaces` expõe `projectStorageRootRelative`, inspeção de uma raiz existente e resolutores separados para referências novas relativas ao projeto e o `repository_relative` legado (`git/<attempt_id>.git`). A inspeção não cria, move ou adota diretórios; rejeita path/identidade inválidos e mudanças durante a observação. Leitura legada resolve sob a raiz operacional atual sem registrar uma localização.
+- `ProjectStorageLocation` e `ProjectStorageView` foram acrescentados a `#contracts`. Sem wiring HTTP/UI nesta fatia. O estado `legacy` retorna `managed_root:null` e lista vazia quando nenhuma raiz verificada existe.
+- A nova tabela foi incluída no inventário relacional, nos alvos/proteções de caminhos gerenciados e na ordem de finalização da exclusão de projeto. As barreiras mantêm raízes de outros projetos protegidas; o projeto dono elimina os registros somente após a conferência e autorização existentes.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict do controlador, contratos, web, testes e scripts. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript aprovadas. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **1.668 testes aprovados em 132 arquivos**. |
+| Testes direcionados de localizações/exclusão | Exit 0; **11 testes em 2 arquivos**, incluindo migration 27→28, mesmo nome, rename, escape/identidade compartilhada, transição, leitura legado e inventário de exclusão. |
+| `npm.cmd run build` | Exit 0; controlador, migration 028, recursos e web compilados/distribuídos. Bundle JS 1.018,13 kB (gzip 256,14 kB), acima do aviso configurado de 500 kB. |
+| `git diff --check` | Exit 0, sem erros de whitespace. |
+
+As provas de nome igual e rename usam SQLite/filesystem temporários e demonstram resolução determinística pelo `project_id`; não equivalem a alocação de consumidor em produção. A prova do formato `HttpDelivery` confirma que a referência histórica repository-relative continua aceita; a migração não reescreve entregas. A cobertura não declara Git real, transição física, aceite visual, integração Maestri/OMP/GitHub, nem conclusão total de RF-64–66. Nenhuma aprovação, mudança de fase, commit ou push foi realizado.
+
+Após incluir as localizações verificadas e suas proteções na identidade do plano de exclusão, `typecheck`, `lint` e `build` passaram novamente; os três arquivos direcionados de localização/caminhos/finalização passaram com **20 testes**. A suíte integral de **1.668 testes/132 arquivos** passou imediatamente antes desse ajuste final.
+
+## Sprint 002 - Identidade e leitura das localizações gerenciadas [CONCLUIDA]
+- Identidade e leitura das localizações: Disponibilizar localizações de projeto compatíveis com referências novas e legadas.
+
+## Sprint 003 - Alocação gerenciada e adaptação dos consumidores [CONCLUÍDA LOCALMENTE]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`, `SPEC.md` V3, PRD, stories, `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md` e o registro de transição pré-movimento. O escopo foi US-15.C1–C3/RF-64–66: alocar recursos exclusivos de novas tentativas e adaptar seus consumidores. Nenhum dado legado foi movido; sessão V3, migration de transição e aceites externos continuam nas fases próprias.
+
+### Implementação
+
+- `Storage` agora fornece a relação tentativa→projeto e a referência original do ambiente, consulta da localização corrente e verificação somente leitura da identidade física já registrada. Saves de nova tentativa persistem, junto da intenção durável, a referência relativa `projects/<project_id>/v1/managed/work/<attempt_id>/implementation`.
+- `Workspaces.resolveAttemptRoot` distingue a referência nova da referência histórica `work/<attempt_id>/implementation`. Para uma referência nova, cria e inspeciona `var/factory/projects/<project_id>/v1/managed`, registra sua identidade na tabela 028 e a confere ao reutilizá-la. A criação ocorre após a intenção SQLite da tentativa e antes do clone; falhas mantêm a tentativa consultável. Nome do projeto não participa do caminho.
+- Git interno retido, implementação, checks, revisão e publicação são alocados sob a raiz do projeto, mantendo separação por tentativa/ID de check ou revisão/operation ID de publicação. Bootstrap Maestri/OMP, logs de check e abertura/recuperação da implementação usam o mesmo resolvedor. Retenção, diff, validação do Revisor, publicação local/remota e consulta/abertura de recursos resolvem pelo ID da tentativa.
+- `repository_relative` mantém a representação histórica validada pelas entregas; `resolveRepositoryReference` resolve esse identificador para o armazenamento efetivo da tentativa, global para legado e sob a localização corrente para tentativas novas. Referências de recursos também aceitam os dois formatos em leitura e exclusão.
+- Inventário e exclusão incluem as raízes gerenciadas do projeto e protegem raízes de outros projetos, recursos legados e referências globais antigas. Bootstrap dentro da raiz gerenciada é coberto pelo destino da raiz. A pasta original, banco SQLite, papéis, templates e demais recursos compartilhados permanecem nos destinos globais/originais.
+- Nenhuma migration foi acrescentada nesta sprint; schema permanece 28. Nenhum checkout, índice, cache, conteúdo de projeto ou arquivo legado foi copiado para SQLite/JSON auxiliar ou movido. Teste novo em `project-storage-locations.test.ts` comprova alocação, persistência da identidade e resolução independente de referência nova e legada.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções. |
+| Testes direcionados de localizações, exclusão e consumidores de workspace | Exit 0; 69 testes em 8 arquivos; a regressão final de exclusão/localizações passou com 29 testes em 2 arquivos. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **1.669 testes em 132 arquivos**, após a correção de compatibilidade das referências de exclusão. |
+| `npm.cmd run build` | Exit 0; controlador, recursos e web compilados/distribuídos. Bundle JS 1.018,06 kB (gzip 256,12 kB), acima do aviso configurado de 500 kB. |
+| `git diff --check` | Exit 0 no fechamento, incluindo a última proteção de caminho e este registro. |
+
+A suíte executa Git/OMP por adapters controlados e SQLite/filesystem locais; não houve Git/GitHub real, provider, TUI Maestri/OMP ou navegador. Esses limites não são promovidos como prova integrada. Nenhuma publicação externa, movimento legado, instalação operacional, commit/push, aprovação ou mudança de fase foi realizada.
+
+## Sprint 003 - Alocação gerenciada e adaptação dos consumidores [CONCLUÍDA]
+- Alocação pós-intenção e isolamento por projeto: Registrar a localização estável antes do primeiro checkout e organizar recursos exclusivos sob ela.
+- Consumidores novos e legados: Resolver por tentativa criação, leitura, captura, checks, revisão, recuperação, retenção, publicação, abertura e exclusão sem mover dados anteriores.
+- Persistência limitada e recursos compartilhados: Manter banco/recursos globais, pasta original e conteúdo Git sem cópias auxiliares.
+
+## Sprint 003 - Alocação gerenciada e adaptação dos consumidores [CONCLUIDA]
+- Alocação integrada sob a raiz do projeto: Agrupar os novos recursos gerenciados exclusivos mantendo suas identidades de execução.
+
+## Sprint — Transição retomável dos diretórios legados [IMPLEMENTADA; PROVA GIT ESPECÍFICA PENDENTE]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`, `SPEC.md` V3, PRD, stories, `GLOSSARY.md` e `INTEGRACAO-MAESTRI-OMP.md` §10. Escopo: US-15.C4, RF-67–68 e RNF-18. Trabalho no repositório canônico; migrations anteriores preservadas. Nenhum comando Git de escrita, provider, Maestri/OMP, publicação ou dado operacional foi usado.
+
+### Implementação
+
+- Migration aditiva `029_project_storage_transitions.sql`; schema atual 29. `project_storage_transitions` guarda vínculo da operação, projeto/chave, origem e destino relativos autorizados, identidade v1 da origem, identidade verificada do destino, hash do plano, etapa, estado, revisão, geração e causa sanitizada. Índice parcial impede duas transições ativas por projeto. Migrations 001–028 não foram editadas e não há backfill ou IO de filesystem na migration.
+- `Storage` expõe leitura, aceitação, avanço, claim de geração, conclusão e interrupção do diário. Intenção, recibo e evento são gravados antes do movimento. O source/destination e a revisão são revalidados na aceitação; a conclusão troca o ponteiro corrente e insere a localização verificada na mesma transação, somente depois da conferência física do destino. `GET /operations/:operationId` projeta `progress.step/state/generation/revision`, além do estado/recibo comum.
+- `ConfigurationView.storage` retorna localizações, estado atual/incerto e `transition_plan` com destino derivado do layout corrente, hash e capacidade. `POST /api/v1/projects/:projectId/storage-transition` (`V08`) aceita exclusivamente `location_key`, `source_location_id`, `plan_hash` e `authorized:true`, com sessão/CSRF, Idempotency-Key e If-Match. Destino e identidade nunca vêm do cliente. A mesma chave retoma a operação; corpo divergente conflita.
+- `Workspaces` move a raiz gerenciada para o próximo layout da mesma instalação por rename do diretório, sem percorrer seu conteúdo nem seguir links internos. Valida a identidade da raiz e ancestrais, cria/conferencia o pai de destino e reconfere a origem imediatamente antes do rename. Resume examina os estados origem-presente/destino-ausente e origem-ausente/destino-presente; ambos presentes, ambos ausentes, acesso negado ou identidade divergente ficam incertos e preservam os caminhos existentes. Sem cópia recursiva de fallback.
+- Claims incrementam geração; somente a geração corrente pode atualizar etapa ou publicar a localização. Startup muda operações `planned/running` para `uncertain` e incrementa a geração. Barreiras SQL e `assertProjectAvailable` bloqueiam novos inícios, saves de configuração/preparação, fila, publicação e exclusão enquanto a transição estiver ativa/incerta/bloqueada. A exclusão inventaria as localizações históricas e os alvos de origem/destino, sem duplicar caminhos já registrados; a alteração de inventário invalida previews anteriores.
+- Leitores mantêm referências históricas de tentativa e resolvem a raiz pelo `project_id` e localização corrente, portanto o layout atualizado segue sendo usado por recuperação, retenção, artifacts, checks/revisão e publicação. A pasta original do operador e recursos compartilhados globais não são movidos.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **1.675 testes em 133 arquivos**, sem falhas. |
+| Testes focados de transição/localizações/finalização | Exit 0; 24 testes em 3 arquivos; repetição final após a última proteção de identidade: 5 testes de transição aprovados. |
+| `npm.cmd run build` | Exit 0; controlador, migration 029, recursos e web compilados/distribuídos. O bundle JS tem 1.018,50 kB gzip 256,16 kB e mantém o aviso Vite acima de 500 kB. |
+| `npm.cmd run test:compiled` | Exit 0; smoke HTTP/SSE/SQLite, shutdown e lock entre processos; preflight Maestri/OMP controlado. |
+| `git diff --check` | Exit 0, sem erros de whitespace. |
+
+Os testes de transição usam filesystem Windows real no `.cache` do workspace: rename e conteúdo da raiz foram conferidos, resposta perdida após o rename retomada depois de reabrir Storage, ausência de localização corrente até verificação, conflito com as duas cópias preservando ambas, substituição de identidade recusada, bloqueio de projeto em uso, progresso/geração, atualização do inventário de exclusão e migration 28→29 sem inventar transições. A suíte controlada não contém um repositório Git operacional submetido à transição; nenhum Git real foi executado por causa da restrição de somente leitura. Também não houve UI/Playwright, GitHub ou Maestri/OMP real. Esses pontos permanecem sem prova e não são declarados como integração externa aceita. Nenhum commit/push, aprovação ou mudança de fase foi realizado.
+
+## Sprint — Transição retomável dos diretórios legados [CONCLUÍDA LOCALMENTE]
+- Plano e comando V08: Expor o plano vigente e aceitar somente sua localização/origem/hash confirmados.
+- Reconciliação e fencing: Preservar origens/destinos incertos, retomar após reopen e impedir publicação por geração antiga.
+- Continuidade e exclusão: Resolver localizações atuais/históricas e incorporar ambos os destinos ao inventário de exclusão.
+
+## Sprint 004 - Transição retomável dos diretórios legados [CONCLUIDA]
+- Plano e operação de transição: Disponibilizar plano verificável e comando de transição por projeto.
+- Reconciliação e continuidade após interrupção: Preservar a operação e o único exemplar válido durante falhas e reinícios.
+
+## Sprint — Inicialização acessível e detecção de ferramentas [IMPLEMENTADA; VALIDAÇÃO LOCAL CONCLUÍDA]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`, `SPEC.md` V3, PRD, stories US-01/RF-01–06, RNF-15, `GLOSSARY.md` e `INTEGRACAO-MAESTRI-OMP.md`. Implementação no repositório canônico, preservando o trabalho preexistente. Sem instalação de dependências, Git/GH, provider, login, publicação ou alteração de credenciais/ACL.
+
+### Implementação
+
+- `scripts/start-host.mjs` inicia sem argumentos EXE obrigatórios; as quatro paths antigas continuam opcionais por compatibilidade. A composição Windows fornece o seletor nativo e o contexto de host separado da descoberta. O controlador detecta ferramentas no host atual com argumentos fixos e `shell:false`; caminhos com espaços/Unicode são preservados.
+- `modules/tools/index.ts` valida candidatos Git, Maestri, OMP, PowerShell e GH CLI por existência, tipo, leitura e comando de versão. PATH/GH_PATH e preferências são limitados e deduplicados; candidato único é selecionado automaticamente, caminho preferido válido resolve ambiguidade e múltiplas opções sem preferência ficam `ambiguous`. Saídas do processo são limitadas à primeira linha de versão; erros/diagnósticos não incluem stderr, ambiente ou credenciais.
+- A inicialização não aguarda conexão Maestri/OMP para servir configuração. Um host context de execução é composto somente quando há executáveis selecionados; a disponibilidade é verificada separadamente por `GET /api/v1/settings/tool-options`. Ações dependentes continuam condicionadas a seus adapters/preflight. Encontrar `maestri.exe` não confirma conexão; capacidades de host/keyring não são produzidas por HTTP.
+- `GET /api/v1/settings/tool-options` retorna candidatos revalidados, estado disponível/indisponível/ambíguo e conexão Maestri em campo separado. O caminho GH usa somente `gh_executable_path`; autenticação/contas continuam no endpoint GitHub existente.
+- Migration aditiva `030_tool_preferences.sql`; schema passa a 30. `factory_settings.tool_preferences_json` guarda versão, caminhos preferidos e timestamps de validação de Git/Maestri/OMP/PowerShell, sem credenciais e sem duplicar GH. A gravação usa o comando isolado de settings, revalida somente caminhos alterados e gera timestamps no servidor. Hash idempotente omite timestamps de observação, e o replay não revalida nem repete IO. No startup, um timestamp só é atualizado quando o caminho salvo coincide com o candidato revalidado; a observação não muda caminho, revisão ou capacidade. Projeções antigas antes da migration 030 leem preferências vazias sem backfill.
+- `NativeSelectionRequest/Result` aceitam os sete kinds (`projects_root`, `project_directory`, `gh_executable`, `git_executable`, `maestri_executable`, `omp_executable`, `powershell_executable`). `cancelled` e `unavailable` preservam o kind e não incluem path; somente `selected` inclui caminho. O picker nativo Windows agora oferece pasta, seletor específico de GH e seleção genérica de EXE com validação do executável correspondente.
+- A resolução GH revalida primeiro o `gh_executable_path` salvo e só depois recorre a PATH/GH_PATH. A mesma preferência persiste para reinícios sem converter ausência ou ambiguidade em capacidade.
+- README/manual documentam inicialização degradada, revalidação, seleção, fonte GH e a separação da conexão nativa.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; código, contratos, cliente, testes e scripts TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções. |
+| `npm.cmd test -- --reporter=json` | Exit 0; **1.687 testes aprovados, zero falhas ou pendências**, em 135 arquivos. |
+| Testes direcionados | Exit 0; **123 testes** de ferramentas, migrations/preferências, seleção nativa, GH resolver, settings, startup e options. |
+| `npm.cmd run build` | Exit 0; controlador, schema 30, recursos, seletor Windows compilado e web. Bundle JS 1.019,45 kB (gzip 256,42 kB), acima do aviso Vite configurado de 500 kB. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite, sessão, CAS/idempotência, shutdown e lock. Preflight de ensaio controlado. |
+| `npm.cmd run test:distribution` | Exit 0; launcher sem paths obrigatórios em pasta distribuída com acentos/espaços, HTTP/assets/SQLite, cwd distintos, lock exclusivo e restart preservando identidade e revogando sessão. Preflight Maestri/OMP controlado. |
+| `git diff --check` | Exit 0, sem erros de whitespace. |
+
+A migration 29→30 preserva instalação, configuração, `gh_executable_path` e ledger; preferências têm defaults nulos e não classificam executáveis antigos. Provas de candidatos usam processos/filesystem controlados; o smoke da distribuição comprova inicialização e API locais, mas não conexão Maestri/OMP real, keyring/GitHub autenticado, execução de provider ou seleção manual interativa. A interface visual do wizard não foi alterada/inspecionada nesta fatia; aceite visual e integração nativa permanecem pendentes. Nenhum commit, push, aprovação ou mudança de fase foi executado.
+
+## Sprint — Inicialização acessível e detecção de ferramentas [CONCLUÍDA LOCALMENTE]
+- Inicialização sem caminhos obrigatórios: Abrir API/configuração e wizard sem exigir executáveis ou conexão Maestri.
+- Observação e preferência revalidável: Detectar/validar cinco ferramentas, persistir preferências sem autoridade e revalidar no reinício.
+- Seleção nativa fechada e estável: Aceitar os sete kinds com `path` somente no resultado `selected`.
+
+## Sprint 005 - Inicialização acessível e detecção de ferramentas [CONCLUIDA]
+- Inicialização sem caminhos obrigatórios: Permitir acessar o controlador e sua configuração em uma instalação limpa ou incompleta.
+- Observação, seleção e revalidação das ferramentas: Detectar as cinco ferramentas e persistir escolhas sem converter preferência em capacidade.
+
+## Sprint — Wizard de ferramentas e correção da instalação [IMPLEMENTADA; VALIDADA LOCALMENTE; ACEITE CHROME REGISTRADO ABAIXO]
+
+Data: 2026-10-23. Fontes: AGENTS.md, SPEC V3/PRD/stories em `docs/Docs20261023_014848`, US-01.C1–C4/RF-01–06, GLOSSARY.md e INTEGRACAO-MAESTRI-OMP.md. Preservados os trabalhos anteriores, o schema 30, os contratos e os endpoints da sprint-005. Nenhuma dependência, migration, escrita Git, chamada de provider ou efeito externo acrescentado.
+
+- `ToolsSetupPanel.tsx` apresenta as cinco ferramentas no wizard e na Configuração global. Valida a observação pelo schema compartilhado, mostra caminhos/versões válidos em resumo e oferece CustomSelect, seletor nativo ou entrada de caminho somente para ausência, ambiguidade ou preferência anterior não confirmada. Uma nova detecção preserva edição, candidatos e falhas de gravação. Maestri localizado, conexão observada e execução OMP são fatos distintos.
+- `useOnboarding.saveTool` usa comandos isolados de settings, ETag, Idempotency-Key e recibo existentes. GH continua exclusivamente em `gh_executable_path`; as outras ferramentas usam `tool_preferences`. Nenhuma outra edição do wizard é incluída. Escolha de candidato não grava e cancelamento/indisponibilidade não apagam caminhos anteriores. Preferências de execução passam a valer na próxima inicialização da composição do host.
+- `InitialSetupDialog` incorpora rascunhos/seleção de ferramentas ao fechamento e descarte já existentes, sem outro modal ou mudança dos passos persistidos. `ProjectForm` reutiliza o painel na Configuração global. Erro mantém o wizard aberto, com causa e ação no painel responsável; ferramenta ausente não impede editar as outras configurações.
+- Nova categoria `tool-preference-save` conserva somente os metadados mínimos da operação incerta em sessionStorage. Request original continua exclusivamente em memória pelo mecanismo existente. Consulta é GET; reapresentação explícita mantém a identidade original e suas restrições. Respostas são descartadas após troca de instalação/conta, revisão de settings, nova consulta ou desmontagem. O hook de save também confere contexto/ciclo de vida antes de aplicar confirmação tardia.
+- `tools-setup.test.ts`: seis provas com React real/happy-dom, hooks e painel/wizard reais; HTTP, detecção, persistência e seletor controlados. Cobrem instalação incompleta, seleção e save com recibo, desmontagem/reabertura com caminho anteriormente válido ausente, cancelamento, seletor indisponível, save recusado sem fechar wizard, ambiguidade, edição durante detecção, conclusão de outro contexto e consulta após resposta perdida sem repetir PUT. Remontagem de React não é reinício físico do controlador.
+
+| Validação | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 na versão final. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções preservadas. |
+| Suíte completa, `.cache/tools-wizard-tests-final.json` | Exit 0; **1.694 aprovados, zero falhas/pendentes, 136 arquivos**. |
+| Última prova direcionada de ferramentas e captura de eventos | Exit 0; oito testes em dois arquivos, incluindo a entrada manual final. |
+| `npm.cmd run build` | Exit 0 na versão final; JS 1.031,57 kB / gzip 258,75 kB. Mantido aviso de bundle acima de 500 kB. |
+| `npm.cmd run test:distribution` | Exit 0; pacote próprio `build/Fábrica distribuição-jD1qNm`, assets/API/SQLite locais, processos com cwd distintos, lock exclusivo e restart com identidade preservada/sessão revogada. Âncora/preflight controlados. |
+| `git diff --check` | Exit 0 antes do registro; reconferido no fechamento. |
+
+A primeira suíte integral registrou 1.693 aprovados/uma falha na regra de captura de eventos: o novo CustomSelect lia o evento dentro do updater. Corrigido capturando o valor primitivo antes do callback; regressão e suíte integral repetidas com sucesso. A prova inicial da Configuração também encontrou uma fixture retornando diagnóstico no lugar de ToolOptions; a validação de schema agora apresenta falha recuperável sem derrubar o formulário. Nenhum gate foi relaxado.
+
+Context7 consultado para cleanup e respostas obsoletas no React. As skills de design nomeadas e `load_skill` não foram encontradas; mantidos componentes, tokens, layout e modal existentes. Conforme INTEGRACAO-MAESTRI-OMP.md §4, o Implementador não executou auditoria visual de navegador: encaminhar ao Revisor a prova Chrome da instalação limpa, correção, teclado/mobile e reinício. A prova React controlada e o restart do smoke distribuído são superfícies separadas; não comprovam esse percurso integrado no navegador. Conexão Maestri/OMP real permanece **não executada**, separada da observação sintética; nenhum Wire, GitHub/keyring, provider, instalação operacional, aprovação ou mudança de fase foi acionado.
+
+## Correção feat-010-c3 — prova renderizada independente na distribuição
+
+Data: 2026-10-23. O registro histórico anterior de aceite Chrome pendente e ausência do percurso integrado no navegador foi superado, para o percurso desktop descrito aqui, por esta revisão independente conforme INTEGRACAO-MAESTRI-OMP.md §4. Nenhuma alteração de produto foi necessária nesta rodada.
+
+- Playwright MCP/Chrome de teste acessou a distribuição real `build/Fábrica distribuição-F1dAkt`, empacotada após build, em `http://127.0.0.1:4310`: assets compilados, HTTP e SQLite reais, sem interceptação ou mock. O pacote usa sua própria instalação/SQLite, sem tocar a instalação operacional. PATH vazio somente no subprocesso reproduziu instalação incompleta; contexto Maestri/OMP e GH_PATH foram retirados somente desse processo.
+- A instalação limpa abriu o wizard e apresentou cinco ausências com correção manual. Um caminho Git inválido foi recusado pela API, mantendo wizard e rascunho; um Git Windows real copiado com DLLs para uma pasta de teste foi validado por `--version` (2.55.0.windows.2), salvo pela UI com recibo e apresentado como resumo válido sem exigir seleção manual. Fechar e reabrir o wizard conservou a escolha. Isso comprova versão/processo/filesystem locais, não conexão nativa do produto.
+- O primeiro controlador foi fisicamente encerrado (sessão 7638, conexão health recusada), e somente o executável Git isolado foi temporariamente renomeado. O segundo processo (sessão 72937) iniciou o mesmo pacote/banco. Reload do navegador confirmou o mesmo installation_id, preferência anterior preservada e caminho ausente com causa/próxima ação renderizadas. Nova detecção manteve o rascunho digitado por teclado. Ao restaurar o binário isolado, a preferência voltou a ser validada automaticamente. Navegador e ambos os controladores próprios foram encerrados; executável isolado restaurado.
+- Evidência persistida: `tests/browser/evidence/tools-wizard-20261023/result.json` contém assertions, reprodução, identidade, hashes SHA-256 do controlador/assets e PNGs, limites e cleanup. PNGs 07/08 mostram o reinício/caminho ausente; 09/10 mostram o caminho novamente validado. Esses screenshots desktop foram abertos e inspecionados visualmente. PNGs 01–05 de elemento longo foram recortados pelo viewport do modal e são apenas suplementares às assertions executadas no Chrome.
+
+**Resultado feat-010-c3:** passou o percurso renderizado desktop de instalação incompleta, falha/correção manual, salvar/reabrir e reinício físico com revalidação de caminho anteriormente válido ausente. A prova determinística anterior de respostas tardias/cancelamento continua distinta desta prova nativa; seletor de arquivo interativo não foi exercitado nesta rodada.
+
+**Limite visual adicional:** viewport 390×844 foi exercitado por teclado, mas não recebeu aceite responsivo: há overflow horizontal/conteúdo cortado no modal, registrado no PNG 06. Não se declara aprovação visual integral/mobile. O escopo desta rodada fecha a prova desktop faltante, sem alterar layout aprovado.
+
+**Integração real separada:** conexão Maestri/OMP **NÃO EXECUTADA**; nenhum provider, Wire, publicação, Git/GH autenticado ou pipeline acionado. Localizar/validar Git por versão não comprova conexão Maestri nem execução OMP.
+
+Validação técnica repetida pelo Implementador nesta rodada: `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build`, 43 testes direcionados em cinco arquivos e `npm.cmd run test:distribution`: todos exit 0. O smoke de distribuição permanece separado da prova Chrome e usa seu preflight controlado, sem conexão real.
+
+## Sprint 006 - Wizard de ferramentas e correção da instalação [CONCLUIDA]
+- Resumo compacto e correção contextual: Apresentar observações e ações de configuração por ferramenta.
+- Retomada do onboarding distribuído: Conservar escolhas e permitir correção após reinício.
+
+## Sprint — Mapeamento V3 e capacidades reais do Kanban [IMPLEMENTADA; PROVA GITHUB REAL PENDENTE]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`, `SPEC.md` V3, PRD/stories `docs/Docs20261023_014848`, critérios RF-09–11 e tabelas `project_revisions`/`creation_board_operations`. Implementação no repositório canônico; migrations históricas preservadas.
+
+### Mapeamentos e compatibilidade
+
+- `ProjectMapping` exige o formato V3 com os cinco IDs de opção (Backlog, Ready, In progress, In review e Done/Delivered). `ProjectChanges.github_project` aceita somente V3 ou `null`; a validação semântica do serviço e do storage recusa IDs repetidos.
+- `ReadProjectMapping` aceita somente V3 ou o objeto legado fechado com quatro propriedades. Leitores da configuração, preparação e projeção histórica preservam os quatro valores sem adicionar Backlog. Os conversores privados mantêm `ready`, `inProgress`, `inReview` e `delivered`; `backlog` é serializado somente se existir no documento.
+- Uma leitura legada continua disponível para consulta e produz o impedimento `STATUS_MAPPING_LEGACY`. Edição de outro campo não converte nem reapresenta o mapeamento legado; para adequá-lo, a configuração precisa selecionar os cinco valores e salvar uma nova revisão.
+
+### Diário e capacidades GitHub Projects
+
+- Migration aditiva `031_creation_board_operations.sql`; schema atual 31. A tabela registra os efeitos `create_board`, `configure_status`, `link_repository`, `configure_view` e `verify_board`, com escopo único, hash, autorização, identidade esperada, estado e recibo observado. Os enums fechados de `effects` e `creation_steps` não foram ampliados.
+- Storage cria a intenção antes do IO, registra envio/resultado e mantém `unknown` consultável após resposta perdida/reinício. A reconciliação é somente leitura; o mesmo efeito incerto não é reenviado. Exclusão de projeto inclui as linhas do diário e preserva a guarda de finalização autorizada.
+- O adapter GitHub cria o Project, cria/atualiza o campo de seleção simples com exatamente as cinco opções na ordem, vincula o repositório e cria uma view `BOARD_LAYOUT` com Status visível. A verificação final relê owner, título, campo/opções em ordem, vínculo ao repositório, layout da view e Status como agrupamento. Só então registra o recibo final e a configuração inicial do projeto recebe o mapeamento V3.
+- A API oficial atual permite criar views, selecionar `BOARD_LAYOUT`, configurar a lista ordenada de campos visíveis e observar `groupByFields`; o input documentado de configuração da view só expõe `visibleFieldIds`. O adapter não presume que possa definir agrupamento por API: se a view lida de volta não estiver agrupada pelo Status, mantém a criação parcial com impedimento. [Referência GraphQL de Projects](https://docs.github.com/en/graphql/reference/projects) e [mutação de vínculo Project–repository](https://docs.github.com/en/graphql/reference/projects#linkProjectV2ToRepository).
+- Nenhum quadro local é criado. Uma nova criação remota não chega a `completed` sem os cinco tipos confirmados e os efeitos de repositório exigidos; criações históricas concluídas não são alteradas nem recebem recibos retroativos.
+
+### Validação e limites
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções aprovadas. |
+| Testes direcionados de mapeamento, codecs, contratos HTTP e adapter GitHub | Exit 0; 82 testes em 6 arquivos, incluindo identidades cruzadas de repositório, Status e view. |
+| Testes de exclusão/transição afetados | Exit 0; 80 testes em 7 arquivos. |
+| `npm.cmd run build` | Exit 0; controlador, migration 031, recursos e cliente distribuídos; bundle JS 1.036,95 kB gzip 260,30 kB, acima do aviso Vite configurado. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; 1.711 testes em 140 arquivos. |
+| `git diff --check` | Exit 0. |
+
+As provas controladas cobrem ordem errada, opção extra, vínculo ausente, agrupamento Kanban não observado, IDs duplicados, compatibilidade dos quatro campos históricos e resposta perdida nos cinco efeitos sem repetição do mesmo efeito. GitHub real, criação remota e inspeção visual do quadro não foram executados; fixtures não comprovam permissões, a renderização ou a configuração real da conta. Não houve commit, push, publicação, aprovação ou mudança de fase.
+
+## Sprint 007 - Mapeamento V3 e capacidades reais do Kanban [CONCLUIDA]
+- Mapeamentos novos e históricos: Distinguir o mapeamento V3 de cinco opções do mapeamento legado de quatro.
+- Quadro e diário de efeitos específicos: Disponibilizar criação, configuração, vínculo e verificação do quadro por capacidades comprovadas.
+
+## Sprint — Criação completa e retomada sem duplicação [IMPLEMENTADA; VALIDAÇÃO LOCAL CONCLUÍDA; GITHUB REAL PENDENTE]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`, `SPEC.md` V3, PRD e stories de `docs/Docs20261023_014848`, US-02, RF-07–13, critérios E53–E57 e o registro da sprint anterior de quadro. Trabalho no repositório canônico, preservando alterações preexistentes. Sem nova migration, dependência, execução Git/GitHub real, provider, commit ou push.
+
+### Implementação
+
+- `GET /scaffold/options` publica somente `remote_push`. Os schemas de `POST /scaffold/plans` exigem repositório remoto, modalidade `remote_push` e `board_name`; `POST /scaffold/creations` aceita exclusivamente o mesmo plano V3 estrito. A rota e o serviço recusam a forma antiga antes de qualquer escrita ou mutação.
+- `ScaffoldPlanV3` é compartilhado pelas respostas de planejamento e comandos de criação. A leitura de `ProjectCreation.plan` mantém a união fechada V3/legado. O plano completo, incluindo `board_name`, entra no hash e na intenção idempotente. O mapeador de leitura conserva o input do V3; documentos históricos sem nome de quadro continuam válidos e seus hashes são recalculados sobre o conteúdo original sem backfill.
+- A criação percorre diretório/arquivos/Git/baseline, criação do remoto, origin, push inicial e operações específicas do quadro. A configuração do Project recebe o nome editável do plano e as cinco opções Status na ordem normativa. Cadastro só conclui após confirmar remoto, origin, push, criação/configuração/vínculo/view e a releitura que confirma layout, coluna visível e agrupamento por Status.
+- E57 consulta e reconcilia operações incertas antes de continuar; efeitos confirmados são reutilizados. O caminho impede iniciar operações do quadro enquanto remoto, origin ou push estão incertos. Planos divergentes são recusados por hash; conta divergente é recusada antes do adapter remoto. A projeção E56 informa nome/URL comprovados do quadro e uma próxima ação. Leituras legadas não inferem o nome do projeto como nome de quadro; exibem somente o nome guardado no plano V3 ou em recibo confirmado.
+- `ProjectCreationDialog` apresenta a modalidade obrigatória, sugere o nome do quadro a partir do nome inicial do projeto e preserva edição manual. O resultado mostra quadro, URL quando observada e próxima ação; a ação de reconciliação considera estados incertos/falhos do diário do quadro.
+- `README.md` descreve os contratos V3, compatibilidade de leitura, a sequência e os limites de retomada.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict do controlador, contracts, cliente e testes. |
+| `npm.cmd run lint` | Exit 0; fronteiras de módulos e convenções. |
+| Testes direcionados de scaffold/HTTP, contratos e projeção do resultado | Exit 0; 83 testes em 4 arquivos. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **1.712 testes aprovados em 140 arquivos**. |
+| `npm.cmd run build` | Exit 0; controlador, recursos e bundle web compilados. Bundle JS 1.039,75 kB (gzip 260,90 kB); permanece o aviso Vite acima de 500 kB. |
+
+Os testes cobrem rejeição de modos locais/sem push, campos remotos e quadro obrigatórios, separação estrutural V3/legado, preservação de plano histórico, hash com o nome editado, rejeição de conta/plano antes dos efeitos, conclusão após todos os cinco efeitos de quadro, ordenação Status, display somente com prova, resposta perdida em cada efeito, E57 via HTTP após reopen e replay sem duplicação de repositório/push/quadro. O ensaio de quadro usa adapters controlados e SQLite/HTTP locais reais.
+
+Criação remota, push inicial, Project real, permissões da conta e configuração renderizada no GitHub não foram executados. Testes e documentação não são prova de integração GitHub real. Nenhum efeito externo, commit, push, aprovação ou mudança de fase foi realizado.
+
+### Complemento Playwright local
+
+- Chrome/Playwright carregou o bundle Vite compilado em `127.0.0.1:4310` com respostas HTTP sintéticas. O formulário mostrou somente repositório GitHub com push inicial, o campo obrigatório `Nome do quadro Kanban` e a sugestão inicial derivada do nome do projeto. Alterar o nome do projeto atualizou a sugestão enquanto o quadro seguia a edição manual independente.
+- A leitura visual mostrou o modal de criação e as ações dentro do viewport desktop. Nenhum plano, criação, provider ou efeito remoto foi enviado. O mock deliberadamente não implementou todos os endpoints; a faixa de atualizações/events e erros 404 exibidos pertencem à fixture incompleta, não são prova da conexão SSE. O servidor próprio foi encerrado e a porta 4310 ficou livre.
+
+## Sprint 008 - Criação completa e retomada sem duplicação [CONCLUIDA]
+- Plano estrito de criação V3: Restringir novas criações ao plano completo autorizado.
+- Orquestração parcial e conclusão verificável: Coordenar os efeitos locais, remotos e de quadro conservando seus recibos.
+
+## Sprint — Cadastro incompleto e prontidão efetiva [IMPLEMENTADA; VALIDAÇÃO LOCAL CONCLUÍDA]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`, `SPEC.md` V3, PRD e stories de `docs/Docs20261023_014848`, US-03 e RF-14–17, contrato de mapeamento V3/legado e as interfaces existentes de projetos, preparações, fila e início. Trabalho no repositório canônico, preservando alterações anteriores. Sem migration, dependência ou efeito externo.
+
+### Implementação
+
+- Cadastro de pasta local sem remoto, commit publicado ou quadro continua permitido. O projeto permanece com automação desabilitada e a projeção retorna causas separadas para remoto GitHub não confirmado, branch-base não publicada, quadro ausente e mapeamento histórico de quatro valores. Cada causa tem ação correspondente.
+- Preparação revalida a origem atual. Exige repositório remoto confirmado pela identidade configurada e commit da branch-base com SHA correspondente na origem e no GitHub; verifica também o quadro/mapeamento V3 e mantém as demais validações de conta, issue, responsável, vínculo, Status e bloqueadores.
+- Início manual continua usando a revalidação do resumo e recusa esses requisitos antes de criar tentativa, preparar clone ou lançar papel. O serviço também recusa ligar a automação do projeto por uma gravação direta de configuração enquanto faltar qualquer requisito.
+- A observação da fila aplica as mesmas verificações antes de consultar candidatos Ready. A habilitação por projeto conflita com o resumo atual se estiver incompleto; uma fila global pode continuar atendendo outros projetos prontos. Ready, por si só, não liga a automação e não altera os bloqueios existentes de conta, assignee, consumo ou tentativa ativa.
+- Mapeamentos legados de quatro opções continuam consultáveis. Uma edição que não altera Status conserva o formato legado, não cria Backlog implicitamente e não modifica a captura histórica. Projetos novos e adequações continuam exigindo cinco IDs distintos.
+- `QueueReason`, DTO público da fila e rótulos de causa foram atualizados. Nenhum dado novo foi persistido; SQL e interfaces de domínio existentes foram reutilizados.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções aprovadas. |
+| Testes focados de projetos, preparações, início, fila, contratos e exclusão | Exit 0; 256 testes em 6 arquivos antes da última regressão de mapeamento legado; o teste atualizado de início legado passou isoladamente (26 testes no arquivo). |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **1.728 testes aprovados em 140 arquivos** na rodada final. |
+| `npm.cmd run build` | Exit 0; TypeScript, Vite e cópia de recursos concluídos. Bundle JS 1.040,57 kB (gzip 261,21 kB), acima do aviso Vite de 500 kB. |
+| `git diff --check` | Exit 0 antes deste registro; repetição final registrada após a atualização. |
+
+As regressões confirmam cadastro incompleto com recibo e automação desligada; causas distintas no projeto/preparação; rejeição de início manual sem clone/passagem; recusa da automação direta e da habilitação da fila por projeto; ausência de despacho automático com os três requisitos incompletos mesmo quando as duas automações já estão ligadas; seleção Ready normal quando os requisitos são observados; preservação do mapeamento legado e da captura histórica. As fixtures usam SQLite/HTTP locais e respostas de GitHub/origem controladas. Não houve GitHub real, Git, provider, Maestri/OMP ou execução de tentativa de produto; essas integrações não são declaradas aceitas nesta sprint.
+
+## Sprint — Cadastro incompleto e prontidão efetiva [CONCLUÍDA LOCALMENTE]
+- Cadastro sem prontidão presumida: Aceitar projetos existentes incompletos e mostrar causas e ações específicas.
+- Barreiras comuns nos inícios: Exigir remoto GitHub, commit-base publicado e quadro V3 tanto no início manual quanto na fila.
+- Ready e automação explícita: Manter Ready como elegibilidade e preservar as regras existentes da fila e do mapeamento legado.
+
+## Sprint 009 - Cadastro incompleto e prontidão efetiva [CONCLUIDA]
+- Cadastro sem prontidão presumida: Permitir cadastrar existente incompleto e projetar pendências específicas.
+- Mesmas barreiras nos dois inícios: Aplicar prontidão nos serviços chamados por início manual e seleção automática.
+
+## Sprint 010 — Criação completa e cadastro na interface [IMPLEMENTADA; VALIDADA LOCALMENTE; ACEITE VISUAL PENDENTE]
+
+Data: 2026-10-23. Fontes: AGENTS.md, SPEC V3/PRD/stories em `docs/Docs20261023_014848`, US-02/US-03, RF-07–17, GLOSSARY.md e INTEGRACAO-MAESTRI-OMP.md §4. Preservadas as alterações preexistentes no repositório canônico. A área gerenciada e o comando V08 não foram alterados nesta sprint.
+
+- `ProjectCreationDialog.tsx` conserva o formulário exclusivo `remote_push`, quadro obrigatório e sugestão inicial independente da edição manual. Plano e resultado apresentam os cinco efeitos do quadro com rótulos humanos, além de destino e etapas locais/remotas; estado parcial e efeito unknown continuam distintos de conclusão confirmada pelo servidor.
+- A identidade mínima de criação/reconciliação é registrada antes do POST. Fechar durante o envio preserva a consulta original; resposta tardia não navega após desmontagem. Reabrir oferece GET da mesma operação, inclusive quando ela ainda está pendente. Um 404 não apaga a identidade nem libera uma segunda criação. Voltar ao formulário fica bloqueado durante envio ou incerteza. Reconciliação aceita bloqueia outro envio enquanto sua operação é acompanhada; reabertura consulta o registro original sem repetir POST. Refresh e navegação não criam recursos.
+- `ProjectForm.tsx` informa que o cadastro existente pode permanecer incompleto, apresenta as causas independentes e aponta para a configuração do projeto cadastrado. Ready é explicado como elegibilidade, sem habilitação implícita de automação. Recusa de prontidão ao salvar automação preserva a edição e apresenta causa/próxima ação no componente compartilhado.
+- `ProjectReadiness.tsx` localiza `CODE_NOT_PUBLISHED` junto da origem, inclusive no resumo da preparação. O mapeamento legado permanece consultável; salvar orientação não envia `github_project` nem sintetiza Backlog. A prova React revelou uma falha real ao abrir esse editor: faltava a ajuda de `Status Backlog`. `FieldHelp.tsx` corrige a falha e atualiza a explicação da troca de campo para cinco valores.
+- `creation-v3.test.ts` e as regressões de `project-readiness.test.ts` exercitam React/DOM e transporte controlado: sugestão/editabilidade do quadro, plano obrigatório, fechamento durante envio, recuperação de operação pendente, 404, reconciliação original, efeitos do quadro, cadastro incompleto, recusa de automação, preparação bloqueada e save preservando mapeamento histórico.
+
+Validação: `npm.cmd run typecheck`, `npm.cmd run lint` e `npm.cmd run build` passaram na rodada final. Suíte integral em `.cache/creation-interface-tests.json`: **1.738 aprovados, zero falhas/pendentes, 141 arquivos**, exit 0. Após o ajuste final dos links do cadastro e o reforço das asserções, os quatro arquivos direcionados passaram novamente com **37 testes**, e typecheck/lint/build foram repetidos. `git diff --check` e a conferência do arquivo novo não apontaram whitespace. Build mantém o aviso de bundle acima de 500 kB: JS 1.043,63 kB, gzip 261,87 kB.
+
+As primeiras execuções dos testes novos identificaram expectativas incorretas de texto, estado de rascunho compartilhado entre testes e seleção de um alerta não relacionado; as fixtures/assertions foram corrigidas sem relaxar gates do produto. A falha de ajuda do Backlog foi corrigida no produto. Context7 foi consultado para cleanup e descarte de respostas obsoletas no React; CodeGraph orientou a leitura. As skills de design nomeadas e `load_skill` não estavam disponíveis; composição, CSS e componentes compartilhados foram preservados.
+
+**Visual: not_verified.** React/happy-dom com HTTP controlado não comprova Chrome, teclado/foco real ou responsividade. Conforme INTEGRACAO-MAESTRI-OMP.md §4, encaminhar ao Revisor independente a prova Playwright MCP/Chrome dos dois percursos sobre versão fixa. Playwright MCP não está exposto nesta sessão; não foi usado CUA/Portal como alternativa. Não houve GitHub real, criação remota, push, provider, Maestri/OMP, alteração de banco operacional, dependência nova, commit/push de versionamento, aprovação ou mudança de fase. Os testes não são aceite integrado externo.
+
+## Sprint 010 - Criação completa e cadastro na interface [CONCLUIDA]
+- Formulário de criação e retomada: Apresentar a única criação completa e acompanhar sua operação.
+- Cadastro incompleto com ações pertinentes: Permitir salvar cadastro e explicar os bloqueios operacionais.
+
+## Sprint — Localizações e transição gerenciada na interface [IMPLEMENTADA; VALIDAÇÃO LOCAL CONCLUÍDA; VISUAL PENDENTE]
+
+Data: 2026-10-23. Fontes: AGENTS.md, SPEC V3 §§US-15.C1–C4/RF-64–68/V08, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md §4, contratos ProjectStorageView/StorageTransitionCommand/OperationProgress e rota V08 existente. Alterações anteriores preservadas no repositório canônico. Nenhuma dependência, migration, movimento de diretório operacional, Git de escrita ou efeito externo.
+
+- `apps/web/src/features/projects/ProjectConfigurationDialog.tsx` é o conteúdo de localizações hospedado no diálogo de configuração existente, integrado por `ProjectForm.tsx`; não abre um segundo modal. Separa pasta original, raiz gerenciada e localizações históricas, preserva os caminhos sem truncamento e oferece cópia após confirmação do clipboard. O backend atual retorna a raiz gerenciada relativa à instalação; o cliente a identifica como tal sem inventar caminho absoluto. Abertura nativa por projeto não existe no contrato: o link encaminha às tentativas e às suas ações existentes por recurso/capacidade, sem URL file:// ou chamada de shell.
+- `apps/web/src/features/projects/useProjectStorage.ts` acompanha a operação no escopo instalação/conta/projeto. Antes do POST guarda somente ID/tipo/instante em sessionStorage; corpo e ETag originais permanecem exclusivamente em memória. Fechamento/reabertura recuperam a consulta GET; retorno tardio de outro contexto é descartado. GET, polling e refresh nunca enviam movimento. 404 conserva a identidade e impede um segundo comando. Reload conserva consulta; sem request original em memória, a interface não reconstrói uma autorização para retomada.
+- A confirmação fica vinculada ao plano e ETag exibidos, envia somente location_key/source_location_id/plan_hash/authorized com If-Match e Idempotency-Key. Guarda síncrona impede duplo envio. 202 anuncia somente aceite; sucesso exige OperationView succeeded com tipo/recurso/ID correspondentes. Progresso, incerteza, bloqueio e resultado final são distintos. Retomada é ação explícita disponível somente com operação unknown/failed e request original em memória; preserva body, revisão e chave. Recusa conhecida exige nova observação e confirmação do plano, sem substituir os rascunhos da configuração.
+- `artifact.css` acrescenta quebra integral dos caminhos, grade adaptativa e ações que podem quebrar linha, dentro dos tokens e do modal existentes. Nenhuma alteração de contrato HTTP/backend ou layout do shell. Causas codificadas de transição recebem linguagem humana; próxima ação permanece a orientação recebida do backend.
+- `project-storage.test.ts`: nove testes React/happy-dom com transporte controlado, cobrindo caminhos, autorização/revisão, request exato, resposta perdida/reabertura/404/sucesso, incerteza e retomada da mesma operação, recusa de plano, capacidade indisponível, resposta de conta/objeto divergente e duplo clique/fechamento com envio pendente. Os testes direcionados de prontidão e backend de transição também passaram (36 testes em três arquivos antes dos dois testes adicionais; nove testes web repetidos depois).
+
+Validação: typecheck, lint e build passaram; suíte completa `.cache/storage-interface-tests.json`: **1.752 aprovados, zero falhas ou pendências**, exit 0. A suíte integral precede somente o ajuste final de tradução das causas; os nove testes direcionados passaram novamente após esse ajuste e os checks-base foram repetidos. Build mantém aviso Vite de bundle acima de 500 kB. `git diff --check` passou. Uma regressão nova encontrou uma consulta iniciada após recusa conhecida substituindo sua mensagem; corrigida a guarda de consulta para exigir identidade ainda persistida/ativa. A primeira checagem também encontrou indexação de labels sem assinatura e variável de teste não usada; ambas corrigidas.
+
+**Visual: not_verified.** Playwright MCP não está exposto nesta sessão. As skills de design nomeadas e load_skill também não estão disponíveis; mantidos os componentes e tokens existentes. Conforme INTEGRACAO-MAESTRI-OMP.md §4, encaminhar ao Revisor independente a prova renderizada de rascunhos, aceite V08, resposta perdida/reabertura, resultado confirmado, parcial/incerto/bloqueado e plano vencido, além de teclado, janela baixa, largura estreita e zoom. React/happy-dom não comprova esses critérios. Não foi usado CUA ou Portal como alternativa. Portanto a sprint não declara todos os aceites renderizados concluídos.
+
+Sem navegador, integração Git/Windows de movimento, GitHub, Maestri/OMP, provider, banco operacional, publicação, commit/push, aprovação ou mudança de fase nesta rodada. As provas backend anteriores e os testes controlados não substituem o aceite renderizado ou integração nativa.
+
+### Correção após avaliação — prova complementar em Chrome (2026-10-23)
+
+A ausência de evidência renderizada foi parcialmente resolvida por `node scripts/prove-storage-browser.mjs`. O runner serve exclusivamente `dist/web` em `127.0.0.1:4310`, inicia Chrome isolado e intercepta todas as APIs com respostas controladas. Não inicia o controller operacional nem movimenta pastas. Fecha o navegador e o servidor ao terminar. O registro anterior descreve a rodada anterior; esta rodada acrescenta navegador real, sem representar aceite independente via MCP.
+
+Evidências em `tests/browser/evidence/storage-transition/result.json`: Chrome 155.0.8059.86, oito grupos de verificações aprovados, 15 capturas PNG, snapshots ARIA correspondentes, três comandos V08 controlados e hashes SHA-256 do JS/CSS servidos. Capturas de aceite, plano vencido, parcial/incerto, mobile e reflow foram abertas e inspecionadas. Cobertura: caminhos completos separados; rascunho de orientação; 202 sem conclusão presumida; identidade, plano e revisão enviados; parcial/incerto e bloqueado com causa/próxima ação do HTTP controlado; conclusão somente após GET; resposta perdida e fechamento/reabertura mantendo identidade e rascunho; recusa por plano vencido exigindo nova revisão; legado e capacidade indisponível sem comando. Consultas e refresh por teclado não repetem V08.
+
+A inspeção renderizada encontrou dois defeitos reais: o checkbox herdava `width: 100%` dos campos, afastando-o da autorização; no mobile, o footer combinava direção de coluna com bases flex de 180/130 px e ocupava grande parte do modal. Corrigidos somente o tamanho flex do checkbox em `artifact.css` e a direção/base do footer da configuração em `dialogs.css`. O runner agora exige checkbox de até 24 px, footer menor que um terço da janela e ações alcançáveis por foco/rolagem dentro do viewport. Foram conferidos 1280×480, 375×667 e 720×500, sem overflow horizontal da página. Layout aprovado e alterações preexistentes preservados.
+
+Validação final após os ajustes: `npm.cmd run build`, `npm.cmd run typecheck`, `npm.cmd run lint`, os 38 testes de `project-storage.test.ts`, `project-readiness.test.ts` e `storage-transition.test.ts`, execução Chrome e `git diff --check` passaram. Build conserva o aviso de bundle acima de 500 kB. Nenhuma dependência instalada. Skills de design nomeadas/load_skill e Playwright MCP não foram encontrados; Context7 consultado sobre viewport e screenshots.
+
+**Aceite visual independente via Playwright MCP: pendente. Zoom real do navegador: not_verified.** O caso de 720×500 comprova reflow equivalente a uma janela 1440×1000 em 200%; não altera nem mede zoom real do Chrome. Portanto esta prova complementar não declara c3 integralmente aprovado, nem substitui a revisão independente exigida por INTEGRACAO-MAESTRI-OMP.md §4. O fluxo renderizado de c7 foi exercitado com HTTP controlado, sem comprovar movimento nativo ou integração com backend operacional. Não houve Git de escrita, efeito externo, aprovação ou mudança de fase.
+
+### Correção de c3 — zoom nativo medido (2026-10-23)
+
+O registro acima descreve a execução anterior. Nesta rodada, `scripts/prove-storage-browser.mjs` substitui o caso de reflow simulado por zoom nativo selecionado em `chrome://settings/appearance`, controle `#zoomLevel`, valor 2. Usa perfil temporário exclusivo, descartado pelo Playwright ao fechar, sem modificar o perfil pessoal. Não usa CSS zoom, pinch zoom ou alteração de deviceScaleFactor. O viewport configurado permanece 1440×1000: a medição passa de DPR 1/área CSS 1440×1000 para DPR 2/área CSS 720×500, com visualViewport.scale 1. As asserções exigem essas mudanças e validam limites das ações contra a área CSS medida. Capturas usam viewport visível, evitando o recorte da captura fullPage em zoom nativo.
+
+`tests/browser/evidence/storage-transition/result.json` registra `ok: true`, oito grupos aprovados, medições antes/depois e hashes dos assets reconstruídos. `12-browser-zoom-setting.png`, `12-browser-zoom-200.png` e `12-browser-zoom-200-paths.png` documentam o ajuste e o conteúdo; a captura das ações foi aberta e inspecionada. Janela baixa, largura estreita, teclado, caminhos, estados parciais, rascunho, aceite, resposta perdida/reabertura e recusa de plano foram novamente exercitados. No zoom real, foco/rolagem alcançam atualizar, salvar e fechar dentro do viewport, sem overflow horizontal; o rascunho permanece intacto e refresh não repete V08. A lacuna específica de c3 tem agora prova renderizada reproduzível.
+
+Validação repetida: build, typecheck, lint, 38 testes direcionados em três arquivos e `git diff --check` passaram. Runner Chrome passou duas vezes, incluindo a repetição após ajustar a captura de tela. Permanece o aviso de bundle acima de 500 kB. Nenhuma UI ou dependência foi alterada nesta rodada. A prova usa Chrome/Playwright local com HTTP controlado; não equivale a movimento nativo nem a aceite independente. O MCP foi encontrado nesta sessão, mas sua tentativa de leitura do resultado falhou por restrição de import dinâmico; não se atribui esta execução ao MCP. Sem Git de escrita ou mudança de fase.
+
+## Sprint 011 - Localizações e transição gerenciada na interface [CONCLUIDA]
+- Localização gerenciada consultável: Expor as localizações e o acompanhamento da transição no contexto do projeto.
+
+## Sprint — Instruções efetivas versionadas no backend [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-23. Fontes: `AGENTS.md`, SPEC V3 `docs/Docs20261023_014848/SPEC20261023_014848.md`, PRD/stories da mesma revisão (US-08 e RF-36–40), `GLOSSARY.md`, contratos existentes de perfis/capturas e `INTEGRACAO-MAESTRI-OMP.md`. Escopo restrito à composição efetiva dos perfis, captura por tentativa, consulta sob demanda e isolamento do contrato técnico. Nenhuma migration histórica foi editada.
+
+### Implementação
+
+- Migration aditiva `032_profile_composition.sql`; schema passa a 32. `execution_profiles.composition_version` aceita a versão suportada 1 ou NULL para composição ainda incompatível. O runner migra perfis ativos dentro da transação da migration, lê as instruções comportamentais v1 dos recursos distribuídos por papel e as compõe uma única vez com a `guidance` existente. Migração promovida atualiza revisão e timestamp do perfil; texto que já contém integralmente o bloco comportamental não é duplicado.
+- Se o resultado exceder o limite vigente de 8.192 caracteres ou a revisão não puder avançar, `guidance` permanece intacta e `composition_version` continua NULL. Preparação indica `PROFILE_COMPOSITION_REQUIRED`; início recusa antes do clone/passagem. Uma edição explícita das instruções pode regularizar o perfil sem ampliar o limite. Criação e alteração regular pelo storage gravam composition_version 1. ETags de configuração incluem versão de composição além da revisão.
+- Novas tentativas persistem na captura o perfil por valor, ID/revisão quando existentes, guidance efetiva e composition_version. A preparação redige padrões conhecidos de credencial na cópia efetiva antes do hash/resumo; a captura e as passagens usam essa mesma cópia. As alterações posteriores do perfil não modificam captura nem continuação de correção. Campos de composição ausentes em capturas antigas continuam ausentes nos codecs e são projetados como versão desconhecida (`null`), sem backfill/rewrite.
+- A extensão OMP não prefixa mais `role.instructions` fixas como comportamento adicional; o bootstrap contém só referência e schemas técnicos e o prompt usa guidance do perfil capturado, separada do contexto da tarefa. O recurso v1 e seu digest permanecem íntegros para migration/referência histórica. Os schemas de resultado/pergunta continuam versionados e fechados, e o controlador mantém a autoridade sobre binding, papel, critérios, isolamento, recursos e limites.
+- A seção de detalhe sob demanda `profiles` em `GET /attempts/:attemptId?section=profiles` expõe até os dois perfis efetivos com revisão, versão, instruções, contexto de issue/critério e resumo do contrato técnico. A resposta redige padrões conhecidos de tokens, headers, URLs com credenciais e chaves privadas; não entra na projeção resumida/polling.
+- O editor de perfis explica que a guidance é comportamental e não altera papel, critérios, permissões, schemas nem limites. Nenhuma alteração de layout ou nova dependência foi necessária.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict em produção, cliente, testes e scripts. |
+| `npm.cmd run lint` | Exit 0; fronteiras de módulos e convenções. |
+| `npm.cmd test -- --reporter=json --outputFile=.cache/profile-composition-tests-delivery.json --no-color` | Exit 0; **1.759 testes aprovados, zero falhas/pendências, 255 suítes**. |
+| Testes focados de storage/captura/preparação/revisão/OMP/UI help | Exit 0; migration idempotente, ambas as roles, deduplicação do texto legado, over-limit sem perda, captura estável após save, correção com guidance capturada, redaction da consulta, schemas OMP fixos e resposta HTTP sob demanda. |
+| `npm.cmd run build` | Exit 0; migration 032, controlador, recursos e web distribuídos. Bundle JS 1.059,80 kB (gzip 265,58 kB), acima do aviso configurado de 500 kB. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite, sessão, CAS/idempotência, shutdown e lock; preflight controlado, Maestri/OMP não executado. |
+| `npm.cmd run test:distribution` | Exit 0; pacote relocável, SQLite nativo, múltiplos cwd/processos e restart; preflight controlado, Maestri/OMP não executado. |
+| `git diff --check` | Exit 0; sem whitespace inválido. |
+
+A suíte usa SQLite/filesystem/HTTP locais e adapters controlados. A distribuição exercitada usa recursos compilados, sem conta operacional. Nenhum OMP/TUI/provider real, Git/GitHub, navegador, publicação, instalação operacional, credencial, migration de banco do operador, commit ou push foi executado. A prova local confirma a composição e os limites do backend, sem declarar integração real, aceite visual, aprovação ou mudança de fase.
+
+## Sprint 012 - Instruções efetivas versionadas no backend [CONCLUIDA]
+- Composição migrada sem perda: Tornar guidance a fonte comportamental efetiva dos perfis existentes e novos.
+- Captura e consulta da composição histórica: Vincular a execução às instruções efetivas capturadas no início.
+
+## Sprint — Editor de instruções e perfil histórico [IMPLEMENTADA; VALIDAÇÃO TÉCNICA CONCLUÍDA]
+
+Data: 2026-10-23. Fontes: AGENTS.md, SPEC V3 e stories US-08/RF-36–40 em `docs/Docs20261023_014848`, GLOSSARY.md e INTEGRACAO-MAESTRI-OMP.md §4. Preservadas as alterações anteriores no repositório canônico e a composição backend da sprint-012. Sem migration, dependência nova ou armazenamento paralelo de instruções.
+
+- `ProfileForm.tsx` edita a guidance efetiva de Implementador e Revisor pelo comando de perfil existente, junto das escolhas de execução. Explica que alterações valem para novas tentativas e não alteram papel, critérios, permissões, schemas ou limites técnicos. Contagem Unicode e medição do JSON UTF-8 distinguem 8.192 caracteres de 16.384 bytes; texto excessivo permanece integralmente no rascunho. Erros de campo são associados à edição. Conflito mantém texto e ETag originais até reaplicação explícita; a guarda do submit também impede um novo envio durante o conflito. Atualizações da configuração não substituem a edição nem confirmam save sem recibo correspondente.
+- `HistoricalProfile.tsx`, integrado ao detalhe existente da tentativa, consulta `section=profiles` somente por ação explícita. Valida identidade, seção, papéis únicos e schema compartilhado de composição redigida antes de renderizar. Mostra instruções, contexto, papel, executor/modelo/esforço, revisão e versão históricas; ausências legadas ficam indisponíveis. Não consulta perfis atuais nem acompanha seus eventos para substituir o histórico. Cleanup descarta respostas após troca de tentativa/desmontagem. Textos longos têm quebra e rolagem local acessível por teclado.
+- `profile-instructions.test.ts` e `historical-profile.test.ts`: nove regressões React/DOM controladas cobrem ambos os papéis, recibo posterior ao envio, conflito/erro de campo/413 com rascunho preservado, reaplicação com ETag atual, limites Unicode/UTF-8, histórico sob demanda, dados legados, resposta inválida e conclusão tardia. A documentação React foi consultada via Context7 para cleanup e campos controlados. As skills de design nomeadas/load_skill não estão disponíveis; mantidos componentes, tokens e modal existentes.
+
+Validação técnica: `npm.cmd run typecheck`, `npm.cmd run lint` e `npm.cmd run build`: exit 0. Suíte integral `.cache/profile-editor-sprint-tests.json`: **1.768 aprovados, zero falhas/pendências, 145 arquivos**, exit 0, após a guarda final de conflito. Build distribuiu `index-CixlEkfD.js` (1.066,67 kB; gzip 266,96 kB), preservando o tamanho acima do aviso de 500 kB. `git diff --check` passou antes deste registro.
+
+A prova renderizada está sendo executada pelo Revisor independente conforme §4; seu resultado será acrescentado sem promover testes DOM a aceite Chrome. HTTP/SQLite/adapters da suíte são controlados nas integrações externas. Nenhuma instalação operacional, Git de escrita, GitHub real, provider, Maestri/OMP, publicação, aprovação ou mudança de fase foi acionada.
+
+Correção encontrada pelo Revisor em Chrome/MCP: ao consultar o histórico, a remoção do botão enviava o foco ao BODY. O controle agora permanece montado durante carga, erro e sucesso, com bloqueio de novo envio enquanto carrega e atualização explícita posterior. O teste de histórico passou a exigir a identidade e o foco do mesmo botão. Após esse ajuste, typecheck, lint, nove testes direcionados e build passaram novamente; `git diff --check` também passou. A suíte integral acima antecede somente essa correção de foco. Bundle corrigido: `index--lUkqOGn.js`, SHA-256 `2a759efc6e3881f74e0d96a65c50ec506673694b39160de2d5166acdd28f2690`, 1.066,70 kB (gzip 267,00 kB). A repetição renderizada está pendente neste ponto do registro.
+
+### Revisão renderizada independente — concluída nos limites controlados
+
+O Revisor repetiu a jornada sobre o bundle corrigido em Playwright MCP/Chrome 155.0.8059.86, com servidor estático próprio em 127.0.0.1:4310 e APIs integralmente interceptadas. Resultado e reprodução em `tests/browser/evidence/profile-instructions/result.json`, `proof.mcp.js` e `static-server.mjs`; a lista `captures` identifica 14 PNGs desta jornada final, com hashes dos assets e evidências. Imagens de texto longo, limite UTF-8, ações mobile e histórico foram abertas e inspecionadas independentemente.
+
+Passaram: editor dos dois papéis e patch isolado de guidance; 412/reaplicação com revisão atual, erros de campo e 413 mantendo rascunho; limites de caracteres e UTF-8 bloqueando PUT; save pendente sem fechamento/sucesso antecipado; consulta histórica sob demanda com papel/revisão/composição/contexto; edição atual e resync sem substituir captura; campos legados indisponíveis; resposta sem confirmação de redação recusada antes de renderizar. Desktop e mobile 390×844 foram exercitados por teclado, com ações alcançáveis e sem overflow horizontal da página. Após Enter na consulta histórica, o foco permaneceu no BUTTON dentro do diálogo. Zero pageerrors na execução final. Browser MCP fechado e servidor próprio encerrado ao terminar.
+
+Esta é prova da UI compilada e do transporte frontend com HTTP sintético, separada da integração e persistência reais. Não comprova redação universal de credenciais pelo backend, SSE real ou execução Maestri/OMP/GitHub. Os testes backend anteriores mantêm suas evidências próprias. Nenhuma instalação operacional, provider ou efeito externo foi utilizado; sem Git de escrita, aprovação ou mudança de fase.
+
+## Sprint 013 - Editor de instruções e perfil histórico [CONCLUÍDA LOCALMENTE]
+- Instruções efetivas editáveis: editor existente dos dois papéis com limites, erros e conflitos preservando rascunho.
+- Consulta histórica: composição capturada sob demanda, sem substituição pelo perfil atual, com revisão independente renderizada nas condições acima.
+
+## Sprint 013 - Editor de instruções e perfil histórico [CONCLUIDA]
+- Instruções editáveis dos dois papéis: Integrar guidance efetivo ao editor existente de perfis.
+- Consulta histórica da composição: Apresentar o perfil capturado da tentativa sem substituí-lo pelo perfil atual.
+
+## Sprint — Terminais próprios e ocupação segura [IMPLEMENTADA; VALIDADA LOCALMENTE]
+
+Data: 2026-10-23. Escopo RF-45–49/US-10, com a compatibilização de sessão por tentativa/papel registrada em `INTEGRACAO-MAESTRI-OMP.md` §10 para respeitar a entrada das sprints de base. Preservadas as alterações preexistentes; nenhuma dependência, operação Git, provider, recrutamento Maestri real ou publicação executada.
+
+### Implementação
+
+- Migration aditiva `033_managed_terminals.sql`; schema 33. Cria `managed_terminals`, `attempt_sessions` e `terminal_occupancies`, com propriedade Factory, instalação/host/papel, geração monotônica, sessão única por `(attempt_id,role)`, vínculo da passagem à sessão e índices únicos para ocupação física/lógica ativa. Migrations 001–032 permanecem inalteradas; históricos anteriores ficam sem sessão inferida.
+- `createAttempt` persiste as duas identidades de sessão antes da ocupação e do clone, em transação com a intenção/recibo já existente. Diretórios de sessão são relativos à raiz gerenciada do projeto/tentativa. Cada tentativa usa `--session-dir` próprio; OMP retorna identidade nova. Revisões seguintes do Revisor usam `--continue`; correções do Implementador mantêm `followUp` na sessão acompanhada.
+- `ExecutionPersistence.reserve` grava ocupação e generation fence antes do efeito Maestri. Handshake vincula workspace/terminal/session observados à sessão persistida e rejeita substituição ou IDs OMP duplicados. Resultado oficial libera somente a ocupação lógica. Falhas, perda de tracking, cancelamento sem prova de parada e restart preservam `uncertain`; não há lease nem timeout que libere a reserva.
+- Terminais próprios ficam compartilhados por instalação/host/papel, fora da propriedade removível do projeto. Uma nova tentativa pode escolher terminal próprio anteriormente liberado; a composição exige `confirmStoppedTerminal` com identidade física atual duas vezes, incluindo imediatamente antes de `maestri recruit --replace`, e o handshake exige os mesmos IDs. Sem a capacidade, ou diante de ocupação/incerteza/substituição, o terminal anterior não é tocado: a sessão é reatribuída antes da ocupação a um terminal Factory novo. Terminais manuais não são procurados nem adotados. Inícios concorrentes também criam outro terminal próprio quando o anterior segue ocupado/incerto.
+- `project-configuration-lock.ts` bloqueia por ocupação `occupied/uncertain` e mantém os gates de tentativa ativa, publicação pendente e efeitos `running/unknown`. Terminal disponível após tentativa concluída não bloqueia sozinho. A barreira de exclusão também considera ocupações; a finalização remove sessões/ocupações de tentativas do projeto e preserva os registros compartilhados de `managed_terminals`. A parada continua necessária para remoção do ambiente.
+- `INTEGRACAO-MAESTRI-OMP.md`, §10, e `GLOSSARY.md` registram a compatibilização; README e `docs/integration/maestri-omp-adapter.md` descrevem sessão física/lógica e a necessidade de observação atual. Não houve alteração de API HTTP ou UI.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; controlador, contratos, cliente, testes e scripts strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **1.773 testes em 146 arquivos**, zero falhas/pendências. |
+| `npm.cmd run build` | Exit 0; controlador, migration 033, recursos e cliente compilados/distribuídos. O bundle de 1.066,70 kB mantém o aviso Vite existente de chunk acima de 500 kB. |
+| `git diff --check` | Exit 0, sem whitespace inválido. |
+
+As regressões novas exercitam CAS/geração/identidade, ocupação exclusiva, sessão única por papel/tentativa, `--session-dir`/`--continue`, reuso controlado do terminal com sessionId OMP distinto, recusa sem observação física, falhas de parada, restart sem restauração, desbloqueio de configuração após entrega e bloqueio por ocupação incerta. Testes relacionais/HTTP de exclusão confirmam que sessões/ocupações pertencem ao projeto e que `managed_terminals` permanece compartilhado depois da exclusão.
+
+### Provas e limites
+
+- Testes adicionados/estendidos cobrem schema/migration 32→33 sem seed/backfill, sessão por papel, ocupação prévia, exclusividade, reuso com sessionId OMP distinto, recusa quando identidade/disponibilidade não é confirmada, isolamento de terminal incerto, reinício sem restauração, configuration lock após entrega e preservação de terminal compartilhado na exclusão.
+- A documentação oficial OMP consultada confirma `--session-dir`, `--continue` e sessão nova em diretório próprio. A documentação oficial Maestri consultada documenta `maestri recruit --replace` como reinício de teammate existente preservando a identidade do terminal. Essas referências sustentam os argv; não comprovam estado real do host. Sem callback de disponibilidade, o terminal anterior não é tocado e a tentativa recebe um terminal Factory novo.
+- A suíte usa SQLite/processos/adapters controlados e confirma somente o comportamento sob essas capacidades. Reuso real requer que a composição confiável do host forneça `ExecutionHost.confirmStoppedTerminal`; sem ela, um terminal anteriormente disponível é preservado e uma TUI própria nova é criada. Maestri/OMP/Windows real, substituição concorrente externa e parada física continuam sem prova nesta entrega. O sistema não declara sessão ou autoridade restauradas no restart.
+- Nenhum Git/GH, provider, TUI Maestri/OMP real, operação de commit/push, credencial, instalação operacional, alteração de fase ou commit foi executado.
+
+## Sprint 014 - Terminais próprios e ocupação segura [CONCLUIDA]
+- Identidade, reserva e disponibilidade dos terminais: Localizar ou criar terminal próprio por papel sem adotar recursos manuais.
+- Nova tentativa e recuperação conservadora: Reutilizar recurso físico sem transferir conversa, resultados ou autoridade.
+
+## Sprint — Sessões contínuas por papel na tentativa [CONCLUÍDA LOCALMENTE; CONVERSAS REAIS PENDENTES]
+
+Data: 2026-10-23. Fontes: AGENTS.md, SPEC V3/PRD/stories em `docs/Docs20261023_014848`, US-09/RF-41–44/RF-47, GLOSSARY.md e decisão aplicada de INTEGRACAO-MAESTRI-OMP.md §10. A pré-condição documental está satisfeita pelo contrato atual; não foi simulada aprovação. Preservadas as alterações preexistentes no repositório canônico e as identidades da migration 033.
+
+### Implementação
+
+- Migration aditiva `034_session_continuity.sql`, schema 34: amplia a guarda de origem da passagem aos dois papéis, exigindo a mesma sessão/tentativa/papel, rodada anterior acompanhada e resultado aceito. Estado incerto/interrompido da sessão não pode ser reativado. A geração física não pode avançar sobre conversa de tentativa ainda sem resultado final. Não cria tabela, backfill, JSON de conversa ou alteração de migration histórica.
+- `Execution.prepareReviewContinuation` exige handle vivo, resultado oficial e confirmação de ociosidade pela extensão OMP (`isIdle`, mensagens, chamadas e ferramentas pendentes). A espera tem prazo e não bloqueia a recepção dos ACKs que precisam drená-la. Depois exige parada física confirmada pelo adapter/capacidade confiável; aceite do dismiss não basta. Falha impede materialização/retomada e conserva trabalho.
+- `continuePassage` valida papel, tentativa, sessão, perfil, recurso e geração. O Implementador mantém follow-up no cwd acompanhado. Para o Revisor, após parada confirmada, o pipeline cria um checkout novo por reviewId exclusivamente da referência retida; a conversa é retomada com `--continue` no diretório persistido, cwd novo e o mesmo ID OMP exigido pelo handshake. Não há substituição por sessão nova nem readopção por histórico. Sem capacidade física de parada, a continuidade revisora fica bloqueada.
+- Cada nova revisão recebe versão atual, diff completo paginado contra a versão imediatamente anterior, respostas oficiais do Implementador, achados pendentes e checks vinculados à verificação atual. As duas refs são conferidas antes/depois do diff. Contexto acima do limite de 512 KiB para diff ou dos limites existentes de request/frame recusa despacho, sem truncamento silencioso. Checkouts/evidências anteriores permanecem intactos; não se usam remanescentes como versão nova.
+- Novas sessões usam `sessions/<attempt_id>/<role>` sob a raiz gerenciada, corrigindo a colisão entre tentativas do mesmo projeto. Diretórios históricos imutáveis não são reescritos. Terminais liberados logicamente ficam indisponíveis para outra tentativa enquanto a conversa pertence a tentativa sem resultado final. Recibos de parada são restritos à sessão e às passagens até a rodada correspondente: parar o processo anterior não confirma parada da passagem futura.
+- Perda da conversa revisora entre rodadas agora interrompe a coordenação, preservando seu parecer. Reinício não restaura canais nem autoridade. SQL continua privado em storage; interfaces de Execution/Workspaces foram estendidas sem endpoint HTTP novo. A conferência do schema da exclusão foi atualizada para 34; sessões/ocupações seguem o inventário existente e terminais permanecem compartilhados.
+
+### Provas locais e limites
+
+Testes controlados cobrem duas correções/três versões, duas sessões lógicas e resultados próprios, ordem ociosidade/parada/materialização, recusa de atualização com Revisor ocupado, perfil e ID OMP exatos, recusa de conversa substituta, vínculos estrangeiros/adulterados, perda e restart sem restauração, fencing/geração, respostas/achados/checks/diff por versão, ACK pendente durante drenagem, diretórios distintos entre tentativas e recibo de parada sem alcançar passagem futura. Upgrade SQLite temporário 33→34 compara integralmente identidades, capturas/resultados/pareceres e ledger anterior sem reseed ou reescrita. Fixtures históricas foram adaptadas ao schema novo sem relaxar as guardas.
+
+Rodadas iniciais expuseram asserções/fixtures ainda baseadas em lançamento por revisão, schema 33 e diretório compartilhado. Foram ajustadas; também foram corrigidas a consulta da geração reservada antes do primeiro reuso e a delimitação dos recibos de parada. Uma falha isolada de consulta não se reproduziu na execução direcionada; a confirmação da suíte final fica registrada abaixo, sem converter o resultado anterior em sucesso.
+
+**Gate real Maestri/OMP: não executado.** Não foram autorizados alvo, perfis/provider e efeitos para ensaio das duas conversas. A documentação do adapter registra o roteiro conjunto com a sprint-014: observar duas correções, perfil/cwd/versão e IDs estáveis por papel, nova sessão em outra tentativa, perda, cancelamento e reinício. A sprint final de composição não substitui este gate. Testes SQL/DOM/adapters e smokes locais não comprovam TUI, conversa real, parada física Maestri ou integração GitHub. Não houve provider, Git/GH real, publicação, alteração de credenciais, instalação operacional, commit/push ou mudança de fase. Nenhuma UI foi alterada.
+
+### Fechamento técnico da versão entregue
+
+| Comando/prova | Resultado observado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0 na versão final; TypeScript strict, produção/testes/scripts. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções preservadas. |
+| `npm.cmd test -- --reporter=json --outputFile=.cache/session-continuity-validated.json --no-color` | Exit 0; **1.787 aprovados, zero falhas/pendências, 146 arquivos**, após o último ajuste de drenagem. |
+| `npm.cmd run build` | Exit 0; controlador, migration 034, recursos e web distribuídos. Bundle web existente 1.066,70 kB / gzip 267,00 kB; permanece aviso Vite acima de 500 kB. |
+| `npm.cmd run test:execution-compiled` | Exit 0; socket/framing/UTF-8/EOF e launcher Windows com Node como fixture. `maestriOmpIntegration=not_executed`. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite reais, sessão/CAS/idempotência, shutdown, lock e restart. Preflight controlado; Maestri/OMP não executados. |
+| Migration fonte/distribuição | Bytes idênticos; SHA-256 `ec6ba788586f82f8af18e17cac69c2f8b76ed2a68f06a69683c7593b956ed215`. |
+| `git diff --check` | Exit 0 antes do complemento; reconferido no fechamento. |
+
+A execução integral anterior `.cache/session-continuity-delivery.json` passou com 1.786 testes; a execução final acima acrescenta a regressão de ACKs durante espera de ociosidade. Relatórios anteriores com falhas permanecem em `.cache/session-{full-first,full-second,continuity-final}.json`, sem serem apresentados como aprovações. A consulta que falhou uma vez passou isoladamente e na suíte final. Testes novos de drenagem/retomada também passaram direcionados antes da repetição integral.
+
+RF-41–44/RF-47 e US-09 têm implementação e provas controladas nas condições descritas. **Aceite integrado das duas conversas permanece pendente**, condicionado à autorização e composição física do host. Sem essa prova, não se declara continuidade real observada de provider/TUI, aprovação de fase ou aceite externo integral.
+
+### Revisão local da sprint 015 - parada preservando identidade
+
+A revisão do launcher e do adapter identificou que `scripts/start-host.mjs` e a descoberta em `main.ts` não fornecem observação física de parada. Também identificou que `maestri dismiss` remove o terminal, contrariando a reutilização da mesma identidade pelo `recruit --replace`. A documentação oficial Maestri de Maestro Mode confirma a remoção; Context7 não retornou a biblioteca correspondente. A presença de operações internas no binário instalado não constitui contrato público suportado.
+
+`ExecutionHost.stopTerminal` separa o pedido de parada que preserva a identidade da observação `confirmStoppedTerminal`. `native.stop` não usa mais `dismiss` e só confirma após ambas as capacidades, dentro do prazo existente. Capacidades ausentes, alvo estrangeiro, falha ou confirmação negativa mantêm estado incerto. A regressão verifica que nenhuma CLI de remoção é chamada. Não há alteração de migrations, autoridade, credenciais ou integrações operacionais.
+
+Validação direcionada: 104 testes passaram em execution, managed-terminals, reviews e attempt-results; lint e diff check passaram. O primeiro typecheck encontrou inferência `Promise<never>` na fixture que simula falha de parada; a fixture recebeu a assinatura explícita do port, sem mudança de comportamento.
+
+**Lacuna operacional ainda aberta:** os dois ports não estão compostos no launcher de produção. A escolha entre bridge Windows mínima e integração Wire própria do produto foi encaminhada ao usuário; credenciais/helpers Wire do ensaio não foram usados como integração do produto. Não se declara a sprint funcionalmente fechada nem prova real Maestri/OMP.
+
+### Bridge composta e ensaio real autorizado - resultado parcial
+
+O usuário autorizou prosseguir com a bridge mínima e executar teste real. `resources/execution/terminal-job.cs` é compilado em `scripts/copy-resources.mjs`; `execution/terminal-jobs.ts` implementa contenção por Job Object, parada, observação e proteção contra attach tardio. `main.ts` compõe a bridge tanto para descoberta normal quanto para executáveis explícitos. Os ports existentes fornecidos por host confiável não são sobrescritos. O Wire existente somente conduz o ensaio e não fornece credenciais ao produto.
+
+A revisão independente identificou e a correção tratou cancelamento antes do hello e rejeição indevida de geração física posterior por uma entrada histórica do runtime. A proteção contra sessão OMP duplicada e contra ocupação da mesma geração permanece. `scripts/prove-terminal-jobs.mjs` comprovou duas rodadas com shell, processo e filho encerrados, identidade divergente recusada, parada anterior ao bind e attach tardio recusado sem executar o comando. Evidência: `.cache/terminal-jobs-1792790021996/result.json`.
+
+O ensaio opt-in `vitest.sessions.config.ts` / `tests/native/session-continuity.proof.ts` usa OMP 18.12.5 com openai-codex/gpt-6-luna/high, TUI Maestri, SQLite e diretórios reais. GitHub, captura/diff Git e observação de integridade são controlados. A primeira rodada falhou antes de inferência por autoload do módulo Set-Acl no Windows PowerShell herdado pelo Node; o bootstrap agora usa DirectoryInfo.SetAccessControl, sem relaxar ACL.
+
+As rodadas seguintes alcançaram a primeira correção. `.cache/session-real-1792790100811/bridge-trace.json` comprova parada física confirmada e novo hello com os mesmos IDs OMP/terminal, porém cwd antigo. O adapter interrompeu a tentativa com TRACKING_LOST. Probe sem inferência `.cache/s15-cwd-observed.json` confirmou cwd antigo mesmo com --cwd explícito; essa tentativa de flag foi removida. Logs de falha preservados em `.cache/s15-real-run{2,3,4}.log`. **Prova real executada e reprovada neste ponto, não concluída.**
+
+Permanece necessária decisão sobre materialização em diretório fixo do Revisor, com retenção de versões/evidências, para compatibilizar conversa contínua com o runtime observado. Nenhuma credencial foi impressa ou persistida em evidências; não houve Git de escrita no repositório canônico, publicação, mudança de fase ou aprovação presumida.
+
+Fechamento desta rodada: a geração acompanha também pedidos/observações de parada, impedindo que um cancelamento histórico alcance a árvore nova do mesmo terminal. A prova nativa final `.cache/terminal-jobs-1792790582942/result.json` passou com recusa de stop histórico e preservação da árvore atual, além dos cenários anteriores. Os 106 testes direcionados de execution/managed-terminals/reviews/attempt-results, build, lint e diff check passaram. Typecheck final conferido separadamente. A revisão independente foi somente leitura e seus achados foram tratados sem apagar registros anteriores. O bloqueio real de cwd permanece, sem nova inferência depois do probe sem provider.
+
+A rechecagem independente encontrou também cancelamento antes de hello em terminal reutilizado que já tinha identidade física histórica. `native.stop` agora tenta primeiro o Job pendente da geração exata, inclusive nesse caso; um alvo de workspace divergente é recusado antes. Os 55 testes de execution passaram novamente e `.cache/terminal-jobs-1792790671403/result.json` comprovou cancelamento antes do bind na terceira geração do mesmo terminal, além de stop histórico recusado, árvore de processos encerrada e attach tardio selado. Build e diff check passaram. O feed confirmou todos os terminais factory criados no ensaio sem processo ativo e, depois, o terminal âncora próprio também parado. Nenhum nó do canvas foi removido.
+
+### Decisão aplicada: um checkout por tentativa - 2026-10-23, 18:37
+
+O usuário substituiu expressamente a arquitetura de cópias por papel/rodada por um checkout próprio por tentativa. SPEC raiz, cópia documental e INTEGRACAO-MAESTRI-OMP.md registram a precedência dessa decisão. Repositório original e ambientes históricos são preservados. A decisão não autoriza remover arquivos existentes ou iniciar a sprint seguinte.
+
+`Execution.preparePassageHandoff` confirma ociosidade e parada de ambos os papéis. O pipeline faz o handoff do Implementador antes de reivindicar a captura (eventos de parada mudam a revisão operacional e não podem invalidar uma claim já aberta) e o do Revisor antes de retomar a correção. Ambos retomam via --continue com seu próprio ID OMP e o mesmo cwd. Perda ou parada incerta bloqueia o próximo papel.
+
+Workspaces usa `createAttemptMaterializer` para checks e revisão: retorna o checkout de implementação após verificação da versão, sem clone adicional. `createCapturer(input, expectedDelivery)` compara nomes, bytes binários e modos contra a tree retida, verifica refs antes/depois e estabilidade da observação; esse caminho não grava objetos, índice ou refs. Checks conferem antes/depois; a aceitação do parecer confere novamente. Evidências usam `.factory-evidence/<reviewId>/`, sem sobrescrever rodadas anteriores. A exclusão Git dessa pasta é criada exclusivamente no clone novo da preparação, antes dos agentes; a materialização/validação não escreve metadados fornecidos pelo agente. Esta última correção atende ao achado independente sobre links em `.git/info/exclude`.
+
+Os 119 testes direcionados passaram; regressões de captura, recuperação e composição passaram após isolar quatro testes de transação SQL da emissão concorrente do evento controlado de handoff. Os 19 testes de deliveries passaram novamente; os 25 testes de preparação/shared-attempt também passaram. Typecheck e lint foram conferidos durante a rodada. Resultados anteriores de falha permanecem em `.cache/shared-attempt-*.json`.
+
+O ensaio real foi ampliado para clone/captura/diff/conferência Git reais, além de SQLite, Job Object e duas TUI OMP. A primeira execução recusou corretamente um cache MCP/npm não ignorado maior que o limite; a fixture passou a ignorar seus caches, sem relaxar a captura. A segunda execução retomou os dois papéis no checkout comum e aprovou a versão 2; a asserção que exigia três versões falhou porque o exemplo foi corrigido antecipadamente. O roteiro foi tornado explicitamente escalonado para exigir duas trocas de correção. O ensaio final permanece em execução neste ponto do registro; não há aceite antecipado.
+
+### Resultado final do percurso compartilhado
+
+O percurso real de `.cache/session-real-1792792216498` chegou a publishing na terceira versão, com seis resultados oficiais e três revisões, a última aprovada. Os seis hellos mostram um único cwd e um ID OMP estável por papel. Clone, captura, diff e conferência de conteúdo Git, SQLite, Maestri/TUI, perfil Luna/high e parada Windows foram reais. GitHub/autoridade e checks configurados da fixture continuam controlados; não houve publicação externa ou alteração na issue operacional.
+
+A execução inicial do runner concluiu o percurso, mas falhou depois ao extrair `terminal_id` de attempt_sessions em vez de managed_terminals. A consulta foi corrigida com JOIN. `FACTORY_REAL_SESSION_RECHECK` revalidou em modo somente leitura o progresso datado, seis resultados, duas sessões, três rodadas, IDs/cwd e conteúdo final do mesmo ensaio; exit 0, sem inferência adicional. `result.json` foi produzido pela revalidação e não por uma nova execução de agentes. O log inicial `.cache/s15-shared-real-run3.log` permanece com sua falha de extração, sem ser reclassificado como comando aprovado.
+
+Validação local: 119 testes direcionados passaram; a suíte completa executou 1.792 testes, com 1.790 aprovados e duas expectativas legadas falhando (quantidade de conferências antes/depois dos checks e hash de blob na fixture Git). As duas foram corrigidas e seus arquivos completos passaram em `.cache/shared-attempt-final-fixes.json`. A suíte completa não foi repetida após essas correções restritas aos testes. Build, typecheck, lint, diff check e smoke de execução compilada passaram; este último usa Node como fixture e não é contado como prova Maestri/OMP.
+
+A revisão independente confirmou a alternância e a validação da tree; o achado sobre escrita em exclude foi corrigido e reconferido. A limitação de cwd que bloqueava a sprint 015 foi resolvida pelo checkout único autorizado. O aceite aqui é do percurso delimitado, não de GitHub real, UI ou do pacote V3 inteiro. Nenhuma sprint seguinte, aprovação de pipeline, staging, commit ou push do repositório canônico foi executado.
+
+## Sprint 016 - Sessões, recursos e recuperação na interface [CONCLUÍDA LOCALMENTE]
+
+Data: 2026-10-23. Retomada após interrupção por limite de tokens. Fontes: SPEC V3, US-09/US-10 e feat-028/feat-029 do plano `docs/Docs20261023_014848/sprints20261023_014848.json`. Alterações anteriores preservadas no repositório canônico.
+
+- A consulta de passagens projeta sessão, origem da continuidade, terminal atual e ocupação histórica. `PassageFacts` diferencia papel/rodada, sessão, terminal, acompanhamento e parada, com ausências legadas explícitas. Perda de acompanhamento informa interrupção, preservação do trabalho e próxima ação, sem inferir parada física ou autoridade recuperada.
+- Recursos usam a superfície de interação existente da passagem; indisponibilidade possui descrição acessível. O detalhe diferencia recursos atuais da tentativa e histórico da versão. Respostas de consulta, recursos e comandos ficam vinculadas à seleção, descartando retornos tardios após trocar tentativa, rodada ou versão. Nenhum comando é repetido pela consulta ou reabertura.
+- Validação nesta retomada: 65 testes em sete arquivos passaram (`session-resources`, `observation-requests`, `attempt-results`, `project-configuration-lock`, `project-readiness`, `historical-profile`, `queries`); build, typecheck, lint e diff check passaram. Inclui bloqueio por ocupação incerta e configuração liberada para terminal ocioso pelo contrato atual do backend.
+- Playwright MCP executou `tests/browser/session-resources.playwright.js` com APIs controladas, Vite local e código atual: ativo, ocioso, incerto, perdido e legado; quatro ações indisponíveis descritas; fechamento/reabertura; nenhuma mutação operacional nem erro JavaScript. Capturas em `tests/browser/evidence/sprint016-desktop.png` (1440×1000) e `sprint016-mobile.png` (390×844), sem overflow horizontal. Inspeção visual confirmou leitura e rodapé acessível no mobile.
+- As primeiras tentativas do roteiro falharam por fixture sem data, seletor incorreto de fechar, seletor ambíguo após reabertura e classificação da criação de sessão HTTP como mutação operacional. Foram corrigidas no roteiro. O stream controlado recebeu MIME SSE correto. Essas falhas não foram atribuídas ao produto.
+- Limites: prova de UI controlada, sem controlador real, provider, abertura nativa de terminal ou publicação externa nesta sprint. A suíte completa não foi repetida. O build conserva aviso de tamanho do bundle. Nenhum pipeline, staging, commit, push ou sprint seguinte foi iniciado.

@@ -4,7 +4,7 @@ import {
   GitHubAccount, GitHubBranch, GitHubProject, GitHubProjectDetails, GitHubRepository,
   GitHubId, GitHubIssueReference, GitHubProjectOwner, GitHubProjectSelection,
   IssueBlocker, IssueComment, IssueContext, IssueMembership, ProjectItem, RepositoryReference, StatusField,
-  type GitHubQueryResult,
+  V3StatusMapping, type GitHubQueryResult,
 } from '#contracts';
 import { GraphQLReader, collect, object, result, string } from './transport.js';
 import * as queries from './queries.js';
@@ -112,7 +112,11 @@ export function createClient(rootReader: GraphQLReader) {
     const response = await getProject(selection.id);
     if (!response.data) return response;
     const field = response.data.singleSelectFields.find((candidate) => candidate.id === selection.statusFieldId);
-    const code = !field ? 'STATUS_FIELD_INACCESSIBLE' : selection.statusOptionIds.some((id) => !field.options.some((option) => option.id === id)) ? 'STATUS_OPTION_INACCESSIBLE' : null;
+    const missingOption = field && selection.statusOptionIds.some((id) => !field.options.some((option) => option.id === id));
+    const compatible = field?.name === 'Status' && response.data.singleSelectFields.filter((candidate) => candidate.name === 'Status').length === 1 &&
+      field.options.length === V3StatusMapping.length && V3StatusMapping.every(({ name }, index) =>
+        field.options[index]?.id === selection.statusOptionIds[index] && field.options[index]?.name === name);
+    const code = !field ? 'STATUS_FIELD_INACCESSIBLE' : missingOption ? 'STATUS_OPTION_INACCESSIBLE' : !compatible ? 'STATUS_MAPPING_INCOMPATIBLE' : null;
     return code ? result('partial', response.data, [...response.diagnostics.map((entry) => entry.code), code], response.retryAtMs) : response;
   }
   async function listProjectItems(id: string): Promise<GitHubQueryResult<ProjectItem[]>> {

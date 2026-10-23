@@ -31,7 +31,7 @@ async function fixture(enabled = true) {
   }
   automation(f.projectId, true);
   vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([{ id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true }]));
-  const queue = createQueue({ storage: f.storage, github: f.github, hostName: 'test-host' });
+  const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
   f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue });
   return { f, queue, automation };
 }
@@ -48,7 +48,7 @@ describe('authorized queue changes', () => {
       const remote = observationWire({ issues: new Map([[f.issue.id, f.issue]]), projects: new Map([[f.project.project.id, f.project]]),
         items: new Map([[f.project.project.id, (await f.github.listProjectItems(f.project.project.id)).data!]]), pages: 1,
         account: () => 'ACCOUNT_test' }, meter);
-      const queue = createQueue({ storage: f.storage, github: remote, hostName: 'test-host' });
+      const queue = createQueue({ storage: f.storage, github: remote, workspaces: f.workspaces, hostName: 'test-host' });
       const warm = await queue.read({}); expect(warm.items[0]?.eligible).toBe(true);
       const trace: string[] = [];
       const record = f.storage.recordQueueObservations.bind(f.storage);
@@ -211,6 +211,56 @@ describe('durable scheduler', () => {
     expect(f.storage.getConfiguration(f.projectId).view.configuration.automation_enabled).toBe(false);
   });
 
+  it.each(['remote', 'published_base', 'board'] as const)('does not enable or dispatch a Ready issue with missing %s readiness', async missing => {
+    const { f, queue, automation } = await fixture(false);
+    automation(f.projectId, false);
+    if (missing === 'remote') {
+      f.observation.remote = null;
+      f.observation.diagnostics.push({ code: 'REMOTE_MISSING', message: 'No remote.', recovery: 'Configure remote.' });
+    }
+    if (missing === 'published_base') f.observation.remote!.branch!.sha = 'b'.repeat(40);
+    if (missing === 'board') {
+      const current = f.storage.getConfiguration(f.projectId);
+      const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
+      f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
+        body: { project_changes: { github_project: null } }, configuration: { ...configuration, github_project: null }, globalChanges: {} });
+    }
+    const observed = await queue.observe({ projectId: f.projectId });
+    expect(observed.observation).toMatchObject({ complete: false, valid: false });
+    const expected = missing === 'remote' ? 'REMOTE_UNCONFIRMED' : missing === 'published_base' ? 'CODE_NOT_PUBLISHED' : 'PROJECT_REQUIRED';
+    expect(observed.observation.diagnostics.map(item => item.code)).toContain(expected);
+    await expect(queue.save(command(observed.observation, true), { operationId: randomUUID(), expectedRevision: observed.etag }))
+      .rejects.toMatchObject({ code: 'QUEUE_SUMMARY_CHANGED' });
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.getConfiguration(f.projectId).view.configuration.automation_enabled).toBe(false);
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 0 });
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+  });
+
+  it.each(['remote', 'published_base', 'board'] as const)('does not dispatch an already enabled Ready issue while %s readiness is missing', async missing => {
+    const { f } = await fixture(true);
+    if (missing === 'remote') {
+      f.observation.remote = null;
+      f.observation.diagnostics.push({ code: 'REMOTE_MISSING', message: 'No remote.', recovery: 'Configure remote.' });
+    }
+    if (missing === 'published_base') f.observation.remote!.branch!.sha = 'b'.repeat(40);
+    if (missing === 'board') {
+      const current = f.storage.getConfiguration(f.projectId);
+      const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
+      f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
+        body: { project_changes: { github_project: null } }, configuration: { ...configuration, github_project: null }, globalChanges: {} });
+    }
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.getSettings().automation_enabled).toBe(true);
+    expect(f.storage.getConfiguration(f.projectId).view.configuration.automation_enabled).toBe(true);
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 0 });
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+  });
+
   it('keeps shared identity failures blocking every project', async () => {
     const { f, queue, automation } = await fixture(); automation(f.register(), true);
     vi.mocked(f.github.getIdentity).mockResolvedValue({ state: 'authentication_invalid', data: null, retryAtMs: null, diagnostics: [] });
@@ -249,7 +299,7 @@ describe('durable scheduler', () => {
     const { f, queue, automation } = await fixture(); const other = f.register(); automation(other, true);
     const current = f.storage.getConfiguration(other);
     const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
-    const mapping = { ...configuration.github_project!, id: 'UNAVAILABLE_BOARD' };
+    const mapping = { ...configuration.github_project!, id: 'UNAVAILABLE_BOARD' } as import('#contracts').ProjectMapping;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: other,
       body: { project_changes: { github_project: mapping } }, configuration: { ...configuration, github_project: mapping }, globalChanges: {} });
     const original = vi.mocked(f.github.listProjectItems).getMockImplementation()!;
@@ -376,7 +426,7 @@ describe('durable scheduler', () => {
     const remote = observationWire({ issues: new Map([[f.issue.id, f.issue]]), projects: new Map([[f.project.project.id, f.project]]),
       items: new Map([[f.project.project.id, (await f.github.listProjectItems(f.project.project.id)).data!]]), pages: 1,
       account: () => 'ACCOUNT_test' }, new BackendMeasurement(), { afterSend: async operation => { if (operation === 'GroupedValues') grouped++; } });
-    const displayQueue = createQueue({ storage: f.storage, github: remote, hostName: 'test-host' });
+    const displayQueue = createQueue({ storage: f.storage, github: remote, workspaces: f.workspaces, hostName: 'test-host' });
     await displayQueue.read({}); expect(grouped).toBe(1);
     f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue: displayQueue });
     await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
@@ -385,7 +435,7 @@ describe('durable scheduler', () => {
     expect(f.storage.getOperation(f.storage.getAttempt(first.id).operationId)?.resource.id).toBe(first.id);
     f.persistence.recordCancellation(first.id, randomUUID()); await f.pipeline.close(); f.storage.close();
     const reopened = openStorage({ dataDirectory: f.directory });
-    const queue = createQueue({ storage: reopened, github: remote, hostName: 'test-host' });
+    const queue = createQueue({ storage: reopened, github: remote, workspaces: f.workspaces, hostName: 'test-host' });
     const pipeline = createPipeline({ ...f.dependencies, storage: reopened, queue });
     try {
       const beforeReads = grouped;
@@ -411,7 +461,7 @@ describe('durable scheduler', () => {
     await f.pipeline.close(); f.storage.close(); removeQueueSchedulerSchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(27); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(34); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getOperation(operationId)?.receipt).toEqual(receipt?.receipt);
       expect(f.db.prepare('SELECT observed_cycle,attempt_id,ready_exit_observed_at_ms,ready_return_observed_at_ms FROM queue_consumptions').get())
         .toEqual({ observed_cycle: 1, attempt_id: first.id, ready_exit_observed_at_ms: null, ready_return_observed_at_ms: null });

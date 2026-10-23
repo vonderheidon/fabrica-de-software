@@ -6,9 +6,9 @@ import {
 } from './profile-collection.js';
 
 const profiles: StoredExecutionProfile[] = [
-  { id: '00000000-0000-4000-8000-000000000001', name: 'Café Delivery', profile_type: 'implementer', executor: 'maestri-omp', provider: 'provider-a', model: 'shared-model', effort: 'high', guidance: 'Use ações rápidas.', revision: 1, created_at_ms: 1, updated_at_ms: 1 },
-  { id: '00000000-0000-4000-8000-000000000002', name: 'Revisão cuidadosa', profile_type: 'reviewer', executor: 'maestri-omp', provider: 'provider-b', model: 'shared-model', effort: null, guidance: 'Confira documentação.', revision: 1, created_at_ms: 2, updated_at_ms: 2 },
-  { id: '00000000-0000-4000-8000-000000000003', name: 'Implementador extra', profile_type: 'implementer', executor: 'maestri-omp', provider: 'provider-a', model: 'other-model', effort: 'medium', guidance: '', revision: 1, created_at_ms: 3, updated_at_ms: 3 },
+  { id: '00000000-0000-4000-8000-000000000001', name: 'Café Delivery', profile_type: 'implementer', executor: 'maestri-omp', provider: 'provider-a', model: 'shared-model', effort: 'high', guidance: 'Use ações rápidas.', revision: 1, created_at_ms: 1, updated_at_ms: 1, composition_version: 1 },
+  { id: '00000000-0000-4000-8000-000000000002', name: 'Revisão cuidadosa', profile_type: 'reviewer', executor: 'maestri-omp', provider: 'provider-b', model: 'shared-model', effort: null, guidance: 'Confira documentação.', revision: 1, created_at_ms: 2, updated_at_ms: 2, composition_version: 1 },
+  { id: '00000000-0000-4000-8000-000000000003', name: 'Implementador extra', profile_type: 'implementer', executor: 'maestri-omp', provider: 'provider-a', model: 'other-model', effort: 'medium', guidance: '', revision: 1, created_at_ms: 3, updated_at_ms: 3, composition_version: 1 },
 ];
 
 describe('global profile collection filters', () => {

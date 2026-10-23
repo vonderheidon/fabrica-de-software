@@ -3,17 +3,19 @@ import { resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, OperationId } from '#contracts';
 import type { GitReader } from './git.js';
+import type { AttemptRootResolver } from './project-storage.js';
 import { CaptureError, captureLimits, gitPath, managedRoot, metadataBytes, noBorrowedObjects, nul, plainDirectory, verifyRetained } from './capture.js';
 
 /** Verify the reviewed bytes, including files hidden by assume-unchanged/skip-worktree.
  * Ignored generated caches are excluded; retained tracked files are always read.
  */
-export function createReviewValidator(dataDirectory?: string, git?: GitReader, canonicalize: (p: string) => Promise<string> = realpath) {
+export function createReviewValidator(dataDirectory?: string, git?: GitReader, canonicalize: (p: string) => Promise<string> = realpath,
+  resolveAttemptRoot?: AttemptRootResolver) {
   return async (delivery: Delivery, reviewId: string): Promise<boolean> => {
     if (!Value.Check(Delivery, delivery) || !Value.Check(OperationId, reviewId) || delivery.captureState !== 'captured') throw new CaptureError('DELIVERY_NOT_CAPTURED');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
     try {
-      const data = await managedRoot(dataDirectory, canonicalize);
+      const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory, canonicalize);
       let checkout = data;
       for (const part of ['work', delivery.attemptId, 'reviews', reviewId, 'checkout']) {
         checkout = resolve(checkout, part); await plainDirectory(checkout, canonicalize);

@@ -27,6 +27,12 @@ if (process.platform === 'win32') {
     `/out:${fileURLToPath(new URL('picker.exe', nativeDirectory))}`,
     fileURLToPath(new URL('../resources/native-selection/picker.cs', import.meta.url))], { windowsHide: true, encoding: 'utf8' });
   if (compiled.error || compiled.status !== 0) throw new Error(`NATIVE_PICKER_BUILD_FAILED: ${compiled.stdout ?? ''}`);
+  const executionDirectory = new URL('../dist/resources/execution/', import.meta.url);
+  mkdirSync(executionDirectory, { recursive: true });
+  const job = spawnSync(compiler, ['/nologo', '/target:exe', '/optimize+',
+    `/out:${fileURLToPath(new URL('terminal-job.exe', executionDirectory))}`,
+    fileURLToPath(new URL('../resources/execution/terminal-job.cs', import.meta.url))], { windowsHide: true, encoding: 'utf8' });
+  if (job.error || job.status !== 0) throw new Error(`NATIVE_TERMINAL_JOB_BUILD_FAILED: ${job.stdout ?? ''}`);
 }
 
 const faviconDefinition = JSON.parse(readFileSync(new URL('../resources/favicon.v1.json', import.meta.url), 'utf8'));

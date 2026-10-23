@@ -8,6 +8,8 @@ import { ProjectConfigurationForm } from './ProjectForm.js';
 import { ConditionNotices, conditionSection } from './ProjectReadiness.js';
 import { IssueOptionsNotice } from '../preparations/IssueOptionsNotice.js';
 import { PreparationDialog } from '../preparations/PreparationDialog.js';
+import { clearDraft, configurationDraftIdentity } from '../../app/drafts.js';
+import { HttpError } from '../../api/http.js';
 
 const { request, metadata } = vi.hoisted(() => ({ request: vi.fn(), metadata: vi.fn() }));
 vi.mock('../../api/http.js', async (original) => ({ ...await original<typeof import('../../api/http.js')>(), getControllerInstanceId: () => 'test-instance', requestJson: request, requestJsonWithMetadata: metadata }));
@@ -16,7 +18,8 @@ const prerequisite = (code: string): Prerequisite => ({ code, message: `Condiç�
 const projectId = 'ed0ae84a-3f5b-47c3-bfc5-d6e135880356';
 let sequence = 0;
 let savedConfiguration: ConfigurationView;
-async function mount(locked = false) {
+async function mount(locked = false, legacy = false) {
+  clearDraft(configurationDraftIdentity(null, projectId), 'project-configuration');
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const settings: SettingsView = {
     settings: { id: 'local', installation_id: `project-test-${++sequence}`, account_id: null, designated_host: null,
@@ -26,11 +29,14 @@ async function mount(locked = false) {
     profiles: [], profile_counts: { all: 0, implementer: 0, reviewer: 0 }, event_cursor: '1',
     onboarding: { suppressed: true, completed_at_ms: null, first_incomplete_step: null, prerequisites: [] },
     selection_capabilities: { projects_root: { available: false }, gh_executable: { available: false } },
+    tool_preferences: { format_version: 1, git: { preferred_path: null, last_validated_at_ms: null }, maestri: { preferred_path: null, last_validated_at_ms: null }, omp: { preferred_path: null, last_validated_at_ms: null }, powershell: { preferred_path: null, last_validated_at_ms: null } },
   };
   const configuration: ConfigurationView = { ...settings, deletion: null, prerequisites: [],
+    storage: { managed_root: null, original_path: 'C:\\source', locations: [], transition_plan: null,
+      active_transition_operation_id: null, state: 'legacy', cause: null, recovery: null },
     configuration_lock: locked ? { attempt_id: 'active-attempt' } : null,
     configuration: { id: 'revision', project_id: projectId, revision: 1, created_at_ms: 1,
-      source: { kind: 'local', location: 'C:\\source' }, base_branch: 'main', github_project: null,
+      source: { kind: 'local', location: 'C:\\source' }, base_branch: 'main', github_project: legacy ? { id: 'board', owner_id: 'owner', status_field_id: 'status', status_option_ids: { ready: 'ready', in_progress: 'progress', in_review: 'review', delivered: 'done' } } : null,
       implementer_profile_id: null, reviewer_profile_id: null, checks: [{ id: 'check', command: 'npm test', cwd_relative: '.', timeout_ms: 1000 }],
       correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
       queue_order: { priority_field_id: null, priority_direction: 'asc', use_board_position: true }, guidance: '' },
@@ -58,7 +64,7 @@ it('locates project conditions and keeps one configuration action without verifi
   const container = await mount();
   expect(container.textContent).toContain('selecione um perfil ativo para cada papel');
   expect(container.textContent).toContain('Perfis disponíveis: nenhum Implementador e nenhum Revisor');
-  expect(container.querySelector('[aria-label="Configuração do projeto"]')?.textContent).toContain('confirme a origem');
+  expect(container.querySelector('[aria-label="Configuração do projeto"]')?.textContent).toContain('Confirme o repositório GitHub');
   expect(container.textContent).not.toContain('Bloqueado · Revise os pré-requisitos');
   expect([...container.querySelectorAll('button')].filter((item) => item.textContent === 'Verificar condições do projeto')).toHaveLength(1);
   expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
@@ -91,10 +97,38 @@ it('keeps editing locked while the read-only verification remains available', as
   expect(button(container, 'Salvar configuração').disabled).toBe(true);
 });
 it.each([
-  ['ACCOUNT_CHANGED', 'global'], ['REMOTE_MISMATCH', 'origin'], ['REPOSITORY_ARCHIVED', 'origin'],
+  ['ACCOUNT_CHANGED', 'global'], ['REMOTE_MISMATCH', 'origin'], ['REPOSITORY_ARCHIVED', 'origin'], ['CODE_NOT_PUBLISHED', 'origin'],
   ['PROJECT_CONFIGURATION_CHANGED', 'configuration'], ['PROFILE_REFERENCE_CHANGED', 'profiles'],
   ['CRITERIA_MISSING', 'criteria'], ['ISSUE_CLOSED', 'issue'], ['BLOCKED', 'issue'], ['STATUS_NOT_READY', 'issue'],
 ])('locates %s without changing eligibility', (code, section) => expect(conditionSection(code)).toBe(section));
+it('keeps a legacy mapping readable and omits it when saving another field', async () => {
+  const container = await mount(false, true);
+  expect(container.textContent).toContain('Mapeamento histórico de quatro valores');
+  expect(container.textContent).toContain('Selecione novamente o campo');
+  const field = container.querySelector<HTMLTextAreaElement>('#project-guidance')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Orientação editada'); field.dispatchEvent(new Event('input', { bubbles: true })); });
+  metadata.mockResolvedValueOnce({ data: { ...savedConfiguration, operation_id: crypto.randomUUID(), receipt: { revision: 2, event_cursor: '2' } }, etag: '"saved"' });
+  const save = [...container.querySelectorAll('button')].find(item => item.textContent?.includes('Salvar') && item.classList.contains('primary'))!;
+  await act(async () => save.click());
+  const [, init] = metadata.mock.calls.find(([, options]) => options?.method === 'PUT')!;
+  expect(JSON.parse(String(init.body))).toEqual({ project_changes: { guidance: 'Orientação editada' } });
+  expect(savedConfiguration.configuration.github_project?.status_option_ids).not.toHaveProperty('backlog');
+});
+it.each(['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'REMOTE_UNCONFIRMED', 'PROJECT_REQUIRED', 'STATUS_MAPPING_LEGACY', 'CODE_NOT_PUBLISHED'])('keeps automation edits and displays the server cause and recovery for %s', async (code) => {
+  const container = await mount();
+  const automation = [...container.querySelectorAll('label')].find(item => item.textContent?.includes('Automação deste projeto habilitada'))!.querySelector<HTMLInputElement>('input')!;
+  await act(async () => automation.click());
+  const recovery = 'Confira a configuração indicada pelo servidor e tente habilitar novamente.';
+  metadata.mockRejectedValueOnce(new HttpError(409, code, 'Publique a branch-base antes de habilitar a automação.', null, [], null, null, null, ['RF-15'], recovery));
+  await act(async () => button(container, 'Salvar configuração').click());
+  expect(container.textContent).toContain('Publique a branch-base antes de habilitar a automação.');
+  expect(container.querySelector('.save-feedback [role="alert"]')?.textContent).toContain('Próxima ação:');
+  expect(container.querySelector('.save-feedback [role="alert"]')?.textContent).toContain(recovery);
+  expect(container.querySelector('.save-feedback')?.textContent).not.toContain(code);
+  expect(container.textContent).toContain('Ready indica elegibilidade na fila; não habilita a automação');
+  expect(automation.checked).toBe(true);
+  expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
+});
 it('shows revalidation as information and gives global correction access', () => {
   const html = renderToStaticMarkup(createElement(ConditionNotices, { items: [prerequisite('EXECUTOR_REVALIDATION_REQUIRED'), prerequisite('ISSUE_REVALIDATION_REQUIRED')], section: 'information', projectId }));
   expect(html).toContain('role="note"'); expect(html).not.toContain('blocked'); expect(html.match(/serão revalidados/g)).toHaveLength(1);
@@ -113,7 +147,7 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
   const preparation: Preparation = {
     id: crypto.randomUUID(), project_id: preparationProjectId, project_revision_id: 'revision', revision: 1,
     issue_id: 'ISSUE_test', delivery_mode: 'icr', guidance: '', overrides: {}, can_start: false,
-    prerequisites: ['ISSUE_CLOSED', 'REMOTE_MISMATCH', 'REPOSITORY_ARCHIVED', 'PROFILE_REFERENCE_CHANGED', 'ACCOUNT_CHANGED', 'EXECUTOR_REVALIDATION_REQUIRED', 'CRITERIA_LIST_INVALID'].map(prerequisite),
+    prerequisites: ['ISSUE_CLOSED', 'REMOTE_MISMATCH', 'REMOTE_UNCONFIRMED', 'CODE_NOT_PUBLISHED', 'PROJECT_REQUIRED', 'REPOSITORY_ARCHIVED', 'PROFILE_REFERENCE_CHANGED', 'ACCOUNT_CHANGED', 'EXECUTOR_REVALIDATION_REQUIRED', 'CRITERIA_LIST_INVALID'].map(prerequisite),
     effective_configuration: { configuration, project_revision_id: 'revision', settings_revision: 1,
       implementer_profile: null, reviewer_profile: null, time_defaults: savedConfiguration.settings.time_defaults,
       artifact_policy: savedConfiguration.settings.artifact_policy, guidance: '',
@@ -135,6 +169,9 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
   expect(container.textContent).toContain('Configuração efetiva'); expect(container.textContent).toContain('Critérios não executáveis');
   expect(container.textContent).toContain('Issue fechada');
   expect(container.textContent).toContain('Base local e remota divergentes');
+  expect(container.textContent).toContain('Confirme o repositório GitHub');
+  expect(container.textContent).toContain('Publique a branch-base');
+  expect(container.textContent).toContain('Selecione o quadro do projeto');
   expect(container.textContent).toContain('Repositório arquivado');
   expect(container.textContent).toContain('Referência de perfil alterada');
   expect(container.textContent).not.toContain('Atenção necessária');

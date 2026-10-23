@@ -50,6 +50,7 @@ export { AttemptListQuery as HttpAttemptListQuery } from './queries.js';
 export { AttemptSummary as HttpAttemptSummary } from './queries.js';
 export { AttemptPage as HttpAttemptPage } from './queries.js';
 export { DetailSection as HttpDetailSection } from './queries.js';
+export { HistoricalEffectiveProfile as HttpHistoricalEffectiveProfile } from './queries.js';
 export { AttemptDetailQuery as HttpAttemptDetailQuery } from './queries.js';
 export { DeliveryDetailQuery as HttpDeliveryDetailQuery } from './queries.js';
 export { PassageSummary as HttpPassageSummary } from './queries.js';

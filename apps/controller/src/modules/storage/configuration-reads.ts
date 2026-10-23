@@ -4,9 +4,9 @@ import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import {
   CatalogQuery, ConfigurationView, OperationId, ProjectDetail, ProjectPage, ProjectRevision, SettingsView, StoredExecutionProfile,
-  type DeletionSummary, type FactorySettings, type Prerequisite, type ProjectConfiguration, type ProjectSummary,
+  type DeletionSummary, type FactorySettings, type Prerequisite, type ProjectConfiguration, type ProjectSummary, type ProjectStorageView,
 } from '#contracts';
-import { readSettings } from './settings.js';
+import { readSettings, readToolPreferences } from './settings.js';
 import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
 import { deletionOperation, deletionRecovery } from './project-deletion-barrier.js';
@@ -29,8 +29,11 @@ export function eventCursor(db: Database.Database): string {
   return String(db.prepare<[string, string | null], { seq: number }>('SELECT coalesce(max(e.seq), 0) AS seq FROM events e JOIN operation_requests o ON o.operation_id = e.operation_id WHERE o.installation_id = ? AND o.account_id IS ?').get(s.installation_id, s.account_id)?.seq ?? 0);
 }
 export function readSettingsView(db: Database.Database): SettingsView {
+  const hasCompositionVersion = db.prepare<[], { present: number }>(
+    "SELECT 1 AS present FROM pragma_table_info('execution_profiles') WHERE name='composition_version'",
+  ).get() !== undefined;
   const profiles = db.prepare<[], StoredExecutionProfile>(`SELECT id, name, executor, provider, model, effort, guidance,
-    profile_type, revision, created_at_ms, updated_at_ms FROM execution_profiles
+    profile_type, revision, created_at_ms, updated_at_ms, ${hasCompositionVersion ? 'composition_version' : 'NULL AS composition_version'} FROM execution_profiles
     WHERE deleted_at_ms IS NULL ORDER BY id`).all();
   if (profiles.some((p) => !Value.Check(StoredExecutionProfile, p))) throw new StorageError('PROFILE_DATA_INVALID');
   const profileCounts = profiles.reduce((counts, profile) => ({
@@ -39,6 +42,7 @@ export function readSettingsView(db: Database.Database): SettingsView {
     reviewer: counts.reviewer + Number(profile.profile_type === 'reviewer'),
   }), { all: 0, implementer: 0, reviewer: 0 });
   const settings = readSettings(db);
+  const toolPreferences = readToolPreferences(db);
   const linkedAccount = settings.account_id === null ? null : db.prepare<[string], { id: string }>(
     'SELECT github_account_id AS id FROM accounts WHERE github_account_id = ?',
   ).get(settings.account_id);
@@ -87,31 +91,45 @@ export function readSettingsView(db: Database.Database): SettingsView {
       first_incomplete_step: firstIncompleteStep, prerequisites: onboardingPrerequisites },
     selection_capabilities: { projects_root: unavailableSelection, gh_executable: unavailableSelection },
     event_cursor: eventCursor(db),
+    tool_preferences: toolPreferences,
   };
   if (!Value.Check(SettingsView, view)) throw new StorageError('SETTINGS_INVALID');
   return view;
 }
 export function configurationETag(view: SettingsView | ConfigurationView): string {
   return `"${digest({ installation: view.settings.installation_id, account: view.settings.account_id, settings: view.settings.revision,
-    profiles: view.profiles.map((p) => [p.id, p.revision]),
+    profiles: view.profiles.map((p) => [p.id, p.revision, p.composition_version]),
     project: 'configuration' in view ? [view.configuration.project_id, view.configuration.id, view.configuration.revision] : null,
     ...('configuration' in view && view.prerequisites.some(item => item.code === 'PROJECT_DELETION_PENDING') ? { deletionPending: true } : {}) })}"`;
 }
 interface ProjectRow {
   id: string; name: string; account_id: string | null; revision: number; current_revision_id: string;
   source_kind: 'local' | 'github'; source_location: string; repository_id: string | null; repository_url: string | null;
-  base_branch: string; github_project_id: string | null; implementer_profile_id: string | null; reviewer_profile_id: string | null;
+  base_branch: string; github_project_id: string | null; github_project_owner_id: string | null; status_field_id: string | null; status_options_json: string;
+  implementer_profile_id: string | null; reviewer_profile_id: string | null;
   origin_notes_json: string;
 }
 const summaryColumns = `p.id, p.name, p.account_id, p.revision, p.current_revision_id, r.source_kind, r.source_location,
-  r.repository_id, r.repository_url, r.base_branch, r.github_project_id, r.implementer_profile_id, r.reviewer_profile_id, r.origin_notes_json`;
-export function prerequisites(config: Pick<ProjectConfiguration, 'source' | 'implementer_profile_id' | 'reviewer_profile_id'> & { github_project: { id: string } | null }, notes: readonly string[] = []): Prerequisite[] {
+  r.repository_id, r.repository_url, r.base_branch, r.github_project_id, r.github_project_owner_id, r.status_field_id, r.status_options_json,
+  r.implementer_profile_id, r.reviewer_profile_id, r.origin_notes_json`;
+export function prerequisites(config: Pick<ProjectConfiguration, 'source' | 'implementer_profile_id' | 'reviewer_profile_id' | 'github_project'>, notes: readonly string[] = []): Prerequisite[] {
   const result: Prerequisite[] = [];
   const add = (code: string, message: string, recovery: string) => result.push({ code, message, recovery });
-  if (!config.source.repository_id) add('REMOTE_UNCONFIRMED', 'O repositório GitHub ainda não foi confirmado.', 'Confirme a origem GitHub na configuração do projeto.');
+  const noteSet = new Set(notes);
+  if (!config.source.repository_id || noteSet.has('REMOTE_MISSING') || noteSet.has('REMOTE_UNCONFIRMED')) {
+    add('REMOTE_UNCONFIRMED', 'A origem GitHub do projeto ainda não foi confirmada.', 'Configure um remoto GitHub acessível para esta pasta e confirme a identidade do repositório.');
+  }
+  if (['BRANCH_NOT_FOUND', 'BASE_UNCONFIRMED', 'REMOTE_MISMATCH'].some(code => noteSet.has(code))) {
+    add('CODE_NOT_PUBLISHED', 'O commit da branch-base ainda não está confirmado no remoto GitHub.', 'Publique o commit da branch-base no repositório configurado e confira novamente a origem.');
+  }
   if (!config.github_project) add('PROJECT_REQUIRED', 'O quadro GitHub e o mapeamento de Status ainda não foram configurados.', 'Selecione o quadro pelo nome e mapeie os valores de Status na configuração do projeto.');
+  else if (!('backlog' in config.github_project.status_option_ids)) add('STATUS_MAPPING_LEGACY', 'O quadro salvo usa um mapeamento histórico de quatro valores.', 'Selecione o campo Status e configure também Backlog para liberar novos inícios.');
   if (!config.implementer_profile_id || !config.reviewer_profile_id) add('PROFILES_REQUIRED', 'Falta associar perfis aos papéis de Implementador e Revisor.', 'Selecione um perfil ativo para cada papel na configuração do projeto.');
-  for (const code of notes) add(code, code === 'LOCAL_CHANGES_EXCLUDED' ? 'Alterações locais sem commit não entram nas tentativas.' : 'A consulta da origem encontrou um pré-requisito pendente.', 'Confira a origem antes de preparar uma issue.');
+  for (const code of notes) {
+    if (['REMOTE_MISSING', 'REMOTE_UNCONFIRMED', 'BRANCH_NOT_FOUND', 'BASE_UNCONFIRMED', 'REMOTE_MISMATCH'].includes(code)) continue;
+    if (code === 'LOCAL_CHANGES_EXCLUDED') add(code, 'Alterações locais sem commit não entram nas tentativas.', 'Faça commit das alterações que devem entrar na branch-base e consulte a origem novamente.');
+    else add(code, 'A origem do projeto precisa de uma nova conferência antes da execução.', 'Confira a pasta, a branch-base e o acesso ao repositório GitHub na configuração do projeto.');
+  }
   add('EXECUTION_REVALIDATION_REQUIRED', 'Revise os pré-requisitos na preparação antes de iniciar.', 'A preparação confere conta, origem, vínculo da issue ao quadro e executor novamente.');
   return result;
 }
@@ -132,7 +150,10 @@ function summary(row: ProjectRow, settings: FactorySettings, pending: DeletionSu
   if (!settings.projects_root) globalPrerequisites.push({ code: 'PROJECTS_ROOT_REQUIRED', message: 'A project root is not configured.', recovery: 'Choose an accessible local project directory.' });
   return { deletion: pending, id: row.id, name: row.name, account_id: row.account_id, source: source(row), base_branch: row.base_branch,
     revision: row.revision, current_revision_id: row.current_revision_id,
-    prerequisites: [...prerequisites({ source: source(row), github_project: row.github_project_id ? { id: row.github_project_id } : null,
+    prerequisites: [...prerequisites({ source: source(row), github_project: row.github_project_id ? {
+      id: row.github_project_id, owner_id: row.github_project_owner_id!, status_field_id: row.status_field_id!,
+      status_option_ids: readStatusOptionIds(JSON.parse(row.status_options_json) as unknown),
+    } : null,
       implementer_profile_id: row.implementer_profile_id, reviewer_profile_id: row.reviewer_profile_id }, originNotes), ...globalPrerequisites],
   };
 }
@@ -158,7 +179,24 @@ export function readConfiguration(db: Database.Database, projectId: string): Con
     automation_enabled: r.automation_enabled === 1, queue_order: readQueueOrderJson(JSON.parse(String(r.queue_order_json)) as unknown), guidance: r.guidance,
   };
   if (!Value.Check(ProjectRevision, configuration)) throw new StorageError('PROJECT_DATA_INVALID');
-  const view = { deletion: project.deletion, configuration_lock: projectConfigurationLock(db, projectId), configuration, ...readSettingsView(db), prerequisites: project.prerequisites };
+  const hasLocations = Boolean(db.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type='table' AND name='project_storage_locations'").get());
+  const locations = hasLocations ? db.prepare<[string], { id: string; location_key: string; layout_version: number; root_relative: string; is_current: number; verified_at_ms: number }>(
+    `SELECT id,location_key,layout_version,root_relative,is_current,verified_at_ms FROM project_storage_locations WHERE project_id=? ORDER BY location_key,revision,id`).all(projectId)
+    .map(location => ({ id: location.id, location_key: location.location_key, layout_version: location.layout_version,
+      path: location.root_relative, current: location.is_current === 1, verified_at_ms: location.verified_at_ms })) : [];
+  const hasTransitions = Boolean(db.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type='table' AND name='project_storage_transitions'").get());
+  const activeTransition = hasTransitions ? db.prepare<[string], { operation_id: string; state: string; reason: string | null }>(
+    `SELECT operation_id,state,reason FROM project_storage_transitions WHERE project_id=? AND state IN ('planned','running','uncertain','blocked') ORDER BY created_at_ms DESC LIMIT 1`).get(projectId) : undefined;
+  const current = locations.filter(location => location.current);
+  const transitionState: ProjectStorageView['state'] = activeTransition
+    ? activeTransition.state === 'planned' || activeTransition.state === 'running' ? 'transitioning' : activeTransition.state as ProjectStorageView['state']
+    : current.length ? 'current' : 'legacy';
+  const storage: ProjectStorageView = { managed_root: current.find(location => location.location_key === 'managed')?.path ?? null,
+    original_path: project.project.source.kind === 'local' ? project.project.source.location : null, locations,
+    transition_plan: null, active_transition_operation_id: activeTransition?.operation_id ?? null,
+    state: transitionState, cause: activeTransition?.reason ?? null,
+    recovery: activeTransition?.reason ? 'Retome a mesma operação de transição para conferir origem e destino; preserve ambos até a reconciliação.' : null };
+  const view = { deletion: project.deletion, configuration_lock: projectConfigurationLock(db, projectId), configuration, storage, ...readSettingsView(db), prerequisites: project.prerequisites };
   if (!Value.Check(ConfigurationView, view)) throw new StorageError('PROJECT_DATA_INVALID');
   return view;
 }

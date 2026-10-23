@@ -15,7 +15,7 @@ const resources: { close(): unknown }[] = []; const directories: string[] = [];
 const host = '127.0.0.1:4310'; const origin = `http://${host}`;
 const baseSha = 'a'.repeat(40);
 const complete = <T>(data: T): GitHubQueryResult<T> => ({ state: 'complete', data, diagnostics: [], retryAtMs: null });
-const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_status', status_option_ids: { ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' } };
+const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_status', status_option_ids: { backlog: 'BACKLOG', ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' } };
 function fixture() {
   const directory = mkdtempSync(join(tmpdir(), 'factory-preparations-')); directories.push(directory);
   const storage = openStorage({ dataDirectory: directory, busyTimeoutMs: 20 }); resources.push(storage);
@@ -40,7 +40,11 @@ function fixture() {
   const issue: IssueContext = { id: 'I_test', number: 17, url: `${repository.url}/issues/17`, title: 'Executable issue', body: '## Objetivo\nDeliver an observable feature.\n## Critérios de aceite\n- Same text\n- Same text',
     state: 'OPEN', repository, assignees: [{ id: 'ACCOUNT_test', login: 'test-user' }], comments: [{ id: 'C_test', url: `${repository.url}/issues/17#issuecomment-1`, body: 'Free comment\n## Acceptance criteria\n- ac-999: not scope', author: null, updatedAt: '2026-10-16T00:00:00Z' }], blockers: [],
     memberships: [{ itemId: 'ITEM_test', projectId: mapping.id, archived: false, statusValues: [{ fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready, name: 'Ready' }] }], references: [] };
-  const project: GitHubProjectDetails = { project: { id: mapping.id, number: 1, title: 'Project', url: 'https://github.com/orgs/test-org/projects/1', owner: { id: mapping.owner_id, login: 'test-org', kind: 'organization' }, closed: false }, singleSelectFields: [{ id: mapping.status_field_id, name: 'Status', options: Object.values(mapping.status_option_ids).map((id) => ({ id, name: id })) }] };
+  const project: GitHubProjectDetails = { project: { id: mapping.id, number: 1, title: 'Project', url: 'https://github.com/orgs/test-org/projects/1', owner: { id: mapping.owner_id, login: 'test-org', kind: 'organization' }, closed: false }, singleSelectFields: [{ id: mapping.status_field_id, name: 'Status', options: [
+    { id: mapping.status_option_ids.backlog, name: 'Backlog' }, { id: mapping.status_option_ids.ready, name: 'Ready' },
+    { id: mapping.status_option_ids.in_progress, name: 'In progress' }, { id: mapping.status_option_ids.in_review, name: 'In review' },
+    { id: mapping.status_option_ids.delivered, name: 'Done' },
+  ] }] };
   const observation: OriginInspection = { state: 'identified', source: configuration.source, local: null, base: { branch: 'main', sha: baseSha, observedFrom: 'github' },
     remote: { name: null, url: repository.url, confirmed: true, repository, branch: { repositoryId: repository.id, name: 'main', sha: baseSha } }, diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false };
   const github: PreparationDependencies['github'] = {
