@@ -54,7 +54,7 @@ function fixture(initialEffort: string | null = 'high', ompVersion = '19.2.0-bet
   const api: Api = {
     typebox: { Type: {
       String: opts => ({ ...opts, type: 'string' }), Integer: opts => ({ ...opts, type: 'integer' }), Boolean: opts => ({ ...opts, type: 'boolean' }),
-      Literal: value => ({ const: value }), Union: values => ({ anyOf: values }), Array: (items, opts) => ({ ...opts, type: 'array', items }), Object: (properties, opts) => ({ ...opts, type: 'object', properties }),
+      Null: () => ({ type: 'null' }), Literal: value => ({ const: value }), Union: values => ({ anyOf: values }), Array: (items, opts) => ({ ...opts, type: 'array', items }), Object: (properties, opts) => ({ ...opts, type: 'object', properties }),
     } },
     on: (event, handler) => { handlers.set(event, handler); }, registerTool: def => { tools.set(def.name, def); },
     getThinkingLevel: () => effort, sendUserMessage: vi.fn(),

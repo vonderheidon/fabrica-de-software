@@ -107,7 +107,7 @@ describe('durable official results', () => {
     f.persistence.confirmReady(handle, profile, '18.11.1');
     f.storage.recordReviewIntegrity(binding, true);
     const result = { formatVersion: 1 as const, summary: 'Review complete', verdict: 'approved' as const, criteria: f.result.criteria,
-      findings: [{ key: 'finding-1', criterionIds: ['ac-1'], category: 'correctness', problem: 'Wrong behavior', evidence: ['Observed'], expectedResult: 'Correct behavior', blocking: true }], resolutions: [] };
+      findings: [{ key: 'finding-1', criterionIds: ['ac-1'], category: 'correctness', problem: 'Wrong behavior', evidence: ['Observed'], expectedResult: 'Correct behavior', priority: 'high', blocking: true }], resolutions: [] };
     expect(() => f.accept(result, binding)).toThrow('RESULT_INVALID');
     expect(f.persistence.getResult(handle)).toBeNull();
     const accepted = f.accept({ ...result, findings: [] }, binding); expect(f.persistence.getResult(handle)).toEqual(accepted);
@@ -159,6 +159,7 @@ describe('private adapter with real SQL persistence', () => {
         cwd: request.cwd, provider: 'provider', model: 'model', effort: 'high', tui: true, roleDigest: request.roleResource.sha256, ompVersion: '18.11.1' });
       await callbacks.frame({ type: 'task-submitted' }); await f.pipeline.drain();
       const result = { formatVersion: 1, summary: 'Resultado oficial 😀', writesStopped: true,
+        additionalChangesJustification: null,
         criteria: request.criterionIds.map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Observed'] })), checks: [] };
       const call = async (payload: unknown) => { await callbacks.frame({ type: 'call', id: randomUUID(), tool: 'execution_complete', payload }); return frames.at(-1); };
       expect(await call({ summary: 'Turn ended' })).toMatchObject({ ok: false, code: 'RESULT_INVALID' });

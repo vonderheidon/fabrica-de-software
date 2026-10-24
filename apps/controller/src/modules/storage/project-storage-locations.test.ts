@@ -144,7 +144,7 @@ describe('project storage location identity and reads', () => {
       .toEqual({ count: 0 });
     db.close();
     const storage = openStorage({ dataDirectory }); stores.push(storage);
-    expect(storage.getDiagnostics().schemaVersion).toBe(34);
+    expect(storage.getDiagnostics().schemaVersion).toBe(42);
     const reopened = new Database(filename);
     try {
       expect(reopened.prepare('SELECT * FROM project_storage_locations').all()).toEqual([]);
@@ -173,7 +173,7 @@ describe('project storage location identity and reads', () => {
         ALTER TABLE factory_settings DROP COLUMN tool_preferences_json; DELETE FROM schema_migrations WHERE version=30; PRAGMA user_version=29;`);
       db.exec('DROP TABLE project_storage_transitions; DELETE FROM schema_migrations WHERE version=29; PRAGMA user_version=28;');
       applyMigrations(db, loadMigrations(), () => { throw new Error('SEED_MUST_NOT_RUN'); });
-      expect(db.pragma('user_version', { simple: true })).toBe(34);
+      expect(db.pragma('user_version', { simple: true })).toBe(42);
       expect(db.prepare('SELECT * FROM project_storage_transitions').all()).toEqual([]);
       expect(db.prepare('SELECT id,project_id,location_key,layout_version,root_relative,object_identity_json,is_current,revision,verified_at_ms FROM project_storage_locations')
         .get()).toMatchObject({ id: location.id, project_id: projectId, root_relative: relative, is_current: 1 });

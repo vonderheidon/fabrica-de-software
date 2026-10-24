@@ -175,6 +175,8 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
     <div className="publication-effects" aria-label="Resultados dos efeitos desta versão">
       {([['Commit local', summary.commit], ['Push', summary.push], ['Pull request', summary.pull_request]] as const).map(([label, value]) => value && <article className="attempt-record" key={label}>
         <h4>{label}</h4><p>Estado: <b>{effectStateLabel(value.state)}</b></p>{!operatorState(value.state).known && <UnknownState value={value.state} />}
+        {'branch_ref' in value && value.task_type && value.task_description && <dl><div><dt>Tarefa</dt><dd>{value.task_type}: {value.task_description}</dd></div>{value.branch_ref && <div><dt>Branch</dt><dd>{value.branch_ref}</dd></div>}</dl>}
+        {'receipt' in value && value.receipt && 'target_operation_id' in value.receipt && value.receipt.target_operation_id && <p>Destino local conferido para esta entrega.</p>}
         {value.reason && <p className="muted">{operatorCodeLabel(value.reason)}</p>}
         {'receipt' in value && value.receipt?.url && <p><a href={value.receipt.url} target="_blank" rel="noreferrer">Abrir recurso confirmado</a></p>}
 
@@ -196,7 +198,12 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
       return <div className="notice publication-upgrade" key={upgrade.target_mode}>
         <h4>Aumentar para {modeLabel[upgrade.target_mode]}</h4><p>Os efeitos abaixo ainda não estão autorizados:</p>
         <ul>{upgrade.additional_effects.map((kind) => <li key={kind}>{effectLabel[kind]}</li>)}</ul>
-        {!upgrade.capability.available && <><p>Este aumento não está disponível enquanto os pré-requisitos atuais não forem confirmados.</p></>}
+        {upgrade.publication_target && <p>Destino local: {upgrade.publication_target.selection.kind === 'clone'
+          ? 'Clonar o repositório em ' + upgrade.publication_target.selection.destination
+          : 'Usar o clone em ' + upgrade.publication_target.selection.path}</p>}
+        {!upgrade.capability.available && <><p>{upgrade.capability.reason_code === 'PUBLICATION_TARGET_REQUIRED'
+          ? 'Esta tentativa ICR não capturou um destino para o clone local. Para outra execução de commit ou PR neste projeto por URL, selecione o destino na preparação antes de iniciar.'
+          : 'Este aumento não está disponível enquanto os pré-requisitos atuais não forem confirmados.'}</p></>}
         {stale && <p role="alert">O resumo mudou desde sua revisão. Atualize a versão selecionada e revise novamente.</p>}
         {upgrade.capability.available && <><label className="check"><input type="checkbox" checked={isArmed} onChange={(event) => setArmedUpgrade(event.currentTarget.checked ? { mode: upgrade.target_mode, hash: upgrade.summary_hash } : null)} />Autorizo os efeitos adicionais deste resumo.</label>
           <button type="button" className="primary" disabled={!summaryMatchesAuthorization || !isArmed || !attemptEtag || actionState === 'accepted' || actionState === 'running' || actionState === 'unknown' || actionState === 'succeeded'} onClick={() => void send('upgrade', upgrade.target_mode)}>Autorizar aumento uma vez</button></>}

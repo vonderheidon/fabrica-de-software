@@ -17,7 +17,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     if (!Value.Check(Delivery,delivery) || !Value.Check(EffectView,effect) || effect.kind !== 'push' || !effect.authorized || !['running','unknown'].includes(effect.state) ||
       effect.attemptId !== delivery.attemptId || effect.deliveryId !== delivery.id || effect.scopeKey !== delivery.id ||
       i.contentIdentity !== delivery.contentIdentity || i.parentSha !== delivery.baseSha || !i.commitSha || !i.commitOperationId ||
-       !i.repositoryId || !i.issueNumber || i.branchRef !== `refs/heads/factory/${i.issueNumber}/${delivery.attemptId}` ||
+       !i.repositoryId || !i.issueNumber || !i.branchRef || (i.targetOperationId ? !i.taskType || !i.taskDescription || !i.baseBranch : i.branchRef !== `refs/heads/factory/${i.issueNumber}/${delivery.attemptId}`) ||
       !i.repositoryOwner || !/^[A-Za-z0-9-]{1,100}$/.test(i.repositoryOwner) || !i.repositoryName || !/^[A-Za-z0-9_.-]{1,100}$/.test(i.repositoryName)) throw new CaptureError('PUSH_IDENTITY_INVALID');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
     const root = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory,canonicalize); const parent = resolve(root,'git'); const repository = resolve(parent,`${delivery.attemptId}.git`);
@@ -25,7 +25,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     if ((await metadataBytes(resolve(repository,'factory-owner'),36)).toString('utf8') !== delivery.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
     const local = async (args: string[]) => { const r = await git(repository,[`--git-dir=${repository}`,...args],{ isolatedConfig: true }); if (r.exitCode) throw new CaptureError('PUBLICATION_GIT_FAILED'); return r.stdout; };
     await verifyRetained(local,delivery);
-    const message = `feat: deliver issue #${i.issueNumber}\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${i.commitOperationId}\n`;
+    const message = (i.targetOperationId ? `${i.taskType}: ${i.taskDescription} (#${i.issueNumber})\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${i.commitOperationId}\nFactory-Target: ${i.targetOperationId}\n` : `feat: deliver issue #${i.issueNumber}\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${i.commitOperationId}\n`);
     if ((await local(['show','--no-patch','--format=%T%x00%P%x00%B',i.commitSha,'--'])).trimEnd() !== `${delivery.contentIdentity}\0${delivery.baseSha}\0${message}`.trimEnd()) throw new CaptureError('PUSH_IDENTITY_INVALID');
     if ((await local(['rev-parse','--verify',i.branchRef])).trim() !== i.commitSha) throw new CaptureError('PUSH_IDENTITY_INVALID');
     // Keep the host's normal credential helper, but never honor URL rewriting or caller-selected transport commands.
@@ -42,7 +42,8 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     const lines = r.stdout.trim().split(/\r?\n/).filter(Boolean);
     if (!lines.length) return { state: 'unknown',receipt: null,reason: 'REMOTE_REF_NOT_OBSERVED' };
     if (lines.length !== 1 || lines[0] !== `${c.i.commitSha}\t${c.i.branchRef}`) return { state: 'unknown',receipt: null,reason: 'REMOTE_REF_CONFLICT' };
-    return { state: 'confirmed',receipt: { id: c.i.commitSha!,commitSha: c.i.commitSha!,branchRef: c.i.branchRef!,repositoryId: c.i.repositoryId! },reason: null };
+    return { state: 'confirmed',receipt: { id: c.i.commitSha!,commitSha: c.i.commitSha!,branchRef: c.i.branchRef!,repositoryId: c.i.repositoryId!,
+      ...(c.i.targetOperationId ? { targetOperationId:c.i.targetOperationId,taskType:c.i.taskType!,taskDescription:c.i.taskDescription! } : {}) },reason: null };
   }
   return {
     async reconcilePush(delivery: Delivery,effect: EffectView): Promise<LocalCommitResult> {

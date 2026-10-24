@@ -1,6 +1,7 @@
 import type { GitHub } from '../github/index.js';
 import { createGitReader, type GitContext } from './git.js';
 import { createInspector } from './inspect.js';
+import { createPublicationTargetWorkspace } from './publication-target.js';
 import { createWorkspacePreparer } from './prepare.js';
 import { createCapturer } from './capture.js';
 import { CaptureError } from './capture.js';
@@ -11,6 +12,7 @@ import { createRetainedVerifier } from './retention.js';
 import { createLocalScaffolder } from './scaffold.js';
 import { createScaffoldRemoteGit } from './remote-scaffold.js';
 import { createLocalPublisher } from './publication.js';
+import { createDeliveryTargetWorkspace } from './delivery-target.js';
 import { createRemotePublisher, type PushAuthorization } from './remote-publication.js';
 import { createDeletionInspector, windowsReferenceDeletionPlatform, nativeDeletionInspectionPlatform } from './deletion.js';
 import { createProjectStorageInspector, type ProjectStoragePersistence } from './project-storage.js';
@@ -29,6 +31,9 @@ import type { ToolObservation } from '#contracts';
 export { WorkspacePreparationError } from './prepare.js';
 
 export type { GitContext } from './git.js';
+export { TargetError } from './publication-target.js';
+export type { TargetIdentity } from './publication-target.js';
+export type { DeliveryTaskInput, DeliveryTargetInspection, TargetCommitResult } from './delivery-target.js';
 export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'>; context?: GitContext; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization; projectStorage?: ProjectStoragePersistence }
 export function createWorkspaces(options: WorkspaceOptions) {
   const git = options.context ? createGitReader(options.context) : undefined;
@@ -36,11 +41,16 @@ export function createWorkspaces(options: WorkspaceOptions) {
   const projectStorage = createProjectStorageInspector(options.dataDirectory ?? resolve('.'), undefined, options.projectStorage);
   const projectStorageTransition = createProjectStorageTransitionWorkspace(options.dataDirectory ?? resolve('.'));
   const resolveAttemptRoot = projectStorage.resolveAttemptRoot;
+  const deliveryTargetWorkspace = createDeliveryTargetWorkspace(options.github,options.dataDirectory,git);
   const sharedAttempt = createAttemptMaterializer(options.dataDirectory, git, undefined, resolveAttemptRoot);
-  return { ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot), ...projectStorage, ...projectStorageTransition, prepareAttempt: createWorkspacePreparer(options.dataDirectory, git, undefined, resolveAttemptRoot),
+  return { ...createPublicationTargetWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot), ...projectStorage, ...projectStorageTransition, prepareAttempt: createWorkspacePreparer(options.dataDirectory, git, undefined, resolveAttemptRoot),
     captureDelivery: createCapturer(options.dataDirectory, git, undefined, resolveAttemptRoot), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git, undefined, resolveAttemptRoot),
     verifyRetainedDelivery: createRetainedVerifier(options.dataDirectory, git, undefined, resolveAttemptRoot),
     ...createLocalPublisher(options.dataDirectory, git, undefined, resolveAttemptRoot),
+    inspectDeliveryTarget: deliveryTargetWorkspace.inspectDeliveryTarget,
+    verifyDeliveryTarget: deliveryTargetWorkspace.verifyDeliveryTarget,
+    createTargetCommit: deliveryTargetWorkspace.createLocalCommit,
+    reconcileTargetCommit: deliveryTargetWorkspace.reconcileLocalCommit,
     ...createRemotePublisher(options.dataDirectory,git,options.pushAuthorization,undefined,options.context ? { kind: 'confirmed_attempt' } : undefined, resolveAttemptRoot),
     materializeCheck: sharedAttempt,
     materializeReview: sharedAttempt,

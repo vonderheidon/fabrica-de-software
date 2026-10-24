@@ -1,15 +1,22 @@
 import { expect, it } from 'vitest';
+import { AttemptDecisionView, HttpAttemptDecisionView, HttpMakeAttemptDecision, MakeAttemptDecision } from './index.js';
 import type { TSchema } from '@sinclair/typebox';
-import { TypeGuard } from '@sinclair/typebox';
+import { Type, TypeGuard } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { PassageBinding, HttpPassageBinding, ExecutionQuestion, HttpExecutionQuestion, CriterionOutcome, HttpCriterionOutcome, ImplementerResult, HttpImplementerResult, ReviewerResult, HttpReviewerResult, StartAttempt, HttpStartAttempt, AttemptStatus, HttpAttemptStatus, ScopeChange, HttpScopeChange, Question, HttpQuestion, AnswerQuestion, HttpAnswerQuestion, PassageMeasurements, HttpPassageMeasurements, AttemptMeasurements, HttpAttemptMeasurements, RecoveryCapability, HttpRecoveryCapability, CancelAttempt, HttpCancelAttempt, AttemptResource, HttpAttemptResource, AttemptResources, HttpAttemptResources, RemovalPlan, HttpRemovalPlan, RemoveResource, HttpRemoveResource, FolderSurface, HttpFolderSurface, PassageInteraction, HttpPassageInteraction, GitObjectId, HttpGitObjectId, CaptureWarning, HttpCaptureWarning, Delivery, HttpDelivery, DeliveryView, HttpDeliveryView, CaptureRetry, HttpCaptureRetry, DeliveryDiffQuery, HttpDeliveryDiffQuery, DiffEntry, HttpDiffEntry, DeliveryDiff, HttpDeliveryDiff, CheckState, HttpCheckState, Artifact, HttpArtifact, CheckRun, HttpCheckRun, VerificationSummary, HttpVerificationSummary, CheckHistoryQuery, HttpCheckHistoryQuery, CheckHistory, HttpCheckHistory, Finding, HttpFinding, Review, HttpReview, RoundHistory, HttpRoundHistory, ProducerResult, HttpProducerResult, EffectIdentity, HttpEffectIdentity, EffectReceipt, HttpEffectReceipt, EffectView, HttpEffectView, CompletePublication, HttpCompletePublication, ReconcilePublication, HttpReconcilePublication, AuthorizeUpgrade, HttpAuthorizeUpgrade, ModeUpgradeSummary, HttpModeUpgradeSummary, PublicationSummary, HttpPublicationSummary, IssueHeader, HttpIssueHeader, AttemptListQuery, HttpAttemptListQuery, AttemptSummary, HttpAttemptSummary, AttemptPage, HttpAttemptPage, DetailSection, HttpDetailSection, AttemptDetailQuery, HttpAttemptDetailQuery, DeliveryDetailQuery, HttpDeliveryDetailQuery, PassageSummary, HttpPassageSummary, CriterionDetail, HttpCriterionDetail, ReviewSummary, HttpReviewSummary, QuestionSummary, HttpQuestionSummary, FindingDetail, HttpFindingDetail, DetailItem, HttpDetailItem, DetailPage, HttpDetailPage, AttemptDetail, HttpAttemptDetail, DeliveryDetail, HttpDeliveryDetail, AttemptParams, QuestionParams, ResourceParams, InteractionParams, DeliveryParams, CaptureRetryParams, ArtifactParams } from './index.js';
 
-// Test-only schema comparison: keywords and constraints stay verbatim; only declared JSON property names change.
+// Historical optional fields have explicit HTTP projections while private envelopes remain unchanged.
 function expectedHttpSchema(schema: TSchema): unknown {
   const rename = (key: string): string => key.replace(/[A-Z]/g, letter => '_'+letter.toLowerCase());
+  const requiredProjection = (key: string) => key === 'responseType' || key === 'additionalChangesJustification' || key === 'repeatReason' || (key === 'commandRepetitions' && 'verificationId' in (schema.properties ?? {}));
+  const reviewProjection = 'declaredVerdict' in (schema.properties ?? {}) && 'resolutions' in (schema.properties ?? {});
   if (TypeGuard.IsObject(schema)) return { ...schema,
-    properties: Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [rename(key), expectedHttpSchema(value)])),
-    ...(schema.required ? { required: schema.required.map(rename) } : {}) };
+    properties: { ...Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [rename(key),
+      expectedHttpSchema(key === 'responseType' ? Type.Union([...value.anyOf, Type.Null()]) : requiredProjection(key) ? Type.Optional(value, false) : value)])),
+      ...(reviewProjection ? { dispute_details_url: Type.String({ minLength: 1, maxLength: 512 }) } : {}) },
+    ...(schema.required ? { required: [...(reviewProjection ? ['dispute_details_url'] : []),
+      ...schema.required.flatMap(key => key === 'findingId' && 'responseType' in schema.properties ? [rename(key), 'response_type'] : [rename(key)]),
+      ...Object.keys(schema.properties).filter(key => key !== 'responseType' && requiredProjection(key)).map(rename)] } : {}) };
   if (TypeGuard.IsArray(schema)) return { ...schema, items: expectedHttpSchema(schema.items) };
   if (TypeGuard.IsUnion(schema)) return { ...schema, anyOf: schema.anyOf.map((item: TSchema) => expectedHttpSchema(item)) };
   return schema;
@@ -77,6 +84,8 @@ const pairs: readonly (readonly [string, TSchema, TSchema])[] = [
   ['DetailPage', DetailPage, HttpDetailPage],
   ['AttemptDetail', AttemptDetail, HttpAttemptDetail],
   ['DeliveryDetail', DeliveryDetail, HttpDeliveryDetail],
+  ['MakeAttemptDecision', MakeAttemptDecision, HttpMakeAttemptDecision],
+  ['AttemptDecisionView', AttemptDecisionView, HttpAttemptDecisionView],
 ];
 it.each(pairs)('preserves all constraints and closes the HTTP representation of %s', (_name, internal, http) => {
   expect(http).toEqual(expectedHttpSchema(internal));

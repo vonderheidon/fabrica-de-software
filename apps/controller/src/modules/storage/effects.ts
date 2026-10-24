@@ -11,6 +11,7 @@ import { assertPublicationEligible } from './publication.js';
 import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
 import { authorizedMode } from './publication-modes.js';
+import { readDeliveryTarget } from './delivery-targets.js';
 
 export type EffectOrigin = { attemptId: string; creationId?: never; deliveryId?: string } | { creationId: string; attemptId?: never; deliveryId?: never };
 export interface EffectIntent {
@@ -57,9 +58,15 @@ function validateAttemptEffect(db: Database.Database, attemptId: string, deliver
     assertPublicationEligible(db,attemptId,deliveryId,explicit);
     const d = db.prepare<[string],{ content_identity: string; base_sha: string }>('SELECT content_identity,base_sha FROM deliveries WHERE id=?').get(deliveryId);
     if (!d || identity.contentIdentity !== d.content_identity) throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','The effect must identify the approved tree.');
-    if (kind === 'local_commit' && (mode === 'icr' || identity.parentSha !== d.base_sha ||
-      identity.issueNumber !== capture.issue.number || !identity.commitTime || identity.branchRef !== `refs/heads/factory/${capture.issue.number}/${attemptId}`)) {
-      throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','The commit must identify the approved tree, base and managed branch.');
+    if (kind === 'local_commit') {
+      const target = identity.targetOperationId ? readDeliveryTarget(db,identity.targetOperationId) : null;
+      if (mode === 'icr' || identity.parentSha !== d.base_sha || identity.issueNumber !== capture.issue.number || !identity.commitTime ||
+          (target ? target.attempt_id !== attemptId || target.delivery_id !== deliveryId || target.repository_id !== capture.issue.repository.id ||
+            target.branch_ref !== identity.branchRef || target.task_type !== identity.taskType || target.task_description !== identity.taskDescription ||
+            target.content_identity !== identity.contentIdentity || target.base_sha !== identity.parentSha
+            : identity.branchRef !== `refs/heads/factory/${capture.issue.number}/${attemptId}`)) {
+        throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','O commit deve corresponder à versão, base e branch seladas do destino.');
+      }
     }
     if (kind === 'issue_comment' && mode === 'pr') throw new OperationError(409,'EFFECT_NOT_AUTHORIZED','PR mode records results in its pull request.');
     if (kind === 'issue_comment' && mode === 'commit' && !db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id=? AND kind='local_commit' AND state IN ('confirmed','not_applicable')").get(attemptId,deliveryId)) {
@@ -68,8 +75,13 @@ function validateAttemptEffect(db: Database.Database, attemptId: string, deliver
     if (kind === 'push' || kind === 'pull_request') {
       const commit = db.prepare<[string,string],{ state: string; receipt_json: string | null }>("SELECT state,receipt_json FROM effects WHERE attempt_id=? AND delivery_id=? AND kind='local_commit'").get(attemptId,deliveryId);
       const sha = commit?.receipt_json ? (JSON.parse(commit.receipt_json) as { id: string }).id : undefined;
+      const commitIdentity = commit ? db.prepare<[string,string],{ expected_identity_json: string }>('SELECT expected_identity_json FROM effects WHERE attempt_id=? AND delivery_id=? AND kind=\'local_commit\'').get(attemptId,deliveryId) : null;
+      const priorIdentity = commitIdentity ? JSON.parse(commitIdentity.expected_identity_json) as EffectIdentity : null;
+      const target = identity.targetOperationId ? readDeliveryTarget(db,identity.targetOperationId) : null;
       if (mode !== 'pr' || !explicit || !commit || !['confirmed','not_applicable'].includes(commit.state) ||
-        identity.commitSha !== sha || identity.branchRef !== `refs/heads/factory/${capture.issue.number}/${attemptId}` ||
+        identity.commitSha !== sha || identity.targetOperationId !== priorIdentity?.targetOperationId ||
+        identity.branchRef !== (target?.branch_ref ?? `refs/heads/factory/${capture.issue.number}/${attemptId}`) ||
+        (target && (target.attempt_id !== attemptId || target.delivery_id !== deliveryId || target.task_type !== identity.taskType || target.task_description !== identity.taskDescription)) ||
         identity.repositoryOwner !== capture.issue.repository.owner.login || identity.repositoryName !== capture.issue.repository.name ||
         identity.baseBranch !== capture.configuration.configuration.base_branch || identity.parentSha !== d.base_sha) {
         throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','Remote publication requires the authorized repository, branch, base and confirmed commit.');
@@ -191,7 +203,9 @@ export function finishEffect(db: Database.Database, id: string, revision: number
   guarded(() => db.transaction(() => {
     const e = readEffect(db, id);
     if (e.state === 'confirmed' || e.state === 'not_applicable') return;
-    if (e.revision !== revision || !['running','unknown'].includes(e.state) || (e.state === 'unknown' && !['confirmed','not_applicable'].includes(state))) {
+    const observedAbsentCommit = e.state === 'unknown' && e.kind === 'local_commit' && state === 'failed_known' && reason === 'COMMIT_NOT_OBSERVED';
+    if (e.revision !== revision || !['running','unknown'].includes(e.state) ||
+        (e.state === 'unknown' && !['confirmed','not_applicable'].includes(state) && !observedAbsentCommit)) {
       throw new OperationError(409, 'EFFECT_REVISION_CONFLICT', 'The effect changed during observation.');
     }
     if ((state === 'confirmed') !== (receipt !== null) || (receipt && !Value.Check(EffectReceipt, receipt)) || (reason !== null && !/^[A-Z0-9_]{1,128}$/.test(reason))) {
@@ -208,11 +222,13 @@ export function finishEffect(db: Database.Database, id: string, revision: number
     }
     if (e.kind === 'local_commit' && receipt && (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(receipt.id) ||
       receipt.contentIdentity !== e.expectedIdentity.contentIdentity || receipt.parentSha !== e.expectedIdentity.parentSha ||
-      receipt.branchRef !== e.expectedIdentity.branchRef || receipt.operationId !== e.operationId)) {
+      receipt.branchRef !== e.expectedIdentity.branchRef || receipt.operationId !== e.operationId || receipt.targetOperationId !== e.expectedIdentity.targetOperationId ||
+      receipt.taskType !== e.expectedIdentity.taskType || receipt.taskDescription !== e.expectedIdentity.taskDescription)) {
       throw new OperationError(409,'EFFECT_RECEIPT_INVALID','The commit receipt differs from its durable identity.');
     }
     if (receipt && (e.kind === 'push' || e.kind === 'pull_request') && (receipt.commitSha !== e.expectedIdentity.commitSha || receipt.branchRef !== e.expectedIdentity.branchRef || receipt.repositoryId !== e.expectedIdentity.repositoryId ||
-      (e.kind === 'push' && receipt.id !== e.expectedIdentity.commitSha) || (e.kind === 'pull_request' && receipt.baseBranch !== e.expectedIdentity.baseBranch))) {
+      receipt.targetOperationId !== e.expectedIdentity.targetOperationId || (e.kind === 'push' && receipt.id !== e.expectedIdentity.commitSha) ||
+      (e.kind === 'pull_request' && receipt.baseBranch !== e.expectedIdentity.baseBranch))) {
       throw new OperationError(409,'EFFECT_RECEIPT_INVALID','The remote receipt differs from its durable repository, ref, SHA or base.');
     }
     if (state === 'not_applicable' && (!['local_commit','push','pull_request'].includes(e.kind) || reason !== 'APPROVED_NO_DELTA' ||

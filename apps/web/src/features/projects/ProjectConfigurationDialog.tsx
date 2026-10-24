@@ -50,7 +50,7 @@ export function ProjectConfigurationDialog({ projectId, installationId, accountI
     {transition.failure && <div role="alert" className="notice"><p>{transition.failure.message}</p><p><strong>Próxima ação:</strong> {transition.failure.recovery}</p></div>}
     {pending && <div className="notice" aria-live="polite">
       <strong>{operation?.state === 'succeeded' ? 'Transição concluída e verificada' : operation?.progress?.state === 'blocked' ? 'Transição bloqueada' : operation?.state === 'unknown' ? 'Resultado incerto; localizações preservadas' : operation?.state === 'failed' ? 'Transição não concluída' : 'Transição aceita ou aguardando confirmação'}</strong>
-      {operation?.progress && <p>{steps[operation.progress.step]}</p>}
+      {operation?.progress && 'step' in operation.progress && <p>{steps[operation.progress.step]}</p>}
       {operation?.error && <><p>{operation.error.message}</p><p><strong>Próxima ação:</strong> {operation.error.recovery}</p></>}
       {!operation && <p>O envio não comprova movimento concluído. Consulte a operação original; fechar esta janela não cancela o trabalho.</p>}
       {operation && ['unknown', 'failed'].includes(operation.state) && !transition.canResume && <p>O pedido original não está mais nesta sessão. Consulte o andamento e encaminhe a pendência ao suporte para retomar com a mesma identidade; não autorize outro movimento.</p>}

@@ -12,6 +12,7 @@ import { readUncertainOperations, recordUncertainOperation, resolveUncertainOper
 import { profilesForRole } from '../projects/profile-collection.js';
 import { formatMinuteValue } from '../projects/time-minutes.js';
 import { FieldHelp } from '../projects/FieldHelp.js';
+import { useNativeSelection, nativeSelectionMessage } from '../projects/useNativeSelection.js';
 import { OperatorState } from '../../app/OperatorSupport.js';
 import { operatorCodeLabel, operatorErrorMessage, operatorState } from '../../app/operator-language.js';
 
@@ -45,6 +46,8 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const [issueId, setIssueId] = useState(initialIssueId ?? '');
   const [mode, setMode] = useState<DeliveryMode>('icr');
   const [guidance, setGuidance] = useState('');
+  const [targetFolderName, setTargetFolderName] = useState('');
+  const nativeSelection = useNativeSelection();
   const [draft, setDraftState] = useState<PreparationDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -313,6 +316,17 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const missingProfileRole = profilesLoadState === 'ready' && (implementerProfiles.length === 0 || reviewerProfiles.length === 0);
   const blocked = Boolean(!draft || saving || saveError || draft.conflict || !draft.current.criteria_preview.executable || hasBlockingPrerequisites(draft.current.prerequisites) || !draft.current.base_sha || !draft.current.issue || !draft.current.effective_configuration.implementer_profile || !draft.current.effective_configuration.reviewer_profile || !draft.current.summary_hash);
   const configuration = draft?.current.effective_configuration;
+  const target = draft ? (draft.choices.publication_target === undefined ? draft.current.publication_target : draft.choices.publication_target) ?? null : null;
+  const targetRepositoryId = configuration?.configuration.source.kind === 'github' ? configuration.configuration.source.repository_id ?? null : null;
+  const hasUrlTargetRequirement = configuration?.configuration.source.kind === 'github' && mode !== 'icr';
+  const showTargetField = hasUrlTargetRequirement || target !== null;
+  const targetCandidate = nativeSelection.candidates.project_directory;
+  const targetSelectionStatus = nativeSelection.state.status !== 'idle' && nativeSelection.state.kind === 'project_directory' ? nativeSelection.state : null;
+  const targetSelectionMessage = targetSelectionStatus ? nativeSelectionMessage(targetSelectionStatus) : null;
+  function applyTarget(selection: NonNullable<PreparationChoices['publication_target']>['selection']): void {
+    if (!targetRepositoryId) return;
+    updateChoices(current => ({ ...current, publication_target: { format_version: 1, repository_id: targetRepositoryId, selection } }));
+  }
 
   return <div className="preparation-dialog">
     {previousAttemptId && <div className="notice"><b>Nova tentativa</b><p>A preparação consulta a issue e a base atuais. O histórico, a sessão e as alterações da tentativa anterior não serão reutilizados.</p></div>}
@@ -320,6 +334,29 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
       <div className="form-field"><label htmlFor="preparation-project">Projeto</label><input id="preparation-project" value={projectName} readOnly aria-describedby="preparation-project-help" /><FieldHelp id="preparation-project-help" label="Projeto" /></div>
       <div className="form-field"><label htmlFor="preparation-issue">Issue</label><CustomSelect id="preparation-issue" value={issueId} aria-describedby="preparation-issue-help" onChange={(event) => { const value = event.currentTarget.value; if (draftRef.current) updateChoices((current) => ({ ...current, issue_id: value })); else setIssueId(value); }} disabled={!issues || !configurationReady || creating}><option value="">Selecione uma issue elegível</option>{issueId && !issues?.items.some((item) => item.content_id === issueId) && <option value={issueId}>{draft?.current.issue?.id === issueId ? draft.current.issue.title : previousAttemptId ? 'Issue da tentativa anterior (indisponível na lista atual)' : 'Consultando issue selecionada…'}</option>}{issues?.items.filter((item) => item.kind === 'issue' && item.executable && item.content_id).map((item) => <option key={item.id} value={item.content_id ?? ''}>{item.title}</option>)}</CustomSelect><FieldHelp id="preparation-issue-help" label="Issue" /></div>
       <div className="form-field"><label htmlFor="preparation-delivery-mode">Modo de entrega</label><CustomSelect id="preparation-delivery-mode" value={mode} aria-describedby="preparation-delivery-mode-help" onChange={(event) => { const value = event.currentTarget.value as DeliveryMode; setMode(value); updateChoices((current) => ({ ...current, delivery_mode: value })); }} disabled={!configurationReady || !draft}>{modes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</CustomSelect><FieldHelp id="preparation-delivery-mode-help" label="Modo de entrega" /></div>
+      {showTargetField && <div className="form-field field-full publication-target-field">
+        <label>Destino de entrega</label>
+        <p className="muted">Salvar guarda o destino; não cria o clone. A escolha não confirma que um clone existente corresponde ao repositório.</p>
+        {!targetRepositoryId && <p className="notice" role="status">{configuration?.configuration.source.kind === 'local' ? 'Projetos locais usam o clone cadastrado. Limpe esta intenção adicional.' : 'O repositório da issue ainda não está confirmado para associar um destino.'}</p>}
+        {target && <>
+          <p>{target.selection.kind === 'existing_clone' ? 'Usar clone existente' : 'Criar clone no destino escolhido'}</p>
+          <label htmlFor="preparation-target-path">Caminho local</label>
+          <input id="preparation-target-path" value={target.selection.kind === 'existing_clone' ? target.selection.path : target.selection.destination} readOnly maxLength={32768} aria-describedby="preparation-target-path-help" />
+          <p id="preparation-target-path-help" className="field-guidance">Repositório associado à issue atual. Confira este caminho no resumo antes de autorizar o início.</p>
+          <button type="button" onClick={() => updateChoices(current => ({ ...current, publication_target: null }))}>Limpar destino salvo</button>
+        </>}
+        <button type="button" onClick={() => void nativeSelection.select('project_directory')} disabled={!draft || saving || !targetRepositoryId || nativeSelection.state.status === 'selecting'}>
+          {nativeSelection.state.status === 'selecting' && nativeSelection.state.kind === 'project_directory' ? 'Aguardando a janela…' : 'Selecionar pasta'}
+        </button>
+        {targetSelectionMessage && <p role={targetSelectionStatus?.status === 'unavailable' || targetSelectionStatus?.status === 'expired' || targetSelectionStatus?.status === 'concurrent' ? 'alert' : 'status'}>{targetSelectionMessage}</p>}
+        {targetCandidate && <div className="projects-folder-candidate"><p><span className="eyebrow">Pasta candidata</span><span className="mono">{targetCandidate}</span></p>
+          <button type="button" onClick={() => applyTarget({ kind: 'existing_clone', path: targetCandidate })} disabled={!targetRepositoryId}>Usar como clone existente</button>
+          <label htmlFor="preparation-target-folder-name">Nome da nova pasta dentro deste local</label>
+          <input id="preparation-target-folder-name" value={targetFolderName} onChange={event => setTargetFolderName(event.currentTarget.value)} maxLength={255} placeholder="Nome da nova pasta" />
+          <button type="button" onClick={() => { const separator = targetCandidate.includes('\\') ? '\\' : '/'; const parent = targetCandidate.replace(/[\\/]+$/, ''); applyTarget({ kind: 'clone', destination: `${parent}${separator}${targetFolderName}` }); }} disabled={!targetRepositoryId || !validTargetFolderName(targetFolderName) || targetCandidate.length + targetFolderName.length + 1 > 32768}>Criar clone neste local</button>
+        </div>}
+        {configuration?.configuration.source.kind === 'github' && mode === 'icr' && <p className="muted">O modo ICR não exige nem autoriza clonagem do destino local de entrega.</p>}
+      </div>}
       <div className="form-field field-full"><label htmlFor="preparation-guidance">Orientação</label><textarea id="preparation-guidance" value={guidance} aria-describedby="preparation-guidance-help" onChange={(event) => { const value = event.currentTarget.value; setGuidance(value); updateChoices((current) => ({ ...current, guidance: value })); }} disabled={!draft} maxLength={8192} /><FieldHelp id="preparation-guidance-help" label="Orientação" /></div>
       {draft && <>
         <div className="form-field"><label htmlFor="preparation-base-branch">Branch-base</label><input id="preparation-base-branch" value={String(draft.choices.overrides.base_branch ?? draft.current.effective_configuration.configuration.base_branch)} aria-describedby="preparation-base-branch-help" onChange={(event) => { const baseBranch = event.currentTarget.value; updateChoices((current) => ({ ...current, overrides: { ...current.overrides, base_branch: baseBranch } })); }} /><FieldHelp id="preparation-base-branch-help" label="Branch-base" /></div>
@@ -356,7 +393,8 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
         <ConditionNotices items={draft.current.criteria_preview.executable ? draft.current.prerequisites : draft.current.prerequisites.filter((item) => !draft.current.criteria_preview.reasons.includes(item.code))} section="criteria" projectId={projectId} />
         <ConditionNotices items={draft.current.prerequisites} section="global" projectId={projectId} />
         <ConditionNotices items={draft.current.prerequisites} section="information" projectId={projectId} />
-        <h3>Efeitos previstos</h3><ul className="compact-list">{draft.current.effects_preview.map((effect, index) => <li key={`${effect.kind}-${index}`}>{effect.requested ? 'Será solicitado' : 'Não solicitado'} · {effectLabel(effect.kind)}</li>)}</ul>
+        <h3>Efeitos previstos</h3><ul className="compact-list">{draft.current.effects_preview.map((effect, index) => <li key={`${effect.kind}-${index}`}>{effect.requested ? 'Será solicitado' : 'Não solicitado'} · {effect.kind === 'publication_target' ? effect.description : effectLabel(effect.kind)}</li>)}</ul>
+        <h3>Destino da versão aprovada</h3>{draft.current.publication_target ? <><p>{draft.current.publication_target.selection.kind === 'existing_clone' ? 'Clone existente selecionado' : 'Clonagem futura solicitada'}.</p><p className="mono">{draft.current.publication_target.selection.kind === 'existing_clone' ? draft.current.publication_target.selection.path : draft.current.publication_target.selection.destination}</p><p className="muted">Esta intenção está vinculada ao repositório do projeto. Ela não confirma nem executa clonagem ao salvar ou consultar.</p></> : <p className="muted">Nenhum destino local de entrega foi capturado.</p>}
       </section>
       {draft.conflict && <section className="card conflict-current" role="alert"><h3>Configuração atual do controlador</h3><p>A revisão atual foi consultada separadamente. Seu rascunho continua no formulário.</p><p>Issue atual: {draft.conflict.issue?.title ?? 'Não disponível'} · modo {modes.find((item) => item.value === draft.conflict!.delivery_mode)?.label ?? 'não reconhecido'}</p><button type="button" onClick={() => { const value = { ...draft, etag: `"${draft.conflict!.id}:${draft.conflict!.revision}"`, current: draft.conflict!, savedChoices: draft.conflict!, conflict: null }; installDraft(value); latestChoicesRef.current = draft.choices; void saveLatest(); }}>Manter meu rascunho e salvar sobre os dados atuais</button></section>}
       {saveError && <div className="queue-error" role="alert"><b>Não foi possível confirmar a preparação</b><p>{saveError}</p><p><strong>Próxima ação:</strong> revise os campos e o resumo atual antes de autorizar o início.</p></div>}
@@ -376,6 +414,10 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
 function sameChoices(left: PreparationChoices, right: PreparationChoices): boolean {
   return Object.keys(changedChoices(left, right)).length === 0 && left.previous_attempt_id === right.previous_attempt_id;
 }
+function validTargetFolderName(value: string): boolean {
+  return Boolean(value.trim()) && value.length <= 255 && !/[\\/:*?"<>|\x00-\x1f\x7f]/.test(value) && !/[. ]$/.test(value) && value !== '.' && value !== '..' &&
+    !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(value);
+}
 function effectLabel(kind: string): string {
   const labels: Record<string, string> = {
     clone: 'Criar um ambiente de implementação separado a partir do commit-base confirmado.',
@@ -385,6 +427,7 @@ function effectLabel(kind: string): string {
     pull_request: 'Criar um pull request da versão aprovada, quando aplicável.',
     issue_comment: 'Registrar o resultado em um comentário da issue, sem alterar os critérios.',
     project_status: 'Atualizar o Status no quadro conforme o andamento e a entrega.',
+    publication_target: 'Definir destino da versão aprovada.',
   };
   return labels[kind] ?? 'Efeito ainda não reconhecido. Consulte os detalhes do resumo antes de autorizar.';
 }

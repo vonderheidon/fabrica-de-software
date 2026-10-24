@@ -219,7 +219,7 @@ describe('manual attempt composition and HTTP', () => {
   });
   it.each(['icr', 'commit', 'pr'] as const)('revalidates Ready and all authority prerequisites for %s', async mode => {
     const f = await fixture(); const p = await f.prepare();
-    const updated = await f.preparations.updatePreparation(p.body.preparationId, { changes: { delivery_mode: mode } }, { operationId: randomUUID(), expectedRevision: p.context.expectedRevision });
+    const updated = await f.preparations.updatePreparation(p.body.preparationId, { changes: { delivery_mode: mode, ...(mode === 'icr' ? {} : { publication_target: { format_version: 1, repository_id: f.issue.repository.id, selection: { kind: 'existing_clone', path: join(f.directory,'target') } } }) } }, { operationId: randomUUID(), expectedRevision: p.context.expectedRevision });
     const body = { ...p.body, preparationRevision: 2, authorizedSummaryHash: updated.view.preparation.summary_hash };
     f.issue.assignees.push({ id: 'OTHER', login: 'other' });
     await expect(f.pipeline.startAttempt(body, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: 'SUMMARY_CHANGED' });

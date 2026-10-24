@@ -7,7 +7,8 @@ import { effectiveConfigurationJson, preparationChoicesJson, preparationOverride
 } from './configuration-json.js';
 
 export const retiredCostDefaults = Type.Object({ formatVersion: Type.Literal(1), limit: ConfiguredLimit }, { additionalProperties: false });
-const storedCapture = Type.Object({ ...AttemptCapture.properties,
+const storedCapture = Type.Object({ ...Type.Omit(AttemptCapture, ['v3Delivery']).properties,
+  v3_delivery: Type.Optional(AttemptCapture.properties.v3Delivery),
   criteria: Type.Array(criterionJson, { minItems: 1, maxItems: 1000 }), configuration: effectiveConfigurationJson,
 }, { additionalProperties: false });
 const historicalConfiguration = Type.Object({
@@ -25,9 +26,11 @@ const historicalSnapshot = Type.Object({ ...storedSnapshot.properties, choices: 
 
 /** Validated projections only. Reading a historical document never updates it. */
 export function readCapturedConfiguration(value: unknown): AttemptCapture {
-  if (Value.Check(storedCapture, value)) return { ...value,
-    criteria: value.criteria.map(readCriterion), configuration: readEffectiveConfiguration(value.configuration),
-  };
+  if (Value.Check(storedCapture, value)) {
+    const { v3_delivery: v3Delivery, ...capture } = value;
+    return { ...capture, ...(v3Delivery ? { v3Delivery } : {}),
+      criteria: value.criteria.map(readCriterion), configuration: readEffectiveConfiguration(value.configuration) };
+  }
   if (!Value.Check(historicalCapture, value)) throw new StorageError('OPERATION_DATA_INVALID');
   const { costDefaults: _cost, origins, ...configuration } = value.configuration;
   const { costDefaults: _origin, ...currentOrigins } = origins;
@@ -43,7 +46,8 @@ export function readPreparationChoices(value: unknown): PreparationChoices {
 }
 export function serializeCapture(value: AttemptCapture): string {
   if (!Value.Check(AttemptCapture, value)) throw new StorageError('OPERATION_DATA_INVALID');
-  return JSON.stringify({ ...value, criteria: value.criteria.map(storeCriterion), configuration: storeEffectiveConfiguration(value.configuration) });
+  const { v3Delivery, ...capture } = value;
+  return JSON.stringify({ ...capture, ...(v3Delivery ? { v3_delivery: v3Delivery } : {}), criteria: value.criteria.map(storeCriterion), configuration: storeEffectiveConfiguration(value.configuration) });
 }
 export function serializePreparationChoices(value: PreparationChoices): string {
   if (!Value.Check(PreparationChoices, value)) throw new StorageError('PREPARATION_DATA_INVALID');

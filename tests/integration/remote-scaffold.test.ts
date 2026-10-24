@@ -181,7 +181,7 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
       DROP TABLE creation_board_operations; DELETE FROM schema_migrations WHERE version=31; PRAGMA user_version=30;`);
     const { applyMigrations, loadMigrations } = await import('../../apps/controller/src/modules/storage/migrations.js');
     applyMigrations(f.db,loadMigrations(),() => { throw new Error('MUST_NOT_RESEED'); });
-    expect(f.db.pragma('user_version',{ simple:true })).toBe(34);
+    expect(f.db.pragma('user_version',{ simple:true })).toBe(42);
     expect(f.db.prepare('SELECT installation_id,account_id,revision FROM factory_settings WHERE id=\'local\'').get()).toEqual(before);
     expect(f.db.prepare('SELECT * FROM creation_board_operations').all()).toEqual([]);
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -383,7 +383,7 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     const before = readOperation(f.db,originalId); const instance = f.db.prepare('SELECT installation_id FROM factory_settings').get();
     f.storage.close(); removeRemoteScaffoldSchema(f.db);
     const storage = openStorage({ dataDirectory: f.directory }); cleanup.push(() => storage.close());
-    expect(storage.getDiagnostics().schemaVersion).toBe(34); const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
+    expect(storage.getDiagnostics().schemaVersion).toBe(42); const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
     expect(probe.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(instance); expect(probe.pragma('foreign_key_check')).toEqual([]);
     expect(storage.getOperation(originalId)).toEqual(before);
     expect(storage.getCreation(accepted.resource.id).creation).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });

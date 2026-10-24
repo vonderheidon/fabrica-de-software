@@ -32,8 +32,8 @@ export function createVerification(options: VerificationOptions, seams: { runner
   const { storage, workspaces } = options; const files = createArtifacts(options.dataDirectory, seams.canonicalize, workspaces.resolveAttemptRoot);
   const runner = seams.runner ?? runCheck;
   return {
-    async verifyDelivery(deliveryId: string, signal: AbortSignal): Promise<void> {
-      const plan = storage.beginVerification(deliveryId);
+    async verifyDelivery(deliveryId: string, signal: AbortSignal, repeatReason?: string): Promise<void> {
+      const plan = storage.beginVerification(deliveryId, repeatReason);
       try {
         for (const check of plan.checks) {
           if (signal.aborted) throw new VerificationError('VERIFICATION_CANCELLED');

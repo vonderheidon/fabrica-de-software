@@ -18,6 +18,7 @@ interface SchemaBuilder {
   String(options: Record<string, unknown>): unknown;
   Integer(options: Record<string, unknown>): unknown;
   Boolean(options: Record<string, unknown>): unknown;
+  Null(): unknown;
   Literal(value: unknown): unknown;
   Union(schemas: unknown[]): unknown;
   Array(schema: unknown, options: Record<string, unknown>): unknown;
@@ -49,6 +50,7 @@ function hydrate(builder: SchemaBuilder, value: unknown): unknown {
   if (type === 'string') return builder.String(options);
   if (type === 'integer') return builder.Integer(options);
   if (type === 'boolean') return builder.Boolean(options);
+  if (type === 'null') return builder.Null();
   if (type === 'array') return builder.Array(hydrate(builder, items), options);
   if (type === 'object') return builder.Object(Object.fromEntries(Object.entries(object(properties)).map(([k, v]) => [k, hydrate(builder, v)])), options);
   throw new ExecutionError('RESOURCE_INVALID');

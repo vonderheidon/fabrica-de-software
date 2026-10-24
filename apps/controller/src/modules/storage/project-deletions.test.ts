@@ -51,7 +51,7 @@ afterEach(() => {
 describe('project deletion persistence foundation', () => {
   it('creates the deletion and managed-location tables as empty STRICT tables on fresh storage', () => {
     const path = directory(); const storage = open(path); const db = connect(path);
-    expect(storage.getDiagnostics().schemaVersion).toBe(34);
+    expect(storage.getDiagnostics().schemaVersion).toBe(42);
     for (const name of tables) {
       expect(db.prepare(`SELECT * FROM ${name}`).all()).toEqual([]);
       expect(db.prepare('SELECT strict FROM pragma_table_list WHERE name=?').get(name)).toEqual({ strict: 1 });

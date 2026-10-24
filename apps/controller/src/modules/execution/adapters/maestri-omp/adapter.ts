@@ -1,9 +1,9 @@
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { ExecutionQuestion, ImplementerResult, OperationId, PassageRequest, ReviewerResult, type PassageResult, type PassageRole } from '#contracts';
+import { ExecutionQuestion, OperationId, PassageRequest, type PassageResult, type PassageRole } from '#contracts';
 import type { AnswerRecord, Execution, ExecutionOptions, PassageHandle, PassageRecord, StopReceipt } from '../../index.js';
 import { ExecutionError, type ExecutionCode } from '../../errors.js';
-import { canonical, digest, type RoleResource } from '../../roles.js';
+import { canonical, digest, resultSchemaFor, type RoleResource } from '../../roles.js';
 import { createNative, launchCommand, runCli } from './native.js';
 import type { ToolObservation } from '#contracts';
 import { openChannel, type ChannelFactory, type Hello, type PassageChannel } from './channel.js';
@@ -35,11 +35,12 @@ interface LivePassage {
 const codeOf = (error: unknown, fallback: ExecutionCode): ExecutionCode => error instanceof ExecutionError ? error.code : fallback;
 
 function validateResult(request: PassageRequest, payload: unknown): PassageResult {
-  const schema = request.binding.role === 'implementer' ? ImplementerResult : ReviewerResult;
+  const schema = resultSchemaFor(request.binding.role);
   if (!Value.Check(schema, payload)) throw new ExecutionError('RESULT_INVALID');
   const ids = payload.criteria.map(c => c.criterionId);
   if (new Set(ids).size !== ids.length || canonical([...ids].sort()) !== canonical([...request.criterionIds].sort())) throw new ExecutionError('RESULT_INVALID');
   if ('findings' in payload) {
+    if (payload.findings.some(f => f.priority === undefined)) throw new ExecutionError('RESULT_INVALID');
     const keys = payload.findings.map(f => f.key);
     const resolutions = payload.resolutions.map(f => f.findingKey);
     if (new Set(keys).size !== keys.length || new Set(resolutions).size !== resolutions.length ||

@@ -42,11 +42,34 @@ async function fixture(auto = false, checks = definitions) {
   const result: ImplementerResult = { formatVersion: 1, writesStopped: true, summary: 'Agent declares success but does not run controller checks',
     criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Declared'] })), checks: [] };
   const accept = () => f.persistence.acceptResult({ binding, result, sha256: digest(result) });
-  const run = () => verification.verifyDelivery(binding.deliveryVersion, new AbortController().signal);
+  const run = (reason?: string) => verification.verifyDelivery(binding.deliveryVersion, new AbortController().signal, reason);
   return { ...f, a, binding, captured, materializeCheck, runner, verification, accept, run };
 }
 
 describe('controller verification and external evidence', () => {
+  it('retries the complete configured set after a partial failure with a durable reason for valid checks', async () => {
+    const f = await fixture(); f.accept(); await f.pipeline.drain();
+    f.runner.mockResolvedValueOnce({ state: 'passed', exitCode: 0, output: Buffer.from('passed'), endedAtMs: Date.now() + 1000, durationMs: 1, diagnostic: null });
+    f.runner.mockResolvedValueOnce({ state: 'failed', exitCode: 1, output: Buffer.from('failed'), endedAtMs: Date.now() + 1000, durationMs: 1, diagnostic: null });
+    await f.run(); const previous = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
+    expect(f.storage.getDelivery(f.binding.deliveryVersion).verification?.state).toBe('failed');
+    await f.run();
+    const current = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries.filter(c => c.runNumber === 2);
+    expect(current).toHaveLength(2); expect(f.runner).toHaveBeenCalledTimes(4);
+    expect(current.find(c => c.checkDefinitionId === 'typecheck')?.repeatReason).toContain('failed configured check set');
+    expect(f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries.filter(c => c.runNumber === 1)).toEqual(previous);
+  });
+  it('requires a reason before repeating valid checks for the same version and preserves earlier evidence', async () => {
+    const f = await fixture(); f.accept(); await f.pipeline.drain(); await f.run();
+    const previous = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
+    await expect(f.run()).rejects.toMatchObject({ code: 'VERIFICATION_NOT_ALLOWED' });
+    expect(f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries).toEqual(previous);
+    await f.run('Reproduce the result with a second process to inspect intermittent behavior.');
+    const entries = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
+    expect(entries.filter(c => c.runNumber === 1)).toEqual(previous);
+    expect(entries.filter(c => c.runNumber === 2).every(c => c.repeatReason?.includes('intermittent'))).toBe(true);
+    expect(() => f.db.prepare("UPDATE checks SET repeat_reason='changed'").run()).toThrow();
+  });
   it('runs captured definitions in the shared checkout and verifies integrity before and after every check', async () => {
     const f = await fixture(true); expect(f.runner).not.toHaveBeenCalled();
     f.accept(); await f.pipeline.drain();
@@ -68,7 +91,7 @@ describe('controller verification and external evidence', () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain(); await f.run();
     const originalCapture = structuredClone(f.storage.getAttemptCapture(f.a.id));
     const previous = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
-    await f.run();
+    await f.run('Confirm captured commands remain stable after a same-version rerun.');
     f.storage.interruptAttempts();
     confirmTerminalStops(f, f.a.id);
     expect(f.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
@@ -157,7 +180,7 @@ describe('controller verification and external evidence', () => {
   it('preserves completed checks/artifacts and interrupts unfinished intent across restart', async () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain(); await f.run();
     const old = f.storage.getCheckHistory(f.binding.deliveryVersion, {}).entries;
-    const p = f.storage.beginVerification(f.binding.deliveryVersion); f.storage.startCheck(p.checks[0]!.id);
+    const p = f.storage.beginVerification(f.binding.deliveryVersion, 'Inspect restart recovery during a repeated verification.'); f.storage.startCheck(p.checks[0]!.id);
     await f.pipeline.close(); f.storage.close();
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
@@ -174,7 +197,7 @@ describe('controller verification and external evidence', () => {
     f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DELETE FROM schema_migrations WHERE version=7; PRAGMA user_version=6');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(34); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(42); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getDelivery(old.id)).toMatchObject({ delivery: old, verification: null });
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(result);
       expect(reopened.getCheckHistory(old.id, {}).entries).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);

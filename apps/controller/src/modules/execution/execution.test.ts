@@ -103,6 +103,7 @@ const host: ExecutionHost = {
   confirmStoppedTerminal,
 };
 const payload = () => ({ formatVersion: 1 as const, summary: 'Implementação concluída 😀', writesStopped: true as const,
+  additionalChangesJustification: null,
   criteria: [{ criterionId: 'ac-1', verdict: 'passed' as const, evidence: ['Teste observado'] }], checks: [] });
 function fixture(role: 'implementer' | 'reviewer' = 'implementer', effort: string | null = 'high', ompVersion = '18.11.1') {
   confirmStoppedTerminal.mockReset(); confirmStoppedTerminal.mockResolvedValue(true);
@@ -203,7 +204,7 @@ describe('correction in the same tracked session', () => {
   it('rejects a new OMP conversation instead of silently accepting it as reviewer continuation', async () => {
     const f = fixture('reviewer'); await f.start();
     await f.call('execution_complete', { formatVersion: 1, summary: 'Review', verdict: 'rejected',
-      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Observed'] }], findings: [], resolutions: [] });
+      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Observed'] }], assessments: [], disputeResponses: [], commandRepetitions: [], findings: [], resolutions: [] });
     f.runtime.stop.mockResolvedValue('confirmed');
     const source = { passageId: f.request.binding.passageId };
     const preparing = f.execution.preparePassageHandoff(source);
@@ -223,7 +224,7 @@ describe('correction in the same tracked session', () => {
   it('quiesces a reviewer before resuming the exact OMP session in the same attempt checkout', async () => {
     const f = fixture('reviewer'); await f.start();
     const result = { formatVersion: 1, summary: 'Review rejected', verdict: 'rejected',
-      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Version one'] }], findings: [], resolutions: [] };
+      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Version one'] }], assessments: [], disputeResponses: [], commandRepetitions: [], findings: [], resolutions: [] };
     await f.call('execution_complete', result);
     f.runtime.stop.mockResolvedValue('confirmed');
     const source = { passageId: f.request.binding.passageId };
@@ -247,7 +248,7 @@ describe('correction in the same tracked session', () => {
   it('never resumes a reviewer when physical stop is uncertain', async () => {
     const f = fixture('reviewer'); await f.start();
     await f.call('execution_complete', { formatVersion: 1, summary: 'Review', verdict: 'rejected',
-      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Observed'] }], findings: [], resolutions: [] });
+      criteria: [{ criterionId: 'ac-1', verdict: 'failed', evidence: ['Observed'] }], assessments: [], disputeResponses: [], commandRepetitions: [], findings: [], resolutions: [] });
     const pending = f.execution.preparePassageHandoff({ passageId: f.request.binding.passageId });
     const assertion = expect(pending).rejects.toThrow('TRACKING_LOST');
     await vi.waitFor(() => expect(f.frames.at(-1)).toMatchObject({ type: 'continuation-check' }));
@@ -548,7 +549,7 @@ describe('passage coordination under controlled native dependencies', () => {
   });
   it('requires exact review coverage, finding identity and prior resolution, rejects inconsistent approval', async () => {
     const f = fixture('reviewer'); f.request.previousFindingKeys = ['F-1']; await f.start();
-    const review = { formatVersion: 1, summary: 'Revisão', verdict: 'approved', criteria: payload().criteria, findings: [], resolutions: [] };
+    const review = { formatVersion: 1, summary: 'Revisão', verdict: 'approved', criteria: payload().criteria, assessments: [], disputeResponses: [], commandRepetitions: [], findings: [], resolutions: [] };
     expect(await f.call('execution_complete', review)).toMatchObject({ ok: false });
     expect(await f.call('execution_complete', { ...review, resolutions: [{ findingKey: 'F-1', verdict: 'unresolved', evidence: ['still present'] }] })).toMatchObject({ ok: false });
     expect(await f.call('execution_complete', { ...review, resolutions: [{ findingKey: 'F-1', verdict: 'resolved', evidence: ['observed'] }] })).toMatchObject({ ok: true }); await f.execution.close();

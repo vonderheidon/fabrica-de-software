@@ -1,4 +1,8 @@
+import { PublicationTargetSelection } from '../publication-targets.js';
+import { FindingDispute } from './disputes.js';
 // HTTP DTOs only. Private captures and native executor protocols retain their versioned representation.
+import { FindingAssessment, AttemptBlock } from './progress.js';
+import { AttemptDecisionView } from './decisions.js';
 import { Type, type Static } from "@sinclair/typebox";
 import { Capability, DeliveryMode, OperationId, Page } from "../base.js";
 import { AttemptStatus } from "./attempts.js";
@@ -6,7 +10,7 @@ import { AttemptMeasurements, Question } from "./questions.js";
 import { DeliveryView } from "./deliveries.js";
 import { PublicationSummary, EffectView } from "./publication.js";
 import { AttemptResource } from "./recovery.js";
-import { Criterion } from "../preparations.js";
+import { Criterion, PublicationTargetIntent } from "../preparations.js";
 import { CheckRun } from "./verification.js";
 import { Finding, Review, RoundHistory } from "./reviews.js";
 import { CriterionOutcome } from "./protocol-views.js";
@@ -34,7 +38,7 @@ export const HistoricalEffectiveProfile = Type.Object({
     context_summary: Type.String({ maxLength: 8192 }), technical_contract_summary: Type.String({ minLength: 1, maxLength: 4096 }),
     credentials_redacted: Type.Literal(true),
 }, closed);
-export const DetailSection = Type.Union(['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources', 'profiles'].map(v => Type.Literal(v)));
+export const DetailSection = Type.Union(['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources', 'profiles', 'finding_assessments', 'finding_disputes', 'decisions', 'target_selections'].map(v => Type.Literal(v)));
 export type DetailSection = Static<typeof DetailSection>;
 export const AttemptDetailQuery = Type.Object({ ...paging, round_id: Type.Optional(Type.String({ pattern: '^[1-6]$' })), delivery_id: Type.Optional(OperationId), section: Type.Optional(DetailSection) }, closed);
 export type AttemptDetailQuery = Static<typeof AttemptDetailQuery>;
@@ -49,23 +53,27 @@ export const PassageSummary = Type.Object({ id: OperationId, attempt_id: Operati
 }, closed);
 export const CriterionDetail = Type.Object({ ...Criterion.properties, producer: nullable(Type.Object({ verdict: CriterionOutcome.properties.verdict, evidence: CriterionOutcome.properties.evidence }, closed)),
     reviewer: nullable(Type.Object({ verdict: CriterionOutcome.properties.verdict, evidence: CriterionOutcome.properties.evidence }, closed)) }, closed);
-export const ReviewSummary = Type.Omit(Review, ['criteria', 'findings', 'resolutions']);
+export const ReviewSummary = Type.Omit(Review, ['criteria', 'findings', 'resolutions', 'command_repetitions', 'dispute_details_url']);
 export const QuestionSummary = Type.Object({ id: OperationId, attempt_id: OperationId, passage_id: OperationId, delivery_id: OperationId,
     state: Question.properties.state, revision: Type.Integer(), created_at_ms: Type.Integer(), expires_at_ms: nullable(Type.Integer()), delivery_receipt: Question.properties.delivery_receipt }, closed);
 export const FindingDetail = Type.Object({ ...Finding.properties, resolutions: Type.Array(Type.Object({ review_id: OperationId, delivery_id: OperationId,
         verdict: Type.Union([Type.Literal('resolved'), Type.Literal('unresolved')]), evidence: CriterionOutcome.properties.evidence }, closed), { maxItems: 6 }) }, closed);
-export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, CheckRun, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource, HistoricalEffectiveProfile]);
+export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, CheckRun, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource, HistoricalEffectiveProfile, FindingAssessment, FindingDispute, AttemptDecisionView, PublicationTargetSelection]);
 export type DetailItem = Static<typeof DetailItem>;
 export const DetailPage = Type.Object({ section: DetailSection, ...Page(DetailItem).properties }, closed);
 export type DetailPage = Static<typeof DetailPage>;
+export const AttemptV3DetailPage = Type.Union([Type.Object({ section: Type.Literal('target_selections'), items: Type.Array(PublicationTargetSelection, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed), Type.Object({ section: Type.Literal('finding_assessments'), items: Type.Array(FindingAssessment, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed), Type.Object({ section: Type.Literal('finding_disputes'), items: Type.Array(FindingDispute, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed), Type.Object({ section: Type.Literal('decisions'), items: Type.Array(AttemptDecisionView, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed)]);
 export const AttemptDetail = Type.Object({ ...AttemptStatus.properties,
     expected_account_id: Type.String({ maxLength: 256 }),
     issue: IssueHeader,
     selected_delivery_id: nullable(OperationId), selected_round: Type.Integer({ minimum: 1, maximum: 6 }),
+    publication_target: nullable(PublicationTargetIntent), publication_target_hash: nullable(Type.String({ pattern: '^[a-f0-9]{64}$' })),
     publication: PublicationSummary, measurements: AttemptMeasurements,
     cleanup: Type.Union(['pending', 'complete', 'uncertain'].map(v => Type.Literal(v))),
     authority: nullable(Type.Object({ reason: nullable(text), expected_status_id: nullable(text), observed_status_id: nullable(text), observed_at_ms: Type.Integer(), recovery: text }, closed)),
     capabilities: Type.Object({ cancel: Capability, complete_publication: Capability, reconcile_publication: Capability, revalidate: Capability }, closed),
+    block: AttemptBlock,
+    v3_details: nullable(AttemptV3DetailPage),
     details: nullable(DetailPage),
 }, closed);
 export type AttemptDetail = Static<typeof AttemptDetail>;

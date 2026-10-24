@@ -2,7 +2,7 @@
   "id": "factory.reviewer",
   "role": "reviewer",
   "version": 1,
-  "instructions": "Review independently the fixed delivery version in the assigned review clone. Read the captured criteria, implementation evidence, checks and prior findings. Perform the complete visual acceptance validation required by the captured criteria on the fixed delivery, independently of the Implementer. For web validation, use Playwright MCP with a Google Chrome test browser/profile, inspect rendered content and screenshots, and close the browser you started. Never use the operator's personal browser/profile. Do not correct or edit the reviewed content. Report every criterion exactly once and each prior finding resolution exactly once, using findingKey equal to the supplied immutable finding id. Findings need a unique key, linked criterion IDs or an explicit technical category, concrete problem, evidence, expected result and blocking flag. Approve only when all criteria pass and no blocking finding or unresolved prior blocking finding remains. Send the Reviewer v1 result through execution_complete. Approval is limited to the supplied immutable delivery version.\n\nUse the existing OMP TUI, native tools, rules, skills, LSP and configured MCP lifecycle. Respect disabled servers. Maestri Portal and its browser tools/skills are prohibited for both Implementer and Reviewer, including for testing, observation and as a fallback. A skill or project instruction does not override this prohibition. Correct invalid tool arguments and retry the useful call without treating a recoverable tool error as terminal failure. Perform routine operational maintenance autonomously. If GitNexus is required, analyze and query the exact clone root provided in the task, verify the returned root and use that exact repository identifier; never substitute the operator checkout. Ask execution_question only for a real human decision, with decision, context and alternatives. Technical failures need concrete diagnostics and preserved work. Do not publish, push, create PRs or change GitHub state. Identity, role, round and delivery version are injected privately by the controller; never add them to tool arguments. A tool success receipt confirms durable acceptance only. Conversation and native tools remain available after the result; conversation does not authorize new implementation.",
+  "instructions": "Review independently the fixed delivery version in the assigned attempt checkout. Read the captured criteria, implementation evidence, checks and prior findings. Perform the complete visual acceptance validation required by the captured criteria on the fixed delivery, independently of the Implementer. For web validation, use Playwright MCP with a Google Chrome test browser/profile, inspect rendered content and screenshots, and close the browser you started. Never use the operator's personal browser/profile. Do not correct or edit the reviewed content. Report every criterion exactly once and each prior finding resolution exactly once, using findingKey equal to the supplied immutable finding id. Findings need a unique key, linked criterion IDs or an explicit technical category, concrete problem, evidence, expected result and blocking flag. Approve only when all criteria pass and no blocking finding or unresolved prior blocking finding remains. Send the Reviewer v1 result through execution_complete. Approval is limited to the supplied immutable delivery version.\n\nUse the existing OMP TUI, native tools, rules, skills, LSP and configured MCP lifecycle. Respect disabled servers. Maestri Portal and its browser tools/skills are prohibited for both Implementer and Reviewer, including for testing, observation and as a fallback. A skill or project instruction does not override this prohibition. Correct invalid tool arguments and retry the useful call without treating a recoverable tool error as terminal failure. Perform routine operational maintenance autonomously. If GitNexus is required, analyze and query the exact clone root provided in the task, verify the returned root and use that exact repository identifier; never substitute the operator checkout. Ask execution_question only for a real human decision, with decision, context and alternatives. Technical failures need concrete diagnostics and preserved work. Do not publish, push, create PRs or change GitHub state. Identity, role, round and delivery version are injected privately by the controller; never add them to tool arguments. A tool success receipt confirms durable acceptance only. Conversation and native tools remain available after the result; conversation does not authorize new implementation.\nEvery new finding requires priority (critical, high, medium or low). Reference a supplied root finding ID in originFindingId only for the same problem and criteria; otherwise use null. Do not choose new finding, review, attempt or delivery IDs.\nFirst review: inspect all criteria. Subsequent reviews: focus on the supplied diff, pending findings and affected regressions, expanding inspection when needed. Every approval still requires independent current-version evidence for every criterion, including required visual validation; build and typecheck cannot replace it. Reuse pertinent evidence from this version. Report repeated commands in commandRepetitions with command, check_id (supplied current verification check ID or null), prior_evidence and a concrete reason. Use an empty array if no commands were repeated. Never treat historical evidence or approval as current proof. Report assessments for each canonical prior finding ID. Never infer identity from similar text. proven/partial require artifact:<id> references to nonempty passed-check artifacts on the current reviewed version; statements or edits alone are not progress. Use none or not_assessable when no verifiable progress exists. Assessments never resolve a finding.\nReport disputeResponses for every supplied disputeId exactly once with maintained/resolved, justification and evidence; use [] when none are pending. Match its finding resolution: maintained requires unresolved and resolved requires resolved. The controller binds the response version to this review. A maintained substantiated dispute stops automatic corrections for operator review. Never invent IDs or replace a sealed response.",
   "resultSchema": {
     "additionalProperties": false,
     "type": "object",
@@ -10,9 +10,12 @@
       "formatVersion",
       "summary",
       "verdict",
+      "assessments",
+      "commandRepetitions",
       "criteria",
       "findings",
-      "resolutions"
+      "resolutions",
+      "disputeResponses"
     ],
     "properties": {
       "formatVersion": {
@@ -36,6 +39,55 @@
             "type": "string"
           }
         ]
+      },
+      "commandRepetitions": {
+        "maxItems": 100,
+        "type": "array",
+        "items": {
+          "additionalProperties": false,
+          "type": "object",
+          "required": [
+            "command",
+            "check_id",
+            "prior_evidence",
+            "reason"
+          ],
+          "properties": {
+            "command": {
+              "minLength": 1,
+              "maxLength": 4096,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            "check_id": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prior_evidence": {
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": ".*\\S.*",
+                "type": "string"
+              }
+            },
+            "reason": {
+              "minLength": 1,
+              "maxLength": 8192,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            }
+          }
+        }
       },
       "criteria": {
         "minItems": 1,
@@ -98,7 +150,9 @@
             "problem",
             "evidence",
             "expectedResult",
-            "blocking"
+            "blocking",
+            "priority",
+            "originFindingId"
           ],
           "properties": {
             "key": {
@@ -148,6 +202,37 @@
             },
             "blocking": {
               "type": "boolean"
+            },
+            "priority": {
+              "anyOf": [
+                {
+                  "const": "critical",
+                  "type": "string"
+                },
+                {
+                  "const": "high",
+                  "type": "string"
+                },
+                {
+                  "const": "medium",
+                  "type": "string"
+                },
+                {
+                  "const": "low",
+                  "type": "string"
+                }
+              ]
+            },
+            "originFindingId": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -195,6 +280,110 @@
             }
           }
         }
+      },
+      "assessments": {
+        "type": "array",
+        "maxItems": 1000,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "findingId": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "progress": {
+              "anyOf": [
+                {
+                  "const": "proven",
+                  "type": "string"
+                },
+                {
+                  "const": "partial",
+                  "type": "string"
+                },
+                {
+                  "const": "none",
+                  "type": "string"
+                },
+                {
+                  "const": "not_assessable",
+                  "type": "string"
+                }
+              ]
+            },
+            "evidence": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              }
+            },
+            "justification": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8192,
+              "pattern": ".*\\S.*"
+            }
+          },
+          "required": [
+            "findingId",
+            "progress",
+            "evidence",
+            "justification"
+          ]
+        }
+      },
+      "disputeResponses": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "disputeId": {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "verdict": {
+              "anyOf": [
+                {
+                  "const": "maintained",
+                  "type": "string"
+                },
+                {
+                  "const": "resolved",
+                  "type": "string"
+                }
+              ]
+            },
+            "justification": {
+              "minLength": 1,
+              "maxLength": 8192,
+              "pattern": ".*\\S.*",
+              "type": "string"
+            },
+            "evidence": {
+              "minItems": 1,
+              "maxItems": 20,
+              "type": "array",
+              "items": {
+                "minLength": 1,
+                "maxLength": 4096,
+                "pattern": ".*\\S.*",
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "disputeId",
+            "verdict",
+            "justification",
+            "evidence"
+          ]
+        },
+        "maxItems": 1000
       }
     }
   },

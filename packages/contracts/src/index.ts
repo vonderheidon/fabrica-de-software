@@ -20,3 +20,8 @@ export * from './project-deletions.js';
 
 export * from './http-execution/index.js';
 export * from './http-observation/index.js';
+
+export * from './progress.js';
+export * from './disputes.js';
+export * from './decisions.js';
+export * from './publication-targets.js';

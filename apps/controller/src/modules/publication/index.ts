@@ -4,6 +4,8 @@ import type { GitHub, GitHubEffectRequest } from '../github/index.js';
 import { OperationError, type AuthorityObservation, type PublicationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import type { Verification } from '../verification/index.js';
+import { createTargetSelections, type TargetWorkspaces } from './targets.js';
+import type { DeliveryTargetPlan } from '../storage/index.js';
 
 type Stage = 'inProgress' | 'inReview' | 'delivered';
 const statusKey = (stage: Stage) => stage === 'inProgress' ? 'in_progress' : stage === 'inReview' ? 'in_review' : 'delivered';
@@ -11,7 +13,7 @@ type Snapshot = ReturnType<Storage['getPublicationSnapshot']>;
 export interface PublicationDependencies {
   storage: Storage;
   github: Pick<GitHub, 'getIdentity' | 'getIssueContextById' | 'getProject' | 'getRepository'> & Partial<Pick<GitHub,'reconcilePullRequest'>> & { mutateEffect: (input: GitHubEffectRequest) => Promise<GitHubMutationResult> };
-  workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'pushApproved' | 'reconcilePush'>>;
+  workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget'>> & Partial<TargetWorkspaces>;
   verification: Pick<Verification, 'getArtifact'>;
   cancelAttempt: (id: string) => Promise<void>;
   enqueue: (task: () => Promise<void>) => void;
@@ -26,6 +28,7 @@ function stageFor(s: Snapshot): Stage {
 export function createPublication(deps: PublicationDependencies) {
   const { storage, github } = deps;
   const active = new Set<string>();
+  const targets = createTargetSelections(storage,deps.workspaces,deps.enqueue,deps.isClosed);
   function supported() { if (deps.isClosed()) throw new OperationError(503, 'PUBLICATION_CLOSED', 'The controller is shutting down.'); }
   async function observeAuthority(id: string, desired?: Stage): Promise<boolean> {
     try { return await observeCurrentAuthority(id, desired); }
@@ -95,8 +98,13 @@ export function createPublication(deps: PublicationDependencies) {
     if (effect.kind === 'local_commit') {
       if (!effect.deliveryId || !deps.workspaces.reconcileLocalCommit) return;
       const delivery = storage.getDelivery(effect.deliveryId).delivery;
-      const result = await deps.workspaces.reconcileLocalCommit(delivery, effect);
-      if (result.state === 'confirmed' || result.state === 'not_applicable') storage.finishEffect(effect.operationId,effect.revision,result.state,result.receipt,result.reason);
+      const result = effect.expectedIdentity.targetOperationId
+        ? await deps.workspaces.reconcileTargetCommit?.(delivery,effect,storage.getDeliveryTarget(effect.expectedIdentity.targetOperationId))
+        : await deps.workspaces.reconcileLocalCommit(delivery,effect);
+      if (!result) return;
+      if (result.state === 'confirmed' || result.state === 'not_applicable' || effect.kind === 'local_commit' && result.state === 'failed_known' && result.reason === 'COMMIT_NOT_OBSERVED') {
+        storage.finishEffect(effect.operationId,effect.revision,result.state,result.receipt,result.reason);
+      }
       return;
     }
     const capture = storage.getAttemptCapture(effect.attemptId);
@@ -195,8 +203,8 @@ export function createPublication(deps: PublicationDependencies) {
     const commit = snapshot.effects.find(e => e.kind === 'local_commit' && e.deliveryId === d.id);
     const commitMode = snapshot.mode === 'commit';
     const lines = [marker, commitMode ? '### Resultado Commit local da fábrica' : '### Resultado ICR da fábrica', '', `Tentativa: ${snapshot.status.id}`, `Versão: ${d.id}`, `Tree aprovada: ${d.contentIdentity}`,
-      `Base: ${d.baseSha}`, `Referência retida: ${d.gitRef}`, `Revisão independente: approved (${review.id}).`,
-      commitMode ? (commit?.state === 'not_applicable' ? 'Commit: not_applicable (APPROVED_NO_DELTA). Entrega revisada sem alterações; nenhum commit vazio foi criado.' : `Commit local: ${commit?.receipt?.id}; branch: ${commit?.receipt?.branchRef}.`) : 'Versão aprovada para entrega local ICR. Alterações e ambiente preservados, sem commit de entrega ou push.',
+      `Base: ${d.baseSha}`, `Referência retida: ${d.gitRef}`, ...(commitMode && commit?.expectedIdentity.targetOperationId ? [`Tarefa: ${commit.expectedIdentity.taskType}: ${commit.expectedIdentity.taskDescription}`, `Branch: ${commit.expectedIdentity.branchRef}`] : []), `Revisão independente: approved (${review.id}).`,
+      commitMode ? (commit?.state === 'not_applicable' ? 'Commit: not_applicable (APPROVED_NO_DELTA). Entrega revisada sem alterações; nenhum commit vazio foi criado.' : `Commit local: ${commit?.receipt?.id}; ${commit?.expectedIdentity.taskType ?? 'branch'} ${commit?.expectedIdentity.taskDescription ?? ''}; branch: ${commit?.expectedIdentity.branchRef}.`) : 'Versão aprovada para entrega local ICR. Alterações e ambiente preservados, sem commit de entrega ou push.',
       ...(commitMode ? ['Publicação local, sem push, PR ou fechamento da issue.'] : []), '', 'Critérios verificados:',
       ...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}; ${c.evidence.length} referência(s) de evidência no resultado oficial.`),
       '', `Checks do controlador: ${checks.length ? 'executados na versão aprovada' : 'not_applicable (nenhum check configurado)'}.`,
@@ -211,14 +219,76 @@ export function createPublication(deps: PublicationDependencies) {
   async function completeLocalCommit(snapshot: Snapshot, command: PublicationCommand): Promise<void> {
     const delivery = snapshot.delivery!;
     const previous = snapshot.effects.find(e => e.kind === 'local_commit' && e.deliveryId === delivery.id);
-    if (previous && ['confirmed','not_applicable'].includes(previous.state)) return;
+    if (previous && ['confirmed','not_applicable'].includes(previous.state)) {
+      if (previous.expectedIdentity.targetOperationId && previous.state === 'confirmed') {
+        const reconcileTargetCommit = deps.workspaces.reconcileTargetCommit;
+        if (!reconcileTargetCommit) blocked('COMMIT_CONTEXT_UNAVAILABLE');
+        const sealedTarget = storage.getDeliveryTarget(previous.expectedIdentity.targetOperationId);
+        const observed = await reconcileTargetCommit!(delivery,previous,sealedTarget);
+        if (observed.state !== 'confirmed' || observed.receipt?.id !== previous.receipt?.id) blocked('DELIVERY_TARGET_CHANGED');
+      }
+      return;
+    }
     if (!deps.workspaces.createLocalCommit) blocked('COMMIT_CONTEXT_UNAVAILABLE');
-    const identity: EffectIdentity = previous?.expectedIdentity ?? {
+    const sealed = previous
+      ? previous.expectedIdentity.targetOperationId ? storage.getDeliveryTarget(previous.expectedIdentity.targetOperationId) : null
+      : storage.findDeliveryTarget(snapshot.status.id,delivery.id);
+    let target = sealed;
+    if (!previous && !target && !deps.workspaces.inspectDeliveryTarget) blocked('DELIVERY_TARGET_CONTEXT_UNAVAILABLE');
+    if (target && !deps.workspaces.createTargetCommit) blocked('DELIVERY_TARGET_CONTEXT_UNAVAILABLE');
+    if (!previous && !target && deps.workspaces.inspectDeliveryTarget) {
+      const source = snapshot.capture.configuration.configuration.source;
+      let localPath = source.location; let selectionOperationId: string | null = null; let selectedIdentity: string | null = null;
+      if (source.kind === 'github') {
+        const intent = snapshot.capture.v3Delivery?.publication_target;
+        if (!intent) blocked('PUBLICATION_TARGET_REQUIRED');
+        const intentHash = snapshot.capture.v3Delivery!.publication_target_hash!;
+        let selection = storage.findTargetSelection(snapshot.status.id,delivery.id,{ hash:intentHash });
+        if (!selection) {
+          const pendingSelection = storage.findTargetSelection(snapshot.status.id,delivery.id);
+          if (pendingSelection) {
+            if (pendingSelection.view.target_intent_hash !== intentHash) blocked('TARGET_SELECTION_PENDING');
+            await targets.reconcile(snapshot.status.id,delivery.id);
+            selection = storage.findTargetSelection(snapshot.status.id,delivery.id,{ hash:intentHash });
+          }
+        }
+        if (!selection && command.kind === 'publication.authorize-upgrade' && snapshot.capture.configuration.configuration.default_delivery_mode === 'icr') {
+          const current = storage.getAttempt(snapshot.status.id);
+          await targets.select(snapshot.status.id,{ delivery_id:delivery.id,repository_id:intent!.repository_id,selection:intent!.selection,authorized:true,
+            authorization_operation_id:command.operationId,target_intent_hash:intentHash },{ operationId:randomUUID(),expectedRevision:`"${current.id}:${current.revision}"` });
+          await targets.reconcile(snapshot.status.id,delivery.id);
+          selection = storage.findTargetSelection(snapshot.status.id,delivery.id,{ hash:intentHash });
+        }
+        if (!selection || selection.view.state !== 'confirmed') blocked('TARGET_SELECTION_PENDING');
+        if (selection!.view.repository_id !== intent!.repository_id || selection!.view.local_path !== (intent!.selection.kind === 'clone' ? intent!.selection.destination : intent!.selection.path)) blocked('TARGET_SELECTION_INVALID');
+        localPath = selection!.view.local_path; selectionOperationId = selection!.view.operation_id; selectedIdentity = selection!.expected.directoryIdentity;
+      }
+      const inspected = await deps.workspaces.inspectDeliveryTarget(localPath,{ attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
+        contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
+        repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
+        baseBranch:snapshot.capture.configuration.configuration.base_branch,baseSha:delivery.baseSha },
+        { approvedRef:delivery.gitRef!,contentIdentity:delivery.contentIdentity!,baseSha:delivery.baseSha });
+      if (selectedIdentity && inspected.local_identity.root_identity !== selectedIdentity) blocked('DELIVERY_TARGET_CHANGED');
+      const plan: DeliveryTargetPlan = { operation_id:command.operationId,selection_operation_id:selectionOperationId,
+        delivery_id:delivery.id,attempt_id:snapshot.status.id,repository_id:inspected.repository_id,local_path:inspected.local_path,
+        local_identity:inspected.local_identity,branch_ref:inspected.branch_ref,task_type:inspected.task_type,task_description:inspected.task_description,
+        issue_number:snapshot.capture.issue.number,base_branch:snapshot.capture.configuration.configuration.base_branch,base_sha:delivery.baseSha,
+        approved_ref:delivery.gitRef!,content_identity:delivery.contentIdentity! };
+      target = storage.sealDeliveryTarget(plan);
+    }
+    const identity: EffectIdentity = previous?.expectedIdentity ?? (target ? {
+      repositoryId: snapshot.capture.issue.repository.id,issueId: snapshot.capture.issue.id,contentIdentity: delivery.contentIdentity!,parentSha: delivery.baseSha,
+      branchRef: target.branch_ref,issueNumber: snapshot.capture.issue.number,commitTime: Math.floor(Date.now()/1000),
+      repositoryOwner:snapshot.capture.issue.repository.owner.login,repositoryName:snapshot.capture.issue.repository.name,
+      baseBranch:target.base_branch,targetOperationId:target.operation_id,taskType:target.task_type,taskDescription:target.task_description,
+    } : {
       repositoryId: snapshot.capture.issue.repository.id, issueId: snapshot.capture.issue.id,
       contentIdentity: delivery.contentIdentity!, parentSha: delivery.baseSha,
       branchRef: `refs/heads/factory/${snapshot.capture.issue.number}/${snapshot.status.id}`,
       issueNumber: snapshot.capture.issue.number, commitTime: Math.floor(Date.now() / 1000),
-    };
+    });
+    if (identity.targetOperationId && (!target || identity.targetOperationId !== target.operation_id || identity.branchRef !== target.branch_ref ||
+      identity.taskType !== target.task_type || identity.taskDescription !== target.task_description)) blocked('DELIVERY_TARGET_IDENTITY_CONFLICT');
     const effect = storage.recordEffectIntent({ origin: { attemptId: snapshot.status.id, deliveryId: delivery.id }, kind: 'local_commit', scopeKey: delivery.id,
       expectedIdentity: identity, authorization: { accountId: snapshot.capture.accountId, mode: snapshot.mode, sourceOperationId: command.operationId } });
     if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
@@ -227,7 +297,12 @@ export function createPublication(deps: PublicationDependencies) {
     const running = storage.getEffect(effect.operationId);
     let result;
     try {
-      result = await deps.workspaces.createLocalCommit!(delivery,running,async () => {
+      result = target && deps.workspaces.createTargetCommit
+        ? await deps.workspaces.createTargetCommit(delivery,running,target,async () => {
+          supported(); if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
+          storage.assertPublicationEligible(snapshot.status.id,delivery.id,true); storage.assertDeliveryTarget(target!.operation_id);
+        })
+        : await deps.workspaces.createLocalCommit!(delivery,running,async () => {
         supported();
         if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
         storage.assertPublicationEligible(snapshot.status.id,delivery.id,true);
@@ -257,16 +332,24 @@ export function createPublication(deps: PublicationDependencies) {
   }
   async function completeRemote(s: Snapshot, command: PublicationCommand): Promise<void> {
     const d = s.delivery!; const commit = s.effects.find(e => e.kind === 'local_commit' && e.deliveryId === d.id)!;
+    const targetIdentity = commit.expectedIdentity;
     const body = commit.state === 'not_applicable' ? null : pullRequestBody(s);
     for (const kind of ['push','pull_request'] as const) {
       s = storage.getPublicationSnapshot(s.status.id,d.id);
+      if (targetIdentity.targetOperationId && deps.workspaces.verifyDeliveryTarget) {
+        const sealedTarget = storage.assertDeliveryTarget(targetIdentity.targetOperationId);
+        await deps.workspaces.verifyDeliveryTarget(sealedTarget,{ attemptId:s.status.id,approvedRef:d.gitRef!,contentIdentity:d.contentIdentity!,
+          issueNumber:s.capture.issue.number,issueTitle:s.capture.issue.title,repositoryId:s.capture.issue.repository.id,
+          repositoryUrl:s.capture.issue.repository.url,baseBranch:sealedTarget.base_branch,baseSha:d.baseSha });
+      }
       const old = s.effects.find(e => e.kind === kind && e.deliveryId === d.id);
       if (old && ['confirmed','not_applicable'].includes(old.state)) continue;
       const identity: EffectIdentity = old?.expectedIdentity ?? { repositoryId: s.capture.issue.repository.id,issueId: s.capture.issue.id,contentIdentity: d.contentIdentity!,parentSha: d.baseSha,
-        issueNumber: s.capture.issue.number,branchRef: `refs/heads/factory/${s.capture.issue.number}/${s.status.id}`,repositoryOwner: s.capture.issue.repository.owner.login,repositoryName: s.capture.issue.repository.name,
+        issueNumber: s.capture.issue.number,branchRef: targetIdentity.branchRef!,repositoryOwner: s.capture.issue.repository.owner.login,repositoryName: s.capture.issue.repository.name,
+        ...(targetIdentity.targetOperationId ? { targetOperationId:targetIdentity.targetOperationId,taskType:targetIdentity.taskType,taskDescription:targetIdentity.taskDescription } : {}),
         baseBranch: s.capture.configuration.configuration.base_branch,
         ...(commit.receipt ? { commitSha: commit.receipt.id,commitOperationId: commit.operationId } : {}),
-        ...(kind === 'pull_request' && body !== null ? { marker: body.split('\n')[0]!,bodyHash: hash(body),title: `feat: deliver issue #${s.capture.issue.number}` } : {}) };
+        ...(kind === 'pull_request' && body !== null ? { marker: body.split('\n')[0]!,bodyHash: hash(body),title: targetIdentity.targetOperationId ? `${targetIdentity.taskType}: ${targetIdentity.taskDescription} (#${s.capture.issue.number})` : `feat: deliver issue #${s.capture.issue.number}` } : {}) };
       if (kind === 'pull_request' && body !== null && identity.bodyHash !== hash(body)) blocked('PR_IDENTITY_CHANGED');
       if (commit.state !== 'not_applicable' && kind === 'pull_request') {
         if (!await send(s.status.id,kind,d.id,identity,command.operationId,body!)) blocked('PR_PENDING');
@@ -339,10 +422,11 @@ export function createPublication(deps: PublicationDependencies) {
       active.add(command.attemptId);
       try {
         supported();
+        let targetPending = false;
         if (command.kind === 'publication.complete' || command.kind === 'publication.authorize-upgrade') await completeMode(command);
-        else if (command.kind === 'publication.reconcile') await reconcile(command.attemptId);
+        else if (command.kind === 'publication.reconcile' && 'deliveryId' in command.body) { targetPending = await targets.reconcile(command.attemptId,command.body.deliveryId); await reconcile(command.attemptId); }
         else if (!await observeAuthority(command.attemptId)) blocked('PUBLICATION_BLOCKED');
-        const unknown = storage.getEffects(command.attemptId).some(e => ['running','unknown'].includes(e.state));
+        const unknown = targetPending || storage.getEffects(command.attemptId).some(e => ['running','unknown'].includes(e.state));
         storage.finishPublicationRequest(command.operationId, unknown ? 'unknown' : 'succeeded', unknown ? 'EFFECT_UNRESOLVED' : null);
       } catch (error) {
         const code = error instanceof OperationError ? error.code : 'PUBLICATION_FAILED';
@@ -359,6 +443,7 @@ export function createPublication(deps: PublicationDependencies) {
     return accepted.operation;
   }
   return {
+    selectTarget: targets.select,
     observeAuthority, projectStage,
     async observeControllerAccount(): Promise<boolean> {
       supported(); const settings = storage.getSettings(); const identity = await github.getIdentity();
@@ -394,8 +479,10 @@ export function createPublication(deps: PublicationDependencies) {
     async publishApproved(deliveryId: string): Promise<void> {
       const d = storage.getDelivery(deliveryId).delivery; const a = storage.getAttempt(d.attemptId);
       if (a.result || a.suspension || storage.getReview(deliveryId)?.state !== 'approved') return;
+      await targets.ensureCaptured(deliveryId);
       const mode = storage.getAttemptCapture(a.id).configuration.configuration.default_delivery_mode;
-      accept({ operationId: randomUUID(), attemptId: a.id, expectedRevision: `"${a.id}:${a.revision}"`, kind: 'publication.complete', body: { deliveryId, authorizedMode: mode, authorized: true } });
+      const current = storage.getAttempt(a.id);
+      accept({ operationId: randomUUID(), attemptId: a.id, expectedRevision: `"${a.id}:${current.revision}"`, kind: 'publication.complete', body: { deliveryId, authorizedMode: mode, authorized: true } });
     },
   };
 }

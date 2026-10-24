@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -118,6 +118,7 @@ it('reads real check definitions and artifact metadata without accessing log byt
   const config = f.storage.getConfiguration(f.projectId);
   const { id: _id,project_id: _projectId,revision: _revision,created_at_ms: _created,...configuration } = config.view.configuration;
   const checks = [{ id: 'test',command: 'node --version',cwd_relative: '.' }];
+  const bytes = Buffer.from('proof'); f.verification.getArtifact.mockResolvedValue({ bytes, filename: 'proof.log' });
   f.storage.saveConfiguration({ operationId: randomUUID(),expectedRevision: config.etag,projectId: f.projectId,body: { project_changes: { checks } },configuration: { ...configuration,checks },globalChanges: {} });
   f.issue.id = 'ISSUE_CHECK'; f.issue.number = 20;
   const p = await f.prepare(); const op = await f.pipeline.startAttempt(p.body,p.context); await f.pipeline.drain(); const attemptId = op.resource.id;
@@ -128,7 +129,7 @@ it('reads real check definitions and artifact metadata without accessing log byt
       f.storage.startCheck(check.id);
       const artifactId = randomUUID();
       f.storage.finishCheck(check.id,{ state: 'passed',exitCode: 0,endedAtMs: Date.now(),durationMs: 0,diagnostic: null,executionDiagnostic: null,artifact: {
-        id: artifactId,attemptId,deliveryId,checkId: check.id,kind: 'check_log',pathRelative: `${attemptId}/${check.id}/${artifactId}.log`,sha256: 'a'.repeat(64),sizeBytes: 5,
+        id: artifactId,attemptId,deliveryId,checkId: check.id,kind: 'check_log',pathRelative: `${attemptId}/${check.id}/${artifactId}.log`,sha256: createHash('sha256').update(bytes).digest('hex'),sizeBytes: 5,
       } });
     }
     f.storage.finishVerification(plan.id);
@@ -137,6 +138,7 @@ it('reads real check definitions and artifact metadata without accessing log byt
   const result = { formatVersion: 1 as const,summary: 'Controlled implementation',writesStopped: true as const,
     criteria: ['ac-1','ac-2'].map(criterionId => ({ criterionId,verdict: 'passed' as const,evidence: ['Observed'] })),checks: [] };
   f.persistence.acceptResult({ binding: passage.binding,result,sha256: digest(result) }); await f.pipeline.drain();
+  f.verification.getArtifact.mockClear();
   expect(f.storage.getAttemptDetail(attemptId,{ section: 'checks' }).details?.items).toMatchObject([{ state: 'passed',exitCode: 0,artifacts: [{ sizeBytes: 5 }] }]);
   expect(f.verification.getArtifact).not.toHaveBeenCalled();
   expect(f.storage.getAttemptCapture(f.attemptId).configuration.configuration.checks).toEqual([]);

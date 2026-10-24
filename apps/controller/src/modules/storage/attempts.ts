@@ -16,6 +16,7 @@ import { stopQuestions } from './questions.js';
 import { validatePreviousAttempt } from './recovery.js';
 import { effectEvent } from './effects.js';
 import { consumeQueueCycle } from './queue-cycles.js';
+import { isLocalAbsoluteTargetPath, publicationTargetHash, publicationTargetPath } from './publication-target.js';
 
 export interface AttemptCommand { operationId: string; expectedRevision: string | undefined; body: StartAttempt }
 export interface CreateAttempt {
@@ -116,6 +117,19 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
       capture.accountId !== settings.account_id || capture.issue.id !== preparation.view.issue_id ||
       capture.issue.repository.id !== config.configuration.source.repository_id || capture.configuration.project_revision_id !== config.configuration.id ||
       capture.configuration.settings_revision !== settings.revision) throw new OperationError(409, 'CAPTURE_CONFLICT', 'The capture does not match the authorized preparation.');
+    const intent = preparation.view.publication_target;
+    const capturedTarget = capture.v3Delivery;
+    const targetRequired = config.configuration.source.kind === 'github' && preparation.view.delivery_mode !== 'icr';
+    if (!capturedTarget || capturedTarget.authorization_operation_id !== input.command.operationId ||
+      capturedTarget.publication_target_hash !== publicationTargetHash(intent) ||
+      capturedTarget.publication_target?.repository_id !== intent?.repository_id ||
+      (capturedTarget.publication_target === null) !== (intent === null) ||
+      targetRequired && intent === null ||
+      intent !== null && (config.configuration.source.kind !== 'github' || intent.repository_id !== config.configuration.source.repository_id || !isLocalAbsoluteTargetPath(publicationTargetPath(intent)))) {
+      throw new OperationError(409, targetRequired && intent === null ? 'PUBLICATION_TARGET_REQUIRED' : 'PUBLICATION_TARGET_INVALID',
+        targetRequired && intent === null ? 'A valid local delivery destination is required for this URL project and delivery mode.' : 'The captured delivery destination no longer matches the authorized preparation.', {
+          affected_requirements: ['RF-23', 'RF-24', 'RF-28'], recovery: 'Review and save the exact destination in the preparation, then authorize its updated summary.' });
+    }
     if (input.queueCycle && (input.queueCycle.accountId !== capture.accountId || input.queueCycle.projectId !== preparation.view.project_id || input.queueCycle.issueId !== capture.issue.id || !Number.isSafeInteger(input.queueCycle.cycleNumber) || input.queueCycle.cycleNumber < 1)) {
       throw new OperationError(409, 'QUEUE_CYCLE_CHANGED', 'The observed queue cycle no longer matches this attempt.');
     }

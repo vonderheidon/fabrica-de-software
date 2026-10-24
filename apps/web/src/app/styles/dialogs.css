@@ -80,6 +80,14 @@
 .dialog .onboarding-prompt-layer { z-index: 5; }
 .profile-delete-dialog .project-deletion-targets { padding: 14px; border-radius: 8px; background: #f5f7f8; }
 .profile-delete-dialog .project-deletion-targets span { overflow-wrap: anywhere; }
+.attempt-block-decision fieldset { margin: 12px 0; padding: 0; border: 0; min-width: 0; }
+.attempt-block-decision legend { margin-bottom: 10px; font-weight: 600; }
+.dialog .attempt-block-decision label:has(input[type='radio']) { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.dialog .attempt-block-decision input[type='radio'] { width: 16px; height: 16px; min-height: 0; margin: 0; flex: 0 0 16px; }
+.attempt-block-decision textarea { width: 100%; min-height: 88px; }
+.attempt-block-decision, .attempt-record { overflow-wrap: anywhere; }
+#attempt-decision-actions:empty { display: none; }
+#attempt-decision-actions { display: flex; }
 @media (max-width: 760px) {
   .dialog[role='dialog'], .profile-delete-dialog[open] { --dialog-padding: 20px; padding: var(--dialog-padding); }
   .dialog > #dialog-title, .profile-delete-dialog[open] h2 { font-size: 23px; }
@@ -90,5 +98,7 @@
   .dialog[data-dialog='project-configuration'] .dialog-actions { flex-direction: row; }
   .dialog[data-dialog='project-configuration'] .dialog-actions > .save-feedback:empty { flex-basis: 0; }
   .dialog .profile-catalog-row { align-items: stretch; flex-direction: column; gap: 8px; }
+  #attempt-decision-actions { flex: 1 1 160px; }
+  #attempt-decision-actions > button { width: 100%; }
   .dialog .onboarding-footer-secondary { flex: 1 1 100%; }
 }

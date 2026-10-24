@@ -13,7 +13,7 @@ import { loadConfiguration } from '../../apps/controller/src/config.js';
 
 const fixtures: PublicationFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(mode: 'icr' | 'commit' | 'pr' = 'pr',delta = true) { const f = await publicationFixture(true,mode,delta); fixtures.push(f); return f; }
+async function fixture(mode: 'icr' | 'commit' | 'pr' = 'pr',delta = true) { const f = await publicationFixture(true,mode,delta,{ targetForIcr: mode === 'icr' }); fixtures.push(f); return f; }
 const effects = (f: PublicationFixture) => f.storage.getEffects(f.attemptId);
 const effect = (f: PublicationFixture,kind: EffectView['kind']) => effects(f).find(e => e.kind === kind)!;
 const complete = (f: PublicationFixture) => f.pipeline.completePublication(f.attemptId,{ deliveryId: f.status().deliveryId!,authorizedMode: f.storage.getPublicationSummary(f.attemptId).mode,authorized: true },f.context());
@@ -50,7 +50,7 @@ it('marks all code publication effects not applicable for an approved no-delta v
 
 it('includes unresolved nonblocking findings from earlier rounds in the approved PR body', async () => {
   const f = await fixture(); await f.implement();
-  await f.approve(false,[{ key: 'docs',criterionIds: [],category: 'documentation',problem: 'Follow-up documentation remains',evidence: ['Missing optional example'],expectedResult: 'Add a usage example',blocking: false }]);
+  await f.approve(false,[{ key: 'docs',criterionIds: [],category: 'documentation',problem: 'Follow-up documentation remains',evidence: ['Missing optional example'],expectedResult: 'Add a usage example',priority: 'low',blocking: false }]);
   await f.implement(); await f.approve(true,[],true);
   expect(f.status().result).toBe('delivered');
   const pr = f.mutateEffect.mock.calls.find(([x]) => x.effect.kind === 'pull_request')![0];
@@ -117,11 +117,25 @@ it('uses a single durable upgrade for ICR to PR, preserves confirmed comments an
   expect(f.storage.getPublicationSummary(f.attemptId).upgrades!.find(u => u.targetMode === 'pr')).toMatchObject({ capability: { available: true },additionalEffects: ['local_commit','push','pull_request'] });
   const op = await f.pipeline.authorizePublicationUpgrade(f.attemptId,body,context); await f.pipeline.drain();
   expect(await f.pipeline.authorizePublicationUpgrade(f.attemptId,body,context)).toEqual(f.storage.getOperation(op.operation_id));
+  expect(f.logFailure.mock.calls).toEqual([]);
   expect(f.storage.getDeliveryDetail(deliveryId,{})).toMatchObject({ authorizations: { capturedMode: 'icr',authorizedMode: 'pr' },publication: { mode: 'pr',localState: 'completed',upgrades: [] } });
   expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(capture); expect(effect(f,'issue_comment')).toEqual(comment); expect(f.issue.comments).toHaveLength(1);
   expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce(); expect(f.workspaces.pushApproved).toHaveBeenCalledOnce();
+  const target = f.storage.findDeliveryTarget(f.attemptId,deliveryId)!;
+  expect(target).toMatchObject({ task_type:'feat',task_description:'Executable issue',branch_ref:'refs/heads/feat/17-executable-issue' });
+  const selection = f.storage.getTargetSelection(target.selection_operation_id!).view;
+  expect(selection).toMatchObject({ state:'confirmed',authorization_operation_id:op.operation_id });
+  expect(JSON.parse((f.db.prepare('SELECT authorization_json FROM publication_target_selections WHERE operation_id=?').get(selection.operation_id) as { authorization_json: string }).authorization_json)).toMatchObject({ origin:'publication_upgrade' });
   expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 1 });
   expect(() => f.db.prepare("UPDATE publication_upgrades SET target_mode='commit'").run()).toThrow();
+});
+
+it('blocks a URL-only ICR upgrade when it has no saved delivery target', async () => {
+  const f = await publicationFixture(true,'icr'); fixtures.push(f); await f.implement(); await f.approve();
+  const upgrade = f.storage.getPublicationSummary(f.attemptId).upgrades!.find(item => item.targetMode === 'commit')!;
+  expect(upgrade.capability).toMatchObject({ available:false,reason_code:'PUBLICATION_TARGET_REQUIRED' });
+  expect(f.workspaces.createLocalCommit).not.toHaveBeenCalled();
+  expect(f.db.prepare('SELECT count(*) AS n FROM delivery_targets').get()).toEqual({ n:0 });
 });
 
 it('continues an already authorized upgrade after known failure without requesting a second upgrade', async () => {
@@ -227,7 +241,7 @@ it('migrates actual v14 journals without fabricating upgrades, preserving receip
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(34); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
+    expect(storage.getDiagnostics().schemaVersion).toBe(42); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }

@@ -18,7 +18,7 @@ export type PreparationCommand = Identity & (
   { kind: 'preparation.create'; projectId: string; body: PreparationChoices } |
   { kind: 'preparation.update'; preparationId: string; body: PreparationUpdate }
 );
-export interface SavePreparation { command: PreparationCommand; configurationETag: string }
+export interface SavePreparation { command: PreparationCommand; configurationETag: string; blockedSuccessorAttemptId?: string }
 export interface StoredPreparation { view: PreparationRecord; etag: string; eventCursor: string }
 export function preparationETag(db: Database.Database, record: PreparationRecord): string {
   const s = readSettings(db);
@@ -37,7 +37,7 @@ export function readPreparation(db: Database.Database, id: string): StoredPrepar
   readConfiguration(db, row.project_id);
   const snapshot: unknown = JSON.parse(row.choices_json);
   const choices = readPreparationChoices(snapshot);
-  const record = { ...choices, id: row.id, project_id: row.project_id, project_revision_id: row.project_revision_id, revision: row.revision };
+  const record = { ...choices, publication_target: choices.publication_target ?? null, id: row.id, project_id: row.project_id, project_revision_id: row.project_revision_id, revision: row.revision };
   if (!Value.Check(PreparationRecord, record)) throw new StorageError('PREPARATION_DATA_INVALID');
   return { view: record, etag: preparationETag(db, record), eventCursor: eventCursor(db) };
 }
@@ -66,8 +66,7 @@ export function recoverPreparationCommand(db: Database.Database, command: Prepar
   if (!operation || operation.state !== 'succeeded') throw new StorageError('OPERATION_DATA_INVALID');
   return operation;
 }
-export function savePreparation(db: Database.Database, input: SavePreparation): StoredOperation {
-  return guarded(() => db.transaction(() => {
+export function savePreparationInTransaction(db: Database.Database, input: SavePreparation): StoredOperation {
     const command = input.command;
     const recovered = recoverPreparationCommand(db, command); if (recovered) return recovered;
     const previous = command.kind === 'preparation.update' ? readPreparation(db, command.preparationId) : null;
@@ -77,14 +76,23 @@ export function savePreparation(db: Database.Database, input: SavePreparation): 
     assertProjectAvailable(db, projectId);
     const config = readConfiguration(db, projectId);
     if (configurationETag(config) !== input.configurationETag) throw new OperationError(412, 'REVISION_CONFLICT', 'Configuration changed while preparing the issue.');
-    const choices: PreparationChoices = command.kind === 'preparation.create' ? command.body : {
+    const choices: PreparationChoices = command.kind === 'preparation.create' ? { ...command.body, publication_target: command.body.publication_target ?? null } : {
       issue_id: previous!.view.issue_id, delivery_mode: previous!.view.delivery_mode, guidance: previous!.view.guidance,
       overrides: previous!.view.overrides, ...command.body.changes,
       ...(previous!.view.previous_attempt_id ? { previous_attempt_id: previous!.view.previous_attempt_id } : {}),
     };
     if (!Value.Check(PreparationChoices, choices)) throw new OperationError(400, 'PREPARATION_INVALID', 'Preparation choices are invalid.');
     assertPreparationProfileRoles(db, config.configuration, choices);
-    if (choices.previous_attempt_id) validatePreviousAttempt(db, choices.previous_attempt_id, projectId, choices.issue_id);
+    if (choices.previous_attempt_id) {
+      if (input.blockedSuccessorAttemptId === choices.previous_attempt_id) {
+        const attempt = db.prepare<[string], { project_id: string; issue_id: string; result: string | null; suspension: string | null }>(
+          'SELECT project_id,issue_id,result,suspension FROM attempts WHERE id=?').get(choices.previous_attempt_id);
+        if (!attempt || attempt.project_id !== projectId || attempt.issue_id !== choices.issue_id || attempt.result !== null || attempt.suspension !== 'CORRECTION_BLOCKED' ||
+          !db.prepare('SELECT 1 FROM attempt_blocks WHERE attempt_id=?').get(choices.previous_attempt_id)) {
+          throw new OperationError(409, 'ATTEMPT_DECISION_STALE', 'The blocked attempt changed before its successor preparation was saved.');
+        }
+      } else validatePreviousAttempt(db, choices.previous_attempt_id, projectId, choices.issue_id, previous?.view.id);
+    }
     const id = previous?.view.id ?? randomUUID(); const revision = (previous?.view.revision ?? 0) + 1;
     const now = Date.now(); const settings = readSettings(db);
     if (!previous) db.prepare('INSERT INTO preparations(id, project_id, account_id, revision, created_at_ms, updated_at_ms) VALUES (?, ?, ?, 1, ?, ?)')
@@ -102,5 +110,8 @@ export function savePreparation(db: Database.Database, input: SavePreparation): 
     db.prepare('INSERT INTO events(seq, entity_type, entity_id, project_id, operation_id, event_type, entity_revision, facts_json, occurred_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(seq, 'preparation', id, projectId, command.operationId, command.kind === 'preparation.create' ? 'preparation.created' : 'preparation.updated', revision, '{}', now);
     return { operation_id: command.operationId, kind: command.kind, resource: { type: 'preparation', id }, state: 'succeeded', receipt };
-  }).immediate());
+}
+
+export function savePreparation(db: Database.Database, input: SavePreparation): StoredOperation {
+  return guarded(() => db.transaction(() => savePreparationInTransaction(db, input)).immediate());
 }

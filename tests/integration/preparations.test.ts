@@ -98,7 +98,7 @@ describe('persistent preparation HTTP contracts', () => {
     expect(p).toMatchObject({ revision: 1, can_start: false, delivery_mode: 'pr', base_sha: baseSha,
       effective_configuration: { configuration: { correction_limit: 0 }, origins: { correction_limit: 'preparation', checks: 'preparation', time_defaults: 'preparation', base_branch: 'project' }, guidance: 'Project guidance\nAttempt guidance' } });
     expect(p.criteria_preview.criteria.map((c) => [c.id, c.text])).toEqual([['ac-1', 'Same text'], ['ac-2', 'Same text']]);
-    expect(p.prerequisites.map((p) => p.code)).toEqual(['EXECUTOR_REVALIDATION_REQUIRED']);
+    expect(p.prerequisites.map((p) => p.code)).toEqual(['PUBLICATION_TARGET_REQUIRED', 'EXECUTOR_REVALIDATION_REQUIRED']);
     expect(p.effects_preview.find((e) => e.kind === 'push')?.requested).toBe(true);
     const after = f.storage.getConfiguration(f.projectId);
     expect(after.etag).toBe(before.etag); expect(after.view.configuration).toEqual(before.view.configuration);

@@ -64,6 +64,7 @@ it('composes a test execution implementation with real SQL and unchanged query D
     await pipeline.drain();
     expect(f.storage.getQuestion(status.id, question.questionId).view.state).toBe('delivered');
     const result: ImplementerResult = { formatVersion: 1, writesStopped: true, summary: 'Contract implementation', checks: [],
+      additionalChangesJustification: null,
       criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Controlled contract proof'] })) };
     const input = { binding: passage.binding, result, sha256: fingerprint(result) };
     const accepted = f.persistence.acceptResult(input);

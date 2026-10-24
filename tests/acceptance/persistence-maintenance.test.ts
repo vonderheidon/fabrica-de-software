@@ -65,6 +65,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains approved identity
     const runner = vi.fn(async () => ({ state: 'passed' as const, exitCode: 0, diagnostic: null, endedAtMs: Date.now(), durationMs: 1, output: Buffer.from('Pertinent check evidence\n') }));
     const verification = createVerification({ storage: f.storage, workspaces: { materializeCheck }, dataDirectory: f.directory, logFailure: f.logFailure }, { runner, canonicalize: async p => p });
     f.verification.verifyDelivery.mockImplementation(id => verification.verifyDelivery(id, new AbortController().signal));
+    f.verification.getArtifact.mockImplementation(id => verification.getArtifact(id));
     await f.implement(); await f.approve();
     const deliveryId = f.status().deliveryId!;
     const approved = f.storage.getReview(deliveryId)!;

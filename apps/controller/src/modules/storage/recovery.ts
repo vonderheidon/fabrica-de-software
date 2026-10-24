@@ -142,8 +142,14 @@ export function finishRecovery(db: Database.Database, operationId: string, outco
       VALUES ('resource',?,?,?,?,?,?,'{}',?)`).run(operation.resource.id, a.projectId, a.id, operationId, `${operation.kind}.${outcome}`, revision, Date.now());
   }).immediate());
 }
-export function validatePreviousAttempt(db: Database.Database, id: string, projectId: string, issueId: string): void {
+export function validatePreviousAttempt(db: Database.Database, id: string, projectId: string, issueId: string, successorPreparationId?: string): void {
   const prior = readAttempt(db, id); const capture = readCapture(db, id);
   if (prior.projectId !== projectId || capture.issue.id !== issueId) throw new OperationError(404, 'PREVIOUS_ATTEMPT_NOT_FOUND', 'The previous attempt does not belong to this project and issue.');
-  if (!prior.result) throw new OperationError(409, 'ATTEMPT_ACTIVE', 'End the previous attempt before preparing a new one.');
+  if (!prior.result) {
+    const linkedSuccessor = successorPreparationId ? db.prepare<[string, string], { action: string }>(
+      'SELECT action FROM attempt_decisions WHERE attempt_id=? AND successor_preparation_id=? ORDER BY created_at_ms DESC LIMIT 1',
+    ).get(id, successorPreparationId) : undefined;
+    if (linkedSuccessor?.action === 'change_profile') return;
+    throw new OperationError(409, 'ATTEMPT_ACTIVE', 'End the previous attempt before preparing a new one.');
+  }
 }

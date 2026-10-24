@@ -71,6 +71,25 @@ it('reconciles a lost response without a second commit and completes only on an 
   expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce(); expect(f.issue.comments).toHaveLength(1);
 });
 
+it('turns an observed absent delivery branch into a known failure before an explicit safe retry', async () => {
+  const f = await fixture(); await f.implement();
+  const create = f.workspaces.createTargetCommit.getMockImplementation()!;
+  f.workspaces.createTargetCommit.mockResolvedValueOnce({ state:'unknown',receipt:null,reason:'LOCAL_RESPONSE_LOST' });
+  await f.approve();
+  const target = f.storage.findDeliveryTarget(f.attemptId,f.status().deliveryId!)!;
+  const local = f.storage.getEffects(f.attemptId).find(e => e.kind === 'local_commit')!;
+  expect(local.state).toBe('unknown');
+  f.workspaces.reconcileTargetCommit.mockResolvedValueOnce({ state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' });
+  f.pipeline.reconcilePublication(f.attemptId,{ deliveryId:target.delivery_id },f.context()); await f.pipeline.drain();
+  expect(f.storage.getEffect(local.operationId)).toMatchObject({ state:'failed_known',reason:'COMMIT_NOT_OBSERVED' });
+  expect(f.issue.comments).toEqual([]);
+  f.workspaces.createTargetCommit.mockImplementation(create);
+  f.pipeline.completePublication(f.attemptId,request(f),f.context()); await f.pipeline.drain();
+  expect(f.storage.getEffect(local.operationId).state).toBe('confirmed');
+  expect(f.workspaces.createTargetCommit).toHaveBeenCalledTimes(2);
+  expect(f.status().result).toBe('delivered');
+});
+
 it('preserves approval and earlier effects on a known commit failure without restarting implementation', async () => {
   const f = await fixture(); await f.implement();
   const count = vi.mocked(f.execution.startPassage).mock.calls.length;
@@ -166,7 +185,7 @@ it('migrates actual v13 effect/request definitions preserving confirmed historic
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(34); expect(storage.getSettings().installation_id).toBe(instanceId);
+    expect(storage.getDiagnostics().schemaVersion).toBe(42); expect(storage.getSettings().installation_id).toBe(instanceId);
     expect(storage.getEffects(f.attemptId)).toEqual(effects); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='changed' WHERE operation_id=?").run(effects[0]!.operationId)).toThrow();
     expect(storage.getAttempt(f.attemptId).result).toBe('delivered');

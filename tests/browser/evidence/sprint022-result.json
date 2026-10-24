@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "states": [
+    "recurrence",
+    "proven_partial",
+    "disagreement",
+    "total_limit",
+    "unavailable_action"
+  ],
+  "draft_preserved": true,
+  "stale_requires_review": true,
+  "lost_response_same_operation": true,
+  "command_count": 4,
+  "history_reads": [
+    "finding_assessments",
+    "finding_disputes",
+    "decisions"
+  ],
+  "errors": []
+}

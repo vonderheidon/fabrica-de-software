@@ -5,7 +5,7 @@ import {
   type PreparationRecord, type Prerequisite, type IssueContext,
 } from '#contracts';
 import { assessIssueReadiness, type GitHub } from '../github/index.js';
-import { OperationError, type PreparationCommand, type Storage } from '../storage/index.js';
+import { isLocalAbsoluteTargetPath, OperationError, publicationTargetHash, publicationTargetPath, type PreparationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import { validateProjectConfiguration, type CommandContext } from './index.js';
 import { interpretIssue, preparationDigest } from '../pipeline/index.js';
@@ -20,6 +20,12 @@ export interface PreparationDependencies {
 }
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
 function prerequisite(code: string): Prerequisite {
+  if (code === 'PUBLICATION_TARGET_REQUIRED') return { code,
+    message: 'Esta issue por URL exige um destino local para Commit local ou Pull request.',
+    recovery: 'Escolha um clone existente ou um caminho para criar o clone no destino da versão aprovada, salve e revise o resumo novamente.' };
+  if (code === 'PUBLICATION_TARGET_INVALID') return { code,
+    message: 'O destino salvo não corresponde ao repositório atual ou não é um caminho local absoluto válido.',
+    recovery: 'Selecione novamente o repositório e o caminho do destino na preparação.' };
   if (code === 'PROFILE_COMPOSITION_REQUIRED') return { code,
     message: 'Um dos perfis ainda não tem instruções efetivas compatíveis.',
     recovery: 'Abra Configuração > Perfis, ajuste as instruções ao limite de 8.192 caracteres e salve o perfil antes de iniciar.' };
@@ -92,7 +98,10 @@ function effective(view: ConfigurationView, choices: PreparationChoices): { conf
       artifact_policy: overrides.artifact_policy ? 'preparation' : 'global', guidance: choices.guidance ? 'preparation' : 'project', delivery_mode: 'preparation' },
   } };
 }
-function effects(mode: PreparationChoices['delivery_mode']): Preparation['effects_preview'] {
+function effects(mode: PreparationChoices['delivery_mode'], target: PreparationRecord['publication_target'], repository: string, urlSource: boolean): Preparation['effects_preview'] {
+  const targetDescription = !target ? 'Nenhum destino local de entrega foi selecionado.'
+    : target.selection.kind === 'clone' ? `Clonar ${repository} no destino local ${target.selection.destination}.`
+      : `Usar o clone existente de ${repository} em ${target.selection.path}.`;
   return [
     { kind: 'clone', requested: true, description: 'Create an independent implementation clone from the fixed committed base.' },
     { kind: 'execute', requested: true, description: 'Run implementation, checks and independent review in owned environments.' },
@@ -101,6 +110,9 @@ function effects(mode: PreparationChoices['delivery_mode']): Preparation['effect
     { kind: 'pull_request', requested: mode === 'pr', description: 'Create a pull request for the approved version when applicable.' },
     { kind: 'issue_comment', requested: mode !== 'pr', description: 'Record the delivery result in an issue comment for modes without a pull request, without editing criteria.' },
     { kind: 'project_status', requested: true, description: 'Project the attempt progress and completed delivery to the configured Project.' },
+    { kind: 'publication_target', requested: urlSource && mode !== 'icr' && target !== null, description: !urlSource && target
+      ? 'Projetos locais usam o clone cadastrado; limpe a intenção de destino adicional.'
+      : mode === 'icr' && target ? `${targetDescription} O modo ICR não executará nem autorizará esse efeito.` : targetDescription },
   ];
 }
 
@@ -114,6 +126,11 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     ]);
     const issue = issueResult.state === 'complete' && issueResult.data && 'repository' in issueResult.data ? issueResult.data : null;
     const reasons = [...resolved.reasons];
+    const target = record.publication_target;
+    const targetValid = target === null || config.source.kind === 'github' && target.repository_id === config.source.repository_id && isLocalAbsoluteTargetPath(publicationTargetPath(target));
+    const targetRequired = config.source.kind === 'github' && record.delivery_mode !== 'icr';
+    if (!targetValid) reasons.push('PUBLICATION_TARGET_INVALID');
+    else if (targetRequired && !target) reasons.push('PUBLICATION_TARGET_REQUIRED');
     if (view.prerequisites.some(item => item.code === 'PROJECT_DELETION_PENDING')) reasons.push('PROJECT_DELETION_PENDING');
     if (!view.settings.account_id) reasons.push('ACCOUNT_UNOBSERVED');
     if (identity.state !== 'complete' || !identity.data || issueResult.state !== 'complete') reasons.push('READ_INCOMPLETE');
@@ -150,17 +167,19 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     reasons.push('EXECUTOR_REVALIDATION_REQUIRED');
     const diagnostics = [...identity.diagnostics, ...issueResult.diagnostics, ...(project?.diagnostics ?? []), ...origin.githubDiagnostics];
     if (record.previous_attempt_id) {
-      storage.validatePreviousAttempt(record.previous_attempt_id, record.project_id, record.issue_id);
+      storage.validatePreviousAttempt(record.previous_attempt_id, record.project_id, record.issue_id, record.id);
     }
     const prerequisites = [...new Set(reasons)].map(prerequisite);
-    const effectsPreview = effects(record.delivery_mode);
+    const repositoryLabel = issue ? `${issue.repository.owner.login}/${issue.repository.name}` : 'repositório da issue atual';
+    const effectsPreview = effects(record.delivery_mode, target, repositoryLabel, config.source.kind === 'github');
     const baseSha = origin.base?.sha ?? null;
     const summaryHash = preparationDigest({ version: 1, preparation: [record.id, record.revision, record.project_revision_id],
       account: [view.settings.account_id, identity.state, identity.data?.id ?? null],
       issue: issue ? { id: issue.id, number: issue.number, url: issue.url, title: issue.title, repositoryId: issue.repository.id,
         objective: criteria.objective, criteriaDigest: criteria.digest, references: issue.references,
         state: issue.state, assignees: issue.assignees.map((a) => a.id).sort(), blockers: issue.blockers, memberships: issue.memberships } : null,
-      baseSha, configuration: resolved.configuration, deliveryMode: record.delivery_mode, effectsPreview, prerequisites });
+      baseSha, configuration: resolved.configuration, deliveryMode: record.delivery_mode,
+      publicationTarget: target, publicationTargetHash: publicationTargetHash(target), effectsPreview, prerequisites });
     return { ...record, prerequisites, effective_configuration: resolved.configuration, criteria_preview: criteria, effects_preview: effectsPreview,
       issue, base_sha: baseSha, summary_hash: summaryHash, diagnostics,
       retry_at_ms: [identity.retryAtMs, issueResult.retryAtMs, project?.retryAtMs, origin.retryAtMs].reduce<number | null>((max, value) => value === null || value === undefined ? max : Math.max(max ?? 0, value), null),
@@ -189,7 +208,13 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     const deletion = config.view.prerequisites.find(item => item.code === 'PROJECT_DELETION_PENDING');
     if (deletion) throw new OperationError(409, deletion.code, deletion.message, { recovery: deletion.recovery });
     const choices: PreparationChoices = command.kind === 'preparation.create' ? command.body : { ...previous!.view, ...command.body.changes };
-    if (choices.previous_attempt_id) storage.validatePreviousAttempt(choices.previous_attempt_id, projectId, choices.issue_id);
+    if (choices.publication_target) {
+      const target = choices.publication_target;
+      if (config.view.configuration.source.kind !== 'github' || target.repository_id !== config.view.configuration.source.repository_id || !isLocalAbsoluteTargetPath(publicationTargetPath(target))) {
+        fail(409, 'PUBLICATION_TARGET_INVALID', 'O destino precisa pertencer ao repositório deste projeto e usar um caminho local absoluto válido.');
+      }
+    }
+    if (choices.previous_attempt_id) storage.validatePreviousAttempt(choices.previous_attempt_id, projectId, choices.issue_id, previous?.view.id);
     const resolved = effective(config.view, choices);
     if (resolved.reasons.includes('PROFILE_REFERENCE_CHANGED')) fail(409, 'PROFILE_REFERENCE_CHANGED', 'The exact selected profile revision is unavailable.');
     if (resolved.reasons.includes('PROFILE_TYPE_MISMATCH') || resolved.reasons.includes('PROJECT_PROFILE_TYPE_MISMATCH')) {
@@ -206,6 +231,38 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
   }
   return {
     getPreparation,
+    async prepareDecisionSuccessor(attemptId: string, role: 'implementer' | 'reviewer', profileId: string, profileRevision: number) {
+      const attempt = storage.getAttempt(attemptId); const block = storage.getAttemptBlock(attemptId);
+      if (attempt.result !== null || attempt.suspension !== 'CORRECTION_BLOCKED' || !block || !attempt.deliveryId) {
+        fail(409, 'ATTEMPT_DECISION_NOT_CURRENT', 'The attempt no longer has a current correction block.');
+      }
+      const capture = storage.getAttemptCapture(attemptId); const previous = storage.getPreparation(capture.preparationId).view;
+      const config = storage.getConfiguration(previous.project_id);
+      const choices: PreparationChoices = {
+        issue_id: capture.issue.id, delivery_mode: previous.delivery_mode, guidance: previous.guidance,
+        publication_target: previous.publication_target,
+        overrides: { ...previous.overrides, [`${role}_profile`]: { kind: 'reference', id: profileId, revision: profileRevision },
+          correction_limit: capture.configuration.configuration.correction_limit },
+        previous_attempt_id: attemptId,
+      };
+      const selectedProfile = config.view.profiles.find(profile => profile.id === profileId);
+      if (!selectedProfile || selectedProfile.profile_type !== role) fail(409, 'PROFILE_TYPE_MISMATCH', 'O perfil escolhido não corresponde ao papel solicitado.');
+      if (selectedProfile.revision !== profileRevision) fail(409, 'PROFILE_REFERENCE_CHANGED', 'A revisão exata do perfil selecionado não está mais atual.');
+      const resolved = effective(config.view, choices);
+      if (resolved.reasons.includes('PROFILE_REFERENCE_CHANGED')) fail(409, 'PROFILE_REFERENCE_CHANGED', 'A revisão exata do perfil selecionado não está mais atual.');
+      if (resolved.reasons.includes('PROFILE_TYPE_MISMATCH') || resolved.reasons.includes('PROJECT_PROFILE_TYPE_MISMATCH')) {
+        fail(409, 'PROFILE_TYPE_MISMATCH', 'O perfil escolhido não corresponde ao papel solicitado.');
+      }
+      const issue = await github.getIssueContextById(capture.issue.id);
+      if (issue.state === 'invalid_input') fail(400, 'NOT_AN_ISSUE', 'The successor must reference the captured issue.');
+      if (issue.state !== 'complete' || !issue.data) fail(issue.state === 'inaccessible' ? 404 : 503, 'ISSUE_UNAVAILABLE', 'A complete issue observation is required to prepare the successor.');
+      if (!('repository' in issue.data) || issue.data.id !== capture.issue.id || issue.data.repository.id !== config.view.configuration.source.repository_id) {
+        fail(409, 'REPOSITORY_MISMATCH', 'The successor must remain on the captured issue and repository.');
+      }
+      if (storage.getAttempt(attemptId).revision !== attempt.revision || storage.getConfiguration(previous.project_id).etag !== config.etag ||
+        storage.getAttemptBlock(attemptId)?.id !== block.id) fail(412, 'REVISION_CONFLICT', 'The attempt or project changed while preparing its successor.');
+      return { projectId: previous.project_id, configurationETag: config.etag, body: choices };
+    },
     async createPreparation(projectId: string, body: PreparationChoices, context: CommandContext) {
       if (!Value.Check(PreparationChoices, body)) fail(400, 'PREPARATION_INVALID', 'Preparation choices are invalid.');
       return save({ ...context, kind: 'preparation.create', projectId, body });

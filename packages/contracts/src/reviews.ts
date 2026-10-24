@@ -1,14 +1,18 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { OperationId } from './base.js';
-import { CriterionOutcome, ReviewerResult, ImplementerResult, PassageBinding } from './execution.js';
+import { CriterionOutcome, ReviewerResult, ImplementerResult, PassageBinding, ReviewCommandRepetition } from './execution.js';
 
 const closed = { additionalProperties: false } as const;
 export const Finding = Type.Object({
   ...ReviewerResult.properties.findings.items.properties,
   id: OperationId, reviewId: OperationId, attemptId: OperationId,
+  priority: Type.Union([Type.Null(), ...['critical', 'high', 'medium', 'low'].map(v => Type.Literal(v))]),
+  originFindingId: Type.Union([OperationId, Type.Null()]),
+  deliveryId: Type.Union([OperationId, Type.Null()]), contentIdentity: Type.Union([Type.String(), Type.Null()]),
 }, closed);
 export type Finding = Static<typeof Finding>;
 export const Review = Type.Object({
+  commandRepetitions: Type.Optional(Type.Array(ReviewCommandRepetition, { maxItems: 100 })),
   id: OperationId, deliveryId: OperationId, attemptId: OperationId, passageId: OperationId,
   verificationId: OperationId, contentIdentity: Type.String(),
   state: Type.Union(['pending', 'approved', 'rejected'].map(v => Type.Literal(v))),

@@ -9,6 +9,7 @@ export function projectConfigurationLock(db: Database.Database, projectId: strin
   if (!tables.has('attempts')) return null;
   const conditions = ['a.result IS NULL'];
   if (tables.has('publication_requests')) conditions.push("EXISTS (SELECT 1 FROM publication_requests p WHERE p.attempt_id=a.id AND p.state IN ('accepted','running'))");
+  if (tables.has('publication_target_selections')) conditions.push("EXISTS (SELECT 1 FROM publication_target_selections t WHERE t.attempt_id=a.id AND t.state IN ('accepted','running','unknown'))");
   if (tables.has('effects')) conditions.push("EXISTS (SELECT 1 FROM effects e WHERE e.attempt_id=a.id AND e.state IN ('running','unknown'))");
   if (tables.has('resources')) conditions.push("EXISTS (SELECT 1 FROM resources r WHERE r.attempt_id=a.id AND r.launch_state='starting')");
   if (tables.has('terminal_occupancies')) conditions.push("EXISTS (SELECT 1 FROM terminal_occupancies t WHERE t.attempt_id=a.id AND t.state IN ('occupied','uncertain'))");

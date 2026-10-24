@@ -11,6 +11,7 @@ export const Artifact = Type.Object({
 }, closed);
 export type Artifact = Static<typeof Artifact>;
 export const CheckRun = Type.Object({
+  repeatReason: Type.Optional(nullable(Type.String({ minLength: 1, maxLength: 8192 }))),
   id: OperationId, verificationId: OperationId, deliveryId: OperationId, contentIdentity: Type.String(),
   checkDefinitionId: Type.String({ maxLength: 128 }), runNumber: Type.Integer({ minimum: 1 }),
   command: Type.String({ maxLength: 4096 }), cwdRelative: Type.String({ maxLength: 4096 }), timeoutMs: Type.Integer({ minimum: 1 }),

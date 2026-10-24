@@ -26,9 +26,10 @@ export function verificationSummary(db: Database.Database, deliveryId: string): 
   if (row && !Value.Check(VerificationSummary, row)) throw new StorageError('OPERATION_DATA_INVALID');
   return row ?? null;
 }
-export function beginVerification(db: Database.Database, deliveryId: string): VerificationPlan {
+export function beginVerification(db: Database.Database, deliveryId: string, repeatReason?: string): VerificationPlan {
   return guarded(() => db.transaction(() => {
     const delivery = readDelivery(db, deliveryId); eligible(db, delivery);
+    if (repeatReason !== undefined && (!repeatReason.trim() || repeatReason.length > 8192)) throw denied();
     if (db.prepare("SELECT id FROM verification_runs WHERE delivery_id=? AND state='running'").get(deliveryId)) throw denied();
     const definitions = readCapture(db, delivery.attemptId).configuration.configuration.checks;
     const id = randomUUID(); const now = Date.now();
@@ -36,8 +37,16 @@ export function beginVerification(db: Database.Database, deliveryId: string): Ve
     db.prepare("INSERT INTO verification_runs(id,delivery_id,attempt_id,content_identity,run_number,state,started_at_ms) VALUES (?,?,?,?,?,'running',?)")
       .run(id, deliveryId, delivery.attemptId, delivery.contentIdentity, n, now);
     const checks = definitions.map(definition => ({ id: randomUUID(), definition, timeoutMs: definition.timeout_ms ?? 300_000 }));
-    for (const c of checks) db.prepare(`INSERT INTO checks(id,verification_id,delivery_id,attempt_id,content_identity,check_definition_id,run_number,command,cwd_relative,timeout_ms,state)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'pending')`).run(c.id, id, deliveryId, delivery.attemptId, delivery.contentIdentity, c.definition.id, n, c.definition.command, c.definition.cwd_relative, c.timeoutMs);
+    for (const c of checks) {
+      const prior = db.prepare<[string, string, string], { id: string }>(`SELECT c.id FROM checks c JOIN artifacts a ON a.check_id=c.id
+        WHERE c.delivery_id=? AND c.command=? AND c.cwd_relative=? AND c.state='passed' ORDER BY c.run_number DESC LIMIT 1`)
+        .get(deliveryId, c.definition.command, c.definition.cwd_relative);
+      const retry = db.prepare("SELECT id FROM verification_runs WHERE delivery_id=? AND run_number=? AND state IN ('failed','error')").get(deliveryId, n - 1);
+      const reason = prior ? repeatReason ?? (retry ? `Verification retry after an incomplete or failed configured check set; revalidate the complete set, including prior check ${prior.id}.` : null) : repeatReason ?? null;
+      if (prior && !reason) throw denied();
+      db.prepare(`INSERT INTO checks(id,verification_id,delivery_id,attempt_id,content_identity,check_definition_id,run_number,command,cwd_relative,timeout_ms,state,repeat_reason)
+        VALUES (?,?,?,?,?,?,?,?,?,?,'pending',?)`).run(c.id, id, deliveryId, delivery.attemptId, delivery.contentIdentity, c.definition.id, n, c.definition.command, c.definition.cwd_relative, c.timeoutMs, reason);
+    }
     db.prepare('UPDATE attempts SET suspension=NULL,diagnostic=NULL,revision=revision+1,updated_at_ms=? WHERE id=?').run(now, delivery.attemptId);
     attemptEvent(db, delivery.attemptId, 'verification.started');
     return { id, delivery, checks };
@@ -120,7 +129,7 @@ export function readCheckHistory(db: Database.Database, deliveryId: string, quer
   const limit = Number(query.limit ?? '25');
   const rows = db.prepare<[string, number, number, number, string, number], Omit<CheckRun, 'artifacts'>>(`SELECT id,verification_id AS verificationId,delivery_id AS deliveryId,content_identity AS contentIdentity,
     check_definition_id AS checkDefinitionId,run_number AS runNumber,command,cwd_relative AS cwdRelative,timeout_ms AS timeoutMs,state,exit_code AS exitCode,
-    started_at_ms AS startedAtMs,ended_at_ms AS endedAtMs,duration_ms AS durationMs,diagnostic,execution_diagnostic AS executionDiagnostic FROM checks
+    started_at_ms AS startedAtMs,ended_at_ms AS endedAtMs,duration_ms AS durationMs,diagnostic,execution_diagnostic AS executionDiagnostic,repeat_reason AS repeatReason FROM checks
     WHERE delivery_id=? AND run_number<=? AND (run_number<? OR (run_number=? AND id>?)) ORDER BY run_number DESC,id LIMIT ?`).all(deliveryId, ceiling, run, run, last, limit + 1);
   const entries = rows.slice(0, limit).map(row => {
     const ids = db.prepare<[string], { id: string }>('SELECT id FROM artifacts WHERE check_id=?').all(row.id);

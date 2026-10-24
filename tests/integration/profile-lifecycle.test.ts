@@ -31,8 +31,10 @@ async function createCapturedAttempt(f: Awaited<ReturnType<typeof attemptFixture
   if (!preparation.issue || !preparation.base_sha || !preparation.criteria_preview.executable || !settings.account_id) {
     throw new Error('PROFILE_ATTEMPT_FIXTURE_INCOMPLETE');
   }
+  const operationId = randomUUID();
   const capture: AttemptCapture = {
     formatVersion: 1,
+    v3Delivery: { format_version: 1, publication_target: null, publication_target_hash: null, authorization_operation_id: operationId },
     preparationId: preparation.id,
     preparationRevision: preparation.revision,
     summaryHash: preparation.summary_hash,
@@ -46,7 +48,7 @@ async function createCapturedAttempt(f: Awaited<ReturnType<typeof attemptFixture
     tools: f.tools,
   };
   const accepted = f.storage.createAttempt({
-    command: { operationId: randomUUID(), expectedRevision: saved.etag, body: {
+    command: { operationId, expectedRevision: saved.etag, body: {
       preparationId: preparation.id, preparationRevision: preparation.revision,
       authorizedSummaryHash: preparation.summary_hash, authorized: true,
     } },

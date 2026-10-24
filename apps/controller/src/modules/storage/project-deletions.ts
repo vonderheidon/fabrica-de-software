@@ -22,9 +22,9 @@ interface FinalizationContext extends FinalizeProjectDeletion {
 // intentional residual FK edges during deletion. SQLite checks them at commit.
 const removalOrder: readonly DeletionTable[] = [
   'events', 'effects', 'diagnostic_runs', 'creation_reconciliations', 'creation_board_operations', 'creation_steps',
-  'publication_upgrades', 'publication_requests', 'resource_removals', 'native_open_requests',
-  'cancellation_requests', 'queue_consumptions', 'queue_cycles', 'attempt_authority',
-  'finding_resolutions', 'findings', 'reviews', 'artifacts', 'checks', 'verification_runs',
+  'delivery_targets', 'publication_target_selections', 'publication_upgrades', 'publication_requests', 'resource_removals', 'native_open_requests',
+  'attempt_decisions', 'cancellation_requests', 'queue_consumptions', 'queue_cycles', 'attempt_authority',
+  'finding_disputes', 'finding_assessments', 'attempt_blocks', 'finding_resolutions', 'findings', 'reviews', 'artifacts', 'checks', 'verification_runs',
   'capture_warnings', 'capture_runs', 'deliveries', 'criterion_results', 'passage_results',
   'passage_events', 'passage_measurements', 'execution_questions', 'terminal_occupancies', 'attempt_sessions', 'resources', 'passages',
   'rounds', 'attempt_criteria', 'attempts', 'preparation_revisions', 'preparations',

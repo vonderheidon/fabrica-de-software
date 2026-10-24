@@ -1,4 +1,4 @@
-import { toHttpAttemptMeasurements, toHttpQuestion, toHttpRoundHistory, toHttpAttemptPage, toHttpAttemptDetail, fromHttpAnswerQuestion, fromHttpStartAttempt, fromHttpAttemptListQuery, fromHttpAttemptDetailQuery } from '../execution-views.js';
+import { toHttpAttemptMeasurements, toHttpQuestion, toHttpRoundHistory, toHttpAttemptPage, toHttpAttemptDetail, fromHttpAnswerQuestion, fromHttpStartAttempt, fromHttpAttemptListQuery, fromHttpAttemptDetailQuery, fromHttpMakeAttemptDecision } from '../execution-views.js';
 import type { FastifyInstance } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { HttpAnswerQuestion as AnswerQuestion, QuestionParams, HttpQuestion as Question, HttpAttemptMeasurements as AttemptMeasurements, AttemptParams, EmptyQuery, ErrorResponse, OperationAccepted, HttpStartAttempt as StartAttempt, HttpRoundHistory as RoundHistory } from '#contracts';
@@ -9,6 +9,7 @@ import { installRecoveryRoutes } from './recovery.js';
 import { installPublicationRoutes } from './publication.js';
 import { createQueries } from '../../modules/queries/index.js';
 import { HttpAttemptDetail as AttemptDetail, HttpAttemptDetailQuery as AttemptDetailQuery, HttpAttemptListQuery as AttemptListQuery, HttpAttemptPage as AttemptPage } from '#contracts';
+import { HttpMakeAttemptDecision as MakeAttemptDecision } from '#contracts';
 
 export function installAttemptRoutes(instance: FastifyInstance, pipeline: Pipeline, storage: Storage): void {
   installRecoveryRoutes(instance, pipeline, storage);
@@ -23,6 +24,10 @@ export function installAttemptRoutes(instance: FastifyInstance, pipeline: Pipeli
   });
   app.post('/api/v1/attempts/:attemptId/questions/:questionId/answer', { schema: { params: QuestionParams, querystring: EmptyQuery, body: AnswerQuestion, response: { 202: OperationAccepted, ...errors } } }, async (request, reply) => {
     const operation = await pipeline.answerQuestion({ ...request.params, ...commandHeaders(request), body: fromHttpAnswerQuestion(request.body) });
+    return sendOperationAccepted(reply, request.id, storage, operation.operation_id);
+  });
+  app.post('/api/v1/attempts/:attemptId/decisions', { schema: { params: AttemptParams, querystring: EmptyQuery, body: MakeAttemptDecision, response: { 202: OperationAccepted, ...errors } } }, async (request, reply) => {
+    const operation = await pipeline.makeAttemptDecision(request.params.attemptId, fromHttpMakeAttemptDecision(request.body), commandHeaders(request));
     return sendOperationAccepted(reply, request.id, storage, operation.operation_id);
   });
   app.get('/api/v1/attempts/:attemptId/rounds', { schema: { params: AttemptParams, querystring: EmptyQuery, response: { 200: RoundHistory, ...errors } } }, async request => toHttpRoundHistory(storage.getRounds(request.params.attemptId)));

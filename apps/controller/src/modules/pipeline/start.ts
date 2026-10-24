@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
 import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueQuery, type QueueItem, type QueueObservation } from '#contracts';
-import { OperationError, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
+import { isLocalAbsoluteTargetPath, OperationError, publicationTargetHash, publicationTargetPath, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import { interpretIssue, preparationDigest } from './criteria.js';
 import { ExecutionError, type Execution } from '../execution/index.js';
@@ -12,11 +12,11 @@ import type { DeliveryDiffQuery } from '#contracts';
 import { VerificationError, type Verification } from '../verification/index.js';
 import { createRecovery } from './recovery.js';
 import { createPublication, type PublicationDependencies } from '../publication/index.js';
-import type { AuthorizeUpgrade, CompletePublication, ReconcilePublication } from '#contracts';
+import type { AuthorizeUpgrade, CompletePublication, ReconcilePublication, MakeAttemptDecision } from '#contracts';
 
 export interface PipelineDependencies {
   github?: Pick<GitHub, 'getIssueContextById'>;
-  storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'createPreparation' | 'getPreparation'>; execution: Execution;
+  storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'createPreparation' | 'getPreparation' | 'prepareDecisionSuccessor'>; execution: Execution;
   queue?: { observe: (query: QueueQuery) => Promise<{ observation: QueueObservation; etag: string; items: readonly QueueItem[] }> };
   workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment'>>;
   observeTools: () => Promise<ToolObservation[]>;
@@ -87,6 +87,7 @@ export function createPipeline(deps: PipelineDependencies) {
     if (!controller) { controller = new AbortController(); attemptSignals.set(id, controller); }
     return AbortSignal.any([abort.signal, controller.signal]);
   }
+  function revoke(id: string) { signalFor(id); attemptSignals.get(id)?.abort(); }
   let scopePolling = false;
   let lastScopePoll = 0;
   const scopeReads = new Map<string, Promise<boolean>>();
@@ -141,6 +142,14 @@ export function createPipeline(deps: PipelineDependencies) {
     }
     if (publication && !await publication.observeControllerAccount()) throw new OperationError(409, 'ACCOUNT_CHANGED', 'Dispatch is paused until the configured account is observed.');
     const current = await preparations.revalidateSummary(body); const p = current.view.preparation;
+    const targetRequired = p.effective_configuration.configuration.source.kind === 'github' && p.delivery_mode !== 'icr';
+    if (targetRequired && !p.publication_target) throw new OperationError(409, 'PUBLICATION_TARGET_REQUIRED',
+      'Escolha um destino local para iniciar uma entrega Commit local ou Pull request deste projeto por URL.', {
+        affected_requirements: ['RF-23', 'RF-24', 'RF-28'], recovery: 'Selecione um clone existente ou um destino para o clone, salve e revise novamente o resumo.' });
+    if (p.publication_target && (p.effective_configuration.configuration.source.kind !== 'github' || p.publication_target.repository_id !== p.effective_configuration.configuration.source.repository_id ||
+      !isLocalAbsoluteTargetPath(publicationTargetPath(p.publication_target)))) throw new OperationError(409, 'PUBLICATION_TARGET_INVALID',
+        'O destino salvo não corresponde ao repositório atual ou não usa um caminho local absoluto válido.', {
+          affected_requirements: ['RF-23', 'RF-24', 'RF-28'], recovery: 'Escolha novamente o clone e o destino correspondentes ao repositório do projeto.' });
     const reasons = p.prerequisites.filter(r => r.code !== 'EXECUTOR_REVALIDATION_REQUIRED');
     if (reasons.length || !p.issue || !p.base_sha || !p.criteria_preview.executable || !config.view.settings.account_id ||
       !p.effective_configuration.implementer_profile || !p.effective_configuration.reviewer_profile) {
@@ -154,9 +163,13 @@ export function createPipeline(deps: PipelineDependencies) {
       throw new OperationError(503, 'ROLE_RESOURCE_REQUIRED', 'Both distributed versioned role contracts are required before dispatch.');
     }
     const tools = await deps.observeTools();
+    const v3Delivery = p.publication_target === null
+      ? { format_version: 1 as const, publication_target: null, publication_target_hash: null, authorization_operation_id: context.operationId }
+      : { format_version: 1 as const, publication_target: p.publication_target, publication_target_hash: publicationTargetHash(p.publication_target)!, authorization_operation_id: context.operationId };
     const capture: AttemptCapture = { formatVersion: 1, preparationId: p.id, preparationRevision: p.revision, summaryHash: p.summary_hash,
       accountId: config.view.settings.account_id, issue: p.issue, baseSha: p.base_sha, configuration: p.effective_configuration,
-      criteria: p.criteria_preview.criteria, criteriaDigest: p.criteria_preview.digest, roleResources, tools };
+      criteria: p.criteria_preview.criteria, criteriaDigest: p.criteria_preview.digest, roleResources, tools,
+      v3Delivery };
     const accepted = storage.createAttempt({ command, capture, configurationETag: config.etag, preparationETag: current.etag, ...(queueCycle ? { queueCycle } : {}) });
     if (accepted.created) schedule(accepted.operation.resource.id);
     return accepted.operation;
@@ -184,6 +197,8 @@ export function createPipeline(deps: PipelineDependencies) {
       if (!cycle || cycle.consumedAttemptId !== null || !cycle.ready) return;
       const mode = current.observation.modesByProject.find(item => item.projectId === candidate.projectId)?.mode;
       if (!mode) return;
+      const project = storage.getConfiguration(candidate.projectId).view.configuration;
+      if (project.source.kind === 'github' && mode !== 'icr') return;
       const preparation = await preparations.createPreparation(candidate.projectId, { issue_id: candidate.issueId, delivery_mode: mode, guidance: '', overrides: {} },
         { operationId: randomUUID(), expectedRevision: undefined });
       if (closed || !storage.getSettings().automation_enabled || !storage.getConfiguration(candidate.projectId).view.configuration.automation_enabled) return;
@@ -227,9 +242,25 @@ export function createPipeline(deps: PipelineDependencies) {
     }).finally(() => { pending.delete(task); });
     pending.add(task);
   }
-  const recovery = createRecovery(deps, enqueue, id => { signalFor(id); attemptSignals.get(id)?.abort(); }, () => closed);
+  const recovery = createRecovery(deps, enqueue, revoke, () => closed);
   const publication = deps.publication ? createPublication({ ...deps.publication, storage, enqueue, isClosed: () => closed, logFailure: deps.logFailure,
     cancelAttempt: async id => { await recovery.cancelAttempt(id, {}, { operationId: randomUUID(), expectedRevision: undefined }); } }) : null;
+  async function checkContext(deliveryId: string, verificationId: string) {
+    const checks = storage.getCheckHistory(deliveryId, { limit: '100' }).entries.filter(c => c.verificationId === verificationId);
+    const allowance = Math.min(16_384, Math.floor(131_072 / Math.max(1, checks.filter(c => c.artifacts.length > 0).length)));
+    return Promise.all(checks.map(async check => {
+      const logs = [];
+      for (const artifact of check.artifacts) {
+        if (artifact.deliveryId !== deliveryId || artifact.checkId !== check.id) throw new VerificationError('ARTIFACT_INTEGRITY_FAILED');
+        if (!deps.verification) throw new VerificationError('ARTIFACT_INTEGRITY_FAILED');
+        const { bytes } = await deps.verification.getArtifact(artifact.id);
+        if (bytes.length !== artifact.sizeBytes || createHash('sha256').update(bytes).digest('hex') !== artifact.sha256) throw new VerificationError('ARTIFACT_INTEGRITY_FAILED');
+        logs.push({ artifact, text: new TextDecoder().decode(bytes.subarray(0, allowance)), truncated: bytes.length > allowance });
+      }
+      return { ...check, classification: check.state === 'error' ? 'execution_error' : check.state === 'failed' ? 'check_failed' : 'check_result',
+        interpretation: 'A failed check is evidence to investigate; an execution error does not establish a product defect.', logs };
+    }));
+  }
   async function review(deliveryId: string): Promise<void> {
     if (closed) return;
     const observed = storage.getDelivery(deliveryId);
@@ -282,13 +313,21 @@ export function createPipeline(deps: PipelineDependencies) {
         const passage = storage.executionPersistence().getPassage({ passageId: claimed.passageId });
         const reviewer = capture.configuration.reviewer_profile; if (!reviewer) throw new ExecutionError('RESOURCE_INVALID');
         const findings = storage.getOpenFindings(delivery.attemptId, delivery.round);
+        const disputes = storage.getPendingFindingDisputes(delivery.attemptId, delivery.round);
+        if (disputes.length > 1000) throw new ExecutionError('RESOURCE_INVALID');
         // Only structured scope, criteria, version, checks and findings. No implementer conversation.
         const request: PassageRequest = { binding: passage.binding, cwd, profile: profile(reviewer), criterionIds: capture.criteria.map(c => c.id),
           previousFindingKeys: findings.map(f => f.id), previousBlockingFindingKeys: findings.filter(f => f.blocking).map(f => f.id), gitNexusRequired: false, roleResource: passage.roleResource,
           task: JSON.stringify({ formatVersion: 1, issue: { id: capture.issue.id, title: capture.issue.title, body: capture.issue.body },
             criteria: capture.criteria, delivery, verification: storage.getDelivery(deliveryId).verification,
-            checks: storage.getCheckHistory(deliveryId, { limit: '100' }).entries.filter(c => c.verificationId === claimed.verificationId),
-            findings, producerResult: storage.getProducerResult(deliveryId), previousDelivery: previousRound?.deliveryId ?? null, previousDiff,
+            checks: await checkContext(deliveryId, claimed.verificationId),
+             findings, disputes, producerResult: storage.getProducerResult(deliveryId), previousDelivery: previousRound?.deliveryId ?? null, previousDiff,
+             disputeResponse: 'Respond once to every supplied disputeId in disputeResponses, with maintained/resolved, justification and evidence. Match the resolution of its findingId: maintained requires unresolved; resolved requires resolved. IDs and original version are supplied facts. A maintained dispute blocks automatic correction and requires an operator decision.',
+            reviewScope: { mode: previousReview ? 'focused' : 'complete',
+              focus: previousReview ? 'Review the diff, every pending finding and regressions in affected areas; expand inspection whenever needed.' : 'Independently inspect every captured criterion.',
+              approval: 'Report every current criterion exactly once with independent evidence for this delivery. Historical approval is never inherited. Build and typecheck do not replace required visual proof.',
+              repetitions: 'Reuse pertinent valid evidence from this delivery. Record every repeated command with its concrete reason and prior evidence in commandRepetitions; check_id must reference a supplied check from this verification, or null for another command.' },
+            progressAssessment: 'Assess each canonical prior finding ID. Use artifact:<id> from a supplied nonempty passed-check artifact of this version for proven/partial. Mere edits or declarations are not progress; none and not_assessable do not reset recurrence. Never infer identity from text.',
             guidance: capture.configuration.guidance,
             evidenceDirectory: `.factory-evidence/${claimed.id}/`,
             authority: 'Review this captured version independently in the single attempt checkout while the Implementer is stopped. Never change product content or publish. Conversation and earlier evidence are historical, never the current version. Save screenshots and reports only in the supplied evidenceDirectory, ignored locally by Git. Never overwrite earlier evidence, modify tracked files for evidence or use evidence as product code. Resolve each prior finding using findingKey equal to its supplied id. A rejection needs concrete criterion evidence or an actionable blocking finding.' }) };
@@ -333,8 +372,9 @@ export function createPipeline(deps: PipelineDependencies) {
         criterionIds: capture.criteria.map(c => c.id), previousFindingKeys: plan.findings.map(f => f.id), gitNexusRequired: false, roleResource: p.roleResource,
         task: JSON.stringify({ formatVersion: 1, round: p.binding.round, maximumRound: 1 + capture.configuration.configuration.correction_limit,
           review: plan.review, findings: plan.findings, criteria: capture.criteria,
-          checks: storage.getCheckHistory(deliveryId, { limit: '100' }).entries.filter(c => c.verificationId === plan.review.verificationId),
-          authority: 'Correct the supplied review in this same implementation checkout and session. Report findingResponses for every supplied finding id. Stop all owned writers before execution_complete. This creates a new captured delivery and independent review.' }) });
+          checks: await checkContext(deliveryId, plan.review.verificationId),
+          ...(plan.guidance ? { operatorGuidance: plan.guidance, guidanceHandling: 'Apply this contextual guidance without changing the captured criteria, profile, or correction limit.' } : {}),
+          authority: 'Correct the supplied findings and their necessary consequences in this same checkout and session. Do not add requirements. Report findingResponses for every supplied finding id. Report additionalChangesJustification as null when no additional change was needed, otherwise explain additional changes for the independent Reviewer. Treat technical execution errors separately from demonstrated product defects. Stop all owned writers before execution_complete. This creates a new captured delivery and independent review.' }) });
     } catch (error) {
       storage.recordDispatchFailure(plan.review.attemptId, error instanceof ExecutionError ? error.code : 'CORRECTION_DELIVERY_UNKNOWN'); throw error;
     }
@@ -427,6 +467,26 @@ export function createPipeline(deps: PipelineDependencies) {
   }
   return {
     ...recovery,
+    setPublicationTarget(id: string, body: import('#contracts').SetPublicationTarget, context: { operationId: string; expectedRevision: string | undefined }) {
+      if (!publication) throw new OperationError(503,'PUBLICATION_UNAVAILABLE','A publicação não está disponível neste host.');
+      return publication.selectTarget(id,body,context);
+    },
+    async makeAttemptDecision(attemptId: string, body: MakeAttemptDecision, context: { operationId: string; expectedRevision: string | undefined }) {
+      const command = { ...context, attemptId, body };
+      const previous = storage.recoverAttemptDecision(command);
+      if (previous) return previous;
+      if (closed) throw new OperationError(409, 'PIPELINE_CLOSED', 'The controller is shutting down.');
+      const successor = body.action === 'change_profile'
+        ? await deps.preparations.prepareDecisionSuccessor(attemptId, body.role, body.profileId, body.profileRevision)
+        : undefined;
+      const accepted = storage.acceptAttemptDecision(command, successor);
+      if (accepted.created && body.action === 'guidance') enqueue(() => correct(body.deliveryId));
+      if (accepted.created && body.action === 'end') {
+        revoke(attemptId);
+        enqueue(async () => { await execution.cancelAttempt(attemptId, context.operationId); });
+      }
+      return accepted.operation;
+    },
     completePublication(id: string, body: CompletePublication, context: { operationId: string; expectedRevision: string | undefined }) {
       if (!publication) throw new OperationError(503, 'PUBLICATION_UNAVAILABLE', 'Publication is not composed in this host.');
       return publication.complete(id, body, context);

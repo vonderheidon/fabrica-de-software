@@ -73,8 +73,23 @@ export function readAttemptPage(db: Database.Database, query: AttemptListQuery):
   const selected = rows.slice(0, limit); const last = selected.at(-1); const hasMore = rows.length > limit;
   return { items: selected.map(({ pageKey: _key, ...row }) => row), has_more: hasMore, next_cursor: hasMore && last ? encodeCursor(fingerprint, cursor.ceiling, last.pageKey) : null, event_cursor: eventCursor(db) };
 }
+import { targetSelection } from './target-selections.js';
+import { readAttemptBlock } from './progress.js';
+import { AttemptDecisionView } from '#contracts';
+
 interface SectionPlan { from: string; key: string; delivery: string; round: string; select: string }
 const plans: Record<DetailSection, SectionPlan> = {
+  target_selections: { from: 'publication_target_selections t JOIN deliveries d ON d.id=t.delivery_id', key: "printf('%020d',t.created_at_ms)||':'||t.operation_id", delivery: 't.delivery_id', round: 'd.round_number', select: 't.operation_id' },
+  finding_disputes: { from: 'finding_disputes t JOIN deliveries d ON d.id=t.delivery_id LEFT JOIN reviews response ON response.id=t.response_review_id', key: "printf('%020d',t.created_at_ms)||':'||t.id", delivery: 't.delivery_id', round: 'd.round_number',
+    select: `t.id,t.attempt_id AS attemptId,t.finding_id AS findingId,t.passage_id AS passageId,t.delivery_id AS deliveryId,t.content_identity AS contentIdentity,
+      t.justification,t.evidence_json,t.response_review_id AS responseReviewId,t.response_verdict AS responseVerdict,t.response_justification AS responseJustification,
+      t.response_evidence_json,t.created_at_ms AS createdAtMs,t.responded_at_ms AS respondedAtMs,response.delivery_id AS responseDeliveryId,response.content_identity AS responseContentIdentity` },
+  finding_assessments: { from: 'finding_assessments t JOIN reviews r ON r.id=t.review_id JOIN deliveries d ON d.id=r.delivery_id', key: "printf('%02d',d.round_number)||':'||t.id", delivery: 'r.delivery_id', round: 'd.round_number',
+    select: 't.id,t.attempt_id AS attemptId,t.finding_id AS findingId,t.review_id AS reviewId,r.delivery_id AS deliveryId,d.round_number AS round,r.content_identity AS contentIdentity,t.progress,t.evidence_json,t.justification,t.created_at_ms AS createdAtMs' },
+  decisions: { from: 'attempt_decisions t JOIN deliveries d ON d.id=t.delivery_id', key: "printf('%020d',t.created_at_ms)||':'||t.id", delivery: 't.delivery_id', round: 'd.round_number',
+    select: `t.id,t.operation_id AS operationId,t.attempt_id AS attemptId,t.delivery_id AS deliveryId,t.block_id AS blockId,t.block_revision AS blockRevision,
+      t.block_reason AS blockReason,t.action,t.guidance_json,t.successor_preparation_id AS successorPreparationId,
+      t.successor_preparation_revision AS successorPreparationRevision,t.created_at_ms AS createdAtMs` },
   rounds: { from: 'rounds t LEFT JOIN passages p ON p.attempt_id=t.attempt_id AND p.round_number=t.round_number AND p.role=\'implementer\' LEFT JOIN passage_results z ON z.passage_id=p.id LEFT JOIN deliveries d ON d.id=t.delivery_version LEFT JOIN reviews r ON r.delivery_id=d.id', key: "printf('%02d',t.round_number)", delivery: 't.delivery_version', round: 't.round_number',
     select: 't.round_number AS round,t.delivery_version AS deliveryId,p.id AS producerPassageId,z.receipt_id AS producerReceiptId,r.id AS reviewId,r.state AS reviewState,d.content_identity AS contentIdentity' },
   passages: { from: 'passages t LEFT JOIN passage_results z ON z.passage_id=t.id LEFT JOIN attempt_sessions s ON s.id=t.attempt_session_id LEFT JOIN managed_terminals m ON m.id=s.managed_terminal_id', key: "printf('%02d',t.round_number)||':'||t.role||':'||t.id", delivery: 't.delivery_version', round: 't.round_number',
@@ -91,7 +106,7 @@ const plans: Record<DetailSection, SectionPlan> = {
   reviews: { from: 'reviews t JOIN deliveries d ON d.id=t.delivery_id', key: "printf('%020d',t.created_at_ms)||':'||t.id", delivery: 't.delivery_id', round: 'd.round_number',
     select: `t.id,t.delivery_id AS deliveryId,t.attempt_id AS attemptId,t.passage_id AS passageId,t.verification_id AS verificationId,t.content_identity AS contentIdentity,t.state,t.reason,t.independence_state AS independenceState,t.diagnostic,t.created_at_ms AS createdAtMs,t.completed_at_ms AS completedAtMs,(SELECT json_extract(z.summary_json,'$.verdict') FROM passage_results z WHERE z.passage_id=t.passage_id) AS declaredVerdict` },
   findings: { from: 'findings t JOIN reviews r ON r.id=t.review_id JOIN deliveries d ON d.id=r.delivery_id', key: "printf('%02d',d.round_number)||':'||t.id", delivery: 'r.delivery_id', round: 'd.round_number',
-    select: `t.id,t.review_id AS reviewId,t.attempt_id AS attemptId,t.finding_key AS key,t.criterion_ids_json,t.category,t.problem,t.evidence_json,t.expected_result AS expectedResult,t.blocking,
+    select: `t.id,t.review_id AS reviewId,t.attempt_id AS attemptId,t.finding_key AS key,t.criterion_ids_json,t.category,t.problem,t.evidence_json,t.expected_result AS expectedResult,t.blocking,t.priority,t.origin_finding_id AS originFindingId,r.delivery_id AS deliveryId,r.content_identity AS contentIdentity,
       (SELECT json_group_array(json_object('reviewId',x.review_id,'deliveryId',xr.delivery_id,'verdict',x.verdict,'evidence',json(x.evidence_json))) FROM finding_resolutions x JOIN reviews xr ON xr.id=x.review_id WHERE x.finding_id=t.id) AS resolutions_json` },
   questions: { from: 'execution_questions t JOIN passages p ON p.id=t.passage_id', key: "printf('%020d',t.created_at_ms)||':'||t.id", delivery: 'p.delivery_version', round: 'p.round_number',
     select: "t.id,t.attempt_id AS attemptId,t.passage_id AS passageId,p.delivery_version AS deliveryId,CASE WHEN t.state='recorded' THEN 'answer_recorded' ELSE t.state END AS state,t.revision,t.created_at_ms AS createdAtMs,CASE WHEN t.ttl_ms IS NULL THEN NULL ELSE t.created_at_ms+t.ttl_ms END AS expiresAtMs,t.receipt_json AS receipt_json" },
@@ -135,6 +150,12 @@ export function readDetailPage(db: Database.Database, attemptId: string, query: 
     WHERE ${filter} AND t.rowid<=@ceiling AND (@after='' OR ${plan.key}>@after) ORDER BY ${plan.key} LIMIT @limit`).all({ ...parameters, ...cursor, limit: limit + 1 });
   const selectedRows = rows.slice(0,limit); const items: DetailItem[] = selectedRows.map(({ pageKey: _key, ...row }) => {
     let value: unknown = row;
+    if (query.section === 'finding_disputes') { const { evidence_json, response_evidence_json, ...entry } = row; value = { ...entry,
+      evidence: JSON.parse(String(evidence_json)) as unknown, responseEvidence: typeof response_evidence_json === 'string' ? JSON.parse(response_evidence_json) as unknown : null }; }
+    if (query.section === 'finding_assessments') { const { evidence_json, ...entry } = row; value = { ...entry, evidence: JSON.parse(String(evidence_json)) as unknown }; }
+    if (query.section === 'decisions') { const { guidance_json, ...entry } = row; value = { ...entry,
+      guidance: typeof guidance_json === 'string' ? (JSON.parse(guidance_json) as { text: string }).text : null }; }
+    if (query.section === 'target_selections') value = targetSelection(db,String(row.operation_id)).view;
     if (query.section === 'effects') value = readEffect(db, String(row.operationId));
     if (query.section === 'criteria') {
       const { producer_json, reviewer_json, ...c } = row;
@@ -168,10 +189,18 @@ export function readAttemptDetail(db: Database.Database, id: string, query: Atte
   const expectedAccountId = db.prepare<[string], { account_id: string }>('SELECT account_id FROM attempts WHERE id=?').get(id)?.account_id;
   if (!expectedAccountId) throw new StorageError('ATTEMPT_DATA_INVALID');
   const publication = publicationSummary(db,id,exists ? selectedDeliveryId! : undefined);
-  return { ...a, expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound, publication, measurements: readMeasurements(db,id), cleanup: readResources(db,id).cleanup,
+  const targetCapture = readCapture(db,id).v3Delivery;
+  const details = readDetailPage(db,id,query);
+   const v3Details = details?.section === 'target_selections' ? { section: 'target_selections' as const, items: details.items.filter((item): item is import('#contracts').PublicationTargetSelection => 'selection_kind' in item), next_cursor: details.next_cursor, has_more: details.has_more }
+     : details?.section === 'finding_assessments' ? { section: 'finding_assessments' as const, items: details.items.filter((item): item is import('#contracts').FindingAssessment => 'progress' in item && 'findingId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
+     : details?.section === 'finding_disputes' ? { section: 'finding_disputes' as const, items: details.items.filter((item): item is import('#contracts').FindingDispute => 'responseReviewId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
+     : details?.section === 'decisions' ? { section: 'decisions' as const, items: details.items.filter((item): item is AttemptDecisionView => 'operationId' in item && 'blockId' in item), next_cursor: details.next_cursor, has_more: details.has_more } : null;
+  return { ...a, v3Details, block: readAttemptBlock(db,id), expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound,
+    publicationTarget: targetCapture?.publication_target ?? null, publicationTargetHash: targetCapture?.publication_target_hash ?? null,
+    publication, measurements: readMeasurements(db,id), cleanup: readResources(db,id).cleanup,
     authority: authority ? { ...authority,recovery: authority.reason === 'ASSIGNEE_CHANGED' ? 'Encerre a tentativa anterior antes de transferir responsabilidade e rearmar Ready no GitHub.' : authority.reason ? 'Corrija conta, vínculo ou Status no GitHub e use Revalidar. A fábrica não altera o quadro para resolver divergências.' : 'Autoridade observada; cada despacho ou efeito ainda exige revalidação atual.' } : null,
     capabilities: { cancel: { available: a.result === null }, completePublication: publication.completeCapability, reconcilePublication: publication.reconcileCapability, revalidate: { available: a.result === null || publication.reviewState === 'approved' } },
-    details: readDetailPage(db,id,query) };
+    details: v3Details ? null : details };
 }
 export function readDeliveryDetail(db: Database.Database, id: string, query: DeliveryDetailQuery): DeliveryDetail {
   if (!Value.Check(DeliveryDetailQuery,query)) throw cursorError();

@@ -94,6 +94,16 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   const resources = db.prepare<[string], { id: string; owned: number; reference: string; attempt_id: string; kind: string }>(
     'SELECT id,owned,reference,attempt_id,kind FROM resources WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
   ).all(projectId);
+  const deliveryTargets = db.prepare<[string], { operation_id: string; attempt_id: string; local_path: string }>(`SELECT t.operation_id,t.attempt_id,t.local_path
+    FROM delivery_targets t JOIN attempts a ON a.id=t.attempt_id WHERE a.project_id=? ORDER BY t.operation_id`).all(projectId);
+  for (const target of deliveryTargets) {
+    if (!Value.Check(OperationId,target.operation_id) || !Value.Check(OperationId,target.attempt_id) || !/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(target.local_path)) {
+      blockers.push({ reason: 'Um clone de entrega não tem identidade de caminho válida.', recovery: 'Confira o destino registrado antes de tentar excluir o projeto.' });
+      continue;
+    }
+    const original = project.source.kind === 'local' && resolve(project.source.location).toLowerCase() === resolve(target.local_path).toLowerCase();
+    if (!original) targets.push({ key: `delivery-target:${target.operation_id}`,kind: 'exclusive_workspace',path: target.local_path,ownerKind: 'attempt',ownerId: target.attempt_id });
+  }
   const artifacts = db.prepare<[string], { id: string; attempt_id: string; check_id: string; path_relative: string }>(
     'SELECT id,attempt_id,check_id,path_relative FROM artifacts WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
   ).all(projectId);
@@ -137,7 +147,11 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     if (!valid) blockers.push({ reason: 'Uma localização de outro projeto não pôde ser protegida.', recovery: 'Confira as localizações gerenciadas antes de tentar excluir este projeto.' });
     return valid;
   });
-  const protectedPaths = [...otherOrigins.map(o => o.path),
+  const selectedTargets = db.prepare<[string], { local_path: string }>(`SELECT t.local_path FROM publication_target_selections t
+    JOIN attempts a ON a.id=t.attempt_id WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
+  const otherDeliveryTargets = db.prepare<[string],{ local_path: string }>(`SELECT t.local_path FROM delivery_targets t JOIN attempts a ON a.id=t.attempt_id
+    WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
+  const protectedPaths = [...otherOrigins.map(o => o.path), ...selectedTargets.map(t => t.local_path), ...otherDeliveryTargets.map(t => t.local_path),
     ...creations.filter(c => c.project_id !== projectId || project.source.kind !== 'local' || c.destination !== project.source.location).map(c => c.destination),
     ...others.flatMap(a => [resolve(dataDirectory, 'work', a.id), resolve(dataDirectory, 'git', `${a.id}.git`), resolve(dataDirectory, 'artifacts', a.id)]),
     ...otherPassages.map(p => resolve(dataDirectory, 'execution-bootstrap', p.id)),
@@ -146,7 +160,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     resolve(dataDirectory, 'factory.sqlite'), resolve(dataDirectory, 'controller-lock.sqlite')];
   const settings = readSettings(db);
   const schema = db.prepare<[], { version: number; checksum: string }>('SELECT version,checksum FROM schema_migrations ORDER BY version').all();
-  if (schema.length !== 34 || schema.at(-1)?.version !== 34) blockers.push({
+  if (schema.length !== 42 || schema.at(-1)?.version !== 42) blockers.push({
     reason: 'A versão do inventário de recursos não é suportada nesta conferência.',
     recovery: 'Atualize a política de conferência para o schema instalado.' });
   // Data and install containers cannot themselves be removed. Exclusive leaves
@@ -156,7 +170,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     resolve(dataDirectory, 'execution-bootstrap'), resolve(dataDirectory, 'projects'),
     ...(settings.projects_root ? [settings.projects_root] : [])];
   const inventoryVersion = digest({ version: 1, schema, project, keys: inventory.keys, storageLocations, otherStorageLocations,
-    resources, artifacts, passages, otherPassages, otherResources, otherOrigins, creations, others,
+    resources, artifacts, passages, otherPassages, otherResources, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations, others,
     installation: settings.installation_id, account: settings.account_id, containers });
   const originalProtectedPaths = [resolve(dataDirectory), resolve(dataDirectory, '../..')];
   return { projectId, projectName: project.name, projectRevision: project.revision, sourceKind: project.source.kind,

@@ -7,6 +7,7 @@ import { attemptEvent, readAttempt, readCapture } from './attempts.js';
 import { digest } from './configuration-reads.js';
 import { createPendingDelivery } from './deliveries.js';
 import { acceptReview, openFindings } from './reviews.js';
+import { recordDisputes } from './disputes.js';
 import { beginMeasurement, checkpoint, expireLimits } from './measurements.js';
 import { claimAnswer, questionETag, questionRow as readQuestionRow, recordAnswer, stopQuestions } from './questions.js';
 
@@ -281,6 +282,8 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
       }
       const previous = getResult({ passageId: p.id });
       if (previous) { if (previous.sha256 !== input.sha256) throw new ExecutionError('RESULT_CONFLICT'); return previous; }
+      if ('checks' in result && p.round_number > 1 && result.additionalChangesJustification === undefined) throw new ExecutionError('RESULT_INVALID');
+      if ('findings' in result && result.findings.some(f => f.priority === undefined)) throw new ExecutionError('RESULT_INVALID');
       if (p.state === 'ready' && db.prepare("SELECT id FROM execution_questions WHERE passage_id=? AND state<>'delivered'").get(p.id)) throw new ExecutionError('RESULT_INVALID');
       active(p);
       if (p.state !== 'ready') throw new ExecutionError('RESULT_INVALID');
@@ -290,7 +293,10 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
         .run(p.id, p.attempt_id, input.sha256, receiptId, JSON.stringify(summary), Date.now());
       for (const c of result.criteria) db.prepare('INSERT INTO criterion_results(passage_id,attempt_id,criterion_id,verdict,evidence_json) VALUES (?,?,?,?,?)')
         .run(p.id, p.attempt_id, c.criterionId, c.verdict, JSON.stringify(c.evidence));
-      if (p.role === 'implementer') createPendingDelivery(db, input.binding);
+      if (p.role === 'implementer') {
+        recordDisputes(db, input.binding, result as ImplementerResult, openFindings(db, p.attempt_id, p.round_number));
+        createPendingDelivery(db, input.binding);
+      }
       else acceptReview(db, input.binding, result as import('#contracts').ReviewerResult);
       const occupancy = db.prepare<[string], { id: string; managed_terminal_id: string; attempt_session_id: string; generation: number }>(
         "SELECT id,managed_terminal_id,attempt_session_id,generation FROM terminal_occupancies WHERE passage_id=? AND state='occupied' ORDER BY generation DESC LIMIT 1",

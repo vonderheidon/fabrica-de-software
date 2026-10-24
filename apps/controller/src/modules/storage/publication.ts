@@ -194,20 +194,25 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
     FROM effects WHERE attempt_id=? AND (delivery_id IS ? OR delivery_id IS NULL)`).get(attemptId,selectedId)!;
   if (!reason && d) reason = publicationBlockReason(db, attemptId, d.id, true);
   if (!reason && counts.unknown > 0) reason = 'EFFECT_UNRESOLVED';
+  const targetPending = Boolean(db.prepare("SELECT 1 FROM publication_target_selections WHERE attempt_id=? AND state IN ('accepted','running','unknown')").get(attemptId));
+  if (!reason && targetPending) reason = 'TARGET_SELECTION_PENDING';
   if (!reason && db.prepare("SELECT operation_id FROM publication_requests WHERE attempt_id=? AND state IN ('accepted','running')").get(attemptId)) reason = 'PUBLICATION_BUSY';
   const resolved = (kind: EffectView['kind']) => Boolean(db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind=? AND state IN ('confirmed','not_applicable')").get(attemptId,selectedId,kind));
   const completed = a.result === 'delivered' && (mode === 'icr' ? resolved('issue_comment') : resolved('local_commit') && (mode === 'commit' ? resolved('issue_comment') : resolved('push') && resolved('pull_request')));
   const upgrades = d && d.id === a.deliveryId && review?.state === 'approved' && a.phase === 'finished' && (a.result === 'delivered' || a.result === 'interrupted') ? upgradeSummaries(db,attemptId,d.id,reason) : [];
   if (!reason && completed && counts.pending === 0) reason = 'MODE_COMPLETED';
-  const commit = db.prepare<[string,string | null],{ state: EffectView['state']; sha: string | null; reason: string | null; operationId: string }>("SELECT state,json_extract(receipt_json,'$.id') AS sha,reason,operation_id AS operationId FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind='local_commit' ORDER BY rowid DESC LIMIT 1").get(attemptId,selectedId);
+  const commit = db.prepare<[string,string | null],{ state: EffectView['state']; sha: string | null; reason: string | null; operationId: string; branchRef: string | null; taskType: string | null; taskDescription: string | null }>(`SELECT e.state,json_extract(e.receipt_json,'$.id') AS sha,e.reason,e.operation_id AS operationId,
+    t.branch_ref AS branchRef,t.task_type AS taskType,t.task_description AS taskDescription FROM effects e LEFT JOIN delivery_targets t
+      ON t.operation_id=json_extract(e.expected_identity_json,'$.targetOperationId')
+    WHERE e.attempt_id=? AND e.delivery_id IS ? AND e.kind='local_commit' ORDER BY e.rowid DESC LIMIT 1`).get(attemptId,selectedId);
   const remote = (kind: 'push' | 'pull_request') => { const row = db.prepare<[string,string | null,string],Parameters<typeof effectView>[0]>('SELECT * FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind=?').get(attemptId,selectedId,kind); const e = row ? effectView(row) : null; return { state: e?.state ?? 'not_requested' as const,receipt: e?.receipt ?? null,reason: e?.reason ?? null }; };
   return { mode, reviewState: review?.state ?? null, upgrades, push: remote('push'), pullRequest: remote('pull_request'),
-    commit: commit ?? { state: 'not_requested', sha: null, reason: mode === 'icr' ? 'MODE_ICR' : 'COMMIT_NOT_STARTED', operationId: null },
+    commit: commit ?? { state: 'not_requested', sha: null, reason: mode === 'icr' ? 'MODE_ICR' : 'COMMIT_NOT_STARTED', operationId: null,branchRef: null,taskType: null,taskDescription: null },
     localState: completed && a.deliveryId === selectedId ? 'completed' : 'pending',
     confirmedEffects: counts.confirmed,
     pendingEffects: counts.pending,
     unknownEffects: counts.unknown,
     completeCapability: reason ? { available: false, reason_code: reason } : { available: true },
     reconcileCapability: reason === 'PROJECT_DELETION_PENDING' ? { available: false, reason_code: reason }
-      : counts.unknown > 0 ? { available: true } : { available: false, reason_code: 'NO_UNRESOLVED_EFFECTS' } };
+      : counts.unknown > 0 || targetPending ? { available: true } : { available: false, reason_code: 'NO_UNRESOLVED_EFFECTS' } };
 }

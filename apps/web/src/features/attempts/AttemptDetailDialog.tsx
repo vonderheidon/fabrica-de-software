@@ -1,4 +1,6 @@
 import { AttemptConditions } from './AttemptConditions.js';
+import { AttemptBlockDecision } from './AttemptBlockDecision.js';
+import { CorrectionHistory, EvidenceList } from './CorrectionHistory.js';
 import { HistoricalProfile } from './HistoricalProfile.js';
 import { PassageFacts } from './PassageFacts.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
@@ -20,6 +22,7 @@ const sections: readonly DetailSection[] = ['rounds', 'passages', 'criteria', 'c
 const labels: Record<DetailSection, string> = {
   rounds: 'Rodadas e versões', passages: 'Passagens', criteria: 'Critérios e evidências', checks: 'Checks e logs',
   reviews: 'Pareceres', findings: 'Achados e resoluções', questions: 'Perguntas', effects: 'Efeitos remotos', resources: 'Recursos e limpeza', profiles: 'Perfis capturados',
+  finding_assessments: 'Progresso', finding_disputes: 'Contestações', decisions: 'Decisões',
 };
 type SectionErrorDetails = { code: string; requestId: string | null; facts: Readonly<Record<string, string | number | boolean | null>> | null; affectedRequirements: readonly string[] } | null;
 type SectionState = { page: DetailPage | null; error: string | null; errorDetails: SectionErrorDetails; loading: boolean };
@@ -251,6 +254,9 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Consultar ambiente novamente</button></div>}
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
       <HistoricalProfile key={attemptId} attemptId={attemptId} />
+      <CapturedPublicationTargetSummary target={attempt.publication_target} hash={attempt.publication_target_hash} />
+      {attempt.block && <AttemptBlockDecision key={`${attempt.expected_account_id}:${attemptId}:${attempt.block.id}`} attempt={attempt} etag={attemptEtag} current={selectionCurrent && !attemptError} onRefresh={refreshDetail} />}
+      <CorrectionHistory key={sectionIdentity} attemptId={attemptId} round={selectedRound} deliveryId={effectiveDeliveryId} />
       <details className="attempt-axis-card card attempt-disclosure"><summary>Ver alterações da entrega</summary>
         {deliveryState === 'loading' && <p role="status">Consultando a versão selecionada…</p>}
         {deliveryState === 'not-captured' && <p className="muted">Esta rodada ainda não tem uma versão capturada.</p>}
@@ -343,6 +349,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     <div className="dialog-actions">
       <p>Fechar este detalhe não altera o estado da tentativa.</p>
       <button type="button" onClick={() => setReload((value) => value + 1)}>Atualizar tentativa</button>
+      <span id="attempt-decision-actions" />
       {attempt?.result && <button type="button" className="primary" onClick={() => onRetry(attempt)}>Nova tentativa</button>}
     </div>
   </section>;
@@ -350,6 +357,12 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
 
 function renderRecord(section: DetailSection, item: DetailItem, index: number, evidence: Record<string, EvidenceState>, loadEvidence: (artifact: Artifact) => Promise<void>) {
   const record = asRecord(item);
+  if (section === 'findings' && 'problem' in item && 'resolutions' in item) return <article className="attempt-record" key={item.id}>
+    <h4>{item.problem}</h4><dl className="preparation-facts"><div><dt>Prioridade</dt><dd>{item.priority ? ({ critical: 'Crítica', high: 'Alta', medium: 'Média', low: 'Baixa' })[item.priority] : 'Não registrada no legado'}</dd></div><div><dt>Bloqueante</dt><dd>{item.blocking ? 'Sim' : 'Não'}</dd></div><div><dt>Critérios</dt><dd>{item.criterion_ids.join(', ')}</dd></div></dl>
+    <h5>Resultado esperado</h5><p>{item.expected_result}</p><h5>Evidências</h5><EvidenceList values={item.evidence} />
+    <h5>Resoluções registradas</h5>{item.resolutions.length ? item.resolutions.map((resolution, index) => <div key={index}><p>{resolution.verdict === 'resolved' ? 'Resolvido' : 'Permanece pendente'}</p><EvidenceList values={resolution.evidence} /><details><summary>Versão da resolução</summary><p>{resolution.delivery_id}</p></details></div>) : <p>Sem resolução registrada. Ausência de histórico não comprova resolução.</p>}
+    <details><summary>Identidade e versão revisada</summary><dl><div><dt>Achado</dt><dd>{item.id}</dd></div><div><dt>Versão</dt><dd>{item.delivery_id ?? 'Não registrada no legado'}</dd></div><div><dt>Problema de origem</dt><dd>{item.origin_finding_id ?? 'Achado inicial ou origem não registrada'}</dd></div></dl></details>
+  </article>;
   const recordId = typeof record.id === 'string' ? record.id : typeof record.delivery_id === 'string' ? record.delivery_id : null;
   const round = typeof record.round === 'number' ? record.round : index + 1;
   const role = record.role === 'implementer' ? 'Implementador' : record.role === 'reviewer' ? 'Revisor' : null;
@@ -365,6 +378,7 @@ function renderRecord(section: DetailSection, item: DetailItem, index: number, e
   const artifacts = Array.isArray(record.artifacts) ? record.artifacts as Artifact[] : [];
   const textFields = ['text', 'problem', 'evidence', 'expected', 'resolution', 'description', 'comment'];
   return <article className="attempt-record" key={`${section}:${recordId ?? 'record'}:${index}`}><h4>{heading}</h4><dl>{visibleKeys.filter((key) => record[key] !== null && record[key] !== undefined).map((key) => <div key={key}><dt>{operatorFactLabel(key)}</dt><dd>{operatorVisibleFactValue(key, record[key])}</dd></div>)}</dl>
+    {section === 'checks' && <><p>{record.state === 'failed' ? 'Check reprovado. Investigue a evidência antes de atribuir uma falha ao produto.' : record.state === 'error' ? 'Erro técnico de execução. Não comprova defeito no produto.' : record.state === 'passed' ? 'Check aprovado nesta versão.' : 'Não verificado nesta versão.'}</p>{typeof record.repeat_reason === 'string' && <details><summary>Motivo da repetição</summary><p>{record.repeat_reason}</p></details>}</>}
     {visibleKeys.filter((key) => ['state', 'status', 'phase', 'result', 'tracking', 'verdict', 'declared_verdict', 'capture_state', 'active_limit_state'].includes(key) && typeof record[key] === 'string' && !operatorState(record[key] as string).known).map((key) => <UnknownState key={key} value={String(record[key])} />)}
 
     {typeof record.text === 'string' && <p>{record.text}</p>}
@@ -372,6 +386,18 @@ function renderRecord(section: DetailSection, item: DetailItem, index: number, e
     {section === 'criteria' && <div className="attempt-evidence-columns">{(['producer', 'reviewer'] as const).map((evidenceRole) => { const text = evidenceText(record[evidenceRole]); return text ? <div key={evidenceRole}><b>{evidenceRole === 'producer' ? 'Evidência do Implementador' : 'Evidência do Revisor'}</b><p>{text}</p></div> : null; })}</div>}
     {artifacts.map((artifact) => { const value = evidence[artifact.id]; return <div className="attempt-artifact" key={artifact.id}><p><b>{section === 'checks' ? 'Saída do check' : 'Arquivo de evidência'}</b></p><button type="button" onClick={() => void loadEvidence(artifact)} disabled={value?.loading}>{value?.loading ? 'Carregando evidência…' : value?.text !== null && value?.text !== undefined ? 'Recarregar evidência' : 'Abrir evidência'}</button>{value?.error && <div className="error" role="alert"><p>{value.error}</p></div>}{value?.text !== null && value?.text !== undefined && <pre className="attempt-artifact-content">{value.text}</pre>}</div>; })}
   </article>;
+}
+
+function CapturedPublicationTargetSummary({ target, hash }: { target: AttemptDetail['publication_target']; hash: string | null }) {
+  return <details className="attempt-axis-card card attempt-disclosure">
+    <summary>Destino da versão aprovada</summary>
+    {!target ? <p>Esta tentativa não capturou intenção de destino local.</p> : <>
+      <p>{target.selection.kind === 'existing_clone' ? 'Clone existente selecionado' : 'Clonagem futura solicitada'}.</p>
+      <p className="mono">{target.selection.kind === 'existing_clone' ? target.selection.path : target.selection.destination}</p>
+      <p>{hash ? 'A intenção está vinculada ao início autorizado.' : 'A identidade da intenção não está disponível nesta captura.'}</p>
+      <p className="muted">A intenção não comprova que o clone existe, corresponde ao repositório ou foi criado.</p>
+    </>}
+  </details>;
 }
 
 function cleanupLabel(state: AttemptDetail["cleanup"]): string {

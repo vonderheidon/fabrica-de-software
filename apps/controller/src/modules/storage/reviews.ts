@@ -9,10 +9,14 @@ import { guarded } from './configuration-reads.js';
 import { OperationError } from './operations.js';
 import { ExecutionError } from '../execution/index.js';
 
+import { blockCorrection, readAttemptBlock, recordAssessments } from './progress.js';
+import { respondToDisputes } from './disputes.js';
+
+const digestCriteria = (ids: string[]) => JSON.stringify([...ids].sort());
 const denied = () => new OperationError(409, 'REVIEW_NOT_ALLOWED', 'Review requires the current captured delivery, completed checks and live continuity.');
 export function openFindings(db: Database.Database, attemptId: string, beforeRound: number): Finding[] {
-  return db.prepare<[string, number, number], { id: string; reviewId: string; attemptId: string; key: string; criterion_ids_json: string; category: string; problem: string; evidence_json: string; expectedResult: string; blocking: number }>(`
-    SELECT f.id,f.review_id AS reviewId,f.attempt_id AS attemptId,f.finding_key AS key,f.criterion_ids_json,f.category,f.problem,f.evidence_json,f.expected_result AS expectedResult,f.blocking
+  return db.prepare<[string, number, number], { id: string; reviewId: string; attemptId: string; key: string; criterion_ids_json: string; category: string; problem: string; evidence_json: string; expectedResult: string; blocking: number; priority: Finding["priority"]; originFindingId: string | null; deliveryId: string; contentIdentity: string }>(`
+    SELECT f.id,f.review_id AS reviewId,f.attempt_id AS attemptId,f.finding_key AS key,f.criterion_ids_json,f.category,f.problem,f.evidence_json,f.expected_result AS expectedResult,f.blocking,f.priority,f.origin_finding_id AS originFindingId,r.delivery_id AS deliveryId,r.content_identity AS contentIdentity
     FROM findings f JOIN reviews r ON r.id=f.review_id JOIN deliveries d ON d.id=r.delivery_id
     WHERE f.attempt_id=? AND d.round_number<? AND NOT EXISTS (
       SELECT 1 FROM finding_resolutions x JOIN reviews xr ON xr.id=x.review_id JOIN deliveries xd ON xd.id=xr.delivery_id
@@ -20,7 +24,7 @@ export function openFindings(db: Database.Database, attemptId: string, beforeRou
     ) ORDER BY d.round_number,f.id LIMIT 1001`).all(attemptId, beforeRound, beforeRound).map(f => ({
       id: f.id, reviewId: f.reviewId, attemptId: f.attemptId, key: f.key,
       criterionIds: JSON.parse(f.criterion_ids_json) as string[], category: f.category, problem: f.problem,
-      evidence: JSON.parse(f.evidence_json) as string[], expectedResult: f.expectedResult, blocking: f.blocking === 1,
+      evidence: JSON.parse(f.evidence_json) as string[], expectedResult: f.expectedResult, blocking: f.blocking === 1, priority: f.priority, originFindingId: f.originFindingId, deliveryId: f.deliveryId, contentIdentity: f.contentIdentity,
     }));
 }
 export function readReview(db: Database.Database, deliveryId: string): Review | null {
@@ -30,13 +34,15 @@ export function readReview(db: Database.Database, deliveryId: string): Review | 
     (SELECT json_extract(summary_json,'$.verdict') FROM passage_results WHERE passage_id=reviews.passage_id) AS declaredVerdict,
     created_at_ms AS createdAtMs,completed_at_ms AS completedAtMs FROM reviews WHERE delivery_id=?`).get(deliveryId);
   if (!row) return null;
-  const findings = db.prepare<[string], { id: string; finding_key: string; criterion_ids_json: string; category: string; problem: string; evidence_json: string; expected_result: string; blocking: number }>('SELECT * FROM findings WHERE review_id=? ORDER BY id').all(row.id).map(f => ({
+  const findings = db.prepare<[string], { id: string; finding_key: string; criterion_ids_json: string; category: string; problem: string; evidence_json: string; expected_result: string; blocking: number; priority: Finding["priority"]; originFindingId: string | null; deliveryId: string; contentIdentity: string }>('SELECT *,origin_finding_id AS originFindingId FROM findings WHERE review_id=? ORDER BY id').all(row.id).map(f => ({
     id: f.id, reviewId: row.id, attemptId: row.attemptId, key: f.finding_key, criterionIds: JSON.parse(f.criterion_ids_json) as string[], category: f.category,
-    problem: f.problem, evidence: JSON.parse(f.evidence_json) as string[], expectedResult: f.expected_result, blocking: f.blocking === 1,
+    problem: f.problem, evidence: JSON.parse(f.evidence_json) as string[], expectedResult: f.expected_result, blocking: f.blocking === 1, priority: f.priority, originFindingId: f.originFindingId, deliveryId: row.deliveryId, contentIdentity: row.contentIdentity,
   }));
   const criteria = db.prepare<[string], { criterionId: string; verdict: 'passed' | 'failed' | 'not_verified'; evidence_json: string }>('SELECT criterion_id AS criterionId,verdict,evidence_json FROM criterion_results WHERE passage_id=? ORDER BY criterion_id').all(row.passageId).map(c => ({ criterionId: c.criterionId, verdict: c.verdict, evidence: JSON.parse(c.evidence_json) as string[] }));
   const resolutions = db.prepare<[string], { findingId: string; verdict: 'resolved' | 'unresolved'; evidence_json: string }>('SELECT finding_id AS findingId,verdict,evidence_json FROM finding_resolutions WHERE review_id=? ORDER BY finding_id').all(row.id).map(x => ({ findingId: x.findingId, verdict: x.verdict, evidence: JSON.parse(x.evidence_json) as string[] }));
-  const review = { ...row, criteria, findings, resolutions };
+  const summary = db.prepare<[string], { summary_json: string }>('SELECT summary_json FROM passage_results WHERE passage_id=?').get(row.passageId);
+  const commandRepetitions = summary ? (JSON.parse(summary.summary_json) as ReviewerResult).commandRepetitions ?? [] : [];
+  const review = { ...row, criteria, findings, resolutions, commandRepetitions };
   if (!Value.Check(Review, review)) throw new ExecutionError('STORAGE_FAILED');
   return review;
 }
@@ -100,24 +106,43 @@ export function acceptReview(db: Database.Database, binding: PassageBinding, res
   const r = readReview(db, binding.deliveryVersion); const a = readAttempt(db, binding.attemptId);
   if (!r || r.passageId !== binding.passageId || r.state !== 'pending' || r.independenceState === 'pending' || a.deliveryId !== r.deliveryId) throw new ExecutionError('RESULT_INVALID');
   const prior = openFindings(db, a.id, binding.round);
+  for (const repetition of result.commandRepetitions ?? []) {
+    if (repetition.check_id && !db.prepare(`SELECT id FROM checks WHERE id=? AND verification_id=? AND delivery_id=? AND content_identity=? AND command=?`)
+      .get(repetition.check_id, r.verificationId, r.deliveryId, r.contentIdentity, repetition.command)) throw new ExecutionError('RESULT_INVALID');
+  }
   if (prior.length > 1000 || result.resolutions.length !== prior.length || result.resolutions.some(x => !prior.some(f => f.id === x.findingKey)) ||
     new Set(result.resolutions.map(x => x.findingKey)).size !== prior.length ||
     (result.verdict === 'rejected' && !result.findings.some(f => f.blocking) && !result.criteria.some(c => c.verdict !== 'passed') && !result.resolutions.some(x => x.verdict === 'unresolved'))) throw new ExecutionError('RESULT_INVALID');
-  for (const f of result.findings) db.prepare(`INSERT INTO findings(id,review_id,attempt_id,finding_key,criterion_ids_json,category,problem,evidence_json,expected_result,blocking) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .run(randomUUID(), r.id, a.id, f.key, JSON.stringify(f.criterionIds), f.category, f.problem, JSON.stringify(f.evidence), f.expectedResult, f.blocking ? 1 : 0);
+  for (const f of result.findings) {
+    if (f.originFindingId) {
+      const origin = prior.find(x => x.id === f.originFindingId);
+      if (!origin || origin.originFindingId !== null || !result.resolutions.some(x => x.findingKey === origin.id && x.verdict === 'unresolved') ||
+        digestCriteria(origin.criterionIds) !== digestCriteria(f.criterionIds) || origin.category !== f.category) throw new ExecutionError('RESULT_INVALID');
+    }
+  }
+  if (new Set(result.findings.flatMap(f => f.originFindingId ? [f.originFindingId] : [])).size !== result.findings.filter(f => f.originFindingId).length) throw new ExecutionError('RESULT_INVALID');
+  for (const f of result.findings) db.prepare(`INSERT INTO findings(id,review_id,attempt_id,finding_key,criterion_ids_json,category,problem,evidence_json,expected_result,blocking,priority,origin_finding_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .run(randomUUID(), r.id, a.id, f.key, JSON.stringify(f.criterionIds), f.category, f.problem, JSON.stringify(f.evidence), f.expectedResult, f.blocking ? 1 : 0, f.priority ?? null, f.originFindingId ?? null);
   for (const x of result.resolutions) db.prepare('INSERT INTO finding_resolutions(finding_id,review_id,attempt_id,verdict,evidence_json) VALUES (?,?,?,?,?)')
     .run(x.findingKey, r.id, a.id, r.independenceState === 'valid' ? x.verdict : 'unresolved', JSON.stringify(x.evidence));
+  recordAssessments(db, r.id, result, [...new Set(prior.map(f => f.originFindingId ?? f.id))]);
+  respondToDisputes(db, r.id, result);
   const v = verificationSummary(db, r.deliveryId);
   const approved = result.verdict === 'approved' && r.independenceState === 'valid' && v?.id === r.verificationId &&
     (v.state === 'passed' || (v.state === 'not_applicable' && v.checkCount === 0));
   db.prepare('UPDATE reviews SET state=?,reason=?,completed_at_ms=? WHERE id=?').run(approved ? 'approved' : 'rejected', result.summary, Date.now(), r.id);
   // Technical approval is historical. Publication still needs its current authority gate.
   db.prepare('UPDATE attempts SET phase=?,diagnostic=? WHERE id=?').run(approved ? 'publishing' : 'reviewing', approved ? null : r.diagnostic ?? (v?.state === 'failed' ? 'CHECKS_FAILED' : 'REVIEW_REJECTED'), a.id);
+  if (!approved && r.independenceState === 'valid') blockCorrection(db, r.deliveryId);
 }
-export interface CorrectionPlan { sourcePassageId: string; passageId: string; findings: Finding[]; review: Review }
+export interface CorrectionPlan { sourcePassageId: string; passageId: string; findings: Finding[]; review: Review; guidance: string | null }
 export function beginCorrection(db: Database.Database, deliveryId: string): CorrectionPlan | null {
   return guarded(() => db.transaction(() => {
     const review = readReview(db, deliveryId); const d = readDelivery(db, deliveryId); const a = readAttempt(db, d.attemptId);
+    const block = readAttemptBlock(db, a.id);
+    const latestGuidance = block ? db.prepare<[string, string], { guidance_json: string }>(`SELECT guidance_json FROM attempt_decisions
+      WHERE attempt_id=? AND block_id=? AND action='guidance' ORDER BY created_at_ms DESC,id DESC LIMIT 1`).get(a.id, block.id) : null;
+    if (block && (!latestGuidance || a.suspension !== null)) return null;
     if (!review || review.state !== 'rejected' || a.result || a.suspension || a.deliveryId !== d.id || a.phase !== 'reviewing') return null;
     // An invalid reviewer workspace is not evidence that implementation needs correction.
     if (review.independenceState !== 'valid') {
@@ -126,10 +151,9 @@ export function beginCorrection(db: Database.Database, deliveryId: string): Corr
       attemptEvent(db, a.id, 'attempt.failed'); return null;
     }
     const capture = readCapture(db, a.id);
-    if (d.round >= 1 + capture.configuration.configuration.correction_limit) {
-      db.prepare("UPDATE attempts SET phase='finished',result='rejected',suspension=NULL,revision=revision+1,updated_at_ms=? WHERE id=?").run(Date.now(), a.id);
-      attemptEvent(db, a.id, 'attempt.rejected'); return null;
-    }
+    if (block) {
+      if (block.reason === 'correction_limit' || d.round - 1 >= capture.configuration.configuration.correction_limit) return null;
+    } else if (blockCorrection(db, deliveryId)) return null;
     const source = db.prepare<[string], { state: string; tracking_state: string }>('SELECT state,tracking_state FROM passages WHERE id=?').get(d.producerPassageId);
     if (source?.state !== 'ready' || source.tracking_state !== 'tracked') throw denied();
     const passageId = randomUUID(); const version = randomUUID(); const now = Date.now();
@@ -142,6 +166,7 @@ export function beginCorrection(db: Database.Database, deliveryId: string): Corr
       .run(passageId, a.id, d.round + 1, version, JSON.stringify(role), `factory-${passageId}`, d.producerPassageId, now, a.id);
     db.prepare("UPDATE attempts SET phase='implementing',diagnostic=NULL,revision=revision+1,updated_at_ms=? WHERE id=?").run(now, a.id);
     attemptEvent(db, a.id, 'correction.planned');
-    return { sourcePassageId: d.producerPassageId, passageId, findings, review };
+    const guidance = latestGuidance ? (JSON.parse(latestGuidance.guidance_json) as { text: string }).text : null;
+    return { sourcePassageId: d.producerPassageId, passageId, findings, review, guidance };
   }).immediate());
 }

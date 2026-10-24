@@ -153,7 +153,7 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
       artifact_policy: savedConfiguration.settings.artifact_policy, guidance: '',
       origins: { base_branch: 'project', implementer_profile: 'project', reviewer_profile: 'project', checks: 'project', correction_limit: 'project', time_defaults: 'global', artifact_policy: 'global', guidance: 'project', delivery_mode: 'preparation' } },
     criteria_preview: { executable: false, objective: '', criteria: [], digest: 'a'.repeat(64), reasons: ['CRITERIA_LIST_INVALID'] },
-    effects_preview: [], issue: null, base_sha: null, summary_hash: 'b'.repeat(64), diagnostics: [], retry_at_ms: null,
+    effects_preview: [], issue: null, base_sha: null, summary_hash: 'b'.repeat(64), diagnostics: [], retry_at_ms: null, publication_target: null,
   };
   request.mockReset(); metadata.mockReset();
   request.mockImplementation(async (path: string) => {

@@ -19,8 +19,27 @@ export const PreparationOverrides = Type.Partial(Type.Object({
   time_defaults: TimeDefaults, artifact_policy: ArtifactPolicy,
 }, closed));
 export type PreparationOverrides = Static<typeof PreparationOverrides>;
+export const PublicationTargetChoice = Type.Union([
+  Type.Object({ kind: Type.Literal('existing_clone'), path: Type.String({ minLength: 1, maxLength: 32768 }) }, closed),
+  Type.Object({ kind: Type.Literal('clone'), destination: Type.String({ minLength: 1, maxLength: 32768 }) }, closed),
+]);
+export type PublicationTargetChoice = Static<typeof PublicationTargetChoice>;
+export const PublicationTargetIntent = Type.Object({
+  format_version: Type.Literal(1), repository_id: GitHubId, selection: PublicationTargetChoice,
+}, closed);
+export type PublicationTargetIntent = Static<typeof PublicationTargetIntent>;
+const CapturedPublicationTargetWithIntent = Type.Object({
+  format_version: Type.Literal(1), publication_target: PublicationTargetIntent,
+  publication_target_hash: hash, authorization_operation_id: OperationId,
+}, closed);
+const CapturedEmptyPublicationTarget = Type.Object({
+  format_version: Type.Literal(1), publication_target: Type.Null(), publication_target_hash: Type.Null(), authorization_operation_id: OperationId,
+}, closed);
+export const CapturedPublicationTarget = Type.Union([CapturedPublicationTargetWithIntent, CapturedEmptyPublicationTarget]);
+export type CapturedPublicationTarget = Static<typeof CapturedPublicationTarget>;
 export const PreparationChoices = Type.Object({
   issue_id: GitHubId, delivery_mode: DeliveryMode, guidance: Type.String({ maxLength: 8192 }), overrides: PreparationOverrides,
+  publication_target: Type.Optional(Type.Union([PublicationTargetIntent, Type.Null()])),
   previous_attempt_id: Type.Optional(OperationId),
 }, closed);
 export type PreparationChoices = Static<typeof PreparationChoices>;
@@ -28,7 +47,8 @@ export const PreparationChanges = Type.Partial(Type.Omit(PreparationChoices, ['p
 export const PreparationUpdate = Type.Object({ changes: PreparationChanges }, closed);
 export type PreparationUpdate = Static<typeof PreparationUpdate>;
 export const PreparationRecord = Type.Object({
-  ...PreparationChoices.properties, id: OperationId, project_id: OperationId, project_revision_id: OperationId, revision,
+  ...PreparationChoices.properties, publication_target: Type.Union([PublicationTargetIntent, Type.Null()]),
+  id: OperationId, project_id: OperationId, project_revision_id: OperationId, revision,
 }, closed);
 export type PreparationRecord = Static<typeof PreparationRecord>;
 export const Criterion = Type.Object({ id: Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), text: text(65536), occurrence_index: revision, explicit: Type.Boolean() }, closed);
@@ -53,7 +73,7 @@ export const EffectiveConfiguration = Type.Object({
 }, closed);
 export type EffectiveConfiguration = Static<typeof EffectiveConfiguration>;
 export const PreparationEffect = Type.Object({
-  kind: Type.Union((['clone', 'execute', 'local_commit', 'push', 'pull_request', 'issue_comment', 'project_status'] as const).map((kind) => Type.Literal(kind))),
+  kind: Type.Union((['clone', 'execute', 'local_commit', 'push', 'pull_request', 'issue_comment', 'project_status', 'publication_target'] as const).map((kind) => Type.Literal(kind))),
   requested: Type.Boolean(), description: text(2048),
 }, closed);
 export const Preparation = Type.Object({

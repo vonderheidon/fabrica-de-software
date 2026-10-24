@@ -1,4 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { DisputeResponse } from './disputes.js';
+import { ProgressAssessment } from './progress.js';
 import { OperationId } from './base.js';
 import { ExecutionProfileValue } from './projects.js';
 
@@ -28,19 +30,31 @@ export const CriterionOutcome = Type.Object({
 }, closed);
 export const ImplementerResult = Type.Object({
   formatVersion: Type.Literal(1), summary: text(8192), writesStopped: Type.Literal(true),
+  additionalChangesJustification: Type.Optional(Type.Union([text(8192), Type.Null()])),
   declaredFiles: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 4096 }), { maxItems: 1000, uniqueItems: true })),
-  findingResponses: Type.Optional(Type.Array(Type.Object({ findingId: OperationId, response: text(4096), evidence: Type.Array(text(4096), { minItems: 1, maxItems: 20 }) }, closed), { maxItems: 1000 })),
+  findingResponses: Type.Optional(Type.Array(Type.Object({ findingId: OperationId,
+    responseType: Type.Optional(Type.Union([Type.Literal('corrected'), Type.Literal('disputed')])),
+    response: text(4096), evidence: Type.Array(text(4096), { minItems: 1, maxItems: 20 }) }, closed), { maxItems: 1000 })),
   criteria: Type.Array(CriterionOutcome, { minItems: 1, maxItems: 1000 }),
   checks: Type.Array(Type.Object({ id: text(128), outcome: text(1024), evidence: text(4096) }, closed), { maxItems: 50 }),
 }, closed);
 export type ImplementerResult = Static<typeof ImplementerResult>;
+export const ReviewCommandRepetition = Type.Object({
+  command: text(4096), check_id: Type.Union([OperationId, Type.Null()]),
+  prior_evidence: Type.Array(text(4096), { maxItems: 20 }), reason: text(8192),
+}, closed);
 export const ReviewerResult = Type.Object({
+  disputeResponses: Type.Optional(Type.Array(DisputeResponse, { maxItems: 1000 })),
   formatVersion: Type.Literal(1), summary: text(8192), verdict: Type.Union([Type.Literal('approved'), Type.Literal('rejected')]),
+  assessments: Type.Optional(Type.Array(ProgressAssessment, { maxItems: 1000 })),
+  commandRepetitions: Type.Optional(Type.Array(ReviewCommandRepetition, { maxItems: 100 })),
   criteria: Type.Array(CriterionOutcome, { minItems: 1, maxItems: 1000 }),
   findings: Type.Array(Type.Object({
     key: text(128), criterionIds: Type.Array(CriterionOutcome.properties.criterionId, { maxItems: 1000, uniqueItems: true }),
     category: text(128), problem: text(4096), evidence: Type.Array(text(4096), { minItems: 1, maxItems: 20 }),
     expectedResult: text(4096), blocking: Type.Boolean(),
+    priority: Type.Optional(Type.Union(['critical', 'high', 'medium', 'low'].map(v => Type.Literal(v)))),
+    originFindingId: Type.Optional(Type.Union([OperationId, Type.Null()])),
   }, closed), { maxItems: 1000 }),
   resolutions: Type.Array(Type.Object({
     findingKey: text(128), verdict: Type.Union([Type.Literal('resolved'), Type.Literal('unresolved')]),

@@ -17,6 +17,7 @@ export const CheckRun = Type.Object({
     state: CheckState, exit_code: nullable(Type.Integer()), started_at_ms: nullable(Type.Integer({ minimum: 0 })),
     ended_at_ms: nullable(Type.Integer({ minimum: 0 })), duration_ms: nullable(Type.Integer({ minimum: 0 })),
     diagnostic: nullable(Type.String({ maxLength: 128 })), execution_diagnostic: nullable(Type.String({ maxLength: 128 })), artifacts: Type.Array(Artifact, { maxItems: 1 }),
+    repeat_reason: Type.Union([Type.String({ minLength: 1, maxLength: 8192 }), Type.Null()]),
 }, closed);
 export type CheckRun = Static<typeof CheckRun>;
 export const VerificationSummary = Type.Object({

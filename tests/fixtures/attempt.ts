@@ -108,14 +108,14 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const observeTools = vi.fn(async () => structuredClone(tools)); const logFailure = vi.fn();
   const dependencies: PipelineDependencies = { storage, preparations, execution, workspaces, observeTools, hostName: 'test-host', logFailure };
   const pipeline = createPipeline(dependencies);
-  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr') {
-    const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '', overrides: {} }, { operationId: randomUUID(), expectedRevision: undefined });
+  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr', targetKind: 'clone' | 'existing_clone' = 'existing_clone', includeIcrTarget = false) {
+    const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '', overrides: {}, ...(deliveryMode === 'icr' && !includeIcrTarget ? {} : { publication_target: { format_version: 1, repository_id: repository.id, selection: targetKind === 'clone' ? { kind: 'clone', destination: join(directory,'target') } : { kind: 'existing_clone', path: join(directory,'target') } } }) }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;
     const body: StartAttempt = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true };
     return { body, context: { operationId: randomUUID(), expectedRevision: saved.etag }, saved };
   }
   return { directory, storage, db, profile, reviewerProfile, projectId, issue, project, observation, github, workspaces, preparations, persistence, roles, execution, tools, pipeline, dependencies, observeTools, logFailure, register, prepare,
-    async close() { try { await pipeline.close(); } finally { storage.close(); db.close(); rmSync(directory, { recursive: true }); } } };
+    async close() { try { await pipeline.close(); } finally { storage.close(); db.close(); rmSync(directory, { recursive: true, force: true }); } } };
 }
 export type AttemptFixture = Awaited<ReturnType<typeof attemptFixture>>;
 

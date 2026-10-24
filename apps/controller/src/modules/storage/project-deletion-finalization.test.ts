@@ -108,7 +108,9 @@ describe('exclusive project deletion closure and transactional finalization', ()
     expect(inventory.blockers).toEqual([]);
     expect(Object.keys(inventory.keys).sort()).toEqual([...deletionTables].sort());
     for (const table of deletionTables) {
-      if (table === 'project_storage_locations' || table === 'project_storage_transitions' || table === 'creation_board_operations' ||
+      // This historical fixture predates progress tracking; migrations must not invent assessments or blocks.
+      if (table === 'delivery_targets' || table === 'publication_target_selections' || table === 'attempt_decisions' || table === 'finding_disputes' || table === 'finding_assessments' || table === 'attempt_blocks' ||
+        table === 'project_storage_locations' || table === 'project_storage_transitions' || table === 'creation_board_operations' ||
         (upgrade && (table === 'attempt_sessions' || table === 'terminal_occupancies'))) expect(inventory.keys[table], table).toEqual([]);
       else expect(inventory.keys[table].length, table).toBeGreaterThan(0);
     }
