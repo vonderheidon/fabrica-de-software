@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { HttpOperationSummary as OperationSummary } from '#contracts';
 import { HttpError, requestJson } from '../../api/http.js';
+import { useAppliedObservation } from '../../app/applied-observations.js';
 
 export type OperationLoad = {
   data: OperationSummary | null;
@@ -18,6 +19,7 @@ export function useOperation(enabled: boolean) {
   const [reloadKey, setReloadKey] = useState(0);
   const [load, setLoad] = useState<OperationLoad>({ data: null, loading: true, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, errorFacts: null, affectedRequirements: [] });
   const refresh = useCallback(() => setReloadKey((value) => value + 1), []);
+  useAppliedObservation(enabled, load.loading || load.refreshing, Boolean(load.error), load);
 
   useEffect(() => {
     if (!enabled) return;

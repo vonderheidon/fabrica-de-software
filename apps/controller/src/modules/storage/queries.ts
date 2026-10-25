@@ -1,17 +1,20 @@
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery, DetailItem, type AttemptPage, type AttemptDetail, type DeliveryDetail, type DetailPage, type DetailSection, type HistoricalEffectiveProfile } from '#contracts';
+import { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery, DetailItem, OperationId, type AttemptPage, type AttemptDetail, type DeliveryDetail, type DetailPage, type DetailSection, type HistoricalEffectiveProfile } from '#contracts';
 import { readAttempt, readCapture } from './attempts.js';
 import { deliveryView, readDelivery } from './deliveries.js';
 import { digest, eventCursor } from './configuration-reads.js';
 import { readSettings } from './settings.js';
 import { readMeasurements } from './measurements.js';
+import { readStageActivity } from './stage-activity.js';
 import { readResources } from './recovery.js';
 import { publicationSummary } from './publication.js';
 import { readArtifact } from './verification.js';
 import { readEffect } from './effects.js';
 import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
+import { readDeliverySummary } from './delivery-summary.js';
+import { InvalidAttemptSearch, normalizeAttemptTitle, prepareAttemptSearch } from './attempt-search.js';
 
 const cursorError = () => new OperationError(400, 'QUERY_CURSOR_INVALID', 'The cursor does not match this scope, section, filter or order.');
 function redactProfileText(value: string): string {
@@ -58,20 +61,88 @@ function issueHeader(db: Database.Database,id: string): AttemptDetail['issue'] {
 export function readAttemptPage(db: Database.Database, query: AttemptListQuery): AttemptPage {
   if (!Value.Check(AttemptListQuery, query)) throw cursorError();
   const s = readSettings(db);
-  const fingerprint = digest([s.installation_id, s.account_id, query.projectId ?? null, query.result ?? null, 'attempts:created-desc:id']);
-  const maximum = db.prepare<[], { ceiling: number }>('SELECT coalesce(max(rowid),0) AS ceiling FROM attempts').get()!.ceiling;
-  const cursor = decodeCursor(query.cursor, fingerprint, maximum); const limit = Number(query.limit ?? '25');
-  // Fixed-width timestamp plus UUID makes ties deterministic. New inserts above ceiling never enter continuation pages.
-  const key = "printf('%020d',a.created_at_ms)||':'||a.id";
-  const rows = db.prepare<{ account: string | null; project: string | null; result: string | null; ceiling: number; after: string; limit: number },
-    AttemptPage['items'][number] & { pageKey: string }>(`SELECT a.id,a.project_id AS projectId,a.issue_id AS issueId,
-    json_extract(a.capture_json,'$.issue.number') AS issueNumber,json_extract(a.capture_json,'$.issue.title') AS issueTitle,a.phase,a.result,a.suspension,a.revision,a.created_at_ms AS createdAtMs,a.updated_at_ms AS updatedAtMs,${key} AS pageKey
-    FROM attempts a WHERE a.account_id IS @account AND (@project IS NULL OR a.project_id=@project)
-    AND (@result IS NULL OR (@result='active' AND a.result IS NULL) OR a.result=@result) AND a.rowid<=@ceiling
-    AND (@after='' OR ${key}<@after) ORDER BY a.created_at_ms DESC,a.id DESC LIMIT @limit`)
-    .all({ account: s.account_id, project: query.projectId ?? null, result: query.result ?? null, ...cursor, limit: limit + 1 });
-  const selected = rows.slice(0, limit); const last = selected.at(-1); const hasMore = rows.length > limit;
-  return { items: selected.map(({ pageKey: _key, ...row }) => row), has_more: hasMore, next_cursor: hasMore && last ? encodeCursor(fingerprint, cursor.ceiling, last.pageKey) : null, event_cursor: eventCursor(db) };
+  let search: ReturnType<typeof prepareAttemptSearch>;
+  try { search = prepareAttemptSearch(query); }
+  catch (error) {
+    if (error instanceof InvalidAttemptSearch) throw new OperationError(400, 'ATTEMPT_SEARCH_INVALID', error.message);
+    throw error;
+  }
+  const limit = Number(query.limit ?? '25');
+  const fingerprint = digest({
+    version: 'attempt-search-v1', installation: s.installation_id, account: s.account_id,
+    project: query.projectId ?? null, result: query.result ?? null, issueNumber: search.issueNumber,
+    title: search.titleNeedle, dateFrom: query.dateFrom ?? null, dateTo: query.dateTo ?? null,
+    timeZone: search.timeZone, fromMs: search.fromMs, untilMs: search.untilMs, limit,
+    order: 'created_at_ms-desc-id-desc', ceiling: 'account-rowid',
+  });
+  const maximum = db.prepare<[string | null], { ceiling: number }>(
+    'SELECT coalesce(max(rowid),0) AS ceiling FROM attempts WHERE account_id IS ?',
+  ).get(s.account_id)!.ceiling;
+  const cursor = decodeCursor(query.cursor, fingerprint, maximum);
+  if (cursor.ceiling > maximum) throw cursorError();
+  const initialPosition = attemptPagePosition(cursor.after);
+  const clauses = ['a.account_id IS @account', 'a.rowid<=@ceiling'];
+  const bindings: AttemptPageBindings = { account: s.account_id, ceiling: cursor.ceiling, batch: search.titleNeedle === null ? limit + 1 : 100 };
+  if (query.projectId !== undefined) { clauses.push('a.project_id=@project'); bindings.project = query.projectId; }
+  if (query.result === 'active') clauses.push('a.result IS NULL');
+  else if (query.result !== undefined) { clauses.push('a.result=@result'); bindings.result = query.result; }
+  if (search.issueNumber !== null) { clauses.push('a.issue_number=@issueNumber'); bindings.issueNumber = search.issueNumber; }
+  if (search.fromMs !== null) { clauses.push('a.created_at_ms>=@fromMs'); bindings.fromMs = search.fromMs; }
+  if (search.untilMs !== null) { clauses.push('a.created_at_ms<@untilMs'); bindings.untilMs = search.untilMs; }
+
+  const pageKey = "printf('%020d',a.created_at_ms)||':'||a.id";
+  const buildStatement = (after: boolean) => db.prepare<AttemptPageBindings, AttemptPageRow>(`SELECT a.id,a.project_id AS projectId,a.issue_id AS issueId,
+    a.issue_number AS issueNumber,a.issue_title AS issueTitle,a.phase,a.result,a.suspension,a.revision,
+    a.created_at_ms AS createdAtMs,a.updated_at_ms AS updatedAtMs,${pageKey} AS pageKey
+    FROM attempts a WHERE ${[...clauses, ...(after ? ['(a.created_at_ms<@afterAt OR (a.created_at_ms=@afterAt AND a.id<@afterId))'] : [])].join(' AND ')}
+    ORDER BY a.created_at_ms DESC,a.id DESC LIMIT @batch`);
+  const firstPageStatement = buildStatement(false);
+  const continuationStatement = buildStatement(true);
+  const selected: AttemptPageRow[] = [];
+  let scanPosition = initialPosition;
+  let resumeAfter = '';
+  let hasMore = false;
+  let exhausted = false;
+  while (!exhausted && !hasMore) {
+    const statement = scanPosition === null ? firstPageStatement : continuationStatement;
+    const rows = statement.all({ ...bindings, ...(scanPosition === null ? {} : { afterAt: scanPosition.createdAtMs, afterId: scanPosition.id }) });
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      const positionBeforeRow = scanPosition?.key ?? '';
+      scanPosition = { createdAtMs: row.createdAtMs, id: row.id, key: row.pageKey };
+      const matchesTitle = search.titleNeedle === null || row.issueTitle != null && normalizeAttemptTitle(row.issueTitle).includes(search.titleNeedle);
+      if (!matchesTitle) continue;
+      selected.push(row);
+      if (selected.length > limit) {
+        selected.pop();
+        resumeAfter = positionBeforeRow;
+        hasMore = true;
+        break;
+      }
+    }
+    if (!hasMore && rows.length < bindings.batch) exhausted = true;
+  }
+  return {
+    items: selected.map(({ pageKey: _key, ...row }) => row), has_more: hasMore,
+    next_cursor: hasMore ? encodeCursor(fingerprint, cursor.ceiling, resumeAfter) : null,
+    event_cursor: eventCursor(db),
+  };
+}
+
+interface AttemptPagePosition { createdAtMs: number; id: string; key: string }
+type AttemptPageRow = AttemptPage['items'][number] & { pageKey: string };
+interface AttemptPageBindings {
+  account: string | null; ceiling: number; batch: number; project?: string; result?: string; issueNumber?: number;
+  fromMs?: number; untilMs?: number; afterAt?: number; afterId?: string;
+}
+
+function attemptPagePosition(key: string): AttemptPagePosition | null {
+  if (!key) return null;
+  const match = /^(\d{20}):([0-9a-f-]{36})$/i.exec(key);
+  const createdAtMs = match ? Number(match[1]) : NaN;
+  const id = match?.[2];
+  if (!Number.isSafeInteger(createdAtMs) || createdAtMs < 0 || !id || !Value.Check(OperationId, id)) throw cursorError();
+  return { createdAtMs, id, key };
 }
 import { targetSelection } from './target-selections.js';
 import { readAttemptBlock } from './progress.js';
@@ -196,8 +267,9 @@ export function readAttemptDetail(db: Database.Database, id: string, query: Atte
      : details?.section === 'finding_disputes' ? { section: 'finding_disputes' as const, items: details.items.filter((item): item is import('#contracts').FindingDispute => 'responseReviewId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
      : details?.section === 'decisions' ? { section: 'decisions' as const, items: details.items.filter((item): item is AttemptDecisionView => 'operationId' in item && 'blockId' in item), next_cursor: details.next_cursor, has_more: details.has_more } : null;
   return { ...a, v3Details, block: readAttemptBlock(db,id), expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound,
+    deliverySummary: exists ? readDeliverySummary(db,id,selectedDeliveryId!,publication) : null,
     publicationTarget: targetCapture?.publication_target ?? null, publicationTargetHash: targetCapture?.publication_target_hash ?? null,
-    publication, measurements: readMeasurements(db,id), cleanup: readResources(db,id).cleanup,
+    stageActivity: readStageActivity(db,id), publication, measurements: readMeasurements(db,id), cleanup: readResources(db,id).cleanup,
     authority: authority ? { ...authority,recovery: authority.reason === 'ASSIGNEE_CHANGED' ? 'Encerre a tentativa anterior antes de transferir responsabilidade e rearmar Ready no GitHub.' : authority.reason ? 'Corrija conta, vínculo ou Status no GitHub e use Revalidar. A fábrica não altera o quadro para resolver divergências.' : 'Autoridade observada; cada despacho ou efeito ainda exige revalidação atual.' } : null,
     capabilities: { cancel: { available: a.result === null }, completePublication: publication.completeCapability, reconcilePublication: publication.reconcileCapability, revalidate: { available: a.result === null || publication.reviewState === 'approved' } },
     details: v3Details ? null : details };
@@ -209,6 +281,7 @@ export function readDeliveryDetail(db: Database.Database, id: string, query: Del
   const review = page?.items[0];
   const capturedMode = db.prepare<[string],{ mode: DeliveryDetail['authorizations']['capturedMode'] }>("SELECT json_extract(capture_json,'$.configuration.configuration.defaultDeliveryMode') AS mode FROM attempts WHERE id=?").get(view.delivery.attemptId)!.mode;
   return { ...view,issue: issueHeader(db,view.delivery.attemptId), attempt: readAttempt(db,view.delivery.attemptId),measurements: readMeasurements(db,view.delivery.attemptId),cleanup: readResources(db,view.delivery.attemptId).cleanup,
+    deliverySummary: readDeliverySummary(db,view.delivery.attemptId,id,publication),
     authorizations: { capturedMode,authorizedMode: publication.mode,requiresCurrentGate: true },
     review: review && 'independenceState' in review ? review : null, publication,
     capabilities: { diff: { available: view.delivery.captureState === 'captured' }, completePublication: publication.completeCapability, reconcilePublication: publication.reconcileCapability },

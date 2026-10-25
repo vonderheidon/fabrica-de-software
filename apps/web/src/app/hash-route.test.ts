@@ -1,6 +1,16 @@
 import { expect, it } from 'vitest';
 import { buildHash, parseHash } from './hash-route.js';
 
+it('keeps history filters and pagination when opening and closing details', () => {
+  const params = new URLSearchParams({ issueNumber: '42', issueTitle: '123', dateFrom: '2026-10-01', dateTo: '2026-10-24', timeZone: 'America/Sao_Paulo', filter: 'failed', attemptCursors: '["second-page"]' });
+  const original = buildHash('tentativas', params);
+  params.set('attemptId', 'attempt'); params.set('dialog', 'detail');
+  const route = parseHash(buildHash('tentativas', params));
+  expect(route.error).toBeNull(); expect(route.params.get('attemptCursors')).toBe('["second-page"]');
+  route.params.delete('dialog'); route.params.delete('attemptId');
+  expect(buildHash(route.tab, route.params)).toBe(original);
+});
+
 it('preserves the clicked GitHub issue in a reloadable preparation route', () => {
   const route = parseHash('#principal/dashboard?dialog=preparation&projectId=project-1&issueId=I_issue_2');
   expect(route.error).toBeNull();
@@ -30,4 +40,13 @@ it('recognizes the global profiles workspace route', () => {
   expect(route.error).toBeNull();
   expect(route.tab).toBe('perfis');
   expect(buildHash(route.tab)).toBe('#principal/perfis');
+});
+
+it('round-trips all historical attempt search filters in the URL', () => {
+  const params = new URLSearchParams({ issueNumber: '17', issueTitle: 'Café Straße 50%_',
+    dateFrom: '2026-10-01', dateTo: '2026-10-24', timeZone: 'America/Sao_Paulo' });
+  const hash = buildHash('tentativas', params);
+  const route = parseHash(hash);
+  expect(route.error).toBeNull();
+  expect(Object.fromEntries(route.params)).toEqual(Object.fromEntries(params));
 });

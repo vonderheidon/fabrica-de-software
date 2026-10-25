@@ -7,13 +7,15 @@ import { CustomSelect } from '../../app/CustomSelect.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptSelection } from './execution-requests.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HttpArtifact as Artifact, HttpAttemptDetail as AttemptDetail, HttpAttemptResource as AttemptResource, HttpDeliveryDiff as DeliveryDiff, HttpDetailItem as DetailItem, HttpDetailPage as DetailPage, HttpDetailSection as DetailSection, HttpEffectView as EffectView, HttpQuestion as Question } from '#contracts';
+import type { HttpArtifact as Artifact, HttpAttemptDetail as AttemptDetail, HttpAttemptResource as AttemptResource, HttpDeliveryDiff as DeliveryDiff, HttpDetailItem as DetailItem, HttpDetailPage as DetailPage, HttpDetailSection as DetailSection, HttpQuestion as Question } from '#contracts';
 import { HttpError, requestJsonWithMetadata, requestText } from '../../api/http.js';
 import { QuestionDecisionCard } from './QuestionDecisionCard.js';
 import { useAttempt } from './useAttempt.js';
+import { AttemptStageSummary } from './AttemptStageSummary.js';
 import { useAttemptActions } from './useAttemptActions.js';
 import { useDelivery } from './useDelivery.js';
 import { PublicationDialog } from './PublicationDialog.js';
+import { PublicationTargetFacts } from './PublicationTargetFacts.js';
 import { formatMinuteValue } from '../projects/time-minutes.js';
 import { OperatorState, UnknownState } from '../../app/OperatorSupport.js';
 import { operatorCodeLabel, operatorErrorMessage, operatorFactLabel, operatorState, operatorVisibleFactValue } from '../../app/operator-language.js';
@@ -82,7 +84,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     const value = query.toString();
     return value ? `?${value}` : '';
   }, [selectedRound, selectedDeliveryId]);
-  const { attempt, selectionCurrent, etag: attemptEtag, error: attemptError } = useAttempt(attemptId, selectedQuery, reload);
+  const { attempt, selectionCurrent, etag: attemptEtag, error: attemptError, refreshing: attemptRefreshing } = useAttempt(attemptId, selectedQuery, reload);
   const attemptMatchesRound = !selectedRound || String(attempt?.selected_round) === selectedRound;
   const effectiveDeliveryId = selectedDeliveryId ?? (selectionCurrent && attemptMatchesRound ? attempt?.selected_delivery_id : null) ?? null;
   const { delivery, status: deliveryState, error: deliveryError } = useDelivery(effectiveDeliveryId, reload + (attempt?.revision ?? 0));
@@ -215,13 +217,14 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attemptError && <div className="queue-error" role="alert"><h3>Falha ao consultar esta tentativa</h3><p>{attemptError}</p><p><strong>Próxima ação:</strong> consulte novamente antes de agir sobre os dados anteriores.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar novamente</button></div>}
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
+      <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError) || attemptRefreshing} />
       <div className="attempt-detail-heading"><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
       {delivery && <PublicationDialog key={delivery.delivery.id}
         projectId={attempt.project_id}
         attemptId={attemptId}
         attemptEtag={attemptEtag}
         delivery={delivery}
-        effects={(sectionStateFor(sectionStates, 'effects').page?.items ?? []).filter(isEffectView)}
+        current={selectionCurrent && !attemptError && deliveryState === 'ready'}
         onRefresh={refreshDetail}
       />}
 
@@ -254,7 +257,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Consultar ambiente novamente</button></div>}
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
       <HistoricalProfile key={attemptId} attemptId={attemptId} />
-      <CapturedPublicationTargetSummary target={attempt.publication_target} hash={attempt.publication_target_hash} />
+      <PublicationTargetFacts key={`${attemptId}:${effectiveDeliveryId}`} attemptId={attemptId} deliveryId={effectiveDeliveryId} target={attempt.publication_target} publication={delivery?.publication} />
       {attempt.block && <AttemptBlockDecision key={`${attempt.expected_account_id}:${attemptId}:${attempt.block.id}`} attempt={attempt} etag={attemptEtag} current={selectionCurrent && !attemptError} onRefresh={refreshDetail} />}
       <CorrectionHistory key={sectionIdentity} attemptId={attemptId} round={selectedRound} deliveryId={effectiveDeliveryId} />
       <details className="attempt-axis-card card attempt-disclosure"><summary>Ver alterações da entrega</summary>
@@ -388,17 +391,6 @@ function renderRecord(section: DetailSection, item: DetailItem, index: number, e
   </article>;
 }
 
-function CapturedPublicationTargetSummary({ target, hash }: { target: AttemptDetail['publication_target']; hash: string | null }) {
-  return <details className="attempt-axis-card card attempt-disclosure">
-    <summary>Destino da versão aprovada</summary>
-    {!target ? <p>Esta tentativa não capturou intenção de destino local.</p> : <>
-      <p>{target.selection.kind === 'existing_clone' ? 'Clone existente selecionado' : 'Clonagem futura solicitada'}.</p>
-      <p className="mono">{target.selection.kind === 'existing_clone' ? target.selection.path : target.selection.destination}</p>
-      <p>{hash ? 'A intenção está vinculada ao início autorizado.' : 'A identidade da intenção não está disponível nesta captura.'}</p>
-      <p className="muted">A intenção não comprova que o clone existe, corresponde ao repositório ou foi criado.</p>
-    </>}
-  </details>;
-}
 
 function cleanupLabel(state: AttemptDetail["cleanup"]): string {
   return state === 'complete' ? 'Concluída' : state === 'uncertain' ? 'Incerta' : 'Pendente';
@@ -410,10 +402,4 @@ function operationStateLabel(state: string | undefined): string {
 
 function diffStatusLabel(status: string): string {
   return ({ added: 'Adicionado', modified: 'Alterado', deleted: 'Removido', renamed: 'Renomeado', copied: 'Copiado', typechange: 'Tipo alterado' } as Record<string, string>)[status] ?? 'Alteração registrada';
-}
-
-function isEffectView(item: DetailItem): item is EffectView {
-  const record = asRecord(item);
-  return typeof record.operation_id === 'string' && typeof record.kind === 'string' &&
-    ['issue_comment', 'project_status', 'local_commit', 'push', 'pull_request'].includes(record.kind);
 }

@@ -120,6 +120,8 @@ it('measures final HTTP projections at 0/16/64 MiB and retains approved identity
             // Read-time diagnostics have an observation timestamp. Preserve every other field.
             dto.impediments = dto.impediments.map(d => ({ ...d, observed_at_ms: 0 })); body = JSON.stringify(dto);
           }
+          // Query-time stage observations change even when persisted facts stay identical.
+          body = JSON.stringify(JSON.parse(body) as unknown, (key, value: unknown) => key === 'observed_at_ms' ? 0 : value);
           if (!baseline.has(name)) baseline.set(name, body);
           expect(body, name).toBe(baseline.get(name)); assertNoContent(Buffer.from(body), markers);
           if (sample >= 0) { elapsed.push(duration); payloadBytes.push(Buffer.byteLength(response.body)); }

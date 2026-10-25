@@ -131,7 +131,7 @@ it('reconnects through EventSource, preserves fragmented UTF-8 and issues only r
   const source = harness.sources[0]!.source;
   source.open();
   source.fail(0);
-  expect(harness.states.at(-1)).toBe('reconnecting');
+  expect(harness.states.at(-1)).toBe('unavailable');
   expect(harness.timers.size).toBe(0);
   expect(harness.requests).toHaveLength(2);
 
@@ -146,7 +146,7 @@ it('reconnects through EventSource, preserves fragmented UTF-8 and issues only r
   source.emit('controller-event', { data: decodeFragmentedUtf8(frame), lastEventId: '5' });
   source.emit('controller-event', { data: frame, lastEventId: '5' });
   expect(harness.signals.filter(signal => signal.name === 'factory-controller-event')).toHaveLength(1);
-  expect(harness.signals[0]?.detail).toMatchObject({ seq: '5', entity: { id: 'tentativa-ç-🤝' }, event_type: 'diagnóstico.concluído' });
+  expect(harness.signals.find(signal => signal.name === 'factory-controller-event')?.detail).toMatchObject({ seq: '5', entity: { id: 'tentativa-ç-🤝' }, event_type: 'diagnóstico.concluído' });
   expect(harness.requests.every(request => request.method === 'GET')).toBe(true);
   stop();
 });
@@ -159,7 +159,7 @@ it('recovers through reconnect and resync without repeating save, start, answer 
   const stop = observeControllerEvents(harness.dependencies);
   await settle();
   harness.sources[0]!.source.fail(0);
-  expect(harness.states.at(-1)).toBe('reconnecting');
+  expect(harness.states.at(-1)).toBe('unavailable');
   const callsBeforeResync = { ...harness.mutationCalls };
   harness.sources[0]!.source.emit('resync');
 
@@ -208,4 +208,13 @@ it('discards a cursor response that arrives after the component stops', async ()
   await settle();
   expect(harness.sources).toHaveLength(0);
   expect(harness.states).toEqual([]);
+});
+
+it('does not accept an HTTP response with an invalid cursor as healthy observation', async () => {
+  const harness = createHarness(['invalid']);
+  const stop = observeControllerEvents(harness.dependencies);
+  await settle();
+  expect(harness.sources).toHaveLength(0);
+  expect(harness.states.at(-1)).toBe('unavailable');
+  stop();
 });

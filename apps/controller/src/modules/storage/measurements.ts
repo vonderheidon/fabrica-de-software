@@ -3,6 +3,7 @@ import type { AttemptMeasurements, PassageMeasurements } from '#contracts';
 import { readTimeDefaults } from './common-json.js';
 import { readCapturedConfiguration } from './historical-configuration.js';
 import { attemptEvent, readAttempt } from './attempts.js';
+import { readStageActivity } from './stage-activity.js';
 
 /** Wall clock elapsed while the passage is tracked; human wait never consumes active time. */
 export function checkpoint(db: Database.Database, passageId: string, mode?: 'active' | 'human' | 'stopped', now = Date.now()): void {
@@ -37,6 +38,7 @@ export function readMeasurements(db: Database.Database, id: string): AttemptMeas
       activeLimitState: p.expired_at_ms !== null ? 'expired' : p.observed === null ? 'not_applicable' : unavailable ? 'unavailable' : 'within_limit', activeExpiredAtMs: p.expired_at_ms };
   });
   return {
+    stageActivity: readStageActivity(db, id, now),
     activeTime: !passageStarted ? { state: 'not_applicable', reason: 'PASSAGE_NOT_STARTED' } : missing ? { state: 'unavailable', reason: 'PASSAGE_TIMING_INCOMPLETE', affected_requirements: ['RF-61'] } : { state: 'measured', value: totals.active, unit: 'ms' },
     humanWait: missing ? { state: 'unavailable', reason: 'PASSAGE_TIMING_INCOMPLETE', affected_requirements: ['RF-61'] } : { state: 'measured', value: totals.human, unit: 'ms' },
     cost: passageStarted ? { state: 'unavailable', reason: 'EXECUTOR_COST_NOT_OBSERVED', affected_requirements: ['RF-61'] } : { state: 'not_applicable', reason: 'PROVIDER_NOT_STARTED' },

@@ -13,7 +13,8 @@ import { QueuePanel } from '../features/queue/QueuePanel.js';
 import { useQueue } from '../features/queue/useQueue.js';
 import type { OperationView, HttpQueueSaved as QueueSaved } from '#contracts';
 import { readUncertainOperations, recordUncertainOperation, resolveUncertainOperation } from '../api/uncertain-operations.js';
-import { AttemptListPanel } from '../features/attempts/AttemptListPanel.js';
+import { AttemptListPanel, type AttemptSearchFilters } from '../features/attempts/AttemptListPanel.js';
+import { useAppliedObservation } from './applied-observations.js';
 import { DashboardPanel } from '../features/operations/DashboardPanel.js';
 import { RecordsPanel } from '../features/records/RecordsPanel.js';
 import { ProfilesPanel } from '../features/projects/ProfilesPanel.js';
@@ -49,12 +50,19 @@ function isEmptyResult(tab: PrincipalTab, value: ReadData): boolean {
 }
 
 function usePanelData(route: HashRoute, search: string, reloadKey: number): LoadState<ReadData> {
+  const [resync, setResync] = useState(0);
+  useEffect(() => {
+    const refresh = () => setResync(value => value + 1);
+    window.addEventListener('factory-controller-resync', refresh);
+    return () => window.removeEventListener('factory-controller-resync', refresh);
+  }, []);
   const { tab } = route;
   const identity = routeIdentity(route);
   const requestKey = `${identity}\u0000${search}\u0000${reloadKey}`;
   const [stored, setStored] = useState<{ key: string; state: LoadState<ReadData> }>({ key: '', state: { status: 'loading' } });
   const lastValue = useRef<ReadData | undefined>(undefined);
   const previousValue = 'value' in stored.state ? stored.state.value : stored.state.previous;
+  useAppliedObservation(endpointFor(tab, search) !== null, stored.key !== requestKey || stored.state.status === 'loading', stored.state.status === 'read-error', stored);
   useEffect(() => {
     const previousValue = lastValue.current;
     let current = true;
@@ -74,7 +82,7 @@ function usePanelData(route: HashRoute, search: string, reloadKey: number): Load
       if (current && !(error instanceof DOMException && error.name === 'AbortError')) setStored({ key: requestKey, state: { status: 'read-error', ...messageFor(error), ...(previousValue !== undefined ? { previous: previousValue } : {}) } });
     });
     return () => { current = false; controller.abort(); };
-  }, [tab, search, reloadKey, requestKey, identity]);
+  }, [tab, search, reloadKey, requestKey, identity, resync]);
   return stored.key === requestKey ? stored.state : { status: 'loading', ...(previousValue !== undefined ? { previous: previousValue } : {}) };
 }
 
@@ -272,14 +280,31 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
             onActionError(error);
           }).finally(() => setPausing(false));
       }} onAuthority={(attemptId, trigger) => onOpenDialog('authority', trigger, { attemptId })} />}
-    {route.tab === 'tentativas' && <AttemptListPanel key={`${selectedProjectId}:${route.params.get('filter') ?? ''}`} projectId={selectedProjectId} result={route.params.get('filter') ?? ''} onFilterChange={(projectId, result) => {
+    {route.tab === 'tentativas' && <AttemptListPanel key={`${selectedProjectId}:${route.params.get('filter') ?? ''}:${route.params.get('issueNumber') ?? ''}:${route.params.get('issueTitle') ?? ''}:${route.params.get('dateFrom') ?? ''}:${route.params.get('dateTo') ?? ''}:${route.params.get('timeZone') ?? ''}`} projectId={selectedProjectId} result={route.params.get('filter') ?? ''}
+        cursors={route.params.get('attemptCursors') ?? ''} onPageChange={(cursors) => {
+          const params = new URLSearchParams(route.params);
+          if (cursors) params.set('attemptCursors', cursors); else params.delete('attemptCursors');
+          window.location.hash = buildHash('tentativas', params);
+        }} issueNumber={route.params.get('issueNumber') ?? ''} issueTitle={route.params.get('issueTitle') ?? ''}
+      dateFrom={route.params.get('dateFrom') ?? ''} dateTo={route.params.get('dateTo') ?? ''}
+      timeZone={route.params.get('timeZone') ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? 'UTC'} onFilterChange={(projectId, result) => {
       const params = new URLSearchParams(route.params);
       if (projectId) params.set('projectId', projectId); else params.delete('projectId');
       if (result) params.set('filter', result); else params.delete('filter');
+        params.delete('attemptCursors');
       params.delete('attemptId'); params.delete('deliveryId'); params.delete('roundId'); params.delete('dialog');
       window.location.hash = buildHash('tentativas', params);
-    }} onPrepareRetry={(attemptId, projectId) => onOpenDialog('preparation', document.activeElement as HTMLElement, { projectId, previousAttemptId: attemptId })} onDetail={(attemptId, projectId) => {
-      onOpenDialog('detail', document.activeElement as HTMLElement, { attemptId, projectId });
+    }} onSearchChange={(filters: AttemptSearchFilters) => {
+      const params = new URLSearchParams(route.params);
+      const entries: Array<[string, string]> = [
+        ['issueNumber', filters.issueNumber], ['issueTitle', filters.issueTitle], ['dateFrom', filters.dateFrom], ['dateTo', filters.dateTo], ['timeZone', filters.timeZone],
+      ];
+      for (const [key, value] of entries) { if (value) params.set(key, value); else params.delete(key); }
+        params.delete('attemptCursors');
+      params.delete('attemptId'); params.delete('deliveryId'); params.delete('roundId'); params.delete('dialog');
+      window.location.hash = buildHash('tentativas', params);
+      }} onPrepareRetry={(attemptId, projectId) => onOpenDialog('preparation', document.activeElement as HTMLElement, { projectId, previousAttemptId: attemptId })} onDetail={(attemptId) => {
+        onOpenDialog('detail', document.activeElement as HTMLElement, { attemptId, ...(selectedProjectId ? { projectId: selectedProjectId } : {}) });
     }} />}
   </>;
 }

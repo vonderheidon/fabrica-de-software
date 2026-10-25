@@ -1,4 +1,4 @@
-.event-connection-status {
+.pill.event-connection-status {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -7,6 +7,7 @@
   background: #f3f7f4;
   color: #234b35;
 }
+.pill.event-connection-status-connected { border-color: #a8c5b1; background: #f3f7f4; color: #234b35; }
 
 .event-connection-indicator {
   width: 7px;
@@ -18,20 +19,21 @@
 
 .pill.event-connection-status::before { content: none; }
 
-.event-connection-status-connecting {
+.pill.event-connection-status-connecting {
   border-color: #cbd5d0;
   background: #f3f7f4;
   color: #475569;
 }
 
-.event-connection-status-reconnecting {
+.pill.event-connection-status-reconnecting {
   border-color: #e8c99e;
   background: #fff6e8;
   color: #754400;
 }
 
-.event-connection-status-unavailable {
+.pill.event-connection-status-unavailable {
   border-color: #e7b8b8;
   background: #fff0f0;
   color: #8d2525;
 }
+.event-connection-status-unavailable .event-connection-indicator { background: #b42318; }

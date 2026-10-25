@@ -82,6 +82,7 @@ export function observeControllerEvents(dependencies: ControllerEventObserverDep
     try {
       const page = await dependencies.readCursor();
       if (!active || revision !== requestRevision) return;
+      if (!/^(0|[1-9][0-9]{0,19})$/.test(page.event_cursor)) throw new Error('Invalid event cursor');
       lastSeq = page.event_cursor;
       const previousSource = source;
       source = null;
@@ -91,12 +92,15 @@ export function observeControllerEvents(dependencies: ControllerEventObserverDep
       source = currentSource;
       dependencies.setState('connecting');
       currentSource.setOnOpen(() => {
-        if (active && source === currentSource) dependencies.setState('connected');
+        if (active && source === currentSource) {
+          dependencies.dispatch('factory-controller-resync');
+          dependencies.setState('connected');
+        }
       });
       currentSource.setOnError(() => {
         if (!active || source !== currentSource) return;
         if (currentSource.readyState !== dependencies.closedReadyState) {
-          dependencies.setState('reconnecting');
+          dependencies.setState('unavailable');
           return;
         }
         source = null;

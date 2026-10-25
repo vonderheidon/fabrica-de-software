@@ -1,7 +1,7 @@
 import type { Static } from '@sinclair/typebox';
 import { AttemptDecisionView, HttpAttemptDecisionView, MakeAttemptDecision, HttpMakeAttemptDecision } from '#contracts';
 import { Value } from '@sinclair/typebox/value';
-import { PassageBinding, HttpPassageBinding, ExecutionQuestion, HttpExecutionQuestion, CriterionOutcome, HttpCriterionOutcome, ImplementerResult, HttpImplementerResult, ReviewerResult, HttpReviewerResult, StartAttempt, HttpStartAttempt, AttemptStatus, HttpAttemptStatus, ScopeChange, HttpScopeChange, Question, HttpQuestion, AnswerQuestion, HttpAnswerQuestion, PassageMeasurements, HttpPassageMeasurements, AttemptMeasurements, HttpAttemptMeasurements, AttemptResource, HttpAttemptResource, AttemptResources, HttpAttemptResources, RemovalPlan, HttpRemovalPlan, RemoveResource, HttpRemoveResource, FolderSurface, HttpFolderSurface, PassageInteraction, HttpPassageInteraction, CaptureWarning, HttpCaptureWarning, Delivery, HttpDelivery, DeliveryView, HttpDeliveryView, CaptureRetry, HttpCaptureRetry, DiffEntry, HttpDiffEntry, DeliveryDiff, HttpDeliveryDiff, Artifact, HttpArtifact, CheckRun, HttpCheckRun, VerificationSummary, HttpVerificationSummary, CheckHistory, HttpCheckHistory, Finding, HttpFinding, Review, HttpReview, RoundHistory, HttpRoundHistory, ProducerResult, HttpProducerResult, EffectIdentity, HttpEffectIdentity, EffectReceipt, HttpEffectReceipt, EffectView, HttpEffectView, CompletePublication, HttpCompletePublication, ReconcilePublication, HttpReconcilePublication, AuthorizeUpgrade, HttpAuthorizeUpgrade, ModeUpgradeSummary, HttpModeUpgradeSummary, PublicationSummary, HttpPublicationSummary, AttemptListQuery, HttpAttemptListQuery, AttemptSummary, HttpAttemptSummary, AttemptPage, HttpAttemptPage, AttemptDetailQuery, HttpAttemptDetailQuery, PassageSummary, HttpPassageSummary, ReviewSummary, HttpReviewSummary, QuestionSummary, HttpQuestionSummary, FindingDetail, HttpFindingDetail, DetailItem, HttpDetailItem, DetailPage, HttpDetailPage, HttpHistoricalEffectiveProfile, AttemptDetail, HttpAttemptDetail, DeliveryDetail, HttpDeliveryDetail, HttpDeliveryDetailQuery, DeliveryDetailQuery } from '#contracts';
+import { PassageBinding, HttpPassageBinding, ExecutionQuestion, HttpExecutionQuestion, CriterionOutcome, HttpCriterionOutcome, ImplementerResult, HttpImplementerResult, ReviewerResult, HttpReviewerResult, StartAttempt, HttpStartAttempt, AttemptStatus, HttpAttemptStatus, ScopeChange, HttpScopeChange, Question, HttpQuestion, AnswerQuestion, HttpAnswerQuestion, PassageMeasurements, HttpPassageMeasurements, AttemptMeasurements, HttpAttemptMeasurements, AttemptResource, HttpAttemptResource, AttemptResources, HttpAttemptResources, RemovalPlan, HttpRemovalPlan, RemoveResource, HttpRemoveResource, FolderSurface, HttpFolderSurface, PassageInteraction, HttpPassageInteraction, CaptureWarning, HttpCaptureWarning, Delivery, HttpDelivery, DeliveryView, HttpDeliveryView, CaptureRetry, HttpCaptureRetry, DiffEntry, HttpDiffEntry, DeliveryDiff, HttpDeliveryDiff, Artifact, HttpArtifact, CheckRun, HttpCheckRun, VerificationSummary, HttpVerificationSummary, CheckHistory, HttpCheckHistory, Finding, HttpFinding, Review, HttpReview, RoundHistory, HttpRoundHistory, ProducerResult, HttpProducerResult, EffectIdentity, HttpEffectIdentity, EffectReceipt, HttpEffectReceipt, EffectView, HttpEffectView, CompletePublication, HttpCompletePublication, ReconcilePublication, HttpReconcilePublication, AuthorizeUpgrade, HttpAuthorizeUpgrade, ModeUpgradeSummary, HttpModeUpgradeSummary, PublicationSummary, HttpPublicationSummary, AttemptListQuery, HttpAttemptListQuery, AttemptSummary, HttpAttemptSummary, AttemptPage, HttpAttemptPage, AttemptDetailQuery, HttpAttemptDetailQuery, PassageSummary, HttpPassageSummary, ReviewSummary, HttpReviewSummary, QuestionSummary, HttpQuestionSummary, FindingDetail, HttpFindingDetail, DetailItem, HttpDetailItem, DetailPage, HttpDetailPage, HttpHistoricalEffectiveProfile, AttemptDetail, HttpAttemptDetail, DeliveryDetail, HttpDeliveryDetail, HttpDeliveryDetailQuery, DeliveryDetailQuery, AttemptComparisonQuery, HttpAttemptComparisonQuery, AttemptComparison, HttpAttemptComparison } from '#contracts';
 
 // Field-by-field HTTP projection. Never rename private documents, facts or operator content.
 function invalidView(): never { throw new Error('Invalid execution view.'); }
@@ -51,7 +51,7 @@ export function toHttpPassageMeasurements(value: Static<typeof PassageMeasuremen
 }
 
 export function toHttpAttemptMeasurements(value: Static<typeof AttemptMeasurements>): Static<typeof HttpAttemptMeasurements> {
-  return { active_time: value.activeTime, human_wait: value.humanWait, cost: value.cost, active_limit: value.activeLimit, question_ttl: value.questionTtl, active_limit_state: value.activeLimitState, active_expired_at_ms: value.activeExpiredAtMs, passages: value.passages.map(entry1 => (toHttpPassageMeasurements(entry1))), pending_requirements: value.pendingRequirements.map(entry1 => ({ cause: entry1.cause, affected_requirements: entry1.affectedRequirements, pending: entry1.pending })) };
+  return { stage_activity: value.stageActivity, active_time: value.activeTime, human_wait: value.humanWait, cost: value.cost, active_limit: value.activeLimit, question_ttl: value.questionTtl, active_limit_state: value.activeLimitState, active_expired_at_ms: value.activeExpiredAtMs, passages: value.passages.map(entry1 => (toHttpPassageMeasurements(entry1))), pending_requirements: value.pendingRequirements.map(entry1 => ({ cause: entry1.cause, affected_requirements: entry1.affectedRequirements, pending: entry1.pending })) };
 }
 
 export function toHttpAttemptResource(value: Static<typeof AttemptResource>): Static<typeof HttpAttemptResource> {
@@ -167,7 +167,13 @@ export function toHttpPublicationSummary(value: Static<typeof PublicationSummary
 }
 
 export function toHttpAttemptListQuery(value: Static<typeof AttemptListQuery>): Static<typeof HttpAttemptListQuery> {
-  return { ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }), ...(value.projectId === undefined ? {} : { project_id: value.projectId }), ...(value.result === undefined ? {} : { result: value.result }) };
+  return {
+    ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }),
+    ...(value.projectId === undefined ? {} : { project_id: value.projectId }), ...(value.result === undefined ? {} : { result: value.result }),
+    ...(value.issueNumber === undefined ? {} : { issue_number: value.issueNumber }), ...(value.issueTitle === undefined ? {} : { issue_title: value.issueTitle }),
+    ...(value.dateFrom === undefined ? {} : { date_from: value.dateFrom }), ...(value.dateTo === undefined ? {} : { date_to: value.dateTo }),
+    ...(value.timeZone === undefined ? {} : { time_zone: value.timeZone }),
+  };
 }
 
 export function toHttpAttemptSummary(value: Static<typeof AttemptSummary>): Static<typeof HttpAttemptSummary> {
@@ -234,16 +240,17 @@ export function toHttpDetailPage(value: Static<typeof DetailPage>): Static<typeo
 }
 
 export function toHttpAttemptDetail(value: Static<typeof AttemptDetail>): Static<typeof HttpAttemptDetail> {
+  const delivery_summary = value.deliverySummary;
   const v3Details = value.v3Details === null ? null : value.v3Details.section === 'target_selections' ? value.v3Details : value.v3Details.section === 'finding_disputes'
     ? { ...value.v3Details, items: value.v3Details.items.map(toHttpFindingDispute) }
     : value.v3Details.section === 'decisions'
       ? { ...value.v3Details, items: value.v3Details.items.map(toHttpAttemptDecisionView) }
       : { ...value.v3Details, items: value.v3Details.items.map(toHttpFindingAssessment) };
-  return { id: value.id, project_id: value.projectId, operation_id: value.operationId, passage_id: value.passageId, round: value.round, phase: value.phase, result: value.result, suspension: value.suspension, tracking: value.tracking, diagnostic: value.diagnostic, result_receipt_id: value.resultReceiptId, delivery_id: value.deliveryId, ...(value.pendingQuestionId === undefined ? {} : { pending_question_id: value.pendingQuestionId }), revision: value.revision, event_cursor: value.eventCursor, block: value.block, v3_details: v3Details, expected_account_id: value.expectedAccountId, issue: value.issue, selected_delivery_id: value.selectedDeliveryId, selected_round: value.selectedRound, publication_target: value.publicationTarget, publication_target_hash: value.publicationTargetHash, publication: toHttpPublicationSummary(value.publication), measurements: toHttpAttemptMeasurements(value.measurements), cleanup: value.cleanup, authority: value.authority === null ? null : { reason: value.authority.reason, expected_status_id: value.authority.expectedStatusId, observed_status_id: value.authority.observedStatusId, observed_at_ms: value.authority.observedAtMs, recovery: value.authority.recovery }, capabilities: { cancel: value.capabilities.cancel, complete_publication: value.capabilities.completePublication, reconcile_publication: value.capabilities.reconcilePublication, revalidate: value.capabilities.revalidate }, details: value.details === null ? null : toHttpDetailPage(value.details) };
+  return { stage_activity: value.stageActivity, delivery_summary, id: value.id, project_id: value.projectId, operation_id: value.operationId, passage_id: value.passageId, round: value.round, phase: value.phase, result: value.result, suspension: value.suspension, tracking: value.tracking, diagnostic: value.diagnostic, result_receipt_id: value.resultReceiptId, delivery_id: value.deliveryId, ...(value.pendingQuestionId === undefined ? {} : { pending_question_id: value.pendingQuestionId }), revision: value.revision, event_cursor: value.eventCursor, block: value.block, v3_details: v3Details, expected_account_id: value.expectedAccountId, issue: value.issue, selected_delivery_id: value.selectedDeliveryId, selected_round: value.selectedRound, publication_target: value.publicationTarget, publication_target_hash: value.publicationTargetHash, publication: toHttpPublicationSummary(value.publication), measurements: toHttpAttemptMeasurements(value.measurements), cleanup: value.cleanup, authority: value.authority === null ? null : { reason: value.authority.reason, expected_status_id: value.authority.expectedStatusId, observed_status_id: value.authority.observedStatusId, observed_at_ms: value.authority.observedAtMs, recovery: value.authority.recovery }, capabilities: { cancel: value.capabilities.cancel, complete_publication: value.capabilities.completePublication, reconcile_publication: value.capabilities.reconcilePublication, revalidate: value.capabilities.revalidate }, details: value.details === null ? null : toHttpDetailPage(value.details) };
 }
 
 export function toHttpDeliveryDetail(value: Static<typeof DeliveryDetail>): Static<typeof HttpDeliveryDetail> {
-  return { delivery: toHttpDelivery(value.delivery), verification: value.verification === null ? null : toHttpVerificationSummary(value.verification), event_cursor: value.eventCursor, issue: value.issue, attempt: toHttpAttemptStatus(value.attempt), measurements: toHttpAttemptMeasurements(value.measurements), cleanup: value.cleanup, authorizations: { captured_mode: value.authorizations.capturedMode, authorized_mode: value.authorizations.authorizedMode, requires_current_gate: value.authorizations.requiresCurrentGate }, review: value.review === null ? null : toHttpReviewSummary(value.review), publication: toHttpPublicationSummary(value.publication), capabilities: { diff: value.capabilities.diff, complete_publication: value.capabilities.completePublication, reconcile_publication: value.capabilities.reconcilePublication }, details: value.details === null ? null : toHttpDetailPage(value.details) };
+  return { delivery_summary: value.deliverySummary, delivery: toHttpDelivery(value.delivery), verification: value.verification === null ? null : toHttpVerificationSummary(value.verification), event_cursor: value.eventCursor, issue: value.issue, attempt: toHttpAttemptStatus(value.attempt), measurements: toHttpAttemptMeasurements(value.measurements), cleanup: value.cleanup, authorizations: { captured_mode: value.authorizations.capturedMode, authorized_mode: value.authorizations.authorizedMode, requires_current_gate: value.authorizations.requiresCurrentGate }, review: value.review === null ? null : toHttpReviewSummary(value.review), publication: toHttpPublicationSummary(value.publication), capabilities: { diff: value.capabilities.diff, complete_publication: value.capabilities.completePublication, reconcile_publication: value.capabilities.reconcilePublication }, details: value.details === null ? null : toHttpDetailPage(value.details) };
 }
 
 export function fromHttpStartAttempt(value: Static<typeof HttpStartAttempt>): Static<typeof StartAttempt> {
@@ -282,7 +289,13 @@ export function fromHttpAuthorizeUpgrade(value: Static<typeof HttpAuthorizeUpgra
 }
 
 export function fromHttpAttemptListQuery(value: Static<typeof HttpAttemptListQuery>): Static<typeof AttemptListQuery> {
-  return { ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }), ...(value.project_id === undefined ? {} : { projectId: value.project_id }), ...(value.result === undefined ? {} : { result: value.result }) };
+  return {
+    ...(value.cursor === undefined ? {} : { cursor: value.cursor }), ...(value.limit === undefined ? {} : { limit: value.limit }),
+    ...(value.project_id === undefined ? {} : { projectId: value.project_id }), ...(value.result === undefined ? {} : { result: value.result }),
+    ...(value.issue_number === undefined ? {} : { issueNumber: value.issue_number }), ...(value.issue_title === undefined ? {} : { issueTitle: value.issue_title }),
+    ...(value.date_from === undefined ? {} : { dateFrom: value.date_from }), ...(value.date_to === undefined ? {} : { dateTo: value.date_to }),
+    ...(value.time_zone === undefined ? {} : { timeZone: value.time_zone }),
+  };
 }
 
 export function fromHttpAttemptDetailQuery(value: Static<typeof HttpAttemptDetailQuery>): Static<typeof AttemptDetailQuery> {
@@ -291,4 +304,26 @@ export function fromHttpAttemptDetailQuery(value: Static<typeof HttpAttemptDetai
 
 export function fromHttpDeliveryDetailQuery(value: Static<typeof HttpDeliveryDetailQuery>): Static<typeof DeliveryDetailQuery> {
   return value;
+}
+
+export function fromHttpAttemptComparisonQuery(value: Static<typeof HttpAttemptComparisonQuery>): Static<typeof AttemptComparisonQuery> {
+  return { leftAttemptId: value.left_attempt_id, rightAttemptId: value.right_attempt_id };
+}
+
+export function toHttpAttemptComparison(value: Static<typeof AttemptComparison>): Static<typeof HttpAttemptComparison> {
+  const side = (item: Static<typeof AttemptComparison>['left']): Static<typeof HttpAttemptComparison>['left'] => ({
+    attempt_id: item.attemptId, started_at_ms: item.startedAtMs, result: item.result, failure_reason: item.failureReason,
+    round: item.round, delivery_id: item.deliveryId, content_identity: item.contentIdentity,
+    project_revision_id: item.projectRevisionId, preparation_revision: item.preparationRevision,
+    configuration_state: item.configurationState, details_url: item.detailsUrl,
+  });
+  const historicalValue = (item: Static<typeof AttemptComparison>['differences'][number]['left']): Static<typeof HttpAttemptComparison>['differences'][number]['left'] => ({
+    state: item.state, value: item.value, reason: item.reason,
+  });
+  return {
+    project_id: value.projectId, repository_id: value.repositoryId, issue_id: value.issueId, issue_number: value.issueNumber,
+    left: side(value.left), right: side(value.right),
+    differences: value.differences.map(item => ({ field: item.field, left: historicalValue(item.left), right: historicalValue(item.right) })),
+    limitations: value.limitations,
+  };
 }

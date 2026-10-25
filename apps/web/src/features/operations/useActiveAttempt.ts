@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { HttpAttemptPage as AttemptPage, HttpAttemptSummary as AttemptSummary } from '#contracts';
 import { HttpError, requestJson } from '../../api/http.js';
+import { useAppliedObservation } from '../../app/applied-observations.js';
 
 type ActiveAttemptLoad = {
   data: AttemptSummary | null;
@@ -19,6 +20,7 @@ export function useActiveAttempt(enabled: boolean) {
   const [reloadKey, setReloadKey] = useState(0);
   const [load, setLoad] = useState<ActiveAttemptLoad>({ data: null, loading: true, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, errorFacts: null, affectedRequirements: [], valid: false });
   const refresh = useCallback(() => setReloadKey((value) => value + 1), []);
+  useAppliedObservation(enabled, load.loading || load.refreshing, Boolean(load.error), load);
 
   useEffect(() => {
     if (!enabled) return;

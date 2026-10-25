@@ -146,7 +146,7 @@ it('reads real check definitions and artifact metadata without accessing log byt
 
 it('keeps summary payloads and persisted bytes independent of a large ignored cache', async () => {
   const f = await fixture(); await f.implement(); await f.approve(); const deliveryId = f.status().deliveryId!;
-  const payload = () => JSON.stringify([f.storage.listAttempts({}),f.storage.getAttemptDetail(f.attemptId,{}),f.storage.getDeliveryDetail(deliveryId,{})]);
+  const payload = () => JSON.stringify([f.storage.listAttempts({}),f.storage.getAttemptDetail(f.attemptId,{}),f.storage.getDeliveryDetail(deliveryId,{})], (key, value: unknown) => key === 'observed_at_ms' ? 0 : value);
   const sizes = () => [statSync(join(f.directory,'factory.sqlite')).size,statSync(join(f.directory,'factory.sqlite-wal')).size];
   const before = payload(); const bytes = sizes();
   const cache = join(f.directory,'work',f.attemptId,'implementation','node_modules','cache'); mkdirSync(cache,{ recursive: true }); writeFileSync(join(cache,'ignored.bin'),Buffer.alloc(16_777_216,93));

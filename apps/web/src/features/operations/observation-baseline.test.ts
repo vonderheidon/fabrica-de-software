@@ -19,7 +19,7 @@ const onboarding: OnboardingController = {
   refresh: async () => null, saveProjectsRoot: async () => {}, complete: async () => {}, suppress: async () => {}, saveTool: async () => {}, recover: async () => {},
 };
 function operation(login = 'synthetic-account'): HttpOperationSummary {
-  return { account: { id: 'account', login, observed_id: 'account', observed_at_ms: epoch },
+  return { stage_activity: null, account: { id: 'account', login, observed_id: 'account', observed_at_ms: epoch },
     host: { designated: 'synthetic-host', current: 'synthetic-host', matches: true },
     automation: { enabled: automationEnabled, dispatch_paused: false, project_enabled: null }, active_attempt: null, active_attempt_count: 0,
     next_candidates: [], candidate_observation: { state: 'not_observed', requires_revalidation: true, order: 'observed_queue_order', has_more: false },

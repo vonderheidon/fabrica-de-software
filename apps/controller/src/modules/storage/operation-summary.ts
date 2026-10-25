@@ -6,6 +6,7 @@ import { readSettings } from './settings.js';
 import { eventCursor, readProject } from './configuration-reads.js';
 import { configurationDiagnostics, diagnostic } from './diagnostics.js';
 import { readAttemptPage } from './queries.js';
+import { readStageActivity } from './stage-activity.js';
 import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
 
@@ -55,6 +56,7 @@ export function readOperationSummary(db: Database.Database, query: OperationSumm
       observedAtMs: useIdentity ? identity.observedAtMs : currentAuthority?.observed_at_ms ?? null },
     host: { designated: s.designated_host, current: currentHost, matches: s.designated_host === currentHost },
     automation: { enabled: s.automation_enabled, dispatchPaused: Boolean(currentAuthority?.dispatch_paused) || !s.account_id, projectEnabled },
+    stageActivity: active ? readStageActivity(db, active.id) : null,
     activeAttempt: active, activeAttemptCount, nextCandidates: observed.slice(0, 5),
     candidateObservation: { state: observed.length ? 'recorded' : 'not_observed', requiresRevalidation: true, order: 'observed_queue_order', hasMore: observed.length > 5 },
     recentResults, impediments: impediments.slice(0, 100),

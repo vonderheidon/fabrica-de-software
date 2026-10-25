@@ -5,7 +5,8 @@ import { useQueue } from '../queue/useQueue.js';
 import type { OnboardingController } from '../onboarding/useOnboarding.js';
 import { UnknownState } from '../../app/OperatorSupport.js';
 import { dashboardConditions, conditionDestination } from './dashboard-conditions.js';
-import { diagnosticCopyFor, operatorState } from '../../app/operator-language.js';
+import { diagnosticCopyFor, operatorCodeLabel, operatorState } from '../../app/operator-language.js';
+import { AttemptStageSummary } from '../attempts/AttemptStageSummary.js';
 
 type Props = {
   projects: ProjectPage | null;
@@ -77,7 +78,8 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
       <section className="card dashboard-active">
         <div className="line panel-title"><div><span className="eyebrow">Agora</span><h2>Tentativa ativa</h2></div></div>
         <RequestNote loading={active.loading && !active.valid} refreshing={active.refreshing} error={active.error} stale={active.stale} empty={active.valid && !active.data ? 'Nenhuma tentativa ativa.' : undefined} label="a tentativa ativa" />
-        {active.data && <div className="dashboard-record"><b>Issue #{active.data.issue_number}</b><p>Etapa: {operatorState(active.data.phase).label} · Resultado: {operatorState(active.data.result ?? 'running').label}{active.data.suspension ? ` · ${operatorState(active.data.suspension).label}` : ''}</p>{[active.data.phase, ...(active.data.result ? [active.data.result] : []), ...(active.data.suspension ? [active.data.suspension] : [])].filter((value) => !operatorState(value).known).map((value) => <UnknownState key={value} value={value} />)}<button type="button" onClick={() => onAttempt(active.data!.id, active.data!.project_id)}>Abrir detalhe e ações disponíveis</button></div>}
+        {active.data && <AttemptStageSummary activity={summary?.active_attempt?.id === active.data.id ? summary.stage_activity : null} stale={active.stale || active.refreshing || operation.stale || operation.refreshing} />}
+        {active.data && <div className="dashboard-record"><b>Issue #{active.data.issue_number}</b><p>Resultado: {operatorState(active.data.result ?? 'running').label}{active.data.suspension && !['HUMAN_DECISION', 'TRACKING_LOST'].includes(active.data.suspension) ? ` · ${operatorCodeLabel(active.data.suspension)}` : ''}</p>{[active.data.phase, ...(active.data.result ? [active.data.result] : [])].filter((value) => !operatorState(value).known).map((value) => <UnknownState key={value} value={value} />)}<button type="button" onClick={() => onAttempt(active.data!.id, active.data!.project_id)}>Abrir detalhe e ações disponíveis</button></div>}
       </section>
 
       <section className="card dashboard-blockers">

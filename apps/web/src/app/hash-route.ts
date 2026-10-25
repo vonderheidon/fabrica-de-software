@@ -14,7 +14,7 @@ const tabLabels: Record<PrincipalTab, string> = {
 export const dialogIds = [
   'register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation',
   'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication',
-  'diagnostic', 'interaction', 'profile', 'initial-setup', 'project-configuration',
+  'diagnostic', 'interaction', 'profile', 'initial-setup', 'project-configuration', 'shutdown',
 ] as const;
 export type DialogId = (typeof dialogIds)[number];
 
@@ -25,9 +25,11 @@ export type HashRoute = {
 };
 
 const contextIds = ['projectId', 'issueId', 'attemptId', 'deliveryId', 'roundId', 'creationId', 'questionId', 'operationId'] as const;
+const attemptSearchFilters = ['issueNumber', 'issueTitle', 'dateFrom', 'dateTo', 'timeZone', 'attemptCursors'] as const;
 
 export function routeIdentity(route: HashRoute): string {
-  return JSON.stringify([route.tab, ...contextIds.map((key) => route.params.get(key) ?? ''), route.params.get('filter') ?? '']);
+  return JSON.stringify([route.tab, ...contextIds.map((key) => route.params.get(key) ?? ''), route.params.get('filter') ?? '',
+    ...attemptSearchFilters.map((key) => route.params.get(key) ?? '')]);
 }
 
 export function parseHash(hash: string): HashRoute {
@@ -44,7 +46,7 @@ export function parseHash(hash: string): HashRoute {
   }
 
   const params = new URLSearchParams(match[2] ?? '');
-  const allowed = new Set<string>([...contextIds, 'dialog', 'search', 'filter', 'profileId']);
+  const allowed = new Set<string>([...contextIds, ...attemptSearchFilters, 'dialog', 'search', 'filter', 'profileId']);
   for (const key of params.keys()) {
     if (!allowed.has(key)) return { tab: tabValue as PrincipalTab, params, error: 'O contexto da rota contém parâmetros inválidos.' };
   }
@@ -77,7 +79,7 @@ export function labelForTab(tab: PrincipalTab): string {
 
 export function buildHash(tab: PrincipalTab, params = new URLSearchParams()): string {
   const safe = new URLSearchParams();
-  for (const key of [...contextIds, 'search', 'filter', 'profileId', 'dialog']) {
+  for (const key of [...contextIds, ...attemptSearchFilters, 'search', 'filter', 'profileId', 'dialog']) {
     const value = params.get(key);
     if (value !== null) safe.set(key, value);
   }

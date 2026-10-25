@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HttpEventPage as EventPage } from '#contracts';
 import { eventListQuery } from '../../api/observation-requests.js';
 import { HttpError, requestJson } from '../../api/http.js';
+import { useAppliedObservation } from '../../app/applied-observations.js';
 
 export type RecordFilters = { projectId: string; attemptId: string; operationId: string };
 type PageRequest = { cursor: string | null; index: number; stack: Array<string | null>; serial: number; scope?: string | undefined };
@@ -12,6 +13,7 @@ export function useRecords(filters: RecordFilters, includeTechnical = false) {
   const committed = useRef<PageRequest>({ cursor: null, index: 0, stack: [null], serial: 0 });
   const [state, setState] = useState<RecordState>({ page: null, loading: true, refreshing: false, stale: false, error: null, requestId: null, errorCode: null, affectedRequirements: [], facts: null, emptyKind: 'none' });
   const filterKey = JSON.stringify([filters.projectId, filters.attemptId, filters.operationId]);
+  useAppliedObservation(true, state.loading || state.refreshing, Boolean(state.error), state);
   const stableFilters = useMemo(() => filters, [filterKey]);
 
   const refresh = useCallback(() => {

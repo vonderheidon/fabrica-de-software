@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { HttpQueueObservation as QueueObservation } from '#contracts';
 import { queueQuery } from '../../api/observation-requests.js';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
+import { useAppliedObservation } from '../../app/applied-observations.js';
 
 type QueueFailure = { message: string; requestId: string | null };
 export type QueueLoad =
@@ -12,6 +13,7 @@ export type QueueLoad =
 export function useQueue(projectId: string | null, enabled: boolean) {
   const [load, setLoad] = useState<QueueLoad>({ status: 'loading', observation: null, etag: null, previousError: null });
   const [reloadKey, setReloadKey] = useState(0);
+  useAppliedObservation(enabled, load.status === 'loading', load.status === 'error', load);
   const [cursor, setCursor] = useState<string | null>(null);
   const [history, setHistory] = useState<Array<string | null>>([]);
   const [pageNotice, setPageNotice] = useState('');

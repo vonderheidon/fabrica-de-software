@@ -2,6 +2,7 @@ import { rememberProjectDeletion } from './ProjectDeletionPendingNotice.js';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ProjectPage } from '#contracts';
 import { HttpError, requestJson } from '../../api/http.js';
+import { useAppliedObservation } from '../../app/applied-observations.js';
 import { isProjectDeletionCompleted } from '../../api/project-deletion.js';
 
 type ProjectsState = {
@@ -13,6 +14,7 @@ type ProjectsState = {
 export function useProjects(search: string, enabled = true) {
   const [state, setState] = useState<ProjectsState>({ page: null, loading: true, error: null });
   const [reload, setReload] = useState(0);
+  useAppliedObservation(enabled, state.loading, Boolean(state.error), state);
   const requestVersion = useRef(0);
   const query = search.trim();
 

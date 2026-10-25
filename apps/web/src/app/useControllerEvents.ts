@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { type HttpEventPage as EventPage } from '#contracts';
 import { requestJson } from '../api/http.js';
+import { invalidateAppliedObservations, useAppliedObservations } from './applied-observations.js';
 import {
   observeControllerEvents,
   type ControllerEventSource,
@@ -26,6 +27,7 @@ function openEventSource(url: string): ControllerEventSource {
 
 export function useControllerEvents(): EventConnectionState {
   const [state, setState] = useState<EventConnectionState>('connecting');
+  const applied = useAppliedObservations();
 
   useEffect(() => observeControllerEvents({
     readCursor: async () => {
@@ -33,12 +35,17 @@ export function useControllerEvents(): EventConnectionState {
       return { event_cursor: page.event_cursor };
     },
     openSource: openEventSource,
-    dispatch: (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail })),
+    dispatch: (name, detail) => {
+      if (name === 'factory-controller-resync') invalidateAppliedObservations();
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+    },
     setTimer: (callback, delayMs) => window.setTimeout(callback, delayMs),
     clearTimer: timer => window.clearTimeout(timer),
     setState,
     closedReadyState: EventSource.CLOSED,
   }), []);
 
+  if (state === 'unavailable' || applied === 'failed') return 'unavailable';
+  if (state === 'connected' && applied === 'pending') return 'reconnecting';
   return state;
 }
