@@ -9,6 +9,7 @@ type Receipt = NonNullable<CreationBoardOperation['receipt']>;
 const names = V3StatusMapping.map(({ name }) => name);
 const fieldName = 'Status';
 const viewName = 'Kanban';
+const defaultStatusAliases: Readonly<Record<string, string>> = { Backlog: 'Todo', 'In progress': 'In Progress' };
 const ownerBoards = `query FactoryCreationBoards($id:ID!,$after:String) { viewer { id } node(id:$id) { __typename
   ... on User { id login projectsV2(first:100,after:$after) { nodes { id title createdAt owner { id } } pageInfo { hasNextPage endCursor } } }
   ... on Organization { id login projectsV2(first:100,after:$after) { nodes { id title createdAt owner { id } } pageInfo { hasNextPage endCursor } } }
@@ -185,10 +186,15 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
     if (!sent || !successful(response)) return null;
     return response.data;
   }
-  const statusInputs = (existing: BoardSnapshot['fields'][number] | null) => names.map((name,index) => ({
-    ...(existing?.options.find(option => option.name === name) ? { id: existing.options.find(option => option.name === name)!.id } : {}),
-    name, color: (['GRAY','BLUE','YELLOW','PURPLE','GREEN'] as const)[index], description: `Factory status: ${name}`,
-  }));
+  const statusInputs = (existing: BoardSnapshot['fields'][number] | null) => names.map((name,index) => {
+    // GitHub workflows reference option IDs; renaming defaults must retain those bindings.
+    const option = existing?.options.find(option => option.name === name) ??
+      existing?.options.find(option => option.name === defaultStatusAliases[name]);
+    return {
+      ...(option ? { id: option.id } : {}),
+      name, color: (['GRAY','BLUE','YELLOW','PURPLE','GREEN'] as const)[index], description: `Factory status: ${name}`,
+    };
+  });
   async function doOperation(operation: CreationBoardOperation, remote: Remote, repositoryId: string, accountId: string,
     authorize: () => Promise<void>, markSent: () => void): Promise<BoardResult> {
     if (!Value.Check(CreationBoardOperation, operation) || !authorized(remote.ownerId, remote, accountId) || operation.authorization.account_id !== accountId) return failed('BOARD_TARGET_NOT_AUTHORIZED');

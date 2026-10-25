@@ -31,6 +31,13 @@ function fixture(mode: string | null = null, groupByStatus = true, readyBoard = 
   let boardPages: Array<Record<string, unknown>> = [];
   let mutationCount = 0;
   let viewerId = 'ACCOUNT';
+  if (mode === 'default-status' || mode === 'default-status-lowercase') {
+    fields = [{ __typename: 'ProjectV2SingleSelectField', id: 'STATUS', name: 'Status', options: [
+      { id: 'DEFAULT_TODO', name: 'Todo' },
+      { id: 'DEFAULT_PROGRESS', name: mode === 'default-status' ? 'In Progress' : 'In progress' },
+      { id: 'DEFAULT_DONE', name: 'Done' },
+    ] }];
+  }
   if (readyBoard) {
     fields = [{ __typename: 'ProjectV2SingleSelectField', id: 'STATUS', name: 'Status', options: names.map((name,index) => ({ id: optionIds[index]!, name })) }];
     repositories = repositoryLinked ? ['REPOSITORY'] : [];
@@ -58,9 +65,9 @@ function fixture(mode: string | null = null, groupByStatus = true, readyBoard = 
       return httpResponse({ createProjectV2: { clientMutationId: (request.variables.input as { clientMutationId: string }).clientMutationId, projectV2: { id: project.id } } });
     }
     if (request.query.includes('FactoryCreateStatus') || request.query.includes('FactoryUpdateStatus')) {
-      const input = request.variables.input as { fieldId?: string; projectId?: string; name?: string; singleSelectOptions: Array<{ name: string }> };
+      const input = request.variables.input as { fieldId?: string; projectId?: string; name?: string; singleSelectOptions: Array<{ id?: string; name: string }> };
       const submittedOptions = mode === 'wrong-order' ? [...input.singleSelectOptions].reverse() : input.singleSelectOptions;
-      const observedOptions = submittedOptions.map((option, index) => ({ id: optionIds[index]!, name: option.name }));
+      const observedOptions = submittedOptions.map((option, index) => ({ id: option.id ?? optionIds[index]!, name: option.name }));
       if (mode === 'extra-option') observedOptions.push({ id: 'EXTRA', name: 'Later' });
       fields = [{ __typename: 'ProjectV2SingleSelectField', id: input.fieldId ?? 'STATUS', name: input.name ?? 'Status', options: observedOptions }];
       if (mode === 'lost-status') throw new Error('response lost');
@@ -87,6 +94,23 @@ function fixture(mode: string | null = null, groupByStatus = true, readyBoard = 
 }
 
 describe('GitHub Projects board operations', () => {
+  it.each(['default-status', 'default-status-lowercase'])('preserves workflow-bound default option IDs when configuring five columns (%s)', async mode => {
+    const f = fixture(mode);
+    const result = await f.api.createBoardOperation(boardOperation('configure_status', expected('PROJECT')),
+      remote, 'REPOSITORY', 'ACCOUNT', async () => {}, () => {});
+    expect(result.state).toBe('confirmed');
+    const update = f.runner.mock.calls.map(([raw]) => JSON.parse(raw) as { query: string; variables: { input: { singleSelectOptions: Array<{ id?: string; name: string }> } } })
+      .find(request => request.query.includes('FactoryUpdateStatus'))!;
+    expect(update.variables.input.singleSelectOptions).toMatchObject([
+      { id: 'DEFAULT_TODO', name: 'Backlog' }, { name: 'Ready' },
+      { id: 'DEFAULT_PROGRESS', name: 'In progress' }, { name: 'In review' },
+      { id: 'DEFAULT_DONE', name: 'Done' },
+    ]);
+    expect(result.receipt?.status_options?.map(option => option.name)).toEqual(names);
+    expect(result.receipt?.status_options?.map(option => option.id)).toEqual([
+      'DEFAULT_TODO', 'OPTION_1', 'DEFAULT_PROGRESS', 'OPTION_3', 'DEFAULT_DONE',
+    ]);
+  });
   it('observes Kanban columns through vertical grouping even when horizontal grouping is empty', async () => {
     const f = fixture(null, true, true);
     const result = await f.api.createBoardOperation(boardOperation('verify_board', expected('PROJECT', 'STATUS', 'VIEW')), remote, 'REPOSITORY', 'ACCOUNT', async () => {}, () => {});
