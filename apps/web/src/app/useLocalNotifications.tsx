@@ -92,10 +92,12 @@ function capability(): NotificationPermission | 'unsupported' {
 }
 export function LocalNotificationSettings({ notifications }: { notifications: ReturnType<typeof useLocalNotifications> }) {
   const { enabled, permission, message, ready, activate, deactivate } = notifications;
-  return <section className="card"><h2>Notificações locais</h2>
-    <p>{permission === 'unsupported' ? 'Indisponíveis neste navegador.' : permission === 'denied' ? 'Permissão negada. Para permitir, altere a permissão deste site no navegador.' : enabled && permission === 'granted' ? 'Ativas neste navegador.' : 'Desativadas neste navegador.'}</p>
-    <p className="muted">Perguntas, falhas e conclusões continuam acessíveis na interface. Com a aplicação fechada, não há garantia de entrega posterior.</p>
-    {enabled ? <button type="button" onClick={deactivate}>Desativar notificações</button> : <button type="button" disabled={!ready || permission === 'unsupported' || permission === 'denied'} onClick={() => void activate()}>Ativar notificações</button>}
+  return <section className="card form-section settings-notifications" aria-labelledby="notification-settings-title">
+    <div className="settings-section-heading">
+      <div><h2 id="notification-settings-title">Notificações locais</h2><p className="notification-state">{permission === 'unsupported' ? 'Indisponíveis neste navegador.' : permission === 'denied' ? 'Permissão negada. Para permitir, altere a permissão deste site no navegador.' : enabled && permission === 'granted' ? 'Ativas neste navegador.' : 'Desativadas neste navegador.'}</p></div>
+      {enabled ? <button type="button" onClick={deactivate}>Desativar notificações</button> : <button type="button" disabled={!ready || permission === 'unsupported' || permission === 'denied'} onClick={() => void activate()}>Ativar notificações</button>}
+    </div>
+    <p className="notification-guidance">Perguntas, falhas e conclusões continuam acessíveis na interface. Com a aplicação fechada, não há garantia de entrega posterior.</p>
     {message && <p role="status">{message}</p>}
   </section>;
 }

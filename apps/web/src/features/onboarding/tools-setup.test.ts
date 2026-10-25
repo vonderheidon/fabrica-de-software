@@ -74,6 +74,10 @@ beforeEach(() => {
     if (failSave === 'known') throw new HttpError(400, 'TOOL_PREFERENCE_INVALID', 'Executável inválido.', 'request', [], null, null, null);
     if (failSave === 'unknown') throw new Error('Response lost');
     if (body.tool_preferences) settings.tool_preferences = structuredClone(body.tool_preferences);
+    if (body.changes.projects_root) {
+      settings.settings.projects_root = body.changes.projects_root;
+      settings.onboarding.first_incomplete_step = 'profiles';
+    }
     options.tools.git = { state: 'available', candidates: [{ path, version: '2.0' }], selected_path: path, diagnostic: null, recovery: '' };
     return { data: { ...structuredClone(settings), operation_id: new Headers(init.headers).get('Idempotency-Key'), receipt: { revision: 2, event_cursor: '2' } }, etag: '"settings-2"' };
   });
@@ -85,7 +89,7 @@ afterEach(async () => {
 
 it('renders clean installation, explicit correction, receipt and restart revalidation in the wizard', async () => {
   wizard = true; await mount();
-  expect(container.textContent).toContain('Vamos preparar a fábrica');
+  expect(container.querySelector('#onboarding-step-title')?.textContent).toBe('Ferramentas');
   expect(container.textContent).toContain('Localizado e validado');
   expect(container.textContent).toContain('Conexão não confirmada');
   expect(container.textContent).not.toContain('Selecionar executável de OMP');
@@ -117,7 +121,58 @@ it('preserves draft and saved path on cancellation, unavailable picker and faile
   expect(container.textContent).toContain('A escolha não foi salva');
   expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe(path);
   expect(settings.tool_preferences.git.preferred_path).toBe('C:\\old\\git.exe');
-  expect(container.textContent).toContain('Vamos preparar a fábrica');
+  expect(container.querySelector('#onboarding-step-title')?.textContent).toBe('Ferramentas');
+});
+
+it('shows tools only in their own step and returns without repeating them in GitHub', async () => {
+  wizard = true; await mount();
+  expect(container.querySelectorAll('.onboarding-step')).toHaveLength(4);
+  expect(container.querySelector('.onboarding-tools-step')?.hasAttribute('hidden')).toBe(false);
+  await click('Continuar para o GitHub');
+  expect(container.querySelector('#onboarding-step-title')?.textContent).toBe('Conectar GitHub');
+  expect(container.querySelector('.onboarding-tools-step')?.hasAttribute('hidden')).toBe(true);
+  expect(writes).toHaveLength(0);
+  await click('Voltar');
+  expect(container.querySelector('#onboarding-step-title')?.textContent).toBe('Ferramentas');
+  expect(container.querySelector('.onboarding-tools-step')?.hasAttribute('hidden')).toBe(false);
+});
+
+it('saves the picked projects folder once and enables continuing without another confirmation', async () => {
+  wizard = true;
+  settings.settings.account_id = 'account';
+  settings.onboarding.first_incomplete_step = 'projects_root';
+  settings.selection_capabilities.projects_root = { available: true };
+  selection = { state: 'selected', kind: 'projects_root', path: 'C:\\Projects', observed_at_ms: 1 };
+  await mount();
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.onboarding-step')].find(button => button.textContent?.includes('Escolher a pasta'))!.click());
+  await click('Selecionar pasta');
+  expect(writes).toHaveLength(1);
+  expect(writes[0]?.changes.projects_root).toBe('C:\\Projects');
+  expect(container.querySelector<HTMLInputElement>('#projects-root-path')?.value).toBe('C:\\Projects');
+  expect(container.textContent).not.toContain('Usar esta pasta');
+  expect(container.textContent).not.toContain('Validar e salvar esta pasta');
+  await click('Continuar para os perfis');
+  expect(container.querySelector('#onboarding-step-title')?.textContent).toBe('Configurar os perfis');
+  expect(writes).toHaveLength(1);
+});
+
+it.each(['known', 'unknown'] as const)('keeps the picked folder and blocks advancing after a %s save failure without retrying', async failure => {
+  wizard = true;
+  settings.settings.account_id = 'account';
+  settings.settings.projects_root = 'C:\\OldProjects';
+  settings.onboarding.first_incomplete_step = 'profiles';
+  settings.selection_capabilities.projects_root = { available: true };
+  selection = { state: 'selected', kind: 'projects_root', path: 'C:\\NewProjects', observed_at_ms: 1 };
+  failSave = failure;
+  await mount();
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('.onboarding-step')].find(button => button.textContent?.includes('Escolher a pasta'))!.click());
+  await click('Selecionar pasta');
+  expect(writes).toHaveLength(1);
+  expect(settings.settings.projects_root).toBe('C:\\OldProjects');
+  expect(container.querySelector<HTMLInputElement>('#projects-root-path')?.value).toBe('C:\\NewProjects');
+  expect([...container.querySelectorAll('button')].find(button => button.textContent === 'Continuar para os perfis')?.disabled).toBe(true);
+  await act(async () => {});
+  expect(writes).toHaveLength(1);
 });
 
 it('keeps manual drafts while detection finishes and distinguishes a confirmed connection', async () => {
@@ -130,7 +185,7 @@ it('keeps manual drafts while detection finishes and distinguishes a confirmed c
   const observed = structuredClone(options); observed.maestri_connection = { state: 'connected', diagnostic: null };
   await act(async () => finish?.(observed));
   expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe('C:\\edited\\git.exe');
-  expect(container.textContent).toContain('Conexão confirmada nesta observação');
+  expect(container.textContent).not.toContain('Conexão Maestri');
   expect(writes).toHaveLength(0);
 });
 
@@ -170,3 +225,4 @@ it('consults an uncertain save without repeating PUT after remount', async () =>
   await click('Consultar gravação das ferramentas');
   expect(writes).toHaveLength(1);
 });
+

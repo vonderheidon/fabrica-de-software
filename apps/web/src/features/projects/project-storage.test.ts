@@ -38,6 +38,23 @@ function button(container: HTMLElement, text: string) {
   const value = [...container.querySelectorAll('button')].find(item => item.textContent === text);
   if (!value) throw new Error(`Missing ${text}`); return value;
 }
+it('shows an unregistered managed environment without a legacy migration warning or writes', async () => {
+  const { container } = await mount({ ...storage, state: 'legacy', managed_root: null, locations: [], transition_plan: null });
+  expect(container.textContent).toContain('Sem ambiente gerenciado');
+  expect(container.textContent).toContain('Ainda não registrada.');
+  expect(container.textContent).not.toContain('Organização legada');
+  expect(container.textContent).not.toContain('Próxima ação:');
+  expect(container.textContent).toContain(storage.original_path);
+  expect(button(container, 'Atualizar localizações')).toBeDefined();
+  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+});
+it('keeps the legacy warning and transition controls when managed locations exist', async () => {
+  const { container } = await mount({ ...storage, state: 'legacy' });
+  expect(container.textContent).toContain('Organização legada');
+  expect(container.textContent).toContain('Próxima ação:');
+  expect(button(container, 'Autorizar transição gerenciada').disabled).toBe(true);
+  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+});
 async function authorize(container: HTMLElement) {
   await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
   await act(async () => button(container, 'Autorizar transição gerenciada').click());

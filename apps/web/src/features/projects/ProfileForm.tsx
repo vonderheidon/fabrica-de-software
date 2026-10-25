@@ -9,6 +9,7 @@ import { configurationCommand } from './configuration-requests.js';
 import { createSaveLifecycle } from './save-lifecycle.js';
 import { catalogModel, profileChangesForSave, profileCombinationValid, selectProfileModel, selectProfileProvider } from './profile-editor.js';
 import { isLastProfileOfType } from './profile-collection.js';
+import { profilePrompts } from './profile-prompts.js';
 
 
 type CatalogState = { status: 'loading' | 'ready' | 'error'; data: ExecutionCatalog | null; message?: string };
@@ -31,7 +32,7 @@ function profileTypeBlocker(error: unknown): ProfileProjectBlocker | null {
 }
 
 const emptyProfile = (profileType: ProfileType = 'implementer'): ProfileValues => ({
-  name: '', profile_type: profileType, executor: 'maestri-omp', provider: '', model: '', effort: null, guidance: '',
+  name: '', profile_type: profileType, executor: 'maestri-omp', provider: '', model: '', effort: null, guidance: profilePrompts[profileType],
 });
 
 function profileValues(profile: StoredExecutionProfile): ProfileValues {
@@ -70,6 +71,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
   const [baseline, setBaseline] = useState<ProfileValues | null>(null);
   const [baselineEtag, setBaselineEtag] = useState<string | null>(null);
   const [draft, setDraft] = useState<ProfileValues | null>(null);
+  const [editingGuidance, setEditingGuidance] = useState(false);
   const [profileLoadError, setProfileLoadError] = useState('');
   const [catalog, setCatalog] = useState<CatalogState>({ status: 'loading', data: null });
   const catalogRef = useRef(catalog);
@@ -374,7 +376,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
         <small id="profile-name-help" className="field-guidance">Nome usado para escolher este perfil nos projetos.</small>
       </div>
       <div className="form-field field-full"><label htmlFor="profile-type">Tipo</label>
-        <CustomSelect id="profile-type" value={draft.profile_type} disabled={Boolean(profileId) || lockInitialProfileType} aria-describedby="profile-type-help" onChange={(event) => { const value = event.currentTarget.value as ProfileType; updateDraft((current) => ({ ...current, profile_type: value })); }}>
+        <CustomSelect id="profile-type" value={draft.profile_type} disabled={Boolean(profileId) || lockInitialProfileType} aria-describedby="profile-type-help" onChange={(event) => { const value = event.currentTarget.value as ProfileType; updateDraft((current) => ({ ...current, profile_type: value, guidance: current.guidance === profilePrompts[current.profile_type] ? profilePrompts[value] : current.guidance })); }}>
           <option value="implementer">Implementador</option><option value="reviewer">Revisor</option>
         </CustomSelect>
         <small id="profile-type-help" className="field-guidance">Escolha o papel do agente. O tipo permanece fixo após a criação.</small>
@@ -409,8 +411,9 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
         <small id="profile-effort-help" className="field-guidance">Nível de raciocínio oferecido pelo modelo. Use “Não se aplica” quando não houver opções.</small>
       </div>
       <h3 className="dialog-section-title">Orientações</h3>
-      <div className="form-field field-full"><label htmlFor="profile-guidance">Instruções comportamentais</label>
-        <textarea id="profile-guidance" value={draft.guidance} rows={12} aria-invalid={guidanceExcessive || bodyExcessive || saveState.status === 'error' && saveState.fieldErrors?.some(error => error.field.includes('guidance'))} aria-describedby="profile-guidance-help profile-guidance-count profile-guidance-limit profile-field-errors" onChange={(event) => { const value = event.currentTarget.value; updateDraft((current) => ({ ...current, guidance: value })); }} />
+      <div className="form-field field-full">
+        <div className="profile-guidance-heading"><label htmlFor="profile-guidance">Instruções comportamentais</label>{!editingGuidance && <button type="button" aria-controls="profile-guidance" disabled={saveState.status === 'saving' || Boolean(uncertainId)} onClick={() => { setEditingGuidance(true); requestAnimationFrame(() => document.getElementById('profile-guidance')?.focus()); }}>Editar</button>}</div>
+        <textarea id="profile-guidance" value={draft.guidance} readOnly={!editingGuidance || saveState.status === 'saving' || Boolean(uncertainId)} rows={12} aria-invalid={guidanceExcessive || bodyExcessive || saveState.status === 'error' && saveState.fieldErrors?.some(error => error.field.includes('guidance'))} aria-describedby="profile-guidance-help profile-guidance-count profile-guidance-limit profile-field-errors" onChange={(event) => { if (!editingGuidance) return; const value = event.currentTarget.value; updateDraft((current) => ({ ...current, guidance: value })); }} />
         <small id="profile-guidance-help" className="field-guidance">Estas são as instruções comportamentais efetivas do perfil nas novas tentativas. Até 8.192 caracteres; não inclua credenciais. O texto não altera papel, critérios, permissões, schemas de resultado ou limites técnicos.</small>
         <small id="profile-guidance-count">{guidanceLength.toLocaleString('pt-BR')} / 8.192 caracteres. Tentativas iniciadas mantêm as instruções capturadas.</small>
         <span id="profile-guidance-limit">{guidanceExcessive ? <span role="alert">As instruções excedem 8.192 caracteres. Reduza o texto antes de salvar; o rascunho foi preservado.</span> : bodyExcessive ? <span role="alert">{configurationBodyLimitMessage} O rascunho foi preservado.</span> : null}</span>

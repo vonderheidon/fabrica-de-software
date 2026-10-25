@@ -7,7 +7,8 @@ import type { GitHubSettingsOperation, GitHubSetupController } from './useGitHub
 import { FieldHelp } from './FieldHelp.js';
 import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 
-export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, disabled = false, conditions }: {
+export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, disabled = false, conditions, compactHeading = false }: {
+  compactHeading?: boolean;
   conditions?: ReactNode;
   settings: SettingsView;
   settingsEtag: string;
@@ -36,9 +37,9 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
   const bindingPending = setup.accountOperation.status === 'uncertain' || setup.accountOperation.status === 'saving';
   const accountActionLabel = setup.bindingAction === 'bind' || settings.settings.account_id === null ? 'Vincular conta' : 'Trocar conta';
 
-  return <section className="card form-section github-setup-panel" aria-labelledby="github-setup-title">
-    <div className="panel-title line">
-      <div><h2 id="github-setup-title">Conta GitHub</h2></div>
+  return <section className={`card form-section github-setup-panel${compactHeading ? ' github-setup-compact' : ''}`} aria-labelledby={compactHeading ? 'onboarding-step-title' : 'github-setup-title'}>
+    <div className={compactHeading ? 'github-verification-action' : 'panel-title line'}>
+      {!compactHeading && <div><h2 id="github-setup-title">Conta GitHub</h2></div>}
       <button type="button" onClick={() => void setup.verify()} disabled={disabled || setup.verification.status === 'checking'} aria-busy={setup.verification.status === 'checking'}>
         {setup.verification.status === 'checking' ? 'Verificando…' : 'Verificar status'}
       </button>
@@ -60,7 +61,7 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
     {options && <>
       {options.retry_at_ms !== null && <p className="notice" role="status">A próxima consulta GitHub está prevista para {new Date(options.retry_at_ms).toLocaleString('pt-BR')}.</p>}
 
-      {setup.eligibleAccounts.length > 0 && <details className="github-binding-details"><summary>{settings.settings.account_id ? 'Gerenciar vínculo da conta' : 'Vincular uma conta'}</summary><div className="form-grid github-binding-controls">
+      {setup.eligibleAccounts.length > 0 && <div className="form-grid github-binding-controls">
         <div className="form-field"><label htmlFor="github-eligible-login">Conta elegível</label>
           <CustomSelect id="github-eligible-login" value={setup.selectedLogin} aria-describedby="github-eligible-login-help" onChange={(event) => setup.setSelectedLogin(event.currentTarget.value)} disabled={!setup.observationCurrent || operationBusy || bindingPending}>
             <option value="">Selecione pelo login</option>
@@ -74,7 +75,7 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
             {setup.accountOperation.status === 'saving' ? 'Salvando vínculo…' : accountActionLabel}
           </button>
         </div>
-      </div></details>}
+      </div>}
       {setup.eligibleAccounts.length === 0 && verificationReady && <p className="empty">Nenhuma conta ativa, válida e confirmada está disponível para vínculo.</p>}
 
       <GitHubDiagnostics options={options} />

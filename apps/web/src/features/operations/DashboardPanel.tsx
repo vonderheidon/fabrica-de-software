@@ -69,7 +69,6 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
     {onboardingView && onboardingView.completed_at_ms === null && <section className="card onboarding-dashboard-card" aria-labelledby="onboarding-dashboard-title">
       <div><span className="eyebrow">Primeiros passos</span><h2 id="onboarding-dashboard-title">Configuração inicial</h2>
         <p>{onboardingView.first_incomplete_step ? `Próxima etapa: ${({ github: 'Conectar GitHub', projects_root: 'Escolher a pasta dos projetos', profiles: 'Configurar os perfis' } as const)[onboardingView.first_incomplete_step]}.` : 'As etapas estão prontas para conclusão.'}</p>
-        {onboarding.load.refreshing && <small role="status">Atualizando o progresso salvo…</small>}
         {onboarding.load.error && <><small role="alert">A atualização falhou; consulte novamente antes de salvar. {onboarding.load.error.message}</small></>}
       </div>
       <button type="button" className="primary" data-initial-setup-trigger onClick={(event) => onOpenSetup(event.currentTarget)}>Continuar configuração</button>

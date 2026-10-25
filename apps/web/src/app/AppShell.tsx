@@ -408,11 +408,11 @@ export function AppShell() {
         <div className="brand"><span className="mark" aria-hidden="true">nf</span> Nova Fábrica</div>
         <div className="sidebar-navigation"><div className="eyebrow workspace-label">Workspace local</div><nav className="nav" aria-label="Navegação principal">
           {tabs.map((tab) => <a key={tab} href={buildHash(tab, tab === 'configuracao' ? new URLSearchParams() : route.params)} className={`nav-link${route.tab === tab && !route.error ? ' active' : ''}`} aria-current={route.tab === tab && !route.error ? 'page' : undefined}><svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={navSymbols[tab]} /></svg>{navLabels[tab]}</a>)}
-        </nav><button type="button" onClick={(event) => openDialog('shutdown', event.currentTarget)}>Encerrar controlador</button></div>
+        </nav><button type="button" className="nav-link sidebar-shutdown" onClick={(event) => openDialog('shutdown', event.currentTarget)}><svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v9 M6.34 5.34a8 8 0 1 0 11.32 0" /></svg>Encerrar controlador</button></div>
       </aside>
       <main className="main">
         <header className="topbar"><span>Nova Fábrica <span className="crumb-separator">/</span><b>{title}</b></span><EventConnectionStatus state={eventState} /></header>
-        <div className="content">{route.tab === 'configuracao' && <LocalNotificationSettings notifications={notifications} />}<PrincipalScreen route={route} onOpenDialog={openDialog} onOpenInitialSetup={(trigger) => openDialog('initial-setup', trigger)} onboarding={onboarding} onOpenProfileDialog={(profileId, projectId, trigger) => openDialog('profile', trigger, { ...(projectId ? { projectId } : {}), ...(profileId ? { profileId } : {}) })} onActionError={reportActionError} /></div>
+        <div className="content"><PrincipalScreen route={route} notificationSettings={<LocalNotificationSettings notifications={notifications} />} onOpenDialog={openDialog} onOpenInitialSetup={(trigger) => openDialog('initial-setup', trigger)} onboarding={onboarding} onOpenProfileDialog={(profileId, projectId, trigger) => openDialog('profile', trigger, { ...(projectId ? { projectId } : {}), ...(profileId ? { profileId } : {}) })} onActionError={reportActionError} /></div>
       </main>
     </div>
     {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>

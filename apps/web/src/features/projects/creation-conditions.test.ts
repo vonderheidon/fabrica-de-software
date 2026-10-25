@@ -39,6 +39,24 @@ async function mount() {
   return container;
 }
 function button(container: HTMLElement, name: string) { const node = [...container.querySelectorAll('button')].find((item) => item.textContent === name); if (!node) throw new Error(name); return node; }
+it('keeps conditions visually stable during a background read while blocking verification effects', async () => {
+  const container = await mount();
+  const region = container.querySelector('[aria-label="Condições da criação"]')!;
+  const text = region.textContent;
+  const normal = request.getMockImplementation()!;
+  let finish: ((value: unknown) => void) | undefined;
+  request.mockImplementation((path: string, init?: RequestInit) => path.startsWith('/api/v1/diagnostics') && !init?.method
+    ? new Promise(resolve => { finish = resolve; }) : normal(path, init));
+  await act(async () => { window.dispatchEvent(new Event('factory-controller-resync')); await new Promise(resolve => setTimeout(resolve, 130)); });
+  expect(region.textContent).toBe(text);
+  expect(button(container, 'Verificar recursos').disabled).toBe(false);
+  expect(button(container, 'Verificar recursos').getAttribute('aria-disabled')).toBe('true');
+  await act(async () => button(container, 'Verificar recursos').click());
+  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  await act(async () => finish?.(await normal(`/api/v1/diagnostics?scope=creation&id=${id}`)));
+  expect(region.textContent).toBe(text);
+  expect(button(container, 'Verificar recursos').getAttribute('aria-disabled')).toBe('false');
+});
 it('keeps completion independent, renders each remote effect once and opens with GET only', async () => {
   const container = await mount();
   expect(container.textContent).toContain('Criação concluída');

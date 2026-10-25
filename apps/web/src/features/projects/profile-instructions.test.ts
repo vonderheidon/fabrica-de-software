@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { ProfileForm } from './ProfileForm.js';
 import { HttpError } from '../../api/http.js';
+import { profilePrompts } from './profile-prompts.js';
 
 const { metadata, config, retry } = vi.hoisted(() => ({ metadata: vi.fn(), config: { current: {} }, retry: vi.fn() }));
 vi.mock('./useConfiguration.js', () => ({ useConfiguration: () => ({ load: config.current, retry, refreshError: null }) }));
@@ -20,8 +21,36 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); sessionStorage.clear(); vi.unstubAllGlobals(); });
 async function render() { await act(async () => root.render(createElement(ProfileForm, { projectId: null, profileId: profile.id, onClose: vi.fn(), onSavingChange: vi.fn(), onSaved: saved }))); }
-async function edit(text: string) { await act(async () => { const input = container.querySelector('textarea')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); }); }
+async function edit(text: string) {
+  const unlock = [...container.querySelectorAll('button')].find(button => button.textContent === 'Editar');
+  if (unlock) await act(async () => unlock.click());
+  await act(async () => { const input = container.querySelector('textarea')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, text); input.dispatchEvent(new Event('input', { bubbles: true })); });
+}
 async function submit() { await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); }
+it.each(['implementer', 'reviewer'] as const)('prefills the %s prompt from the role resource and unlocks only through Editar', async role => {
+  const dirty = vi.fn();
+  await act(async () => root.render(createElement(ProfileForm, { projectId: null, profileId: null, initialProfileType: role, onClose: vi.fn(), onSavingChange: vi.fn(), onSaved: saved, onDirtyChange: dirty })));
+  const input = container.querySelector<HTMLTextAreaElement>('#profile-guidance')!;
+  expect(input.value).toBe(profilePrompts[role]);
+  expect(input.value).toContain(role === 'implementer' ? 'Você é o Implementador' : 'Você é o Revisor');
+  expect(input.readOnly).toBe(true);
+  expect(dirty).toHaveBeenLastCalledWith(false);
+  expect(input.value.length).toBeLessThanOrEqual(8192);
+  await edit('Minha orientação em português');
+  expect(input.readOnly).toBe(false);
+  expect(input.value).toBe('Minha orientação em português');
+  expect(dirty).toHaveBeenLastCalledWith(true);
+});
+it('preserves the saved prompt and keeps it locked when opening an existing profile', async () => {
+  await render();
+  expect(container.querySelector('textarea')!.value).toBe(profile.guidance);
+  expect(container.querySelector('textarea')!.readOnly).toBe(true);
+  const unlock = [...container.querySelectorAll('button')].find(button => button.textContent === 'Editar')!;
+  await act(async () => unlock.click());
+  expect(container.querySelector('textarea')!.value).toBe(profile.guidance);
+  expect(container.querySelector('textarea')!.readOnly).toBe(false);
+  expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
+});
 it.each(['implementer', 'reviewer'])('edits effective instructions for %s and confirms only a matching receipt', async role => {
   config.current = { status: 'ready', identity: 'global-settings', etag: '"one"', view: { settings: { installation_id: 'installation', account_id: null }, profiles: [{ ...profile, profile_type: role }] } };
   await render(); await edit('Novas instruções');

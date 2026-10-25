@@ -20,6 +20,12 @@
 .global-settings-editor .global-verification { padding-top: 16px; border-top: 1px solid var(--border); }
 .global-settings-editor .global-verification > p { margin: 0 0 14px; font-size: 12px; max-width: 65ch; }
 .global-settings-editor .form-section { margin: 0; padding: 24px; }
+.settings-notifications .settings-section-heading { align-items: center; }
+.settings-notifications .settings-section-heading > div { min-width: 0; }
+.settings-notifications .settings-section-heading > button { flex-shrink: 0; }
+.settings-notifications .notification-state { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.settings-notifications .notification-guidance { margin: 14px 0 0; max-width: 80ch; font-size: 11px; color: var(--muted); line-height: 1.55; }
+.settings-notifications > [role='status'] { margin: 10px 0 0; font-size: 12px; }
 .global-settings-editor h2 { font-size: 18px; font-weight: 650; margin: 0; }
 .global-settings-editor h3 { font-size: 13px; font-weight: 650; margin: 0; }
 .global-settings-editor .panel-title { margin-bottom: 20px; }
@@ -54,14 +60,17 @@
 .github-binding-details > summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 4px 0; }
 .github-binding-details[open] > summary { margin-bottom: 14px; }
 .global-settings-editor .github-binding-controls { align-items: start; }
-.global-settings-editor .github-binding-action { gap: 7px; }
+.global-settings-editor .github-binding-controls > .form-field { display: grid; align-content: start; gap: 6px; }
+.global-settings-editor .github-binding-controls > .form-field > label, .global-settings-editor .github-binding-action > span { margin: 0; font-size: 12px; font-weight: 600; line-height: 18px; }
+.global-settings-editor .github-binding-controls .custom-select, .global-settings-editor .github-binding-controls .field-guidance { margin: 0; }
 .global-settings-editor .github-binding-action > span { font-size: 12px; font-weight: 600; }
-.global-settings-editor .github-binding-action button { justify-self: start; }
+.global-settings-editor .github-binding-action button { justify-self: start; min-height: 44px; }
 .global-settings-editor .form-actions-card { position: static; display: flex; flex-direction: row; align-items: center; justify-content: space-between; padding: 16px 0 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; gap: 16px; }
 .global-settings-editor .save-feedback { flex: 1; flex-wrap: wrap; gap: 8px; font-size: 12px; }
 .global-settings-editor .form-actions-card > button { flex-shrink: 0; width: auto; }
 .global-settings-editor .form-actions-card { position: sticky; bottom: 12px; z-index: 2; padding: 14px 18px; border: 1px solid var(--border); border-radius: 10px; background: #fff; box-shadow: 0 4px 18px #26332b0d; }
 @media (max-width: 680px) {
+  .settings-notifications .settings-section-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
   .settings-overview { padding: 20px; }
   .settings-overview-facts { grid-template-columns: 1fr; gap: 16px; }
   .settings-overview-heading { align-items: flex-start; flex-direction: column; gap: 12px; }

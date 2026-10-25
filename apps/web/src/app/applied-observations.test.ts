@@ -38,10 +38,35 @@ it('keeps red on read failure and requires an applied update after stream recove
   await render(false, true, 2); expect(host.textContent).toContain('Falha nas atualizações');
   await act(async () => window.dispatchEvent(new CustomEvent('health-http-success')));
   expect(host.textContent).toContain('Falha nas atualizações');
-  await render(true, false, 3); expect(host.textContent).toContain('Reconectando atualizações');
+  await render(true, false, 3); expect(host.textContent).toContain('Falha nas atualizações');
   await render(false, false, 4); expect(host.textContent).toContain('Atualizações conectadas');
   await act(async () => sources[0]!.fail()); expect(host.textContent).toContain('Falha nas atualizações');
   await act(async () => sources[0]!.open()); expect(host.textContent).toContain('Reconectando atualizações');
   await render(false, false, 5); expect(host.textContent).toContain('Atualizações conectadas');
   expect(host.textContent).toContain('Revisão aplicada: 5');
+});
+
+it('keeps confirmed health during background reads but waits for applied data after a real resync', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('EventSource', Source);
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  const render = async (pending: boolean, failed: boolean, revision: number) => act(async () => root!.render(createElement(Surface, { pending, failed, revision })));
+  await render(true, false, 0);
+  await act(async () => sources[0]!.open());
+  expect(host.textContent).toContain('Reconectando atualizações');
+  await render(false, false, 1);
+  await render(true, false, 2);
+  expect(host.textContent).toContain('Atualizações conectadas');
+  await render(false, false, 3);
+  await act(async () => sources[0]!.open());
+  expect(host.textContent).toContain('Reconectando atualizações');
+  await render(true, false, 4);
+  expect(host.textContent).toContain('Reconectando atualizações');
+  await render(false, false, 5);
+  expect(host.textContent).toContain('Atualizações conectadas');
+  await render(false, true, 6);
+  expect(host.textContent).toContain('Falha nas atualizações');
+  await render(true, false, 7);
+  expect(host.textContent).toContain('Falha nas atualizações');
+  await render(false, false, 8);
+  expect(host.textContent).toContain('Atualizações conectadas');
 });

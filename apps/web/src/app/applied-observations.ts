@@ -29,6 +29,9 @@ export function useAppliedObservation(enabled: boolean, pending: boolean, failed
     return () => { observations.delete(id); emit(); };
   }, [id, enabled]);
   useEffect(() => {
-    if (enabled) update(id, pending ? 'pending' : failed ? 'failed' : 'applied');
+    if (!enabled) return;
+    // Background reads retain the last outcome; stream resync explicitly invalidates it.
+    if (failed) update(id, 'failed');
+    else if (!pending) update(id, 'applied');
   }, [id, enabled, pending, failed, revision]);
 }

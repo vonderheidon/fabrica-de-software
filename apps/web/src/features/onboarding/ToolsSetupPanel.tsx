@@ -9,7 +9,7 @@ import { useOnboarding, type OnboardingController } from './useOnboarding.js';
 const tools = ['git', 'maestri', 'omp', 'powershell', 'gh'] as const;
 type Tool = typeof tools[number];
 const labels: Record<Tool, string> = { git: 'Git', maestri: 'Maestri', omp: 'OMP', powershell: 'PowerShell', gh: 'GitHub CLI' };
-type Props = { onboarding: OnboardingController; disabled?: boolean; resetKey?: number; onDraftStateChange?: (dirty: boolean, saving: boolean) => void };
+type Props = { onboarding: OnboardingController; disabled?: boolean; resetKey?: number; compactHeading?: boolean; onDraftStateChange?: (dirty: boolean, saving: boolean) => void };
 
 export function ToolsSetupPanel(props: Props) {
   const settings = props.onboarding.load.snapshot?.settings;
@@ -17,7 +17,7 @@ export function ToolsSetupPanel(props: Props) {
   return <ToolsSetupContent key={identity} {...props} />;
 }
 
-function ToolsSetupContent({ onboarding, disabled = false, resetKey = 0, onDraftStateChange }: Props) {
+function ToolsSetupContent({ onboarding, disabled = false, resetKey = 0, compactHeading = false, onDraftStateChange }: Props) {
   const [observation, setObservation] = useState<ToolOptions | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,8 +81,8 @@ function ToolsSetupContent({ onboarding, disabled = false, resetKey = 0, onDraft
 
   const selectionMessage = nativeSelectionMessage(selection.state);
   return <section className="card form-section tools-setup" aria-label="Ferramentas desta instalação">
-    <div className="settings-section-heading"><div><span className="eyebrow">Instalação</span><h3>Ferramentas desta instalação</h3></div><button type="button" onClick={() => void refresh()} disabled={loading || busy}>Detectar novamente</button></div>
-    <p>As opções válidas são usadas automaticamente. Corrija somente ferramentas ausentes ou com escolha pendente.</p>
+    <div className={compactHeading ? 'tools-detection-action' : 'settings-section-heading'}>{!compactHeading && <div><span className="eyebrow">Instalação</span><h3>Ferramentas desta instalação</h3></div>}<button type="button" onClick={() => void refresh()} disabled={loading || busy}>Detectar novamente</button></div>
+    {!compactHeading && <p>As opções válidas são usadas automaticamente. Corrija somente ferramentas ausentes ou com escolha pendente.</p>}
     {loading && <p role="status">{observation ? 'Revalidando; o resumo anterior permanece visível.' : 'Detectando as ferramentas instaladas…'}</p>}
     {error && <p role="alert" className="error">{error}</p>}
     {onboarding.load.error && <div role="alert"><p>A leitura da configuração falhou. As escolhas salvas exibidas são da leitura anterior; seus rascunhos foram mantidos.</p><button type="button" onClick={() => void onboarding.refresh()}>Atualizar escolhas salvas</button></div>}
@@ -105,7 +105,7 @@ function ToolsSetupContent({ onboarding, disabled = false, resetKey = 0, onDraft
       </article>;
     })}</div>
     {selectionMessage && <p role="status">{selectionMessage}</p>}
-    <div className="notice"><b>Conexão Maestri</b><p>{!observation || observation.maestri_connection.state === 'not_checked' ? 'Conexão ainda não verificada. Inicie pelo terminal-âncora do Maestri e detecte novamente.' : observation.maestri_connection.state === 'connected' ? 'Conexão confirmada nesta observação.' : 'Conexão não confirmada. Inicie pelo terminal-âncora do Maestri e detecte novamente.'} Localizar o executável não confirma a conexão nem uma execução OMP.</p></div>
+    {observation?.maestri_connection.state !== 'connected' && <div className="notice"><b>Conexão Maestri</b><p>{!observation || observation.maestri_connection.state === 'not_checked' ? 'Conexão ainda não verificada. Inicie pelo terminal-âncora do Maestri e detecte novamente.' : 'Conexão não confirmada. Inicie pelo terminal-âncora do Maestri e detecte novamente.'} Localizar o executável não confirma a conexão nem uma execução OMP.</p></div>}
     {operation.status === 'failed' && operation.kind === 'tools' && <p role="alert" className="error">A escolha não foi salva. {operation.message} Confira o executável e tente novamente; seu rascunho foi mantido.</p>}
     {operation.status === 'confirmed' && operation.kind === 'tools' && <p role="status">Escolha salva com recibo. Confira a revalidação atual acima. Ferramentas de execução alteradas serão usadas na próxima inicialização.</p>}
     {operation.status === 'uncertain' && operation.kind === 'tools' && <div role="alert"><p>A gravação está sem confirmação. Consulte a operação original antes de salvar outra escolha.</p><button type="button" onClick={() => void onboarding.recover()}>Consultar gravação das ferramentas</button>{operation.canResend && <button type="button" onClick={() => void onboarding.recover(true)}>Reapresentar a mesma gravação</button>}{operation.recoveryError && <p>{operation.recoveryError}</p>}</div>}

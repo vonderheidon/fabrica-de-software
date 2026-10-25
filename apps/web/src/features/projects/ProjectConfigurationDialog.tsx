@@ -30,22 +30,23 @@ export function ProjectConfigurationDialog({ projectId, installationId, accountI
   const signature = JSON.stringify([etag, plan]);
   const operation = transition.operation;
   const pending = Boolean(transition.operationId || storage.active_transition_operation_id);
+  const hasManagedHistory = storage.locations.length > 0;
+  const needsAttention = Boolean(storage.cause) || ['transitioning', 'uncertain', 'blocked'].includes(storage.state) || storage.state === 'legacy' && hasManagedHistory;
+  const stateLabel = storage.state === 'legacy' && !hasManagedHistory ? 'Sem ambiente gerenciado' : states[storage.state];
   async function copy(path: string): Promise<void> {
     try { await navigator.clipboard.writeText(path); setCopied('Caminho copiado.'); }
     catch { setCopied('Não foi possível copiar. Selecione o caminho completo acima.'); }
   }
   return <section className="card form-section project-storage" aria-labelledby="project-storage-title">
-    <h2 id="project-storage-title">Localizações do projeto</h2>
+    <div className="project-storage-heading"><h3 id="project-storage-title">Pastas do projeto</h3><span className={`project-storage-state${needsAttention ? ' needs-attention' : storage.state === 'current' ? ' is-current' : ''}`}>{stateLabel}</span></div>
     <dl className="project-storage-paths">
-      <div><dt>Pasta original</dt><dd>{storage.original_path ?? 'Origem remota; não há pasta original local.'}</dd>{storage.original_path && <button type="button" onClick={() => void copy(storage.original_path!)}>Copiar pasta original</button>}</div>
-      <div><dt>Pasta gerenciada</dt><dd>{storage.managed_root ?? 'Nenhuma raiz gerenciada verificada.'}</dd>{storage.managed_root && <button type="button" onClick={() => void copy(storage.managed_root!)}>Copiar pasta gerenciada</button>}</div>
+      <div><dt>Original</dt><dd>{storage.original_path ?? 'Origem remota, sem pasta local.'}</dd>{storage.original_path && <button type="button" aria-label="Copiar pasta original" onClick={() => void copy(storage.original_path!)}>Copiar</button>}</div>
+      <div><dt>Gerenciada</dt><dd>{storage.managed_root ?? 'Ainda não registrada.'}</dd>{storage.managed_root && <button type="button" aria-label="Copiar pasta gerenciada" onClick={() => void copy(storage.managed_root!)}>Copiar</button>}</div>
     </dl>
-    <p>A pasta original permanece no lugar. Caminhos gerenciados relativos partem da instalação da fábrica. Banco e recursos compartilhados permanecem globais.</p>
-    <a href={`#principal/tentativas?projectId=${encodeURIComponent(projectId)}`}>Consultar ambientes e ações de abertura das tentativas</a>
+    <div className="project-storage-actions"><a href={`#principal/tentativas?projectId=${encodeURIComponent(projectId)}`}>Ver ambientes das tentativas</a><button type="button" disabled={transition.busy} onClick={() => { setAuthorization(null); onRefresh(); }}>{plan ? 'Atualizar plano' : 'Atualizar localizações'}</button></div>
+    <p className="project-storage-help">A pasta original é preservada. Caminhos gerenciados são relativos à instalação.</p>
     {copied && <p role="status">{copied}</p>}
-    <p><strong>{states[storage.state]}</strong></p>
-    {storage.cause && <p>{storageCause(storage.cause)}</p>}
-    <p><strong>Próxima ação:</strong> {storage.recovery ?? (storage.state === 'legacy' ? 'Consulte os ambientes existentes. A transição exige uma raiz e um plano verificados pelo controlador.' : 'Consulte o plano atual antes de autorizar qualquer transição.')}</p>
+    {needsAttention && !pending && <div className="project-storage-attention">{storage.cause && <p>{storageCause(storage.cause)}</p>}<p><strong>Próxima ação:</strong> {storage.recovery ?? (storage.state === 'legacy' ? 'Consulte os ambientes existentes. A transição exige uma raiz e um plano verificados pelo controlador.' : 'Consulte o plano atual antes de autorizar qualquer transição.')}</p></div>}
     {storage.locations.length > 0 && <details><summary>Localizações registradas</summary><ul>{storage.locations.map(location => <li key={location.id}><span>{location.current ? 'Atual' : 'Histórica'} · layout {location.layout_version}</span><p className="storage-path">{location.path}</p></li>)}</ul></details>}
     {transition.failure && <div role="alert" className="notice"><p>{transition.failure.message}</p><p><strong>Próxima ação:</strong> {transition.failure.recovery}</p></div>}
     {pending && <div className="notice" aria-live="polite">
@@ -65,6 +66,5 @@ export function ProjectConfigurationDialog({ projectId, installationId, accountI
       {plan.capability.available && <><label className="storage-transition-authorization"><input type="checkbox" checked={authorization === signature} disabled={disabled || transition.busy} onChange={event => setAuthorization(event.currentTarget.checked ? signature : null)} />Autorizo a transição entre a origem e o destino deste plano. A pasta original permanece intacta.</label>
         <button type="button" className="primary" disabled={disabled || transition.busy || transition.requiresReview || authorization !== signature || !storage.locations.some(location => location.id === plan.source_location_id && location.current)} onClick={() => { setAuthorization(null); void transition.send(); }}>{transition.busy ? 'Enviando…' : 'Autorizar transição gerenciada'}</button></>}
     </div>}
-    <button type="button" disabled={transition.busy} onClick={() => { setAuthorization(null); onRefresh(); }}>Atualizar e rever plano</button>
   </section>;
 }

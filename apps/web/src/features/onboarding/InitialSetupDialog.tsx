@@ -9,7 +9,9 @@ import { useNativeSelection } from '../projects/useNativeSelection.js';
 import { ToolsSetupPanel } from './ToolsSetupPanel.js';
 
 
-const steps: readonly { id: OnboardingStep; title: string; description: string }[] = [
+type SetupStep = OnboardingStep | 'tools';
+const steps: readonly { id: SetupStep; title: string; description: string }[] = [
+  { id: 'tools', title: 'Ferramentas', description: 'Confira as ferramentas desta instalação e corrija as escolhas pendentes.' },
   { id: 'github', title: 'Conectar GitHub', description: 'Confirme a conta ativa e vincule a identidade que a fábrica usará.' },
   { id: 'projects_root', title: 'Escolher a pasta dos projetos', description: 'Escolha e valide a pasta onde novos projetos poderão ser criados.' },
   { id: 'profiles', title: 'Configurar os perfis', description: 'Crie ou confirme os perfis de Implementador e Revisor.' },
@@ -43,7 +45,8 @@ export function InitialSetupDialog({
     etag: snapshot?.etag ?? null,
     onSettingsSaved: () => { void onboarding.refresh(); },
   });
-  const [activeStep, setActiveStep] = useState<OnboardingStep>('github');
+  const [activeStep, setActiveStep] = useState<SetupStep>('tools');
+  const [toolsReviewed, setToolsReviewed] = useState(false);
   const [stepInitialized, setStepInitialized] = useState(false);
   const [rootPath, setRootPath] = useState('');
   const rootTouchedRef = useRef(false);
@@ -57,7 +60,7 @@ export function InitialSetupDialog({
   const [toolsResetKey, setToolsResetKey] = useState(0);
   const [profileFormKey, setProfileFormKey] = useState(0);
   const [profileReceipt, setProfileReceipt] = useState<{ role: ProfileType; eventCursor: string | null } | null>(null);
-  const [pendingStep, setPendingStep] = useState<OnboardingStep | null>(null);
+  const [pendingStep, setPendingStep] = useState<SetupStep | null>(null);
   const showExitPrompt = closePrompt || pendingStep !== null;
   const stepReturnFocusRef = useRef<HTMLElement | null>(null);
   const exitContinueRef = useRef<HTMLButtonElement | null>(null);
@@ -85,6 +88,16 @@ export function InitialSetupDialog({
   const saving = onboarding.busy || profileSaving || toolsSaving || setup.accountOperation.status === 'saving' || setup.executableOperation.status === 'saving' || selection.state.status === 'selecting';
   const blockedByUncertain = onboarding.operation.status === 'uncertain' || setup.accountOperation.status === 'uncertain' || setup.executableOperation.status === 'uncertain';
   const commandBlocked = saving || blockedByUncertain;
+  const appliedRootSelectionRef = useRef<typeof selection.state | null>(null);
+
+  useEffect(() => {
+    if (activeStep !== 'projects_root' || !candidateRoot || commandBlocked || selection.state.status !== 'selected' || selection.state.kind !== 'projects_root' || appliedRootSelectionRef.current === selection.state) return;
+    appliedRootSelectionRef.current = selection.state;
+    rootTouchedRef.current = true;
+    setRootPath(candidateRoot);
+    selection.clearCandidate('projects_root');
+    if (candidateRoot !== persistedRoot) void onboarding.saveProjectsRoot(candidateRoot);
+  }, [activeStep, candidateRoot, commandBlocked, onboarding.saveProjectsRoot, persistedRoot, selection]);
 
   useEffect(() => {
     onDraftStateChangeRef.current(hasUnsaved, saving);
@@ -97,7 +110,7 @@ export function InitialSetupDialog({
 
   useEffect(() => {
     if (!hasSettings || stepInitialized) return;
-    setActiveStep(firstIncomplete ?? 'profiles');
+    setActiveStep('tools');
     setStepInitialized(true);
   }, [firstIncomplete, hasSettings, stepInitialized]);
 
@@ -146,22 +159,25 @@ export function InitialSetupDialog({
     setPendingStep(null);
   }, [persistedRoot, resetKey]);
 
-  function isStepComplete(step: OnboardingStep): boolean {
+  function isStepComplete(step: SetupStep): boolean {
+    if (step === 'tools') return toolsReviewed;
     const index = steps.findIndex((item) => item.id === step);
     return completed || serverStepIndex > index;
   }
 
-  function canVisitStep(step: OnboardingStep): boolean {
+  function canVisitStep(step: SetupStep): boolean {
+    if (step === 'tools') return true;
     return completed || steps.findIndex((item) => item.id === step) <= serverStepIndex;
   }
 
-  function requestStep(step: OnboardingStep): void {
+  function requestStep(step: SetupStep): void {
     if (step === activeStep || !canVisitStep(step) || saving) return;
     if (hasUnsaved) {
       stepReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       setPendingStep(step);
       return;
     }
+    if (activeStep === 'tools') setToolsReviewed(true);
     setActiveStep(step);
     setProfileFormOpen(false);
   }
@@ -175,7 +191,10 @@ export function InitialSetupDialog({
     const destination = pendingStep;
     resetDrafts();
     setPendingStep(null);
-    if (destination) setActiveStep(destination);
+    if (destination) {
+      if (activeStep === 'tools') setToolsReviewed(true);
+      setActiveStep(destination);
+    }
   }
 
   function resetDrafts(): void {
@@ -219,7 +238,7 @@ export function InitialSetupDialog({
   }
 
   const canAdvanceGitHub = isStepComplete('github') && !blockedByUncertain;
-  const canAdvanceRoot = Boolean(settings && firstIncomplete !== 'projects_root' && settings.settings.projects_root && !blockedByUncertain);
+  const canAdvanceRoot = Boolean(settings && firstIncomplete !== 'projects_root' && settings.settings.projects_root && rootValue === settings.settings.projects_root && !blockedByUncertain);
   const completionReceiptPending = onboarding.operation.status === 'confirmed' && onboarding.operation.kind === 'complete' && !completed;
   const canComplete = Boolean(settings && firstIncomplete === null && profileCounts.implementer > 0 && profileCounts.reviewer > 0 && !completed && !completionReceiptPending && !blockedByUncertain);
   const latestProfileReceipt = profileReceipt && (profileReceipt.role === 'implementer' ? profileCounts.implementer > 0 : profileCounts.reviewer > 0);
@@ -257,8 +276,6 @@ export function InitialSetupDialog({
 
   return <div className="initial-setup">
     <div className={`onboarding-content${showExitPrompt ? ' onboarding-content-blocked' : ''}`} aria-hidden={showExitPrompt}>
-    <div className="onboarding-intro"><span className="eyebrow">Primeiro acesso</span><h3>Vamos preparar a fábrica</h3><p>Conecte o GitHub, escolha a pasta e configure os perfis de execução.</p></div>
-    <ToolsSetupPanel onboarding={onboarding} resetKey={toolsResetKey} disabled={profileSaving || setup.accountOperation.status === 'saving' || setup.accountOperation.status === 'uncertain' || setup.executableOperation.status === 'saving' || setup.executableOperation.status === 'uncertain' || selection.state.status === 'selecting'} onDraftStateChange={(dirty, active) => { setToolsDirty(dirty); setToolsSaving(active); }} />
     <ol className="onboarding-stepper" aria-label="Etapas da configuração inicial">
       {steps.map((step, index) => {
         const active = activeStep === step.id;
@@ -271,10 +288,14 @@ export function InitialSetupDialog({
         </li>;
       })}
     </ol>
+    <div className="onboarding-scroll-body">
     <section className="onboarding-step-content" aria-labelledby="onboarding-step-title">
-      <div className="onboarding-step-heading"><span className="eyebrow">Etapa {steps.findIndex((step) => step.id === activeStep) + 1} de 3</span><h3 id="onboarding-step-title" tabIndex={-1}>{currentStep.title}</h3><p>{currentStep.description}</p></div>
+      <div className="onboarding-step-heading"><span className="eyebrow">Etapa {steps.findIndex((step) => step.id === activeStep) + 1} de {steps.length}</span><h3 id="onboarding-step-title" tabIndex={-1}>{currentStep.title}</h3><p>{currentStep.description}</p></div>
+      <div className="onboarding-tools-step" hidden={activeStep !== 'tools'}>
+        <ToolsSetupPanel compactHeading onboarding={onboarding} resetKey={toolsResetKey} disabled={profileSaving || setup.accountOperation.status === 'saving' || setup.accountOperation.status === 'uncertain' || setup.executableOperation.status === 'saving' || setup.executableOperation.status === 'uncertain' || selection.state.status === 'selecting'} onDraftStateChange={(dirty, active) => { setToolsDirty(dirty); setToolsSaving(active); }} />
+      </div>
       {activeStep === 'github' && <>
-        <GitHubSetupPanel settings={settings} settingsEtag={snapshot.etag} setup={setup} selection={selection} disabled={commandBlocked} />
+        <GitHubSetupPanel compactHeading settings={settings} settingsEtag={snapshot.etag} setup={setup} selection={selection} disabled={commandBlocked} />
         {!canAdvanceGitHub && setup.verification.status !== 'ready' && <p className="muted" role="status">Verifique o status para consultar a conta ativa. A etapa não avança com uma identidade apenas digitada.</p>}
         {!canAdvanceGitHub && setup.verification.status === 'ready' && <p className="notice compact-notice" role="status">Vincule a conta elegível que está ativa no GitHub CLI antes de avançar.</p>}
       </>}
@@ -284,8 +305,9 @@ export function InitialSetupDialog({
           value={rootValue || null}
           capability={settings.selection_capabilities.projects_root}
           selection={selection}
+          confirmSelection={false}
           onChange={(value) => { rootTouchedRef.current = true; setRootPath(value ?? ''); }}
-          onRevalidate={rootValue.trim() ? saveRoot : null}
+          onRevalidate={rootValue.trim() && (rootValue !== persistedRoot || onboarding.operation.status === 'failed' && onboarding.operation.kind === 'projects-root') ? saveRoot : null}
           saveError={onboarding.operation.status === 'failed' && onboarding.operation.kind === 'projects-root' ? { message: onboarding.operation.message, requestId: onboarding.operation.requestId } : null}
           disabled={commandBlocked}
         />
@@ -306,7 +328,6 @@ export function InitialSetupDialog({
           })}
         </div>
         {profileReceipt && <div className="onboarding-receipt" role="status"><p>O perfil de {profileReceipt.role === 'implementer' ? 'Implementador' : 'Revisor'} foi salvo com recibo confirmado. {latestProfileReceipt ? 'A coleção foi atualizada.' : 'Consultando a coleção atual antes de prosseguir.'}</p>{profileReceiptPending && <button type="button" onClick={() => void onboarding.refresh()}>Atualizar perfis</button>}</div>}
-        {!missingProfileType && <p className="notice compact-notice" role="status">Os dois papéis já têm perfis vivos. Você pode concluir a configuração inicial.</p>}
         {profileFormOpen && missingProfileType && <ProfileForm
           key={`${profileFormKey}:${profileType}`}
           projectId={null}
@@ -334,6 +355,7 @@ export function InitialSetupDialog({
       </>}
     </section>
 
+
     {operationMessage && <div className={onboarding.operation.status === 'failed' ? 'notice onboarding-error' : 'notice onboarding-status'} role={onboarding.operation.status === 'failed' ? 'alert' : 'status'}><p>{operationMessage}</p></div>}
     {completionReceiptPending && <button type="button" onClick={() => void onboarding.refresh()} disabled={onboarding.load.refreshing}>Atualizar confirmação</button>}
     {activeStep !== 'github' && setup.accountOperation.status === 'uncertain' && <div className="notice onboarding-uncertain" role="alert"><b>Vínculo do GitHub sem confirmação</b><p>{setup.accountOperation.message}</p><button type="button" onClick={() => void setup.recoverAccountOperation()}>Consultar operação original</button>{setup.accountOperation.recoveryError && <p>{setup.accountOperation.recoveryError}</p>}</div>}
@@ -341,13 +363,17 @@ export function InitialSetupDialog({
     {onboarding.operation.status === 'uncertain' && onboarding.operation.kind !== 'tools' && <UncertainOperationFeedback operation={onboarding.operation} onRecover={onboarding.recover} />}
     {onboarding.load.error && settings && <div className="notice onboarding-read-error" role="alert"><p>A consulta mais recente falhou; os dados exibidos continuam sendo da última leitura confirmada. {onboarding.load.error.message}</p><button type="button" onClick={() => void onboarding.refresh()} disabled={onboarding.load.refreshing}>Tentar atualizar</button></div>}
 
+    {onboarding.operation.status === 'failed' && onboarding.operation.kind === 'suppress' && <div className="error" role="alert"><p>Não foi possível salvar a preferência. {onboarding.operation.message}</p></div>}
+    </div>
     <div className="onboarding-footer dialog-actions">
+      {hasUnsaved && <small className="muted onboarding-footer-hint">Salve ou descarte as alterações antes de ocultar este assistente.</small>}
       <div className="onboarding-footer-secondary">
         <button type="button" onClick={onRequestClose} disabled={saving}>Fechar por enquanto</button>
         <button type="button" className="quiet-button" onClick={suppress} disabled={operationBusy || hasUnsaved}>Não exibir novamente</button>
-        {hasUnsaved && <small className="muted">Salve ou descarte as alterações antes de ocultar este assistente.</small>}
       </div>
       <div className="onboarding-step-actions">
+        {activeStep === 'github' && <button type="button" onClick={() => requestStep('tools')} disabled={operationBusy}>Voltar</button>}
+        {activeStep === 'tools' && <button type="button" className="primary" onClick={() => requestStep('github')} disabled={operationBusy || blockedByUncertain}>Continuar para o GitHub</button>}
         {activeStep === 'projects_root' && <button type="button" onClick={() => requestStep('github')} disabled={!canVisitStep('github') || operationBusy}>Voltar</button>}
         {activeStep === 'profiles' && <button type="button" onClick={() => requestStep('projects_root')} disabled={!canVisitStep('projects_root') || operationBusy}>Voltar</button>}
         {activeStep === 'github' && <button type="button" className="primary" onClick={() => requestStep('projects_root')} disabled={!canAdvanceGitHub || operationBusy}>Continuar para a pasta</button>}
@@ -355,7 +381,6 @@ export function InitialSetupDialog({
         {activeStep === 'profiles' && isFinalSetupState && <button type="button" className="primary" onClick={() => void onboarding.complete()} disabled={!canComplete || operationBusy}>Concluir configuração</button>}
       </div>
     </div>
-    {onboarding.operation.status === 'failed' && onboarding.operation.kind === 'suppress' && <div className="error" role="alert"><p>Não foi possível salvar a preferência. {onboarding.operation.message}</p></div>}
     </div>
     {showExitPrompt && <div className="onboarding-prompt-layer"><section className="onboarding-exit-prompt" role="alert" aria-labelledby="onboarding-exit-title" aria-describedby="onboarding-exit-description">
       <span className="eyebrow">Configuração inicial</span>

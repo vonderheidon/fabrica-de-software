@@ -3,7 +3,7 @@ import type { NativeSelectionController, NativeSelectionState } from './useNativ
 import { nativeSelectionMessage } from './useNativeSelection.js';
 
 
-export function ProjectsFolderField({ persistedValue, value, capability, selection, onChange, onRevalidate, saveError, disabled = false }: {
+export function ProjectsFolderField({ persistedValue, value, capability, selection, onChange, onRevalidate, saveError, disabled = false, confirmSelection = true }: {
   persistedValue: string | null;
   value: string | null;
   capability: SelectionCapabilities['projects_root'];
@@ -12,11 +12,12 @@ export function ProjectsFolderField({ persistedValue, value, capability, selecti
   onRevalidate: (() => void) | null;
   saveError: { message: string; requestId: string | null } | null;
   disabled?: boolean;
+  confirmSelection?: boolean;
 }) {
   const candidate = selection.candidates.projects_root;
   const currentSelection = selection.state.status !== 'idle' && selection.state.kind === 'projects_root' ? selection.state : null;
   const selectionBusy = selection.state.status === 'selecting';
-  const message = currentSelection ? nativeSelectionMessage(currentSelection) : null;
+  const message = currentSelection && (confirmSelection || currentSelection.status !== 'selected') ? nativeSelectionMessage(currentSelection) : null;
   const differsFromSaved = value !== persistedValue;
 
   return <div className="form-field field-full projects-folder-field">
@@ -27,11 +28,11 @@ export function ProjectsFolderField({ persistedValue, value, capability, selecti
         {selectionBusy && currentSelection?.status === 'selecting' ? 'Aguardando a janela…' : 'Selecionar pasta'}
       </button>
     </div>
-    <p id="projects-root-help" className="field-guidance">Pasta local para novos projetos. Alterá-la não move os existentes. Exemplo: C:\Projetos.</p>
+    <p id="projects-root-help" className="field-guidance">Pasta local para novos projetos. Alterá-la não move os existentes.</p>
     {!capability.available && <div className="notice" role="status"><p>A seleção assistida de pasta está indisponível nesta sessão.</p></div>}
     {differsFromSaved && <><p className="projects-folder-saved-value"><span className="eyebrow">Pasta salva</span><span className="mono">{persistedValue ?? 'Ainda não configurada'}</span></p><p className="selection-message" role="status">A edição atual ainda não foi salva. A pasta salva permanece ativa.</p></>}
     {message && <p className={selectionStateIsWarning(currentSelection) ? 'selection-message selection-message-warning' : 'selection-message'} role={selectionStateIsWarning(currentSelection) ? 'alert' : 'status'}>{message}</p>}
-    {candidate && <div className="projects-folder-candidate">
+    {candidate && confirmSelection && <div className="projects-folder-candidate">
       <p><span className="eyebrow">{candidate === persistedValue ? 'Pasta já salva' : 'Candidata da seleção'}</span><span className="mono">{candidate}</span></p>
       {candidate === persistedValue
         ? <p className="muted">A configuração persistida já contém esta raiz. Projetos existentes continuam usando suas origens registradas.</p>

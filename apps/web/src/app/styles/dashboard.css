@@ -1,6 +1,7 @@
 .nav-icon { width: 20px; height: 20px; flex: 0 0 20px; color: currentColor; }
 .sidebar { background: #202326; }
 .nav-link { min-height: 44px; gap: 13px; }
+.sidebar-shutdown { width: 100%; margin-top: 5px; }
 .nav-link.active { background: #383c40; box-shadow: inset 3px 0 #e1a66c; }
 .topbar { min-height: 64px; }
 .content { max-width: 1400px; }

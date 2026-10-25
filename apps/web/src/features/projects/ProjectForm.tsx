@@ -2,7 +2,7 @@ import { deliveryModeLabel } from '../../app/delivery-modes.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
 import { ProjectConfigurationDialog } from './ProjectConfigurationDialog.js';
 import { knownProjectDeletion, useProjectDeletionRestriction } from './ProjectDeletionPendingNotice.js';
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type {
   ConfigurationOptions, ConfigurationView, ExecutionProfile, GlobalConfiguration, ProjectConfiguration, ProjectChanges, ProjectMapping,
   ConfigurationSaved, SettingsSaved, SettingsView, ProjectRegistered, ProjectRegistration, StoredExecutionProfile,
@@ -246,7 +246,7 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
   </form>;
 }
 
-export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateChange }: { projectId: string | null; onDraftStateChange?: (dirty: boolean, saving: boolean) => void; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
+export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateChange, notificationSettings }: { notificationSettings?: ReactNode; projectId: string | null; onDraftStateChange?: (dirty: boolean, saving: boolean) => void; onSaveIssue: (issue: { identity: string; message: string; requestId: string | null; kind: 'error' | 'conflict' } | null, identity: string) => void }) {
   const globalDiagnostic = useGlobalDiagnostics(projectId === null);
   const projectDiagnostic = useProjectDiagnostics(projectId);
   const identity = projectId ?? 'global-settings';
@@ -590,7 +590,6 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
   ));
 
   return <div className={`configuration-editor${projectId ? '' : ' global-settings-editor'}`}>
-    {projectId && isConfigurationView(load.view) && <ProjectConfigurationDialog key={JSON.stringify([load.view.settings.installation_id, accountId, projectId])} projectId={projectId} installationId={load.view.settings.installation_id} accountId={accountId} storage={load.view.storage} etag={load.etag} disabled={saveState.status === 'saving' || Boolean(uncertainId) || Boolean(configurationLock) || Boolean(refreshError) || Boolean(deletionRestricted)} onRefresh={retryConfiguration} />}
     {!projectId && <section className="settings-overview" aria-labelledby="settings-overview-title"><div className="settings-overview-heading"><div><span className="eyebrow">Configuração salva</span><h2 id="settings-overview-title">Operação desta instalação</h2></div><a href="#principal/registros">Ver registros</a></div><dl className="settings-overview-facts">
       <div><dt>Automação global</dt><dd>{load.view.settings.automation_enabled ? 'Habilitada' : 'Pausada'}</dd></div>
       <div><dt>Perfis de execução</dt><dd>{load.view.profile_counts.implementer} Implementador · {load.view.profile_counts.reviewer} Revisor</dd></div>
@@ -598,6 +597,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
     </dl><p>Resumo dos valores salvos. As verificações de cada seção confirmam as condições de uso.</p></section>}
     {refreshError && <div className="notice" role="alert"><b>Atualização da configuração não confirmada</b><p>{refreshError.message} Os valores e rascunhos permanecem visíveis como leitura anterior.</p><div className="row"><button type="button" onClick={retryConfiguration}>Tentar atualizar novamente</button><button type="button" onClick={clearRefreshError}>Dispensar aviso</button></div></div>}
     {conflictView && <section className="notice conflict-current" aria-live="polite"><b>Dados atuais consultados em separado</b><p>Seu rascunho continua aberto. Os valores abaixo vêm da configuração atual:</p><dl className="conflict-values">{conflictCurrentValues(draft, conflictView).map((item) => <div key={item.label}><dt>{item.label}</dt><dd>{item.value}</dd></div>)}</dl><button type="button" onClick={() => setConflictView(null)}>Fechar comparação</button></section>}
+    {!projectId && notificationSettings}
     {!projectId && <ToolsConfigurationPanel disabled={saveState.status === 'saving' || Boolean(uncertainId)} />}
     {globalSettingsView && globalSettingsEtag && <GitHubSetupPanel
       settings={globalSettingsView}
@@ -643,12 +643,10 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
     {recoveryMessage && <p role="status">{recoveryMessage}</p>}
     {uncertainId && <section className="notice"><b>Gravação ainda não confirmada</b><p>O rascunho permanece somente nesta sessão. Consulte a operação original; o comando não será repetido automaticamente.</p><button type="button" onClick={() => void recoverSave()}>Consultar resultado</button>{canResend && <button type="button" onClick={() => void recoverSave(true)}>Reapresentar a mesma operação</button>}</section>}
     {projectId && configurationLock && <div className="notice" role="status"><b>Configuração disponível somente para consulta</b><p>Este projeto tem uma tentativa ou publicação em andamento. Aguarde a conclusão ou cancele a tentativa e aguarde a confirmação da parada para alterar as configurações.</p><a className="button-link" href={`#principal/tentativas?projectId=${encodeURIComponent(projectId)}&attemptId=${encodeURIComponent(configurationLock.attempt_id)}&dialog=detail`}>Ver tentativa</a></div>}
-    {projectId && draft.project && <section className="card form-section"><div className="panel-title"><span className="eyebrow">Projeto selecionado</span><h2>{projectName}</h2><p className="muted">As alterações serão usadas nas próximas preparações deste projeto.</p></div>
+    {projectId && draft.project && <section className="card form-section"><div className="panel-title project-configuration-heading"><h2>{projectName}</h2><p className="muted">Origem, perfis e quadro usados nas próximas preparações.</p></div>
+      {isConfigurationView(load.view) && <ProjectConfigurationDialog key={JSON.stringify([load.view.settings.installation_id, accountId, projectId])} projectId={projectId} installationId={load.view.settings.installation_id} accountId={accountId} storage={load.view.storage} etag={load.etag} disabled={saveState.status === 'saving' || Boolean(uncertainId) || Boolean(configurationLock) || Boolean(refreshError) || Boolean(deletionRestricted)} onRefresh={retryConfiguration} />}
       <fieldset disabled={Boolean(configurationLock)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }} aria-label="Configuração do projeto">
-      <div className="configuration-guidance" role="note" aria-label="Dados necessários e controles opcionais">
-        <div><h3>Para preparar uma issue</h3><p>Confirme o repositório GitHub, a branch-base, um perfil de cada papel e o quadro com seu mapeamento de Status. A issue precisa estar vinculada ao quadro para iniciar em qualquer modo, inclusive no início manual.</p></div>
-        <div><h3>Controles opcionais</h3><p>Checks, orientações e limite de correções podem permanecer nos valores atuais. O modo de entrega parte do padrão configurado.</p></div>
-      </div>
+      <p className="project-configuration-hint">A issue deve pertencer ao quadro selecionado, inclusive no início manual.</p>
       <div className="form-grid">
         <SelectField label="Tipo da origem" value={draft.project.source.kind} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: value as 'local' | 'github', location: current.source.location } }))} options={[{ value: 'local', label: 'Local' }, { value: 'github', label: 'GitHub' }]} />
         <TextField label="Localização da origem" value={draft.project.source.location} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: current.source.kind, location: value } }))} />
@@ -678,7 +676,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       <div className="checks-editor"><div className="line panel-title"><div><span className="eyebrow">Validação</span><h3>Checks</h3></div><button type="button" onClick={() => updateProject((current) => ({ ...current, checks: [...current.checks, { id: crypto.randomUUID(), command: '', cwd_relative: '.' }] }))} disabled={draft.project.checks.length >= 50}>Adicionar check</button></div>
         {draft.project.checks.map((check, index) => <fieldset className="check-card" key={check.id}><legend>Check {index + 1}</legend><div className="form-grid"><TextField label={`Comando do check ${index + 1}`} value={check.command} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, command: value } : item) }))} /><TextField label={`cwd relativo do check ${index + 1}`} value={check.cwd_relative} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, cwd_relative: value } : item) }))} help="Deve permanecer relativo ao ambiente da tentativa." /><NumberField label={`Timeout do check ${index + 1}`} value={check.timeout_ms ?? 60000} min={1} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, timeout_ms: value } : item) }))} unit="ms" /></div><button type="button" className="danger-button" onClick={() => updateProject((current) => ({ ...current, checks: current.checks.filter((item) => item.id !== check.id) }))}>Remover check</button></fieldset>)}
       </div>
-      {draft.project.source.kind === 'local' && <div className="notice"><b>Origem local</b><p>Sem remoto, o projeto ainda pode ser consultado e configurado. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora. Os pré-requisitos serão verificados pelo controlador.</p></div>}
+      {draft.project.source.kind === 'local' && !draft.project.source.repository_id && <div className="notice"><b>Origem local sem remoto confirmado</b><p>O projeto pode ser consultado e configurado. Confirme o repositório GitHub antes de iniciar uma issue. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.</p></div>}
       </fieldset>
       <ProjectConditions diagnostic={projectDiagnostic} section="global" projectId={projectId} />
       <ProjectConditions diagnostic={projectDiagnostic} section="configuration" projectId={projectId} />
