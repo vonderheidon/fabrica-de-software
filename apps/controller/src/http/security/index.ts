@@ -27,10 +27,10 @@ function equalSecret(provided: unknown, expected: string): boolean {
     && timingSafeEqual(Buffer.from(provided, 'ascii'), Buffer.from(expected, 'ascii'));
 }
 
-export function installSecurity(app: FastifyInstance, configuration: ControllerConfiguration, installationId: string) {
+export function installSecurity(app: FastifyInstance, configuration: ControllerConfiguration, installationId: string, controllerInstanceId?: string) {
   const sessions = new Map<string, string>();
   const streams = new Map<AbortController, string>();
-  const instanceId = randomUUID();
+  const instanceId = controllerInstanceId ?? randomUUID();
   const name = `factory_${createHash('sha256').update(installationId).digest('hex').slice(0,16)}_${configuration.port}`;
   let windowStart = Date.now();
   let bootstrapCount = 0;

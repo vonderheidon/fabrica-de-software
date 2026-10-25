@@ -1,21 +1,24 @@
-export type UncertainOperationKind = 'tool-preference-save' | 'project.delete' | 'project-create' | 'project-register' | 'scaffold-create' | 'scaffold-reconcile' | 'settings-save' | 'profile-delete' | 'github-account-binding' | 'github-executable-save' | 'onboarding-root-save' | 'onboarding-complete' | 'onboarding-suppress' | 'queue-toggle' | 'queue-enable' | 'queue-pause' | 'attempt-start' | 'attempt-decision' | 'attempt-cancel' | 'delivery-publish';
+export type UncertainOperationKind = 'tool-preference-save' | 'project.delete' | 'project-create' | 'project-register' | 'scaffold-create' | 'scaffold-reconcile' | 'settings-save' | 'profile-delete' | 'github-account-binding' | 'github-executable-save' | 'onboarding-root-save' | 'onboarding-complete' | 'onboarding-suppress' | 'queue-toggle' | 'queue-enable' | 'queue-pause' | 'attempt-start' | 'attempt-decision' | 'attempt-cancel' | 'delivery-publish' | 'shutdown.pause_starts' | 'shutdown.close_when_idle' | 'shutdown.resume_starts';
 
 export type UncertainOperation = {
   operationId: string;
   kind: UncertainOperationKind;
   recordedAt: number;
   projectId?: string;
+  attemptId?: string;
+  deliveryId?: string;
 };
 
 const storageKey = 'factory.uncertain-operations.v1';
-const kinds: readonly UncertainOperationKind[] = ['tool-preference-save', 'project.delete', 'project-create', 'project-register', 'scaffold-create', 'scaffold-reconcile', 'settings-save', 'profile-delete', 'github-account-binding', 'github-executable-save', 'onboarding-root-save', 'onboarding-complete', 'onboarding-suppress', 'queue-toggle', 'queue-enable', 'queue-pause', 'attempt-start', 'attempt-decision', 'attempt-cancel', 'delivery-publish'];
+const kinds: readonly UncertainOperationKind[] = ['tool-preference-save', 'project.delete', 'project-create', 'project-register', 'scaffold-create', 'scaffold-reconcile', 'settings-save', 'profile-delete', 'github-account-binding', 'github-executable-save', 'onboarding-root-save', 'onboarding-complete', 'onboarding-suppress', 'queue-toggle', 'queue-enable', 'queue-pause', 'attempt-start', 'attempt-decision', 'attempt-cancel', 'delivery-publish', 'shutdown.pause_starts', 'shutdown.close_when_idle', 'shutdown.resume_starts'];
 
 function isUncertainOperation(value: unknown): value is UncertainOperation {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
   return typeof record.operationId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.operationId) &&
     kinds.some((kind) => kind === record.kind) && typeof record.recordedAt === 'number' && Number.isFinite(record.recordedAt) &&
-    (record.projectId === undefined || record.kind === 'project.delete' && typeof record.projectId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.projectId));
+    (record.projectId === undefined || record.kind === 'project.delete' && typeof record.projectId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(record.projectId)) &&
+    (['attemptId','deliveryId'] as const).every(key => record[key] === undefined || record.kind === 'delivery-publish' && typeof record[key] === 'string' && /^[0-9a-f-]{36}$/i.test(record[key]));
 }
 
 export function readUncertainOperations(): UncertainOperation[] {
@@ -24,7 +27,7 @@ export function readUncertainOperations(): UncertainOperation[] {
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isUncertainOperation).map(({ operationId, kind, recordedAt, projectId }) => ({ operationId, kind, recordedAt, ...(projectId ? { projectId } : {}) }));
+    return parsed.filter(isUncertainOperation).map(({ operationId, kind, recordedAt, projectId, attemptId, deliveryId }) => ({ operationId, kind, recordedAt, ...(projectId ? { projectId } : {}), ...(attemptId ? { attemptId } : {}), ...(deliveryId ? { deliveryId } : {}) }));
   } catch {
     return [];
   }
@@ -33,7 +36,7 @@ export function readUncertainOperations(): UncertainOperation[] {
 export function recordUncertainOperation(operation: UncertainOperation): void {
   if (!isUncertainOperation(operation)) throw new TypeError('Registro de operação incerta inválido.');
   const operations = readUncertainOperations().filter((item) => item.operationId !== operation.operationId);
-  operations.push({ operationId: operation.operationId, kind: operation.kind, recordedAt: operation.recordedAt, ...(operation.projectId ? { projectId: operation.projectId } : {}) });
+  operations.push({ operationId: operation.operationId, kind: operation.kind, recordedAt: operation.recordedAt, ...(operation.projectId ? { projectId: operation.projectId } : {}), ...(operation.attemptId ? { attemptId: operation.attemptId } : {}), ...(operation.deliveryId ? { deliveryId: operation.deliveryId } : {}) });
   window.sessionStorage.setItem(storageKey, JSON.stringify(operations));
 }
 

@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { OperationId, OperationProgress, OperationReceipt, TimeDefaults, type OperationView, type ErrorResponse, type DeletionCompleted } from '#contracts';
 import { readSettings } from './settings.js';
+import { shutdownOperation } from './shutdown.js';
 import { StorageError } from './errors.js';
 
 export class OperationError extends Error {
@@ -78,12 +79,20 @@ export function readOperation(db: Database.Database, operationId: string): Store
     if (row.resource_type !== 'settings' || row.resource_id !== 'local' || !targetAccountId ||
       settings.account_id !== targetAccountId || !originValid) return null;
   } else if (row.account_id !== settings.account_id || row.result_account_id !== null) return null;
+  if (row.operation_kind.startsWith('shutdown.')) return shutdownOperation(db, '', operationId);
   // Each domain command adds its own projection here. Unknown kinds never imply success.
   const event = db.prepare<[string], { entity_revision: number; seq: number; entity_type: string; entity_id: string; event_type: string; operation_id: string }>(
     'SELECT entity_revision, seq, entity_type, entity_id, event_type, operation_id FROM events WHERE operation_id = ? ORDER BY seq LIMIT 1',
   ).get(operationId);
   const receipt = row.receipt_json === null ? undefined : readOperationReceipt(JSON.parse(row.receipt_json) as unknown);
   if (receipt !== undefined && !Value.Check(OperationReceipt, receipt)) throw new StorageError('OPERATION_DATA_INVALID');
+  if (['notification.claim','notification.receipt'].includes(row.operation_kind) && row.resource_type === 'notification') {
+    const dispatch = db.prepare(`SELECT n.revision,n.event_seq FROM notification_dispatches n JOIN events e ON e.seq=n.event_seq
+      JOIN operation_requests o ON o.operation_id=e.operation_id WHERE n.dispatch_id=? AND n.installation_id=? AND o.account_id IS ?`)
+      .get(row.resource_id, settings.installation_id, settings.account_id) as { revision: number; event_seq: number } | undefined;
+    if (!dispatch || !receipt || receipt.event_cursor !== String(dispatch.event_seq) || !receipt.revision || receipt.revision>dispatch.revision) throw new StorageError('OPERATION_DATA_INVALID');
+    return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'notification', id: row.resource_id }, state: 'succeeded', receipt };
+  }
   if (row.operation_kind === 'project.delete' && row.resource_type === 'project') {
     const deletion = db.prepare<[string, string], { state: string }>(
       'SELECT state FROM project_deletions WHERE operation_id=? AND project_id=?',

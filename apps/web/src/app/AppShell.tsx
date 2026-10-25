@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
-import { buildHash, labelForTab, parseHash, routeIdentity, tabs, type DialogId } from './hash-route.js';
+import { buildHash, dialogIds, labelForTab, parseHash, routeIdentity, tabs, type DialogId } from './hash-route.js';
 import { useHashRoute } from './useHashRoute.js';
 import { PrincipalScreen } from './PrincipalScreen.js';
 import { HttpError } from '../api/http.js';
@@ -14,6 +14,7 @@ import { AttemptDetailDialog } from '../features/attempts/AttemptDetailDialog.js
 import type { HttpAttemptDetail as AttemptDetail } from '#contracts';
 import { readUncertainOperations } from '../api/uncertain-operations.js';
 import { useControllerEvents } from './useControllerEvents.js';
+import { LocalNotificationSettings, useLocalNotifications } from './useLocalNotifications.js';
 import { useDialogs } from './useDialogs.js';
 import { wrapDialogTabFocus } from './dialog-focus.js';
 import { CloseIcon } from './CloseIcon.js';
@@ -23,6 +24,7 @@ import './styles/event-connection-status.css';
 import { useOnboarding } from '../features/onboarding/useOnboarding.js';
 import { InitialSetupDialog } from '../features/onboarding/InitialSetupDialog.js';
 import { trackProjectDeletions } from '../features/projects/project-deletion-observer.js';
+import { ShutdownDialog } from '../features/shutdown/ShutdownDialog.js';
 
 type DialogState = { status: 'ready'; message: string } | { status: 'action-error'; message: string };
 
@@ -45,8 +47,9 @@ export function AppShell() {
   const route = useHashRoute();
   const dialogs = useDialogs(route);
   const { dialog, setDialog } = dialogs;
-  const onboarding = useOnboarding(route.tab === 'dashboard' || route.params.get('dialog') === 'initial-setup');
+  const onboarding = useOnboarding(true);
   const eventState = useControllerEvents();
+  const notifications = useLocalNotifications(onboarding.load.snapshot?.settings.settings.installation_id);
   const deletionPollingIntervalMs = onboarding.load.snapshot?.settings.settings.time_defaults.polling_interval_ms ?? 15000;
   useEffect(() => trackProjectDeletions(deletionPollingIntervalMs), [deletionPollingIntervalMs]);
   const [dialogState, setDialogState] = useState<DialogState>({ status: 'ready', message: '' });
@@ -253,7 +256,7 @@ export function AppShell() {
   }, [profileClosePrompt]);
 
   function openDialog(id: string, trigger: HTMLElement, context?: { projectId?: string; previousAttemptId?: string; attemptId?: string; profileId?: string; issueId?: string }): void {
-    if (!['register', 'create', 'creation-plan', 'partial', 'preparation', 'start-confirmation', 'enable-queue', 'authority', 'detail', 'decision', 'stop', 'delivery', 'publication', 'diagnostic', 'interaction', 'profile', 'initial-setup', 'project-configuration'].includes(id)) return;
+    if (!dialogIds.some(allowed => allowed === id)) return;
     returnFocusRef.current = trigger;
     if (id === 'initial-setup') setWizardDialogTitle('Configuração inicial');
     setDialogState({ status: 'ready', message: id === 'diagnostic' ? 'Revise a origem local autorizada e a proteção da solicitação. O navegador não libera CORS nem repete o bootstrap automaticamente.' : 'O conteúdo desta ação será conectado à funcionalidade correspondente.' });
@@ -405,18 +408,18 @@ export function AppShell() {
         <div className="brand"><span className="mark" aria-hidden="true">nf</span> Nova Fábrica</div>
         <div className="sidebar-navigation"><div className="eyebrow workspace-label">Workspace local</div><nav className="nav" aria-label="Navegação principal">
           {tabs.map((tab) => <a key={tab} href={buildHash(tab, tab === 'configuracao' ? new URLSearchParams() : route.params)} className={`nav-link${route.tab === tab && !route.error ? ' active' : ''}`} aria-current={route.tab === tab && !route.error ? 'page' : undefined}><svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={navSymbols[tab]} /></svg>{navLabels[tab]}</a>)}
-        </nav></div>
+        </nav><button type="button" onClick={(event) => openDialog('shutdown', event.currentTarget)}>Encerrar controlador</button></div>
       </aside>
       <main className="main">
         <header className="topbar"><span>Nova Fábrica <span className="crumb-separator">/</span><b>{title}</b></span><EventConnectionStatus state={eventState} /></header>
-        <div className="content"><PrincipalScreen route={route} onOpenDialog={openDialog} onOpenInitialSetup={(trigger) => openDialog('initial-setup', trigger)} onboarding={onboarding} onOpenProfileDialog={(profileId, projectId, trigger) => openDialog('profile', trigger, { ...(projectId ? { projectId } : {}), ...(profileId ? { profileId } : {}) })} onActionError={reportActionError} /></div>
+        <div className="content">{route.tab === 'configuracao' && <LocalNotificationSettings notifications={notifications} />}<PrincipalScreen route={route} onOpenDialog={openDialog} onOpenInitialSetup={(trigger) => openDialog('initial-setup', trigger)} onboarding={onboarding} onOpenProfileDialog={(profileId, projectId, trigger) => openDialog('profile', trigger, { ...(projectId ? { projectId } : {}), ...(profileId ? { profileId } : {}) })} onActionError={reportActionError} /></div>
       </main>
     </div>
     {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
       <div className={`dialog${dialog === 'profile' ? ' profile-dialog' : ''}${dialog === 'initial-setup' ? ' initial-setup-dialog' : ''}${dialog === 'project-configuration' ? ' project-configuration-dialog' : ''}`} data-dialog={dialog} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1} onClickCapture={interceptWizardNavigation}>
         <div className="line dialog-toolbar"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label={dialog === 'profile' && profileClosePrompt ? 'Voltar à edição do perfil' : 'Fechar diálogo'} onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending || (dialog === 'initial-setup' || dialog === 'project-configuration') && wizardSaving}><CloseIcon /></button></div>
         <h2 id="dialog-title">{dialog === 'initial-setup' ? wizardDialogTitle : dialog === 'profile' && profileClosePrompt ? 'Descartar alterações do perfil?' : dialog === 'profile' ? (route.params.has('profileId') ? 'Editar perfil' : 'Criar perfil') : dialog === 'diagnostic' ? 'Diagnóstico de acesso' : labelForDialog(dialog)}</h2>
-        {dialog === 'project-configuration' ? <>
+        {dialog === 'shutdown' ? <ShutdownDialog onClose={closeDialog} pollingIntervalMs={deletionPollingIntervalMs} /> : dialog === 'project-configuration' ? <>
           {wizardClosePrompt ? <section className="dialog-prompt" aria-labelledby="configuration-close-title">
             <span className="eyebrow">Alterações não salvas</span><h3 id="configuration-close-title">Sair da configuração do projeto?</h3>
             <p>As alterações ainda não foram salvas. Você pode continuar editando ou sair e manter o rascunho nesta sessão para retomar depois.</p>
@@ -506,7 +509,7 @@ function labelForDialog(dialog: DialogId): string {
     preparation: 'Preparar issue', 'start-confirmation': 'Confirmar início', 'enable-queue': 'Habilitar fila Ready',
     authority: 'Condições da tentativa', detail: 'Detalhe da tentativa', decision: 'Responder decisão', stop: 'Parada da tentativa',
     delivery: 'Entrega', publication: 'Reconciliação da publicação', diagnostic: 'Diagnóstico', interaction: 'Sessão operacional', profile: 'Perfil',
-    'initial-setup': 'Configuração inicial', 'project-configuration': 'Configuração do projeto',
+    'initial-setup': 'Configuração inicial', 'project-configuration': 'Configuração do projeto', shutdown: 'Encerramento guiado',
   };
   return labels[dialog];
 }

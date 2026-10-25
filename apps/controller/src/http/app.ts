@@ -10,6 +10,8 @@ import { installErrors, HttpError } from './errors.js';
 import { installAssets } from './assets.js';
 import { httpLimits, installSecurity } from './security/index.js';
 import { installEventRoutes } from './routes/events.js';
+import { installNotificationRoutes } from './routes/notifications.js';
+import { installShutdownRoutes } from './routes/shutdown.js';
 import { createProjects, type ProjectDependencies } from '../modules/projects/index.js';
 import { createGitHub, type GitHub } from '../modules/github/index.js';
 import { createWorkspaces } from '../modules/workspaces/index.js';
@@ -75,8 +77,10 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   app.server.maxConnections = httpLimits.connections;
   app.server.headersTimeout = httpLimits.headersTimeoutMs;
   installErrors(app);
-  const security = installSecurity(app, configuration, storage.getSettings().installation_id);
+  const security = installSecurity(app, configuration, storage.getSettings().installation_id, storage.controllerInstanceId);
   installEventRoutes(app, storage, security);
+  installNotificationRoutes(app, storage);
+  installShutdownRoutes(app, storage);
   const defaultGitHub = projectDependencies?.githubRuntime ?? createGitHub({ savedExecutablePath: storage.getGitHubExecutablePath });
   const github = projectDependencies?.github ?? defaultGitHub;
   const workspaces = projectDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub,
