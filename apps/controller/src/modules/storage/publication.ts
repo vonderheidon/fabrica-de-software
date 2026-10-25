@@ -179,7 +179,10 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
   const a = readAttempt(db,attemptId); const selectedId = deliveryId ?? a.deliveryId;
   const d = selectedId ? readDelivery(db,selectedId) : null;
   if (d && d.attemptId !== attemptId) throw new OperationError(404,'DELIVERY_NOT_FOUND','The version does not belong to this attempt.');
-  const mode = authorizedMode(db,attemptId);
+  const historical = selectedId && selectedId !== a.deliveryId ? db.prepare<[string, string], { mode: 'icr' | 'commit' | 'pr' }>(`SELECT json_extract(integration_json,'$.source_mode') AS mode
+    FROM rounds WHERE attempt_id=? AND json_extract(integration_json,'$.source_delivery_id')=?
+    AND json_extract(integration_json,'$.source_result')='delivered' LIMIT 1`).get(attemptId,selectedId) : null;
+  const mode = historical?.mode ?? authorizedMode(db,attemptId);
   const review = selectedId ? db.prepare<[string], { state: 'pending' | 'approved' | 'rejected' }>('SELECT state FROM reviews WHERE delivery_id=?').get(selectedId) : null;
   let reason: string | null = !d ? 'DELIVERY_NOT_CAPTURED' : d.id !== a.deliveryId || review?.state !== 'approved' ? 'VERSION_NOT_APPROVED' : null;
   if (a.result && !['delivered','interrupted'].includes(a.result)) reason = 'PUBLICATION_REVOKED';
@@ -198,8 +201,8 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
   if (!reason && targetPending) reason = 'TARGET_SELECTION_PENDING';
   if (!reason && db.prepare("SELECT operation_id FROM publication_requests WHERE attempt_id=? AND state IN ('accepted','running')").get(attemptId)) reason = 'PUBLICATION_BUSY';
   const resolved = (kind: EffectView['kind']) => Boolean(db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind=? AND state IN ('confirmed','not_applicable')").get(attemptId,selectedId,kind));
-  const completed = a.result === 'delivered' && (mode === 'icr' ? resolved('issue_comment') : resolved('local_commit') && (mode === 'commit' ? resolved('issue_comment') : resolved('push') && resolved('pull_request')));
-  const upgrades = d && d.id === a.deliveryId && review?.state === 'approved' && a.phase === 'finished' && (a.result === 'delivered' || a.result === 'interrupted') ? upgradeSummaries(db,attemptId,d.id,reason) : [];
+  const completed = (a.result === 'delivered' || Boolean(historical)) && (mode === 'icr' ? resolved('issue_comment') : resolved('local_commit') && (mode === 'commit' ? resolved('issue_comment') : resolved('push') && resolved('pull_request')));
+  const upgrades = completed && d && d.id === a.deliveryId && review?.state === 'approved' && a.phase === 'finished' ? upgradeSummaries(db,attemptId,d.id,reason) : [];
   if (!reason && completed && counts.pending === 0) reason = 'MODE_COMPLETED';
   const commit = db.prepare<[string,string | null],{ state: EffectView['state']; sha: string | null; reason: string | null; operationId: string; branchRef: string | null; taskType: string | null; taskDescription: string | null }>(`SELECT e.state,json_extract(e.receipt_json,'$.id') AS sha,e.reason,e.operation_id AS operationId,
     t.branch_ref AS branchRef,t.task_type AS taskType,t.task_description AS taskDescription FROM effects e LEFT JOIN delivery_targets t
@@ -208,7 +211,7 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
   const remote = (kind: 'push' | 'pull_request') => { const row = db.prepare<[string,string | null,string],Parameters<typeof effectView>[0]>('SELECT * FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind=?').get(attemptId,selectedId,kind); const e = row ? effectView(row) : null; return { state: e?.state ?? 'not_requested' as const,receipt: e?.receipt ?? null,reason: e?.reason ?? null }; };
   return { mode, reviewState: review?.state ?? null, upgrades, push: remote('push'), pullRequest: remote('pull_request'),
     commit: commit ?? { state: 'not_requested', sha: null, reason: mode === 'icr' ? 'MODE_ICR' : 'COMMIT_NOT_STARTED', operationId: null,branchRef: null,taskType: null,taskDescription: null },
-    localState: completed && a.deliveryId === selectedId ? 'completed' : 'pending',
+    localState: completed && (a.deliveryId === selectedId || Boolean(historical)) ? 'completed' : 'pending',
     confirmedEffects: counts.confirmed,
     pendingEffects: counts.pending,
     unknownEffects: counts.unknown,

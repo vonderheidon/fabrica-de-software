@@ -17,8 +17,10 @@ export interface RetryCaptureCommand {
 export interface CaptureClaim { id: string; deliveryId: string; attemptRevision: number; input: CaptureInput }
 export function createPendingDelivery(db: Database.Database, binding: PassageBinding): void {
   const capture = readCapture(db, binding.attemptId);
+  const integration = db.prepare<[string, number], { baseSha: string }>(`SELECT json_extract(integration_json,'$.base_sha') AS baseSha FROM rounds
+    WHERE attempt_id=? AND round_number<=? AND integration_json IS NOT NULL ORDER BY round_number DESC LIMIT 1`).get(binding.attemptId,binding.round);
   db.prepare(`INSERT INTO deliveries(id,attempt_id,round_number,producer_passage_id,base_sha,repository_relative,capture_state)
-    VALUES (?,?,?,?,?,?,'pending')`).run(binding.deliveryVersion, binding.attemptId, binding.round, binding.passageId, capture.baseSha, `git/${binding.attemptId}.git`);
+    VALUES (?,?,?,?,?,?,'pending')`).run(binding.deliveryVersion, binding.attemptId, binding.round, binding.passageId, integration?.baseSha ?? capture.baseSha, `git/${binding.attemptId}.git`);
 }
 export function readDelivery(db: Database.Database, id: string, authorize = true): Delivery {
   if (!Value.Check(OperationId, id)) throw new OperationError(400, 'DELIVERY_ID_INVALID', 'Delivery ID is invalid.');

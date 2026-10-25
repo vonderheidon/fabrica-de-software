@@ -76,6 +76,14 @@ it('keeps sent response loss unknown until explicit identity read, without repla
   expect(f.run.mock.calls.filter(([x]) => JSON.parse(x).query.includes('mutation'))).toHaveLength(1);
 });
 
+it('refuses creation against a changed base but still reconciles an existing PR after the base advances', async () => {
+  const f = fixture(); f.effect.expectedIdentity.parentSha = 'b'.repeat(40);
+  expect(await f.writer({ effect:f.effect,accountId:'A',body:f.body })).toMatchObject({ state:'failed_known' });
+  expect(f.run.mock.calls.some(([x]) => JSON.parse(x).query.includes('mutation'))).toBe(false);
+  f.existing();
+  expect(await inspectPullRequest(f.reader,{ ...f.effect,state:'unknown' },'A')).toMatchObject({ state:'confirmed',receipt:{ id:'PR_123' } });
+});
+
 it('paginates all matching heads and rejects mutation before IO for missing host authorization or invalid body', async () => {
   const f = fixture();
   expect((await createEffectWriter(f.reader)({ effect: f.effect,accountId: 'A',body: f.body })).reason).toBe('MUTATION_NOT_AUTHORIZED');

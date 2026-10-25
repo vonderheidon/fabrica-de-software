@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile, lstat, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Delivery, EffectView, GitHubQueryResult } from '#contracts';
 import type { GitInput, GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
 import { createDeliveryTargetWorkspace } from '../../apps/controller/src/modules/workspaces/delivery-target.js';
+import { createIntegrationImporter } from '../../apps/controller/src/modules/workspaces/integration.js';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root,{ recursive: true,force: true }); });
@@ -107,4 +108,23 @@ it('commits the approved tree to a descriptive branch while preserving checkout 
   expect(git(targetRoot,'rev-parse','refs/heads/fix/17-corrigir-acesso-c-e-unicode')).toBe(baseSha);
   expect(git(targetRoot,'rev-parse',plan.branch_ref)).toBe(reconciled.receipt!.id);
   expect(git(retainedRepo,'rev-parse',plan.branch_ref)).toBe(reconciled.receipt!.id);
+  // Advance only a ref in the disposable operator clone; staged/unstaged/untracked bytes stay intact.
+  const newBase = git(targetRoot,'-c','user.name=Fixture','-c','user.email=fixture@example.test','commit-tree',contentIdentity,'-p',baseSha,'-m','new base');
+  git(targetRoot,'update-ref','refs/heads/main',newBase,baseSha);
+  github.resolveBranch.mockResolvedValue(complete({ repositoryId:repository.id,name:'main',sha:newBase }));
+  const movedHead = git(targetRoot,'rev-parse','HEAD'); const movedStatus = git(targetRoot,'status','--porcelain=v2','-z','--untracked-files=all');
+  await expect(workspaces.inspectDeliveryTarget(targetRoot,task,task)).rejects.toMatchObject({ code:'DELIVERY_BASE_CHANGED' });
+  const integration = await workspaces.inspectIntegrationTarget(targetRoot,task);
+  expect(integration.baseSha).toBe(newBase);
+  const importer = createIntegrationImporter(async (cwd,args,input) => realGit(cwd,args,input),async () => seed);
+  await importer(delivery,randomUUID(),integration);
+  expect(git(seed,'rev-parse',newBase + '^{tree}')).toBe(contentIdentity);
+  expect(git(targetRoot,'rev-parse','HEAD')).toBe(movedHead);
+  expect(git(targetRoot,'status','--porcelain=v2','-z','--untracked-files=all')).toBe(movedStatus);
+  expect(await readFile(indexPath)).toEqual(originalIndex);
+  expect(await readFile(join(targetRoot,'tracked.txt'))).toEqual(originalTracked);
+  expect(await readFile(join(targetRoot,'staged.txt'))).toEqual(originalStaged);
+  expect(await readFile(join(targetRoot,'untracked.txt'))).toEqual(originalUntracked);
+  const identity = await lstat(await realpath(targetRoot),{ bigint:true });
+  await expect(importer(delivery,randomUUID(),{ ...integration,rootIdentity:`${identity.dev}:${identity.ino}:replaced` })).rejects.toMatchObject({ code:'DELIVERY_TARGET_CHANGED' });
 });

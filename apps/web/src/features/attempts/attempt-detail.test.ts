@@ -11,11 +11,12 @@ vi.mock('../../api/http.js', async (original) => ({ ...await original<typeof imp
 const id = '00000000-0000-4000-8000-000000000001';
 const a = '00000000-0000-4000-8000-000000000002';
 const b = '00000000-0000-4000-8000-000000000003';
+const stage: HttpAttemptDetail['stage_activity'] = { stage: 'verifying', started_at_ms: null, elapsed_ms: null, last_activity_at_ms: null, observed_at_ms: 1, deadline_at_ms: null, remaining_ms: null, tracking_state: 'tracked', availability: 'unavailable', reason: 'Sem eventos suficientes.' };
 const unavailable = { available: false, reason: 'Autoridade revogada' };
 const publication: HttpAttemptDetail['publication'] = { mode: 'icr', review_state: null, local_state: 'pending', confirmed_effects: 0, pending_effects: 0, unknown_effects: 0, complete_capability: unavailable, reconcile_capability: unavailable };
-const measurements: HttpAttemptDetail['measurements'] = { active_time: { state: 'measured', value: 0, unit: 'ms' }, human_wait: { state: 'measured', value: 0, unit: 'ms' }, cost: { state: 'measured', value: 0, unit: 'USD' }, active_limit: { state: 'not_configured' }, question_ttl: { state: 'not_configured' }, active_limit_state: 'unavailable', active_expired_at_ms: null, passages: [], pending_requirements: [] };
-const attempt = (deliveryId: string): HttpAttemptDetail => ({ block: null, v3_details: null, publication_target: null, publication_target_hash: null, id, project_id: id, operation_id: id, passage_id: id, result_receipt_id: null, event_cursor: '1', phase: 'verifying', result: null, suspension: 'HUMAN_DECISION', tracking: 'tracked', round: 2, revision: 1, delivery_id: deliveryId, pending_question_id: null, expected_account_id: 'account', issue: { id: 'issue', number: 1, title: 'Teste de versões', url: 'https://github.com/test/test/issues/1' }, selected_delivery_id: deliveryId, selected_round: deliveryId === a ? 1 : 2, publication, measurements, cleanup: 'uncertain', authority: { reason: 'ACCOUNT_CHANGED', recovery: 'Corrija a conta na Configuração.', observed_at_ms: 1, expected_status_id: null, observed_status_id: null }, diagnostic: 'ACCOUNT_CHANGED', capabilities: { cancel: unavailable, complete_publication: unavailable, reconcile_publication: unavailable, revalidate: unavailable }, details: null });
-const delivery = (deliveryId: string): HttpDeliveryDetail => ({ delivery: { id: deliveryId, attempt_id: id, producer_passage_id: id, round: deliveryId === a ? 1 : 2, base_sha: 'a'.repeat(40), capture_state: 'captured', git_ref: `refs/factory/deliveries/${deliveryId}`, repository_relative: `git/${id}.git`, content_identity: (deliveryId === a ? 'a' : 'b').repeat(40), commit_sha: 'c'.repeat(40), has_delta: true, diagnostic: null, captured_at_ms: 1, revision: 1, warnings: [] }, verification: null, event_cursor: '1', issue: attempt(deliveryId).issue, attempt: attempt(deliveryId), measurements, cleanup: 'uncertain', authorizations: { captured_mode: 'icr', authorized_mode: 'icr', requires_current_gate: true }, review: null, publication, capabilities: { diff: { available: true }, complete_publication: unavailable, reconcile_publication: unavailable }, details: null });
+const measurements: HttpAttemptDetail['measurements'] = { stage_activity: stage, active_time: { state: 'measured', value: 0, unit: 'ms' }, human_wait: { state: 'measured', value: 0, unit: 'ms' }, cost: { state: 'measured', value: 0, unit: 'USD' }, active_limit: { state: 'not_configured' }, question_ttl: { state: 'not_configured' }, active_limit_state: 'unavailable', active_expired_at_ms: null, passages: [], pending_requirements: [] };
+const attempt = (deliveryId: string): HttpAttemptDetail => ({ stage_activity: stage, delivery_summary: null, block: null, v3_details: null, publication_target: null, publication_target_hash: null, id, project_id: id, operation_id: id, passage_id: id, result_receipt_id: null, event_cursor: '1', phase: 'verifying', result: null, suspension: 'HUMAN_DECISION', tracking: 'tracked', round: 2, revision: 1, delivery_id: deliveryId, pending_question_id: null, expected_account_id: 'account', issue: { id: 'issue', number: 1, title: 'Teste de versões', url: 'https://github.com/test/test/issues/1' }, selected_delivery_id: deliveryId, selected_round: deliveryId === a ? 1 : 2, publication, measurements, cleanup: 'uncertain', authority: { reason: 'ACCOUNT_CHANGED', recovery: 'Corrija a conta na Configuração.', observed_at_ms: 1, expected_status_id: null, observed_status_id: null }, diagnostic: 'ACCOUNT_CHANGED', capabilities: { cancel: unavailable, complete_publication: unavailable, reconcile_publication: unavailable, revalidate: unavailable }, details: null });
+const delivery = (deliveryId: string): HttpDeliveryDetail => ({ delivery_summary: { attempt_id: id, delivery_id: deliveryId, original_mode: 'icr', authorized_mode: 'icr', review_state: null, outcome: 'pending', content_identity: null, approved_ref: null, code_location: null, local_repository: null, branch_ref: null, commit_sha: null, pull_request_url: null, checkout_updated: false, pending_effects: [], limitations: [], criteria_satisfied: 0, criteria_total: 0, checks_succeeded: 0, checks_total: 0, resolved_findings: 0, details_url: `/api/v1/deliveries/${deliveryId}` }, delivery: { id: deliveryId, attempt_id: id, producer_passage_id: id, round: deliveryId === a ? 1 : 2, base_sha: 'a'.repeat(40), capture_state: 'captured', git_ref: `refs/factory/deliveries/${deliveryId}`, repository_relative: `git/${id}.git`, content_identity: (deliveryId === a ? 'a' : 'b').repeat(40), commit_sha: 'c'.repeat(40), has_delta: true, diagnostic: null, captured_at_ms: 1, revision: 1, warnings: [] }, verification: null, event_cursor: '1', issue: attempt(deliveryId).issue, attempt: attempt(deliveryId), measurements, cleanup: 'uncertain', authorizations: { captured_mode: 'icr', authorized_mode: 'icr', requires_current_gate: true }, review: null, publication, capabilities: { diff: { available: true }, complete_publication: unavailable, reconcile_publication: unavailable }, details: null });
 let root: ReturnType<typeof createRoot> | null = null;
 let container: HTMLDivElement;
 let selected = a;
@@ -61,6 +62,7 @@ it('keeps publication completion separate from uncertain effects', async () => {
     if (path.includes('/deliveries/')) {
       const data = delivery(path.includes(b) ? b : a);
       data.publication = { ...data.publication, local_state: 'completed', review_state: 'approved', unknown_effects: unknown };
+      data.delivery_summary = { ...data.delivery_summary,outcome:unknown ? 'partial' : 'complete',limitations:unknown ? ['Há efeitos sem confirmação; consulte a publicação.'] : [] };
       return Promise.resolve({ data, etag: '"1"' });
     }
     return previous(path);
@@ -69,11 +71,11 @@ it('keeps publication completion separate from uncertain effects', async () => {
   expect(container.querySelector('#publication-panel-title')?.textContent).toBe('Entrega concluída');
   expect(container.textContent).not.toContain('A reconciliação não está disponível');
   const receipts = [...container.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Detalhes da publicação e recibos');
-  expect(receipts?.open).toBe(false);
+  expect(receipts).toBeUndefined();
   unknown = 1;
   await show(a);
-  expect(container.querySelector('#publication-panel-title')?.textContent).toBe('Entrega pendente');
-  expect(container.textContent).toContain('1 sem confirmação');
+  expect(container.querySelector('#publication-panel-title')?.textContent).toBe('Entrega parcial');
+  expect(container.textContent).toContain('sem confirmação');
 });
 
 it('opens with no effects, consolidates authority and preserves separate suspension/resources', async () => {

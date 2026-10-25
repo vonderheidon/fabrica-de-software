@@ -135,7 +135,8 @@ export function acceptReview(db: Database.Database, binding: PassageBinding, res
   db.prepare('UPDATE attempts SET phase=?,diagnostic=? WHERE id=?').run(approved ? 'publishing' : 'reviewing', approved ? null : r.diagnostic ?? (v?.state === 'failed' ? 'CHECKS_FAILED' : 'REVIEW_REJECTED'), a.id);
   if (!approved && r.independenceState === 'valid') blockCorrection(db, r.deliveryId);
 }
-export interface CorrectionPlan { sourcePassageId: string; passageId: string; findings: Finding[]; review: Review; guidance: string | null }
+export interface CorrectionPlan { sourcePassageId: string; passageId: string; findings: Finding[]; review: Review; guidance: string | null;
+  integration?: import('./integration.js').IntegrationPlan & { operationId: string; sourceDeliveryId: string; sourceContentIdentity: string | null; sourceRef: string | null } }
 export function beginCorrection(db: Database.Database, deliveryId: string): CorrectionPlan | null {
   return guarded(() => db.transaction(() => {
     const review = readReview(db, deliveryId); const d = readDelivery(db, deliveryId); const a = readAttempt(db, d.attemptId);

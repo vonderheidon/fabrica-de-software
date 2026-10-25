@@ -1,6 +1,7 @@
 import type { GitHub } from '../github/index.js';
 import { createGitReader, type GitContext } from './git.js';
 import { createInspector } from './inspect.js';
+import { createIntegrationImporter } from './integration.js';
 import { createPublicationTargetWorkspace } from './publication-target.js';
 import { createWorkspacePreparer } from './prepare.js';
 import { createCapturer } from './capture.js';
@@ -48,6 +49,8 @@ export function createWorkspaces(options: WorkspaceOptions) {
     verifyRetainedDelivery: createRetainedVerifier(options.dataDirectory, git, undefined, resolveAttemptRoot),
     ...createLocalPublisher(options.dataDirectory, git, undefined, resolveAttemptRoot),
     inspectDeliveryTarget: deliveryTargetWorkspace.inspectDeliveryTarget,
+    inspectIntegrationTarget: deliveryTargetWorkspace.inspectIntegrationTarget,
+    importIntegrationBase: createIntegrationImporter(git,sharedAttempt),
     verifyDeliveryTarget: deliveryTargetWorkspace.verifyDeliveryTarget,
     createTargetCommit: deliveryTargetWorkspace.createLocalCommit,
     reconcileTargetCommit: deliveryTargetWorkspace.reconcileLocalCommit,

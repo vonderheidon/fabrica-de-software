@@ -6,6 +6,7 @@ import type { Workspaces } from '../workspaces/index.js';
 import type { Verification } from '../verification/index.js';
 import { createTargetSelections, type TargetWorkspaces } from './targets.js';
 import type { DeliveryTargetPlan } from '../storage/index.js';
+import { CaptureError } from '../workspaces/index.js';
 
 type Stage = 'inProgress' | 'inReview' | 'delivered';
 const statusKey = (stage: Stage) => stage === 'inProgress' ? 'in_progress' : stage === 'inReview' ? 'in_review' : 'delivered';
@@ -13,12 +14,13 @@ type Snapshot = ReturnType<Storage['getPublicationSnapshot']>;
 export interface PublicationDependencies {
   storage: Storage;
   github: Pick<GitHub, 'getIdentity' | 'getIssueContextById' | 'getProject' | 'getRepository'> & Partial<Pick<GitHub,'reconcilePullRequest'>> & { mutateEffect: (input: GitHubEffectRequest) => Promise<GitHubMutationResult> };
-  workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget'>> & Partial<TargetWorkspaces>;
+  workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget' | 'inspectIntegrationTarget'>> & Partial<TargetWorkspaces>;
   verification: Pick<Verification, 'getArtifact'>;
   cancelAttempt: (id: string) => Promise<void>;
   enqueue: (task: () => Promise<void>) => void;
   isClosed: () => boolean;
   logFailure: (code: string) => void;
+  adaptIntegration?: (deliveryId: string, operationId: string, target: { baseSha: string; localPath: string; rootIdentity: string }) => Promise<void>;
 }
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const blocked = (code: string): never => { throw new OperationError(409, code, 'Current authority or publication prerequisites prevent this action.'); };
@@ -234,12 +236,30 @@ export function createPublication(deps: PublicationDependencies) {
       ? previous.expectedIdentity.targetOperationId ? storage.getDeliveryTarget(previous.expectedIdentity.targetOperationId) : null
       : storage.findDeliveryTarget(snapshot.status.id,delivery.id);
     let target = sealed;
+    if (target && deps.adaptIntegration && deps.workspaces.inspectIntegrationTarget && (!previous || previous.state === 'failed_known')) {
+      const absent = !previous || await deps.workspaces.reconcileTargetCommit?.(delivery,previous,target);
+      if (absent === true || absent && absent.state === 'failed_known' && absent.reason === 'COMMIT_NOT_OBSERVED') {
+        const next = await deps.workspaces.inspectIntegrationTarget(target.local_path,{ attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
+          contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
+          repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
+          baseBranch:target.base_branch,baseSha:delivery.baseSha });
+        if (next.rootIdentity !== target.local_identity.root_identity) blocked('DELIVERY_TARGET_CHANGED');
+        if (next.baseSha !== delivery.baseSha) {
+          if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
+          await deps.adaptIntegration(delivery.id,command.operationId,next);
+          return blocked('INTEGRATION_REVIEW_PENDING');
+        }
+      }
+    }
     if (!previous && !target && !deps.workspaces.inspectDeliveryTarget) blocked('DELIVERY_TARGET_CONTEXT_UNAVAILABLE');
     if (target && !deps.workspaces.createTargetCommit) blocked('DELIVERY_TARGET_CONTEXT_UNAVAILABLE');
     if (!previous && !target && deps.workspaces.inspectDeliveryTarget) {
       const source = snapshot.capture.configuration.configuration.source;
       let localPath = source.location; let selectionOperationId: string | null = null; let selectedIdentity: string | null = null;
-      if (source.kind === 'github') {
+      const integrationTarget = storage.getIntegrationTarget(delivery.id);
+      if (integrationTarget) {
+        localPath = integrationTarget.localPath; selectedIdentity = integrationTarget.rootIdentity;
+      } else if (source.kind === 'github') {
         const intent = snapshot.capture.v3Delivery?.publication_target;
         if (!intent) blocked('PUBLICATION_TARGET_REQUIRED');
         const intentHash = snapshot.capture.v3Delivery!.publication_target_hash!;
@@ -263,12 +283,22 @@ export function createPublication(deps: PublicationDependencies) {
         if (selection!.view.repository_id !== intent!.repository_id || selection!.view.local_path !== (intent!.selection.kind === 'clone' ? intent!.selection.destination : intent!.selection.path)) blocked('TARGET_SELECTION_INVALID');
         localPath = selection!.view.local_path; selectionOperationId = selection!.view.operation_id; selectedIdentity = selection!.expected.directoryIdentity;
       }
-      const inspected = await deps.workspaces.inspectDeliveryTarget(localPath,{ attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
+      const task = { attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
         contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
         repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
-        baseBranch:snapshot.capture.configuration.configuration.base_branch,baseSha:delivery.baseSha },
-        { approvedRef:delivery.gitRef!,contentIdentity:delivery.contentIdentity!,baseSha:delivery.baseSha });
+        baseBranch:snapshot.capture.configuration.configuration.base_branch,baseSha:delivery.baseSha };
+      let inspected;
+      try { inspected = await deps.workspaces.inspectDeliveryTarget(localPath,task,task); }
+      catch (error) {
+        if (!(error instanceof CaptureError) || error.code !== 'DELIVERY_BASE_CHANGED' || !deps.adaptIntegration || !deps.workspaces.inspectIntegrationTarget) throw error;
+        const integration = await deps.workspaces.inspectIntegrationTarget(localPath,task);
+        if (selectedIdentity && integration.rootIdentity !== selectedIdentity) blocked('DELIVERY_TARGET_CHANGED');
+        if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
+        await deps.adaptIntegration(delivery.id,command.operationId,integration);
+        return blocked('INTEGRATION_REVIEW_PENDING');
+      }
       if (selectedIdentity && inspected.local_identity.root_identity !== selectedIdentity) blocked('DELIVERY_TARGET_CHANGED');
+      if (integrationTarget) inspected = { ...inspected,branch_ref:`${inspected.branch_ref}-r${delivery.round}` };
       const plan: DeliveryTargetPlan = { operation_id:command.operationId,selection_operation_id:selectionOperationId,
         delivery_id:delivery.id,attempt_id:snapshot.status.id,repository_id:inspected.repository_id,local_path:inspected.local_path,
         local_identity:inspected.local_identity,branch_ref:inspected.branch_ref,task_type:inspected.task_type,task_description:inspected.task_description,
@@ -429,7 +459,10 @@ export function createPublication(deps: PublicationDependencies) {
         const unknown = targetPending || storage.getEffects(command.attemptId).some(e => ['running','unknown'].includes(e.state));
         storage.finishPublicationRequest(command.operationId, unknown ? 'unknown' : 'succeeded', unknown ? 'EFFECT_UNRESOLVED' : null);
       } catch (error) {
-        const code = error instanceof OperationError ? error.code : 'PUBLICATION_FAILED';
+        const code = error instanceof OperationError || error instanceof CaptureError ? error.code : 'PUBLICATION_FAILED';
+        if (code === 'INTEGRATION_REVIEW_PENDING') {
+          storage.finishPublicationRequest(command.operationId,'succeeded',code); return;
+        }
         const unknown = storage.getEffects(command.attemptId).some(e => ['running','unknown'].includes(e.state));
         storage.finishPublicationRequest(command.operationId, unknown ? 'unknown' : 'failed', code);
         deps.logFailure(code);
@@ -480,7 +513,7 @@ export function createPublication(deps: PublicationDependencies) {
       const d = storage.getDelivery(deliveryId).delivery; const a = storage.getAttempt(d.attemptId);
       if (a.result || a.suspension || storage.getReview(deliveryId)?.state !== 'approved') return;
       await targets.ensureCaptured(deliveryId);
-      const mode = storage.getAttemptCapture(a.id).configuration.configuration.default_delivery_mode;
+      const mode = storage.getPublicationSummary(a.id,deliveryId).mode;
       const current = storage.getAttempt(a.id);
       accept({ operationId: randomUUID(), attemptId: a.id, expectedRevision: `"${a.id}:${current.revision}"`, kind: 'publication.complete', body: { deliveryId, authorizedMode: mode, authorized: true } });
     },

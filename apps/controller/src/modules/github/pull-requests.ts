@@ -16,7 +16,7 @@ const query = `query FactoryPullRequests($repositoryId:ID!,$head:String!,$headRe
   } } }
 }`;
 export const prUnknown = (reason: string): GitHubMutationResult => ({ state: 'unknown',receipt: null,reason,retryAtMs: null });
-export async function inspectPullRequest(reader: GraphQLReader, effect: EffectView, accountId: string): Promise<GitHubMutationResult> {
+export async function inspectPullRequest(reader: GraphQLReader, effect: EffectView, accountId: string, requireApprovedBase = false): Promise<GitHubMutationResult> {
   if (!Value.Check(EffectView,effect) || effect.kind !== 'pull_request') return prUnknown('EFFECT_INPUT_INVALID');
   const i = effect.expectedIdentity;
   if (!i.repositoryId || !effect.attemptId || effect.creationId || !i.branchRef?.startsWith('refs/heads/') || !i.baseBranch || !i.marker || !i.bodyHash || !i.commitSha || !i.title) return prUnknown('EFFECT_INPUT_INVALID');
@@ -24,6 +24,7 @@ export async function inspectPullRequest(reader: GraphQLReader, effect: EffectVi
   const response = await collect(reader.scope(),query,{ repositoryId: i.repositoryId,head,headRef: i.branchRef,baseRef: `refs/heads/${i.baseBranch}` }, data => {
     const node = object(data.node);
     if (node.id !== i.repositoryId || object(object(node.headRef).target).oid !== i.commitSha || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(string(object(object(node.baseRef).target).oid))) throw new Error('IDENTITY_INVALID');
+    if (requireApprovedBase && i.parentSha && object(object(node.baseRef).target).oid !== i.parentSha) throw new Error('BASE_CHANGED');
     return node.pullRequests;
   }, node => node);
   if (response.state !== 'complete' || !response.data) return { ...prUnknown('PR_READ_INCOMPLETE'),retryAtMs: response.retryAtMs };

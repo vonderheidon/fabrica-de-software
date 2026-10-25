@@ -169,6 +169,16 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       working_state_hash: found.workingStateHash,index_hash: found.indexHash,
     },branch_ref: `refs/heads/${branch}`,task_type: identity.type,task_description: identity.description };
   }
+  async function inspectIntegrationTarget(path: string,task: DeliveryTaskInput) {
+    const found = await observe(path,task,task,false);
+    await gitRun(found.root,['check-ref-format','--branch',task.baseBranch]);
+    const local = (await gitRun(found.root,['rev-parse','--verify','--end-of-options',`refs/heads/${task.baseBranch}^{commit}`])).trim();
+    const ref = githubReference(task.repositoryUrl)!;
+    const remote = await github.resolveBranch(ref,task.baseBranch);
+    if (!oid.test(local) || remote.state !== 'complete' || remote.data?.repositoryId !== task.repositoryId || remote.data.sha !== local) targetError('DELIVERY_BASE_CHANGED');
+    await gitRun(found.root,['merge-base','--is-ancestor',task.baseSha,local]);
+    return { baseSha:local,localPath:found.root,rootIdentity:found.rootIdentity };
+  }
   async function reconcileLocalCommit(delivery: Delivery,effect: EffectView,target: SealedTarget): Promise<TargetCommitResult> {
     try {
       const c = await localContext(delivery,effect,target,false); const observed = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
@@ -270,5 +280,5 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         found.head !== target.local_identity.observed_head || found.observedBranchRef !== target.local_identity.observed_branch_ref ||
         found.workingStateHash !== target.local_identity.working_state_hash || found.indexHash !== target.local_identity.index_hash) targetError('DELIVERY_CHECKOUT_CHANGED');
   }
-  return { inspectDeliveryTarget,verifyDeliveryTarget,createLocalCommit,reconcileLocalCommit };
+  return { inspectDeliveryTarget,inspectIntegrationTarget,verifyDeliveryTarget,createLocalCommit,reconcileLocalCommit };
 }

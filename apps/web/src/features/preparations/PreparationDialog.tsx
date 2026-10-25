@@ -1,4 +1,5 @@
 import { CustomSelect } from '../../app/CustomSelect.js';
+import { deliveryModeLabel, deliveryModeDescription } from '../../app/delivery-modes.js';
 import { knownProjectDeletion, rememberProjectDeletion, useProjectDeletionRestriction } from '../projects/ProjectDeletionPendingNotice.js';
 import { isProjectDeletionCompleted } from '../../api/project-deletion.js';
 import { startAttemptBody } from '../attempts/execution-requests.js';
@@ -29,12 +30,15 @@ if (typeof window !== 'undefined') window.addEventListener('factory-project-dele
   }
 });
 const modes: readonly { value: DeliveryMode; label: string }[] = [
-  { value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit local' }, { value: 'pr', label: 'Pull request' },
+  { value: 'icr', label: deliveryModeLabel.icr }, { value: 'commit', label: deliveryModeLabel.commit }, { value: 'pr', label: deliveryModeLabel.pr },
 ];
-const savedKey = (projectId: string, previousAttemptId?: string | null, initialIssueId?: string | null): string => JSON.stringify([projectId, previousAttemptId ?? 'new', initialIssueId ?? null]);
+const savedKey = (projectId: string, previousAttemptId?: string | null, initialIssueId?: string | null, scope?: string | null): string => JSON.stringify([projectId, previousAttemptId ?? 'new', initialIssueId ?? null, scope]);
+const referenceKey = (identity: string) => `factory.preparation-reference.v1:${identity}`;
 const startRequestTimeoutMs = 30_000;
 
 export function PreparationDialog({ projectId, initialIssueId = null, previousAttemptId = null, onOpenAttempt }: Props) {
+  const [preparationScope, setPreparationScope] = useState<string | null>(null);
+  const [restoringDraft, setRestoringDraft] = useState(true);
   const deletionRestricted = useProjectDeletionRestriction(projectId);
   const [issues, setIssues] = useState<IssueOptions | null>(null);
   const [projectName, setProjectName] = useState('Consultando nome do projeto…');
@@ -66,7 +70,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const startCommandRef = useRef<{ operationId: string; body: ReturnType<typeof startAttemptBody>; etag: string } | null>(null);
   const createPendingRef = useRef(false);
   const startInFlightRef = useRef(false);
-  const identity = projectId ? savedKey(projectId, previousAttemptId, initialIssueId) : '';
+  const identity = projectId ? savedKey(projectId, previousAttemptId, initialIssueId, preparationScope) : '';
 
   const installDraft = useCallback((value: PreparationDraft) => {
     if (projectId && isProjectDeletionCompleted(projectId)) return;
@@ -76,10 +80,11 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   }, [identity]);
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !preparationScope) return;
     let active = true;
     const controller = new AbortController();
-    const key = savedKey(projectId, previousAttemptId, initialIssueId);
+    const key = savedKey(projectId, previousAttemptId, initialIssueId, preparationScope);
+    setRestoringDraft(true);
     setProjectName('Consultando nome do projeto…');
     void requestJson<ProjectDetail>(`/api/v1/projects/${encodeURIComponent(projectId)}`, { signal: controller.signal }).then((detail) => {
       if (active) { rememberProjectDeletion(projectId, detail.deletion); setProjectName(detail.project.name); }
@@ -87,6 +92,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     const saved = memory.get(key);
     const cached = saved && (!initialIssueId || saved.choices.issue_id === initialIssueId) ? saved : undefined;
     if (cached) {
+      setRestoringDraft(false);
       draftRef.current = cached;
       setDraftState(cached);
       setIssueId(cached.choices.issue_id);
@@ -100,14 +106,30 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
         latestChoicesRef.current = cached.choices;
       }).catch((error: unknown) => { if (active) setSaveError(errorMessage(error)); });
     }
-    if (!cached) setConfigurationReady(false);
+    if (!cached) {
+      setConfigurationReady(false);
+      let stored: string | null = null;
+      try { stored = window.localStorage.getItem(referenceKey(key)); } catch { /* Server state remains the source of truth. */ }
+      if (stored && /^[0-9a-f-]{36}$/i.test(stored)) {
+        void requestJsonWithMetadata<{ preparation: Preparation }>(`/api/v1/preparations/${encodeURIComponent(stored)}`, { signal:controller.signal }).then(({ data, etag }) => {
+          if (!active || !etag || data.preparation.project_id !== projectId || initialIssueId && data.preparation.issue_id !== initialIssueId ||
+            previousAttemptId && data.preparation.previous_attempt_id !== previousAttemptId) return;
+          const value: PreparationDraft = { preparationId:data.preparation.id,etag,choices:data.preparation,savedChoices:data.preparation,current:data.preparation,conflict:null };
+          installDraft(value); latestChoicesRef.current = value.choices;
+          setIssueId(value.choices.issue_id); setMode(value.choices.delivery_mode); setGuidance(value.choices.guidance);
+        }).catch((error: unknown) => {
+          if (!active) return;
+          if (error instanceof HttpError && error.status === 404) { try { window.localStorage.removeItem(referenceKey(key)); } catch { /* No server write. */ } }
+          else setSaveError(errorMessage(error));
+        }).finally(() => { if (active) setRestoringDraft(false); });
+      } else setRestoringDraft(false);
+    }
     void requestJson<ConfigurationView>(`/api/v1/projects/${encodeURIComponent(projectId)}/configuration`, { signal: controller.signal }).then((configuration) => {
       if (!active) return;
       rememberProjectDeletion(projectId, configuration.deletion);
       window.dispatchEvent(new Event('factory-project-deletion-pending'));
       if (cached) return;
-      setMode(configuration.configuration.default_delivery_mode);
-      setGuidance(configuration.configuration.guidance);
+      if (!draftRef.current) { setMode(configuration.configuration.default_delivery_mode); setGuidance(configuration.configuration.guidance); }
       setConfigurationReady(true);
     }).catch((error: unknown) => { if (active) { setIssuesError(errorMessage(error)); setConfigurationReady(false); } });
     const params = new URLSearchParams({ limit: '100' });
@@ -122,12 +144,12 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
       }).catch((error: unknown) => { if (active) setIssuesError(errorMessage(error)); });
     }
     return () => { active = false; controller.abort(); if (timerRef.current !== null) window.clearTimeout(timerRef.current); };
-  }, [installDraft, issueReload, projectId, previousAttemptId, initialIssueId]);
+  }, [installDraft, issueReload, projectId, previousAttemptId, initialIssueId, preparationScope]);
 
   useEffect(() => {
     let active = true;
     void requestJson<SettingsView>('/api/v1/settings').then((settings) => {
-      if (active) { setProfiles(settings.profiles); setProfilesLoadState('ready'); }
+      if (active) { setProfiles(settings.profiles); setProfilesLoadState('ready'); setPreparationScope(JSON.stringify([settings.settings.installation_id,settings.settings.account_id])); }
     }).catch(() => {
       if (active) { setProfiles([]); setProfilesLoadState('error'); }
     });
@@ -136,7 +158,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
 
   useEffect(() => {
     if (projectId && (knownProjectDeletion(projectId) || isProjectDeletionCompleted(projectId))) return;
-    if (!issues || !configurationReady || !projectId || draftRef.current || createPendingRef.current || !issueId) return;
+    if (restoringDraft || !preparationScope || saveError || !issues || !configurationReady || !projectId || draftRef.current || createPendingRef.current || !issueId) return;
     createPendingRef.current = true;
     setCreating(true);
     let active = true;
@@ -147,7 +169,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
       setIssueId(value.choices.issue_id); setMode(value.choices.delivery_mode); setGuidance(value.choices.guidance);
     }).catch((error: unknown) => { if (active) setIssuesError(errorMessage(error)); }).finally(() => { createPendingRef.current = false; if (active) setCreating(false); });
     return () => { active = false; };
-  }, [configurationReady, guidance, identity, installDraft, issueId, issues, mode, previousAttemptId, projectId]);
+  }, [configurationReady, guidance, identity, installDraft, issueId, issues, mode, previousAttemptId, projectId, restoringDraft, preparationScope, saveError]);
 
   const choices = useMemo<PreparationChoices | null>(() => {
     if (!draft) return null;
@@ -247,6 +269,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
       safelyResolveOperation(command.operationId);
       startCommandRef.current = null;
       setStartState({ status: 'accepted', operation: data });
+      try { window.localStorage.removeItem(referenceKey(identity)); } catch { /* No server write. */ }
       if (data.resource.type === 'attempt') onOpenAttempt(data.resource.id);
     } catch (error) {
       if (error instanceof HttpError && error.status < 500) {
@@ -282,6 +305,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
         safelyResolveOperation(operationId);
         startCommandRef.current = null;
         setStartState({ status: 'observed', operation });
+        try { window.localStorage.removeItem(referenceKey(identity)); } catch { /* No server write. */ }
         onOpenAttempt(operation.resource.id);
         return;
       }
@@ -319,7 +343,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const target = draft ? (draft.choices.publication_target === undefined ? draft.current.publication_target : draft.choices.publication_target) ?? null : null;
   const targetRepositoryId = configuration?.configuration.source.kind === 'github' ? configuration.configuration.source.repository_id ?? null : null;
   const hasUrlTargetRequirement = configuration?.configuration.source.kind === 'github' && mode !== 'icr';
-  const showTargetField = hasUrlTargetRequirement || target !== null;
+  const showTargetField = configuration?.configuration.source.kind === 'github' || hasUrlTargetRequirement || target !== null;
   const targetCandidate = nativeSelection.candidates.project_directory;
   const targetSelectionStatus = nativeSelection.state.status !== 'idle' && nativeSelection.state.kind === 'project_directory' ? nativeSelection.state : null;
   const targetSelectionMessage = targetSelectionStatus ? nativeSelectionMessage(targetSelectionStatus) : null;
@@ -333,13 +357,13 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     <section className="card preparation-section"><div className="eyebrow">Escolha do trabalho</div><div className="form-grid">
       <div className="form-field"><label htmlFor="preparation-project">Projeto</label><input id="preparation-project" value={projectName} readOnly aria-describedby="preparation-project-help" /><FieldHelp id="preparation-project-help" label="Projeto" /></div>
       <div className="form-field"><label htmlFor="preparation-issue">Issue</label><CustomSelect id="preparation-issue" value={issueId} aria-describedby="preparation-issue-help" onChange={(event) => { const value = event.currentTarget.value; if (draftRef.current) updateChoices((current) => ({ ...current, issue_id: value })); else setIssueId(value); }} disabled={!issues || !configurationReady || creating}><option value="">Selecione uma issue elegível</option>{issueId && !issues?.items.some((item) => item.content_id === issueId) && <option value={issueId}>{draft?.current.issue?.id === issueId ? draft.current.issue.title : previousAttemptId ? 'Issue da tentativa anterior (indisponível na lista atual)' : 'Consultando issue selecionada…'}</option>}{issues?.items.filter((item) => item.kind === 'issue' && item.executable && item.content_id).map((item) => <option key={item.id} value={item.content_id ?? ''}>{item.title}</option>)}</CustomSelect><FieldHelp id="preparation-issue-help" label="Issue" /></div>
-      <div className="form-field"><label htmlFor="preparation-delivery-mode">Modo de entrega</label><CustomSelect id="preparation-delivery-mode" value={mode} aria-describedby="preparation-delivery-mode-help" onChange={(event) => { const value = event.currentTarget.value as DeliveryMode; setMode(value); updateChoices((current) => ({ ...current, delivery_mode: value })); }} disabled={!configurationReady || !draft}>{modes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</CustomSelect><FieldHelp id="preparation-delivery-mode-help" label="Modo de entrega" /></div>
+      <div className="form-field"><label htmlFor="preparation-delivery-mode">Modo de entrega</label><CustomSelect id="preparation-delivery-mode" value={mode} aria-describedby="preparation-delivery-mode-help" onChange={(event) => { const value = event.currentTarget.value as DeliveryMode; setMode(value); updateChoices((current) => ({ ...current, delivery_mode: value })); }} disabled={!configurationReady || !draft}>{modes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</CustomSelect><p id="preparation-delivery-mode-help" className="field-guidance">{deliveryModeDescription[mode]}</p></div>
       {showTargetField && <div className="form-field field-full publication-target-field">
         <label>Destino de entrega</label>
         <p className="muted">Salvar guarda o destino; não cria o clone. A escolha não confirma que um clone existente corresponde ao repositório.</p>
         {!targetRepositoryId && <p className="notice" role="status">{configuration?.configuration.source.kind === 'local' ? 'Projetos locais usam o clone cadastrado. Limpe esta intenção adicional.' : 'O repositório da issue ainda não está confirmado para associar um destino.'}</p>}
         {target && <>
-          <p>{target.selection.kind === 'existing_clone' ? 'Usar clone existente' : 'Criar clone no destino escolhido'}</p>
+          <p>{target.selection.kind === 'existing_clone' ? 'Intenção: usar clone existente' : 'Intenção: clonagem futura'}</p>
           <label htmlFor="preparation-target-path">Caminho local</label>
           <input id="preparation-target-path" value={target.selection.kind === 'existing_clone' ? target.selection.path : target.selection.destination} readOnly maxLength={32768} aria-describedby="preparation-target-path-help" />
           <p id="preparation-target-path-help" className="field-guidance">Repositório associado à issue atual. Confira este caminho no resumo antes de autorizar o início.</p>
@@ -353,7 +377,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
           <button type="button" onClick={() => applyTarget({ kind: 'existing_clone', path: targetCandidate })} disabled={!targetRepositoryId}>Usar como clone existente</button>
           <label htmlFor="preparation-target-folder-name">Nome da nova pasta dentro deste local</label>
           <input id="preparation-target-folder-name" value={targetFolderName} onChange={event => setTargetFolderName(event.currentTarget.value)} maxLength={255} placeholder="Nome da nova pasta" />
-          <button type="button" onClick={() => { const separator = targetCandidate.includes('\\') ? '\\' : '/'; const parent = targetCandidate.replace(/[\\/]+$/, ''); applyTarget({ kind: 'clone', destination: `${parent}${separator}${targetFolderName}` }); }} disabled={!targetRepositoryId || !validTargetFolderName(targetFolderName) || targetCandidate.length + targetFolderName.length + 1 > 32768}>Criar clone neste local</button>
+          <button type="button" onClick={() => { const separator = targetCandidate.includes('\\') ? '\\' : '/'; const parent = targetCandidate.replace(/[\\/]+$/, ''); applyTarget({ kind: 'clone', destination: `${parent}${separator}${targetFolderName}` }); }} disabled={!targetRepositoryId || !validTargetFolderName(targetFolderName) || targetCandidate.length + targetFolderName.length + 1 > 32768}>Planejar clonagem neste local</button>
         </div>}
         {configuration?.configuration.source.kind === 'github' && mode === 'icr' && <p className="muted">O modo ICR não exige nem autoriza clonagem do destino local de entrega.</p>}
       </div>}
@@ -377,6 +401,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     {draft && <ConditionNotices items={draft.current.prerequisites.filter((item) => !issueBlockers.includes(item.code))} section="issue" projectId={projectId} />}
     </section>
 
+    {!draft && saveError && <div className="queue-error" role="alert"><p>{saveError}</p><p>Não foi possível reler a preparação salva. Consulte novamente antes de iniciar outra.</p><button type="button" onClick={() => { setSaveError(null); setIssueReload(value => value + 1); }}>Consultar preparação salva</button></div>}
     {!draft && <div className="preparation-actions dialog-actions"><p>Selecione uma issue elegível para revisar a tentativa.</p><button type="button" className="primary" disabled>Revisar e autorizar</button></div>}
     {draft && <>
       <section className="card preparation-section"><div className="line panel-title"><div><div className="eyebrow">Antes de iniciar</div><h3>Resumo da tentativa</h3></div><span className={`pill ${saving ? 'warn' : 'neutral'}`}>{saving ? 'Salvando' : 'Salvo no controlador'}</span></div>
@@ -442,6 +467,7 @@ async function createPreparationDraft(identity: string, projectId: string, choic
     if (!etag) throw new Error('A preparação foi criada sem revisão consultável. Atualize os dados antes de iniciar.');
     const value: PreparationDraft = { preparationId: data.preparation.id, etag, choices: data.preparation, savedChoices: data.preparation, current: data.preparation, conflict: null };
     memory.set(identity, value);
+    try { window.localStorage.setItem(referenceKey(identity), value.preparationId); } catch { /* The saved preparation remains on the controller. */ }
     return value;
   })();
   creationPromises.set(identity, pending);

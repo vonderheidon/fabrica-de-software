@@ -27,7 +27,7 @@ export function createEffectWriter(reader: GraphQLReader, authorization?: GitHub
     if ((effect.kind === 'issue_comment' || effect.kind === 'pull_request') && (typeof body !== 'string' || body.length > 60_000 || !identity.marker || !body.startsWith(identity.marker+'\n') || createHash('sha256').update(body).digest('hex') !== identity.bodyHash)) return denied('EFFECT_INPUT_INVALID');
     if (effect.kind === 'pull_request') {
       if (!identity.baseBranch || !identity.branchRef?.startsWith('refs/heads/') || !identity.commitSha || !identity.title || /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:#[0-9]|https:\/\/github\.com\/)/i.test(body!)) return denied('EFFECT_INPUT_INVALID');
-      const prior = await inspectPullRequest(reader,effect,accountId);
+      const prior = await inspectPullRequest(reader,effect,accountId,true);
       if (prior.state === 'confirmed') return prior;
       if (prior.reason !== 'PR_NOT_OBSERVED') return denied(prior.reason ?? 'PR_READ_INCOMPLETE');
       try { await authorize?.(); } catch { return denied('EFFECT_AUTHORITY_REVOKED'); }

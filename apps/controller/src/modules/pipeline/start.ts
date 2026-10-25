@@ -18,7 +18,7 @@ export interface PipelineDependencies {
   github?: Pick<GitHub, 'getIssueContextById'>;
   storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'createPreparation' | 'getPreparation' | 'prepareDecisionSuccessor'>; execution: Execution;
   queue?: { observe: (query: QueueQuery) => Promise<{ observation: QueueObservation; etag: string; items: readonly QueueItem[] }> };
-  workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment'>>;
+  workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment' | 'importIntegrationBase'>>;
   observeTools: () => Promise<ToolObservation[]>;
   verification?: Verification;
   publication?: Pick<PublicationDependencies, 'github' | 'workspaces' | 'verification'>;
@@ -124,6 +124,7 @@ export function createPipeline(deps: PipelineDependencies) {
     if (!Value.Check(StartAttempt, body)) throw new OperationError(400, 'START_INVALID', 'The start request is invalid.');
     const command = { ...context, body };
     const recovered = storage.recoverAttempt(command); if (recovered) return recovered;
+    storage.assertStartsAllowed();
     if (closed) throw new OperationError(503, 'PIPELINE_CLOSED', 'The controller is shutting down.');
     if (context.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
     const saved = storage.getPreparation(body.preparationId);
@@ -244,6 +245,11 @@ export function createPipeline(deps: PipelineDependencies) {
   }
   const recovery = createRecovery(deps, enqueue, revoke, () => closed);
   const publication = deps.publication ? createPublication({ ...deps.publication, storage, enqueue, isClosed: () => closed, logFailure: deps.logFailure,
+    adaptIntegration: async (id,operationId,target) => {
+      if (!workspaces.importIntegrationBase) throw new OperationError(409,'INTEGRATION_CONTEXT_UNAVAILABLE','Ambiente de adaptação indisponível. A versão aprovada foi preservada.');
+      const plan = storage.beginIntegration(id,operationId,target);
+      if (plan) enqueue(() => launchCorrection(plan));
+    },
     cancelAttempt: async id => { await recovery.cancelAttempt(id, {}, { operationId: randomUUID(), expectedRevision: undefined }); } }) : null;
   async function checkContext(deliveryId: string, verificationId: string) {
     const checks = storage.getCheckHistory(deliveryId, { limit: '100' }).entries.filter(c => c.verificationId === verificationId);
@@ -361,6 +367,11 @@ export function createPipeline(deps: PipelineDependencies) {
     const deliveryId = plan.review.deliveryId;
     try {
       await execution.preparePassageHandoff({ passageId: plan.review.passageId });
+      if (plan.integration) {
+        const previous = storage.getDelivery(deliveryId).delivery;
+        await execution.preparePassageHandoff({ passageId: plan.sourcePassageId });
+        await workspaces.importIntegrationBase!(previous,plan.integration.operationId,plan.integration);
+      }
       if (publication && !await authorityReady(publication.projectStage(plan.review.attemptId, 'inProgress'))) {
         waitingForAuthority.set(plan.review.attemptId,() => launchCorrection(plan)); return;
       }
@@ -372,11 +383,13 @@ export function createPipeline(deps: PipelineDependencies) {
         criterionIds: capture.criteria.map(c => c.id), previousFindingKeys: plan.findings.map(f => f.id), gitNexusRequired: false, roleResource: p.roleResource,
         task: JSON.stringify({ formatVersion: 1, round: p.binding.round, maximumRound: 1 + capture.configuration.configuration.correction_limit,
           review: plan.review, findings: plan.findings, criteria: capture.criteria,
+          ...(plan.integration ? { integration: plan.integration,
+            integrationInstructions: 'In this owned attempt checkout only, adapt the previously approved task delta to the supplied baseSha, already imported locally. Preserve changes present in that base, resolve conflicts within captured scope, and report additionalChangesJustification. Never touch the supplied operator localPath, never publish or change retained refs. The prior approval is historical. This round requires fresh mandatory checks, visual evidence when required, and independent review before any delivery commit, push or PR.' } : {}),
           checks: await checkContext(deliveryId, plan.review.verificationId),
           ...(plan.guidance ? { operatorGuidance: plan.guidance, guidanceHandling: 'Apply this contextual guidance without changing the captured criteria, profile, or correction limit.' } : {}),
           authority: 'Correct the supplied findings and their necessary consequences in this same checkout and session. Do not add requirements. Report findingResponses for every supplied finding id. Report additionalChangesJustification as null when no additional change was needed, otherwise explain additional changes for the independent Reviewer. Treat technical execution errors separately from demonstrated product defects. Stop all owned writers before execution_complete. This creates a new captured delivery and independent review.' }) });
     } catch (error) {
-      storage.recordDispatchFailure(plan.review.attemptId, error instanceof ExecutionError ? error.code : 'CORRECTION_DELIVERY_UNKNOWN'); throw error;
+      storage.recordDispatchFailure(plan.review.attemptId, error instanceof ExecutionError || error instanceof CaptureError ? error.code : 'CORRECTION_DELIVERY_UNKNOWN'); throw error;
     }
   }
   async function capture(claim: CaptureClaim): Promise<void> {

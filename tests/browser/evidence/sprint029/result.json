@@ -1,0 +1,101 @@
+{
+  "passed": true,
+  "surface": "Playwright MCP, compiled UI, controlled HTTP",
+  "captures": [
+    "tests/browser/evidence/sprint029/01-preparation-target.png",
+    "tests/browser/evidence/sprint029/02-failed-save.png",
+    "tests/browser/evidence/sprint029/03-icr-desktop.png",
+    "tests/browser/evidence/sprint029/04-commit.png",
+    "tests/browser/evidence/sprint029/04b-target-facts.png",
+    "tests/browser/evidence/sprint029/05-pr.png",
+    "tests/browser/evidence/sprint029/06-legacy.png",
+    "tests/browser/evidence/sprint029/07-adaptation.png",
+    "tests/browser/evidence/sprint029/08-refresh-failed.png",
+    "tests/browser/evidence/sprint029/09-lost-response-reopened.png",
+    "tests/browser/evidence/sprint029/10-narrow.png",
+    "tests/browser/evidence/sprint029/11-low.png",
+    "tests/browser/evidence/sprint029/12-continuation-390.png",
+    "tests/browser/evidence/sprint029/12-continuation-1100.png"
+  ],
+  "continuation_accessibility": [
+    {
+      "width": 390,
+      "height": 640,
+      "top": 268.15625,
+      "bottom": 312.15625,
+      "footer_top": 471.71875
+    },
+    {
+      "width": 1100,
+      "height": 480,
+      "top": 184.65625,
+      "bottom": 225.65625,
+      "footer_top": 368
+    }
+  ],
+  "browser": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+  "assets": [
+    "http://127.0.0.1:4310/assets/index-Ckp2x1mx.js"
+  ],
+  "mutations": [
+    {
+      "path": "/api/v1/projects/00000000-0000-4000-8000-000000000002/preparations",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/settings/selections",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/preparations/00000000-0000-4000-8000-000000000004",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/preparations/00000000-0000-4000-8000-000000000004",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/settings/selections",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/preparations/00000000-0000-4000-8000-000000000004",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/preparations/00000000-0000-4000-8000-000000000004",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/preparations/00000000-0000-4000-8000-000000000004",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/v1/attempts/00000000-0000-4000-8000-000000000001/publication/authorize-upgrade",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/attempts/00000000-0000-4000-8000-000000000001/publication/authorize-upgrade",
+      "method": "POST"
+    },
+    {
+      "path": "/api/v1/attempts/00000000-0000-4000-8000-000000000001/publication/authorize-upgrade",
+      "method": "POST"
+    }
+  ],
+  "errors": [],
+  "states": [
+    "preparation",
+    "reload",
+    "save_failure",
+    "icr",
+    "commit",
+    "pr",
+    "legacy",
+    "adaptation",
+    "refresh_failure",
+    "lost_response",
+    "narrow",
+    "low"
+  ]
+}

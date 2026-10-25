@@ -67,6 +67,7 @@ export function createTargetSelections(storage: Storage, workspaces: Partial<Tar
     },
     async ensureCaptured(deliveryId: string) {
       const delivery = storage.getDelivery(deliveryId).delivery; const capture = storage.getAttemptCapture(delivery.attemptId);
+      if (storage.getIntegrationTarget(deliveryId)) return;
       const target = capture.v3Delivery;
       if (!target?.publication_target || capture.configuration.configuration.default_delivery_mode === 'icr') return;
       const prior = storage.findTargetSelection(delivery.attemptId,deliveryId,{ operationId: target.authorization_operation_id,hash: target.publication_target_hash! })?.view;

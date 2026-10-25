@@ -150,6 +150,13 @@ it('continues an already authorized upgrade after known failure without requesti
   expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce(); expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 1 });
 });
 
+it('offers no higher mode until the currently authorized effects are confirmed', async () => {
+  const f = await fixture('icr'); await f.implement(); await f.approve();
+  f.workspaces.createTargetCommit.mockResolvedValueOnce({ state: 'failed_known',receipt: null,reason: 'DELIVERY_TARGET_UNAVAILABLE' });
+  await f.pipeline.authorizePublicationUpgrade(f.attemptId,upgrade(f,'commit'),f.context()); await f.pipeline.drain();
+  expect(f.storage.getPublicationSummary(f.attemptId)).toMatchObject({ mode: 'commit',localState: 'pending',upgrades: [] });
+});
+
 it('supports ICR to Commit followed by PR without repeating the local commit or the earlier comment', async () => {
   const f = await fixture('icr'); await f.implement(); await f.approve(); const capture = f.storage.getAttemptCapture(f.attemptId);
   await f.pipeline.authorizePublicationUpgrade(f.attemptId,upgrade(f,'commit'),f.context()); await f.pipeline.drain();
@@ -229,6 +236,53 @@ it('does not restore publication on restart and explicitly completes an authoriz
   } finally { storage.close(); }
 });
 
+it.each(['local_commit','push','pull_request'] as const)('reconciles a lost %s receipt after restart without repeating the effect', async kind => {
+  const f = await fixture(); await f.implement();
+  if (kind === 'local_commit') {
+    const create = f.workspaces.createTargetCommit.getMockImplementation()!;
+    f.workspaces.createTargetCommit.mockImplementationOnce(async (...args) => {
+      await create(...args); return { state:'unknown',receipt:null,reason:'RESPONSE_LOST' };
+    });
+  } else if (kind === 'push') {
+    const push = f.workspaces.pushApproved.getMockImplementation()!;
+    f.workspaces.pushApproved.mockImplementationOnce(async (...args) => {
+      const result = await push(...args); f.workspaces.reconcilePush.mockResolvedValue(result);
+      return { state:'unknown',receipt:null,reason:'RESPONSE_LOST' };
+    });
+  } else {
+    const mutate = f.mutateEffect.getMockImplementation()!;
+    f.mutateEffect.mockImplementation(async input => {
+      const result = await mutate(input);
+      return input.effect.kind === 'pull_request' ? { state:'unknown',receipt:null,reason:'RESPONSE_LOST',retryAtMs:null } : result;
+    });
+  }
+  await f.approve(); const deliveryId = f.status().deliveryId!;
+  expect(effect(f,kind).state).toBe('unknown');
+  const creates = f.workspaces.createTargetCommit.mock.calls.length;
+  const pushes = f.workspaces.pushApproved.mock.calls.length;
+  const prs = f.mutateEffect.mock.calls.filter(([x]) => x.effect.kind === 'pull_request').length;
+  await f.pipeline.close(); f.storage.close();
+  const storage = openStorage({ dataDirectory:f.directory });
+  try {
+    const tasks: Promise<void>[] = [];
+    const publication = createPublication({ storage,github:f.github,workspaces:f.workspaces,verification:f.verification,
+      cancelAttempt:async () => {},isClosed:() => false,logFailure:vi.fn(),enqueue:task => { tasks.push(task()); } });
+    expect(tasks).toEqual([]);
+    storage.interruptAttempts(); confirmTerminalStops(f,f.attemptId,storage.executionPersistence());
+    const context = () => ({ operationId:randomUUID(),expectedRevision:`"${f.attemptId}:${storage.getAttempt(f.attemptId).revision}"` });
+    publication.reconcile(f.attemptId,{ deliveryId },context()); await Promise.all(tasks);
+    expect(storage.getEffects(f.attemptId).find(e => e.kind === kind)?.state).toBe('confirmed');
+    expect(storage.getPublicationSummary(f.attemptId).localState).toBe('pending');
+    publication.complete(f.attemptId,{ deliveryId,authorizedMode:'pr',authorized:true },context()); await Promise.all(tasks);
+    expect(storage.getPublicationSummary(f.attemptId).localState).toBe('completed');
+    expect(f.workspaces.createTargetCommit).toHaveBeenCalledTimes(kind === 'local_commit' ? creates : 1);
+    expect(f.workspaces.pushApproved).toHaveBeenCalledTimes(kind === 'local_commit' ? pushes+1 : pushes);
+    expect(f.mutateEffect.mock.calls.filter(([x]) => x.effect.kind === 'pull_request')).toHaveLength(kind === 'pull_request' ? prs : prs+1);
+    expect(storage.getAttemptCapture(f.attemptId).configuration.configuration.default_delivery_mode).toBe('pr');
+    expect(f.db.pragma('foreign_key_check')).toEqual([]);
+  } finally { storage.close(); }
+});
+
 it('migrates actual v14 journals without fabricating upgrades, preserving receipts and immutable history', async () => {
   const f = await fixture('commit'); await f.implement(); await f.approve(); const before = effects(f); const instance = f.storage.getSettings().installation_id;
   await f.pipeline.close(); f.storage.close();
@@ -241,7 +295,7 @@ it('migrates actual v14 journals without fabricating upgrades, preserving receip
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(42); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
+    expect(storage.getDiagnostics().schemaVersion).toBe(49); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }
