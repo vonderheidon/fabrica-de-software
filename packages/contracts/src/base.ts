@@ -18,6 +18,27 @@ export const Capability = Type.Object({
 }, { additionalProperties: false });
 export type Capability = Static<typeof Capability>;
 
+export const ShutdownCommand = Type.Object({
+  action: Type.Union(['pause_starts', 'close_when_idle', 'resume_starts'].map(action => Type.Literal(action))), authorized: Type.Literal(true),
+}, { additionalProperties: false });
+export type ShutdownCommand = Static<typeof ShutdownCommand>;
+export const ShutdownQuery = Type.Object({ cursor: Type.Optional(text(2048)), limit: Type.Optional(Type.String({ pattern: '^(?:[1-9]|[1-9][0-9]|100)$' })) }, { additionalProperties: false });
+export type ShutdownQuery = Static<typeof ShutdownQuery>;
+export const ShutdownWork = Type.Object({
+  type: Type.Union(['attempt', 'execution', 'publication', 'creation', 'deletion', 'storage_transition', 'accepted_operation'].map(type => Type.Literal(type))),
+  id: text(256), attempt_id: Type.Union([OperationId, Type.Null()]), project_id: Type.Union([OperationId, Type.Null()]),
+  state: text(128), cause: Type.Union([text(), Type.Null()]), recovery: Type.Union([text(), Type.Null()]),
+}, { additionalProperties: false });
+export type ShutdownWork = Static<typeof ShutdownWork>;
+export const ShutdownView = Type.Object({
+  revision, generation: revision, starts_paused: Type.Boolean(), automation_enabled: Type.Boolean(), closing_committed: Type.Boolean(),
+  state: Type.Union(['running', 'paused', 'draining', 'ready_to_close', 'blocked', 'closing'].map(state => Type.Literal(state))),
+  active_work: Type.Array(ShutdownWork, { maxItems: 100 }), has_more: Type.Boolean(), remaining_work_count: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  operation_id: Type.Union([OperationId, Type.Null()]), pause_capability: Capability, close_when_idle_capability: Capability, resume_starts_capability: Capability,
+  event_cursor: Type.String({ pattern: '^[0-9]+$', maxLength: 20 }), next_cursor: Type.Union([text(2048), Type.Null()]),
+}, { additionalProperties: false });
+export type ShutdownView = Static<typeof ShutdownView>;
+
 export const MeasuredValue = Type.Union([
   Type.Object({ state: Type.Literal('measured'), value: Type.Number({ minimum: 0 }), unit: text(64) }, { additionalProperties: false }),
   Type.Object({ state: Type.Literal('unavailable'), reason: text(), affected_requirements: Type.Array(text(128), { minItems: 1, maxItems: 100 }) }, { additionalProperties: false }),
@@ -115,6 +136,9 @@ export const StorageTransitionProgress = Type.Object({
   generation: Type.Integer({ minimum: 1 }), revision: Type.Integer({ minimum: 1 }),
 }, { additionalProperties: false });
 export const OperationProgress = Type.Union([StorageTransitionProgress, Type.Object({
+  kind: Type.Literal('shutdown'), state: text(128), cause: Type.Union([text(), Type.Null()]), recovery: Type.Union([text(), Type.Null()]),
+  shutdown: ShutdownView, target_selection: Type.Null(), decision: Type.Null(), transition_step: Type.Null(),
+}, { additionalProperties: false }), Type.Object({
   kind: Type.Literal('publication_target'), state: PublicationTargetSelection.properties.state,
   cause: PublicationTargetSelection.properties.reason, recovery: PublicationTargetSelection.properties.recovery,
   target_selection: PublicationTargetSelection, decision: Type.Null(), shutdown: Type.Null(), transition_step: Type.Null(),

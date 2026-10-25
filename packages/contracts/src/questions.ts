@@ -1,4 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
+import { StageActivity } from './stage-activity.js';
 import { ConfiguredLimit, MeasuredValue, OperationId } from './base.js';
 import { ExecutionQuestion } from './execution.js';
 import { Criterion } from './preparations.js';
@@ -35,6 +36,7 @@ export const PassageMeasurements = Type.Object({
 }, closed);
 export type PassageMeasurements = Static<typeof PassageMeasurements>;
 export const AttemptMeasurements = Type.Object({
+  stageActivity: StageActivity,
   activeTime: MeasuredValue, humanWait: MeasuredValue, cost: MeasuredValue,
   activeLimit: ConfiguredLimit, questionTtl: ConfiguredLimit,
   activeLimitState: Type.Union(['within_limit', 'expired', 'unavailable', 'not_applicable'].map(s => Type.Literal(s))),

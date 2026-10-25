@@ -150,7 +150,7 @@ describe('non-destructive removal of persisted inference ceilings', () => {
       ledger: f.db.prepare('SELECT * FROM schema_migrations WHERE version<=20 ORDER BY version').all() });
     const before = history(); const identity = f.db.prepare('SELECT installation_id FROM factory_settings').get();
     const storage = openStorage({ dataDirectory: f.directory }); resources.push(storage);
-    expect(storage.getDiagnostics().schemaVersion).toBe(42);
+    expect(storage.getDiagnostics().schemaVersion).toBe(49);
     expect(history()).toEqual(before);
     expect(f.db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
     expect(f.db.prepare<[], { name: string }>('PRAGMA table_info(factory_settings)').all().map(row => row.name)).not.toContain('cost_defaults_json');

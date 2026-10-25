@@ -39,7 +39,7 @@ describe('persisted local tool preferences', () => {
 
     applyMigrations(database, migrations, () => { throw new Error('existing installation must not be reseeded'); });
 
-    expect(database.pragma('user_version', { simple: true })).toBe(42);
+    expect(database.pragma('user_version', { simple: true })).toBe(49);
     expect(database.prepare("SELECT installation_id,account_id,gh_executable_path,tool_preferences_json FROM factory_settings WHERE id='local'").get())
       .toEqual({ ...before, tool_preferences_json: JSON.stringify(emptyPreferences()) });
     expect(database.pragma('foreign_key_check')).toEqual([]);

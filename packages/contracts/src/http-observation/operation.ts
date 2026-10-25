@@ -2,6 +2,7 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { OperationId, OperationReceipt } from '../base.js';
 import { AttemptSummary } from '../http-execution/queries.js';
+import { StageActivity } from '../stage-activity.js';
 const closed = { additionalProperties: false } as const;
 const text = (maxLength = 2048) => Type.String({ minLength: 1, maxLength });
 const time = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
@@ -59,6 +60,7 @@ export type DiagnosticsView = Static<typeof DiagnosticsView>;
 export const OperationSummaryQuery = Type.Object({ project_id: Type.Optional(OperationId) }, closed);
 export type OperationSummaryQuery = Static<typeof OperationSummaryQuery>;
 export const OperationSummary = Type.Object({
+  stage_activity: Type.Union([StageActivity, Type.Null()]),
     account: Type.Object({ id: Type.Union([text(256), Type.Null()]), login: Type.Union([text(100), Type.Null()]),
         observed_id: Type.Union([text(256), Type.Null()]), observed_at_ms: Type.Union([time, Type.Null()]) }, closed),
     host: Type.Object({ designated: Type.Union([text(256), Type.Null()]), current: text(256), matches: Type.Boolean() }, closed),

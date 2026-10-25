@@ -1,6 +1,7 @@
 import { serializeOperationReceipt } from './common-json.js';
 import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
+import { assertStartsAllowed } from './shutdown.js';
 import { hostname } from 'node:os';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -91,6 +92,7 @@ export function attemptEvent(db: Database.Database, id: string, type: string, pa
 export function createAttempt(db: Database.Database, input: CreateAttempt): { created: boolean; operation: StoredOperation } {
   return guarded(() => db.transaction(() => {
     const recovered = recoverAttempt(db, input.command); if (recovered) return { created: false, operation: recovered };
+    assertStartsAllowed(db);
     const capture = input.capture;
     if (!Value.Check(AttemptCapture, capture)) throw new OperationError(400, 'CAPTURE_INVALID', 'The attempt capture is invalid.');
     const preparation = readPreparation(db, input.command.body.preparationId);
@@ -156,9 +158,9 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
       VALUES (?,?,?,'attempt.start','attempt',?,?,?,?)`).run(input.command.operationId, settings.installation_id, settings.account_id, id,
       commandHash(input.command), JSON.stringify({ etag: input.command.expectedRevision }), serializeOperationReceipt(receipt));
-    db.prepare(`INSERT INTO attempts(id,operation_id,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,issue_id,capture_json,phase,suspension,diagnostic,created_at_ms,updated_at_ms,source)
-      VALUES (?,?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?)`).run(id, input.command.operationId, preparation.view.project_id, config.configuration.id,
-      preparation.view.id, preparation.view.revision, capture.accountId, capture.issue.repository.id, capture.issue.id, serializeCapture(capture), suspension, suspension, now, now,
+    db.prepare(`INSERT INTO attempts(id,operation_id,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,issue_id,issue_number,issue_title,capture_json,phase,suspension,diagnostic,created_at_ms,updated_at_ms,source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?)`).run(id, input.command.operationId, preparation.view.project_id, config.configuration.id,
+      preparation.view.id, preparation.view.revision, capture.accountId, capture.issue.repository.id, capture.issue.id, capture.issue.number, capture.issue.title, serializeCapture(capture), suspension, suspension, now, now,
       input.queueCycle ? 'automatic' : preparation.view.previous_attempt_id ? 'retry' : 'manual');
     if (input.queueCycle) consumeQueueCycle(db, input.queueCycle.accountId, input.queueCycle.projectId, input.queueCycle.issueId, input.queueCycle.cycleNumber, id);
     for (const c of capture.criteria) db.prepare('INSERT INTO attempt_criteria(attempt_id,criterion_id,occurrence_index,text) VALUES (?,?,?,?)').run(id, c.id, c.occurrence_index, c.text);

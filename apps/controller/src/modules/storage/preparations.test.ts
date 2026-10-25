@@ -36,7 +36,7 @@ describe('preparation storage durability and migration', () => {
       saveTimeDefaults(old, { operationId, expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
     } finally { old.close(); }
     const storage = openStorage({ dataDirectory: path }); resources.push(storage);
-    expect(storage.getDiagnostics().schemaVersion).toBe(42); expect(storage.getSettings().installation_id).toBe(installationId);
+    expect(storage.getDiagnostics().schemaVersion).toBe(49); expect(storage.getSettings().installation_id).toBe(installationId);
     expect(storage.getOperation(operationId)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
     const db = new Database(join(path, 'factory.sqlite')); resources.push(db);
     expect(db.prepare('SELECT count(*) AS n FROM preparations').get()).toEqual({ n: 0 });

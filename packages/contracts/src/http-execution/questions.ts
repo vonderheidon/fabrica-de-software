@@ -1,5 +1,6 @@
 // HTTP DTOs only. Private captures and native executor protocols retain their versioned representation.
 import { Type, type Static } from "@sinclair/typebox";
+import { StageActivity } from '../stage-activity.js';
 import { ConfiguredLimit, MeasuredValue, OperationId } from "../base.js";
 import { ExecutionQuestion } from "./protocol-views.js";
 import { Criterion } from "../preparations.js";
@@ -34,6 +35,7 @@ export const PassageMeasurements = Type.Object({
 }, closed);
 export type PassageMeasurements = Static<typeof PassageMeasurements>;
 export const AttemptMeasurements = Type.Object({
+    stage_activity: StageActivity,
     active_time: MeasuredValue, human_wait: MeasuredValue, cost: MeasuredValue,
     active_limit: ConfiguredLimit, question_ttl: ConfiguredLimit,
     active_limit_state: Type.Union(['within_limit', 'expired', 'unavailable', 'not_applicable'].map(s => Type.Literal(s))),

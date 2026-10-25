@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 import { StorageError } from './errors.js';
 import { readSettings } from './settings.js';
 import { Value } from '@sinclair/typebox/value';
-import { retiredCostDefaults } from './historical-configuration.js';
+import { readCapturedConfiguration, retiredCostDefaults } from './historical-configuration.js';
 
 export const applicationId = 0x4e465331;
 
@@ -17,6 +17,36 @@ export interface Migration {
 }
 
 interface ProfileColumn { name: string; notnull: number }
+
+function backfillAttemptSearchHeaders(db: Database.Database): void {
+  const firstBatch = db.prepare<[number], { rowid: number; id: string; capture_json: string }>(
+    'SELECT rowid,id,capture_json FROM attempts ORDER BY rowid LIMIT ?',
+  );
+  const followingBatches = db.prepare<[number, number], { rowid: number; id: string; capture_json: string }>(
+    'SELECT rowid,id,capture_json FROM attempts WHERE rowid>? ORDER BY rowid LIMIT ?',
+  );
+  const update = db.prepare<[number, string, string]>(
+    'UPDATE attempts SET issue_number=?,issue_title=? WHERE id=? AND issue_number IS NULL AND issue_title IS NULL',
+  );
+  let lastRowId: number | null = null;
+  while (true) {
+    const rows: Array<{ rowid: number; id: string; capture_json: string }> = lastRowId === null
+      ? firstBatch.all(100) : followingBatches.all(lastRowId, 100);
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      lastRowId = row.rowid;
+      let capture: ReturnType<typeof readCapturedConfiguration>;
+      try {
+        capture = readCapturedConfiguration(JSON.parse(row.capture_json));
+      } catch {
+        // Invalid historical captures remain explicitly unavailable to search.
+        continue;
+      }
+      update.run(capture.issue.number, capture.issue.title, row.id);
+    }
+    if (rows.length < 100) break;
+  }
+}
 
 function profileColumns(db: Database.Database): readonly ProfileColumn[] {
   return db.prepare<[], ProfileColumn>("PRAGMA table_info('execution_profiles')").all();
@@ -76,7 +106,7 @@ function freshProfileLifecycleTable(sql: string): string {
 
 export function loadMigrations(): readonly Migration[] {
   const directory = new URL('./migrations/', import.meta.url);
-  const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql', '019_initial_configuration_facts.sql', '020_local_installation.sql', '021_inference_limits.sql', '022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql', '024_diagnostic_configuration_results.sql', '025_project_deletions.sql', '026_project_deletion_finalization.sql', '027_event_context.sql', '028_project_storage_locations.sql', '029_project_storage_transitions.sql', '030_tool_preferences.sql', '031_creation_board_operations.sql', '032_profile_composition.sql', '033_managed_terminals.sql', '034_session_continuity.sql', '035_correction_package.sql', '036_review_approval.sql', '037_finding_progress.sql', '038_finding_disputes.sql', '039_attempt_decisions.sql', '040_publication_targets.sql', '041_delivery_targets.sql', '042_local_commit_reconciliation.sql'];
+  const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql', '019_initial_configuration_facts.sql', '020_local_installation.sql', '021_inference_limits.sql', '022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql', '024_diagnostic_configuration_results.sql', '025_project_deletions.sql', '026_project_deletion_finalization.sql', '027_event_context.sql', '028_project_storage_locations.sql', '029_project_storage_transitions.sql', '030_tool_preferences.sql', '031_creation_board_operations.sql', '032_profile_composition.sql', '033_managed_terminals.sql', '034_session_continuity.sql', '035_correction_package.sql', '036_review_approval.sql', '037_finding_progress.sql', '038_finding_disputes.sql', '039_attempt_decisions.sql', '040_publication_targets.sql', '041_delivery_targets.sql', '042_local_commit_reconciliation.sql', '043_integration_rounds.sql', '044_storage_deletion_authority.sql', '045_attempt_search_headers.sql', '046_attempt_stage_intervals.sql', '047_notification_dispatches.sql', '048_shutdown_barriers.sql', '049_shutdown_resume.sql'];
   try {
     const actual = readdirSync(directory).filter((name) => name.endsWith('.sql')).sort();
     if (JSON.stringify(files) !== JSON.stringify(actual)) {
@@ -205,6 +235,7 @@ export function applyMigrations(
             db.exec(migration.sql);
           }
           if (migration.name === '032_profile_composition.sql') migrateLegacyProfileComposition(db);
+          if (migration.name === '045_attempt_search_headers.sql') backfillAttemptSearchHeaders(db);
           insert.run(migration.version, migration.name, migration.checksum, Date.now());
           db.pragma(`user_version = ${migration.version}`);
         }

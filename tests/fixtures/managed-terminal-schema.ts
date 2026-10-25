@@ -2,6 +2,42 @@ import type Database from 'better-sqlite3';
 
 /** Disposable migration fixtures only; this never downgrades an installation. */
 export function removeAttemptDecisionSchema(db: Database.Database): void {
+  if (db.pragma('user_version', { simple: true }) === 49) {
+    db.exec('DELETE FROM schema_migrations WHERE version=49; PRAGMA user_version=48;');
+  }
+  if (db.pragma('user_version', { simple: true }) === 48) {
+    db.exec(`DROP TRIGGER shutdown_start_barrier; DROP TRIGGER shutdown_final_barrier; DROP TRIGGER shutdown_receipt_immutable;
+      DROP INDEX shutdown_control_order; DELETE FROM schema_migrations WHERE version=48; PRAGMA user_version=47;`);
+  }
+  if (db.pragma('user_version', { simple: true }) === 47) {
+    db.exec(`DROP VIEW notification_events; DROP TABLE notification_dispatches;
+      DELETE FROM schema_migrations WHERE version=47; PRAGMA user_version=46;`);
+  }
+  if (db.pragma('user_version', { simple: true }) === 46) {
+    db.exec(`DROP TRIGGER attempt_stage_event; DROP VIEW attempt_stage_state; DROP TABLE attempt_stage_intervals;
+      DELETE FROM schema_migrations WHERE version=46; PRAGMA user_version=45;`);
+  }
+  if (db.pragma('user_version', { simple: true }) === 45) {
+    db.exec(`DROP TRIGGER attempt_search_headers_immutable; DROP TRIGGER attempt_search_headers_insert_valid;
+      DROP INDEX attempts_account_issue_number_created;
+      ALTER TABLE attempts DROP COLUMN issue_title; ALTER TABLE attempts DROP COLUMN issue_number;
+      DELETE FROM schema_migrations WHERE version=45; PRAGMA user_version=44;`);
+  }
+  if (db.pragma('user_version', { simple: true }) === 44) {
+    db.exec(`DROP TRIGGER project_storage_location_delete_authorized;
+      CREATE TRIGGER project_storage_location_delete_authorized BEFORE DELETE ON project_storage_locations
+      WHEN factory_project_deletion_row_allowed('project_storage_locations',json_array(OLD.id),factory_project_deletion_operation())<>1
+      BEGIN SELECT RAISE(ABORT,'PROJECT_DELETION_AUTHORIZATION_REQUIRED'); END;
+      DROP TRIGGER project_storage_transition_delete_authorized;
+      CREATE TRIGGER project_storage_transition_delete_authorized BEFORE DELETE ON project_storage_transitions
+      WHEN factory_project_deletion_row_allowed('project_storage_transitions',json_array(OLD.operation_id),factory_project_deletion_operation())<>1
+      BEGIN SELECT RAISE(ABORT,'PROJECT_DELETION_AUTHORIZATION_REQUIRED'); END;
+      DELETE FROM schema_migrations WHERE version=44; PRAGMA user_version=43;`);
+  }
+  if (db.pragma('user_version', { simple: true }) === 43) {
+    db.exec(`DROP TRIGGER round_integration_binding; DROP INDEX rounds_integration_operation; ALTER TABLE rounds DROP COLUMN integration_json;
+      DELETE FROM schema_migrations WHERE version=43; PRAGMA user_version=42;`);
+  }
   if (db.pragma('user_version', { simple: true }) === 42) {
     db.exec(`DROP TRIGGER effect_transition;
       CREATE TRIGGER effect_transition BEFORE UPDATE OF state ON effects WHEN NOT (

@@ -369,8 +369,8 @@ describe('durable scheduler', () => {
       const op = randomUUID(); const id = randomUUID();
       f.db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
         SELECT ?,installation_id,account_id,operation_kind,resource_type,?,request_hash,expected_revision_json,receipt_json FROM operation_requests WHERE operation_id=?`).run(op, id, operationId);
-      f.db.prepare(`INSERT INTO attempts(id,operation_id,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,issue_id,capture_json,phase,suspension,diagnostic,created_at_ms,updated_at_ms,source)
-        SELECT ?,?,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,'OTHER_ISSUE',capture_json,'preparing',NULL,NULL,created_at_ms,updated_at_ms,'automatic' FROM attempts WHERE id=?`).run(id, op, first.id);
+      f.db.prepare(`INSERT INTO attempts(id,operation_id,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,issue_id,issue_number,issue_title,capture_json,phase,suspension,diagnostic,created_at_ms,updated_at_ms,source)
+        SELECT ?,?,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,'OTHER_ISSUE',issue_number,issue_title,capture_json,'preparing',NULL,NULL,created_at_ms,updated_at_ms,'automatic' FROM attempts WHERE id=?`).run(id, op, first.id);
     })();
     expect(duplicate).toThrow('UNIQUE constraint failed: attempts.account_id');
     expect(f.storage.listAttempts({}).items).toHaveLength(1);
@@ -461,7 +461,7 @@ describe('durable scheduler', () => {
     await f.pipeline.close(); f.storage.close(); removeQueueSchedulerSchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(42); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(49); expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getOperation(operationId)?.receipt).toEqual(receipt?.receipt);
       expect(f.db.prepare('SELECT observed_cycle,attempt_id,ready_exit_observed_at_ms,ready_return_observed_at_ms FROM queue_consumptions').get())
         .toEqual({ observed_cycle: 1, attempt_id: first.id, ready_exit_observed_at_ms: null, ready_return_observed_at_ms: null });

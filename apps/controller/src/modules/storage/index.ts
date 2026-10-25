@@ -1,4 +1,12 @@
 import { existsSync, mkdirSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { acceptShutdown, assertStartsAllowed, commitShutdown, initializeShutdown, readShutdown, type ShutdownRequest, type ShutdownToken } from './shutdown.js';
+export { shutdownETag } from './shutdown.js';
+import type { ShutdownQuery, ShutdownView } from '#contracts';
+import { claimNotification, recordNotificationReceipt, interruptNotificationDispatches, type NotificationCommand } from './notifications.js';
+export { notificationETag } from './notifications.js';
+import type { ClaimNotification, RecordNotificationReceipt, NotificationClaim, NotificationReceipt } from '#contracts';
+import { beginIntegration, integrationTarget, type IntegrationPlan } from './integration.js';
 import { assertDeliveryTarget, findDeliveryTarget, readDeliveryTarget, sealDeliveryTarget, type DeliveryTargetPlan } from './delivery-targets.js';
 import { findTargetSelection, assertTargetSelection, acceptTargetSelection, advanceTargetSelection, recoverTargetSelection, targetSelection, validateTargetCommand, type TargetCommand } from './target-selections.js';
 export type { TargetCommand } from './target-selections.js';
@@ -8,7 +16,8 @@ import { claimCreationBoardOperation, finishCreationBoardOperation, getCreationB
 import type { CreationBoardOperation, CreationStep } from '#contracts';
 export type { CreationCommand } from './creations.js';
 import { readAttemptPage, readAttemptDetail, readDeliveryDetail } from './queries.js';
-import type { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery } from '#contracts';
+import { readAttemptComparison } from './attempt-comparison.js';
+import type { AttemptComparisonQuery, AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery } from '#contracts';
 import { recordEffectIntent, readEffect, claimEffect, finishEffect, assertEffectAuthorized, type EffectIntent } from './effects.js';
 import { acceptPublication, recoverPublication, finishPublicationRequest, publicationSnapshot, recordAuthority, finalizeICR, publicationSummary, effectsFor, assertPublicationEligible, type PublicationCommand, type AuthorityObservation } from './publication.js';
 export type { EffectIntent, EffectOrigin } from './effects.js';
@@ -89,6 +98,13 @@ export interface StorageDiagnostics {
 }
 
 export interface Storage {
+  readonly controllerInstanceId: string;
+  getShutdown(query?: ShutdownQuery): ShutdownView;
+  acceptShutdown(command: ShutdownRequest): StoredOperation;
+  commitShutdown(token: ShutdownToken): boolean;
+  assertStartsAllowed(): void;
+  claimNotification(command: NotificationCommand<ClaimNotification>): NotificationClaim;
+  recordNotificationReceipt(command: NotificationCommand<RecordNotificationReceipt>): NotificationReceipt;
   sealDeliveryTarget(plan: DeliveryTargetPlan): ReturnType<typeof sealDeliveryTarget>;
   getDeliveryTarget(operationId: string): ReturnType<typeof readDeliveryTarget>;
   assertDeliveryTarget(operationId: string): ReturnType<typeof assertDeliveryTarget>;
@@ -144,6 +160,7 @@ export interface Storage {
   markCreationBoardOperationSent(operationId: string, revision: number): CreationBoardOperation;
   finishCreationBoardOperation(operationId: string, revision: number, state: 'confirmed' | 'failed_known' | 'unknown', receipt: NonNullable<CreationBoardOperation['receipt']> | null, reason: string | null): CreationBoardOperation;
   listAttempts(query: AttemptListQuery): ReturnType<typeof readAttemptPage>;
+  getAttemptComparison(query: AttemptComparisonQuery): ReturnType<typeof readAttemptComparison>;
   getAttemptBlock(id: string): ReturnType<typeof readAttemptBlock>;
   recoverAttemptDecision(command: AttemptDecisionCommand): StoredOperation | null;
   acceptAttemptDecision(command: AttemptDecisionCommand, successor?: SuccessorPreparationInput): ReturnType<typeof acceptAttemptDecision>;
@@ -188,6 +205,8 @@ export interface Storage {
   recordReviewWorkspace(deliveryId: string, ready: boolean, diagnostic: string | null): void;
   recordReviewIntegrity(binding: PassageBinding, valid: boolean): void;
   beginCorrection(deliveryId: string): CorrectionPlan | null;
+  beginIntegration(deliveryId: string, operationId: string, target: IntegrationPlan): CorrectionPlan | null;
+  getIntegrationTarget(deliveryId: string): IntegrationPlan | null;
   beginVerification(deliveryId: string, repeatReason?: string): VerificationPlan;
   startCheck(checkId: string): void;
   finishCheck(checkId: string, completion: CheckCompletion): void;
@@ -276,10 +295,13 @@ export function openStorage(options: StorageOptions): Storage {
       const projectStorageLocations = createProjectStorageLocations(connection);
     const resultListeners = new Set<(binding: PassageBinding) => void>();
     applyMigrations(connection, migrations, () => seedSettings(connection));
+    const controllerInstanceId = randomUUID();
+    initializeShutdown(connection, controllerInstanceId);
+    interruptNotificationDispatches(connection);
     interruptStorageTransitions(connection);
     connection.prepare("UPDATE publication_target_selections SET state='unknown',revision=revision+1,reason='TARGET_INTERRUPTED',updated_at_ms=max(updated_at_ms,?) WHERE state='running'").run(Date.now());
     const tables = connection.prepare<[], { name: string; strict: number }>(
-      "SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND name NOT LIKE 'sqlite_%'",
+      "SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND type='table' AND name NOT LIKE 'sqlite_%'",
     ).all();
     const foreignKeyViolations: unknown = connection.pragma('foreign_key_check');
     if (tables.some((table) => table.strict !== 1) || !Array.isArray(foreignKeyViolations) || foreignKeyViolations.length !== 0) {
@@ -290,9 +312,16 @@ export function openStorage(options: StorageOptions): Storage {
       foreignKeys, journalMode, synchronous, busyTimeoutMs: timeout, schemaVersion: migrations.length,
     });
     return {
+      controllerInstanceId,
+      assertStartsAllowed: () => guarded(() => assertStartsAllowed(connection)),
+      getShutdown: (query = {}) => guarded(() => connection.transaction(() => readShutdown(connection, controllerInstanceId, query))()),
+      acceptShutdown: command => acceptShutdown(connection, controllerInstanceId, command),
+      commitShutdown: token => commitShutdown(connection, controllerInstanceId, token),
       deletionWorker: createDeletionWorkerPersistence(connection, directory),
       getProjectDeletionPaths: projectId => guarded(() => connection.transaction(() => readProjectDeletionPaths(connection, projectId, directory))()),
       acceptProjectDeletion: input => guarded(() => acceptProjectDeletion(connection, directory, input)),
+      claimNotification: command => guarded(() => claimNotification(connection, command)),
+      recordNotificationReceipt: command => guarded(() => recordNotificationReceipt(connection, command)),
       recoverProjectDeletion: command => guarded(() => connection.transaction(() => recoverProjectDeletion(connection, command))()),
       getProjectDeletion: operationId => guarded(() => connection.transaction(() => readProjectDeletion(connection, operationId))()),
       getProjectDeletionInventory: projectId => guarded(() => projectDeletions.inventory(projectId)),
@@ -313,6 +342,7 @@ export function openStorage(options: StorageOptions): Storage {
       captureLocalHost: () => guarded(() => captureLocalHost(connection)),
       recordToolPreferenceValidation: paths => guarded(() => recordToolPreferenceValidation(connection, paths)),
       listAttempts: query => guarded(() => connection.transaction(() => readAttemptPage(connection, query))()),
+      getAttemptComparison: query => guarded(() => connection.transaction(() => readAttemptComparison(connection, query))()),
       getAttemptBlock: id => guarded(() => connection.transaction(() => { readAttempt(connection, id); return readAttemptBlock(connection, id); })()),
       assertTargetSelection: id => assertTargetSelection(connection,id),
       sealDeliveryTarget: plan => sealDeliveryTarget(connection,plan),
@@ -387,6 +417,8 @@ export function openStorage(options: StorageOptions): Storage {
       recordReviewWorkspace: (id, ready, code) => recordReviewWorkspace(connection, id, ready, code),
       recordReviewIntegrity: (binding, valid) => recordReviewIntegrity(connection, binding, valid),
       beginCorrection: id => beginCorrection(connection, id),
+      beginIntegration: (id,operationId,target) => beginIntegration(connection,id,operationId,target),
+      getIntegrationTarget: id => integrationTarget(connection,id),
       beginVerification: (id, reason) => beginVerification(connection, id, reason),
       startCheck: id => startCheck(connection, id),
       finishCheck: (id, completion) => finishCheck(connection, id, completion),

@@ -1095,7 +1095,7 @@ describe('global and aggregate configuration', () => {
       const accepted = saveTimeDefaults(db, { operationId: randomUUID(), expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
       const identity = db.prepare('SELECT installation_id FROM factory_settings').get();
       applyMigrations(db, loadMigrations(), () => { throw new Error('Must not reseed'); });
-      expect(db.pragma('user_version', { simple: true })).toBe(42); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
+      expect(db.pragma('user_version', { simple: true })).toBe(49); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
       expect(db.prepare('SELECT * FROM projects').all()).toEqual([]); expect(db.prepare('SELECT * FROM execution_profiles').all()).toEqual([]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect(readOperation(db, accepted.operation_id)).toEqual(accepted);

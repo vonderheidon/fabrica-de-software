@@ -49,6 +49,8 @@ export { IssueHeader as HttpIssueHeader } from './queries.js';
 export { AttemptListQuery as HttpAttemptListQuery } from './queries.js';
 export { AttemptSummary as HttpAttemptSummary } from './queries.js';
 export { AttemptPage as HttpAttemptPage } from './queries.js';
+export { AttemptComparisonQuery as HttpAttemptComparisonQuery, AttemptComparisonSide as HttpAttemptComparisonSide,
+  HistoricalComparisonValue as HttpHistoricalComparisonValue, AttemptComparison as HttpAttemptComparison } from './queries.js';
 export { DetailSection as HttpDetailSection } from './queries.js';
 export { HistoricalEffectiveProfile as HttpHistoricalEffectiveProfile } from './queries.js';
 export { AttemptDetailQuery as HttpAttemptDetailQuery } from './queries.js';
