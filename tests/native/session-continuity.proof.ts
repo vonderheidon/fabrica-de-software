@@ -91,6 +91,16 @@ it('continues both real OMP conversations over three versions with native proces
   });
   const preflight = await execution.preflight(); expect(preflight.ready).toBe(true);
   for (const tool of f.tools) if (tool.tool === 'omp') tool.version = preflight.ompVersion!;
+  const deadline = Date.now() + 540_000;
+  let authorizedPassages = 0;
+  const authorizePassage = () => {
+    if (authorizedPassages >= 6 || Date.now() >= deadline) throw new Error('REAL_SESSION_AUTHORIZATION_LIMIT');
+    authorizedPassages++;
+  };
+  const startPassage = execution.startPassage.bind(execution);
+  const continuePassage = execution.continuePassage.bind(execution);
+  execution.startPassage = (...args) => { authorizePassage(); return startPassage(...args); };
+  execution.continuePassage = (...args) => { authorizePassage(); return continuePassage(...args); };
   Object.assign(f.execution, execution);
   const prepare = createWorkspacePreparer(f.directory, git);
   f.workspaces.prepareAttempt.mockImplementation(input => prepare({ ...input, source: { ...input.source, kind: 'local', location: seed } }));
@@ -100,11 +110,11 @@ it('continues both real OMP conversations over three versions with native proces
     getDeliveryDiff: createDeliveryDiff(f.directory, git),
   });
   f.dependencies.verification = { verifyDelivery: async id => { const plan = f.storage.beginVerification(id); f.storage.finishVerification(plan.id); }, getArtifact: async () => { throw new Error('UNUSED'); } };
+  const watchdog = setTimeout(() => { void f.pipeline.close(); }, Math.max(0, deadline - Date.now()));
   let attemptId: string | undefined;
   try {
     const prepared = await f.prepare();
     const op = await f.pipeline.startAttempt(prepared.body, prepared.context); attemptId = op.resource.id;
-    const deadline = Date.now() + 540_000;
     while (Date.now() < deadline) {
       await f.pipeline.drain();
       const status = f.storage.getAttempt(attemptId);
@@ -115,8 +125,10 @@ it('continues both real OMP conversations over three versions with native proces
       await new Promise(r => setTimeout(r, 1000));
     }
     const status = f.storage.getAttempt(attemptId); expect(status.phase).toBe('publishing'); expect(status.round).toBe(3);
+    expect(authorizedPassages).toBe(6);
     recordEvidence(evidence, f.db, attemptId, f.directory);
   } finally {
+    clearTimeout(watchdog);
     await f.pipeline.close(); f.storage.close(); f.db.close();
   }
 });

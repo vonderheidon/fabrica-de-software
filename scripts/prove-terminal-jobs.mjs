@@ -30,6 +30,8 @@ try {
     assert.equal(await bridge.confirmStoppedTerminal(reference), false);
     assert.equal(await bridge.confirmStoppedTerminal({ ...reference, terminalId: randomUUID() }), false);
     assert(pids.every(alive));
+    await assert.rejects(bridge.prepareTerminalLaunch(reference, 'must not replace active processes'));
+    assert(pids.every(alive));
     if (round === 2) {
       await assert.rejects(bridge.stopTerminal({ ...reference, generation: 1 }));
       assert(pids.every(alive));
@@ -54,6 +56,6 @@ try {
   const lateExit = await new Promise((resolve, reject) => { lateShell.once('exit', resolve); lateShell.once('error', reject); });
   assert.notEqual(lateExit, 0);
   await assert.rejects(readFile(lateFile, 'utf8'), { code: 'ENOENT' });
-  await writeFile(join(directory, 'result.json'), JSON.stringify({ ok: true, rounds: 2, foreignIdentityRejected: true, processTreeStopped: true, beforeHandshakeStop: true, lateLaunchRejected: true, historicalStopRejected: true }));
+  await writeFile(join(directory, 'result.json'), JSON.stringify({ ok: true, rounds: 2, activeReplacementRejected: true, foreignIdentityRejected: true, processTreeStopped: true, beforeHandshakeStop: true, lateLaunchRejected: true, historicalStopRejected: true }));
   console.log(JSON.stringify({ evidence: directory }));
 } finally { await bridge.closeTerminalProcesses(); }

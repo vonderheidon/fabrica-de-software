@@ -162,6 +162,26 @@ describe('distributed role contracts', () => {
 });
 
 describe('shutdown coordination', () => {
+  it.each([false, true])('preserves an approved reviewer result on close with physical handoff=%s', async handedOff => {
+    const f = fixture('reviewer'); await f.start();
+    await f.call('execution_complete', { formatVersion: 1, summary: 'Approved version', verdict: 'approved',
+      criteria: f.request.criterionIds.map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Observed version'] })),
+      assessments: [], disputeResponses: [], commandRepetitions: [], findings: [], resolutions: [] });
+    const handle = { passageId: f.request.binding.passageId };
+    const receipt = f.execution.getResult(handle);
+    if (handedOff) {
+      f.runtime.stop.mockResolvedValue('confirmed');
+      const pending = f.execution.preparePassageHandoff(handle);
+      await vi.waitFor(() => expect(f.frames.at(-1)).toMatchObject({ type: 'continuation-check' }));
+      await f.callbacks().frame({ type: 'continuation-idle', passageId: handle.passageId });
+      await pending;
+    }
+    await f.execution.close();
+    expect(f.execution.getResult(handle)).toEqual(receipt);
+    expect(f.store.getPassage(handle)).toMatchObject(handedOff ? { state: 'ready', diagnostic: null } : { state: 'interrupted', diagnostic: 'TRACKING_LOST' });
+    if (handedOff) expect(f.store.recordStop).toHaveBeenCalledWith(handle, { passageId: handle.passageId, state: 'confirmed' });
+    else expect(f.runtime.stop).not.toHaveBeenCalled();
+  });
   it('settles answer waits without replay and shares an idempotent close promise', async () => {
     const f = fixture(); const ready = await f.start();
     const question = await f.call('execution_question', { formatVersion: 1, decision: 'Escolha?', context: 'Contexto 😀', alternatives: ['Manter', 'Alterar'] });

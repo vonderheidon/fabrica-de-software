@@ -73,6 +73,7 @@ it('recovers approved ref/tree/base from real Git after physical stops, controll
       runner: async () => ({ state: 'passed', exitCode: 0, diagnostic: null, endedAtMs: Date.now(), durationMs: 1, output: Buffer.from('Pertinent recovery evidence\n') }),
     });
     f.verification.verifyDelivery.mockImplementation(id => verification.verifyDelivery(id, new AbortController().signal));
+    f.verification.getArtifact.mockImplementation(id => verification.getArtifact(id));
     await f.implement(); await f.approve();
     const deliveryId = f.status().deliveryId!;
     const delivery = f.storage.getDelivery(deliveryId).delivery; const review = f.storage.getReview(deliveryId);

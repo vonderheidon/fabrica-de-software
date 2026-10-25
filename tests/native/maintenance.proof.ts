@@ -1,4 +1,4 @@
-import { mkdir, realpath, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import type { Delivery } from '#contracts';
@@ -20,12 +20,17 @@ it('executes an additional configured check through the existing lifecycle using
     const materializeCheck = async (delivery: Delivery, id: string) => {
       expect(delivery.captureState).toBe('captured');
       const directory = join(f.directory, 'work', delivery.attemptId, 'checks', id, 'checkout');
+      if (directories.includes(directory)) {
+        expect(await readFile(join(directory, 'probe.mjs'), 'utf8')).toContain('process.stdout.write');
+        return directory;
+      }
       await mkdir(directory, { recursive: true });
       await writeFile(join(directory, 'probe.mjs'), "process.stdout.write(JSON.stringify({check:process.argv[2],cwd:process.cwd(),text:'ação 😀'}));", { flag: 'wx' });
       directories.push(directory); return directory;
     };
     const verification = createVerification({ storage: f.storage, workspaces: { materializeCheck }, dataDirectory: f.directory, logFailure: f.logFailure }, { canonicalize });
     f.verification.verifyDelivery.mockImplementation(id => verification.verifyDelivery(id, new AbortController().signal));
+    f.verification.getArtifact.mockImplementation(id => verification.getArtifact(id));
     await f.implement();
     const deliveryId = f.status().deliveryId!;
     const completed = f.storage.getCheckHistory(deliveryId, {}).entries;
