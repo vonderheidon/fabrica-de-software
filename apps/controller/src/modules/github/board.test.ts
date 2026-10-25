@@ -36,11 +36,18 @@ function fixture(mode: string | null = null, groupByStatus = true, readyBoard = 
     repositories = repositoryLinked ? ['REPOSITORY'] : [];
     views = [{ id: 'VIEW', name: 'Kanban', layout: 'BOARD_LAYOUT', createdAt: new Date().toISOString(),
       configuration: { visibleFields: { nodes: [{ __typename: 'ProjectV2SingleSelectField', id: 'STATUS', options: visibleOptions }], pageInfo: { hasNextPage: false, endCursor: null } } },
-      groupByFields: { nodes: groupByStatus ? [{ __typename: 'ProjectV2SingleSelectField', id: 'STATUS', options: viewOptions }] : [], pageInfo: { hasNextPage: false, endCursor: null } } }];
+      groupByFields: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } },
+      verticalGroupByFields: { nodes: groupByStatus ? [{ __typename: 'ProjectV2SingleSelectField', id: 'STATUS', options: viewOptions }] : [], pageInfo: { hasNextPage: false, endCursor: null } } }];
   }
   const runner = vi.fn<GhRunner>(async (raw, onSend) => {
     const request = JSON.parse(raw) as { query: string; variables: Record<string, unknown> };
     const pageInfo = { hasNextPage: false, endCursor: null };
+    if (request.query.includes('FactoryCreationBoardSnapshot') && /\b__typename\s+id\b/.test(request.query)) return {
+      exitCode: 0, stdout: 'HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n' + JSON.stringify({ errors: [{ message: "Selections can't be made directly on unions", type: 'GRAPHQL_VALIDATION_FAILED' }] }),
+    };
+    if (request.query.includes('FactoryLinkBoardRepository') && /\bprojectV2\s*\{/.test(request.query)) return {
+      exitCode: 0, stdout: 'HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\r\n' + JSON.stringify({ errors: [{ message: "Field 'projectV2' doesn't exist on type 'LinkProjectV2ToRepositoryPayload'", type: 'GRAPHQL_VALIDATION_FAILED' }] }),
+    };
     if (request.query.includes('FactoryCreationBoards')) return httpResponse({ viewer: { id: viewerId }, node: { __typename: 'Organization', id: 'OWNER', projectsV2: { nodes: boardPages, pageInfo } } });
     if (request.query.includes('FactoryCreationBoardSnapshot')) return httpResponse({ viewer: { id: viewerId }, node: { __typename: 'ProjectV2', ...project,
       repositories: { nodes: repositories.map(id => ({ id })), pageInfo }, fields: { nodes: fields, pageInfo }, views: { nodes: views, pageInfo } } });
@@ -63,13 +70,14 @@ function fixture(mode: string | null = null, groupByStatus = true, readyBoard = 
     }
     if (request.query.includes('FactoryLinkBoardRepository')) {
       repositories = ['REPOSITORY'];
-      return httpResponse({ linkProjectV2ToRepository: { clientMutationId: (request.variables.input as { clientMutationId: string }).clientMutationId, projectV2: { id: 'PROJECT' } } });
+      return httpResponse({ linkProjectV2ToRepository: { clientMutationId: (request.variables.input as { clientMutationId: string }).clientMutationId, repository: { id: 'REPOSITORY' } } });
     }
     if (request.query.includes('FactoryCreateKanbanView')) {
       const input = request.variables.input as { name: string; layout: string; configuration: { visibleFieldIds: string[] } };
       views = [{ id: 'VIEW', name: input.name, layout: input.layout, createdAt: new Date().toISOString(),
         configuration: { visibleFields: { nodes: input.configuration.visibleFieldIds.map(id => ({ __typename: 'ProjectV2SingleSelectField', id, options: visibleOptions })), pageInfo } },
-        groupByFields: { nodes: groupByStatus ? [{ __typename: 'ProjectV2SingleSelectField', id: 'STATUS', options: viewOptions }] : [], pageInfo } }];
+        groupByFields: { nodes: [], pageInfo },
+        verticalGroupByFields: { nodes: groupByStatus ? [{ __typename: 'ProjectV2SingleSelectField', id: 'STATUS', options: viewOptions }] : [], pageInfo } }];
       return httpResponse({ createProjectV2View: { clientMutationId: (request.variables.input as { clientMutationId: string }).clientMutationId, projectV2View: { id: 'VIEW', name: input.name, layout: input.layout } } });
     }
     throw new Error('unexpected GraphQL query');
@@ -79,6 +87,14 @@ function fixture(mode: string | null = null, groupByStatus = true, readyBoard = 
 }
 
 describe('GitHub Projects board operations', () => {
+  it('observes Kanban columns through vertical grouping even when horizontal grouping is empty', async () => {
+    const f = fixture(null, true, true);
+    const result = await f.api.createBoardOperation(boardOperation('verify_board', expected('PROJECT', 'STATUS', 'VIEW')), remote, 'REPOSITORY', 'ACCOUNT', async () => {}, () => {});
+    expect(result).toMatchObject({ state: 'confirmed', receipt: { group_by_field_ids: ['STATUS'] } });
+    const snapshots = f.runner.mock.calls.map(([raw]) => (JSON.parse(raw) as { query: string }).query).filter(query => query.includes('FactoryCreationBoardSnapshot'));
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.every(query => query.includes('verticalGroupByFields(first:100)'))).toBe(true);
+  });
   it('creates and reads back five ordered options, repository link, board layout and Status grouping', async () => {
     const f = fixture(); const authorize = vi.fn(async () => {}); let operation = boardOperation('create_board');
     const run = async (kind: CreationBoardOperationKind, identity: CreationBoardOperation['expected_identity']) => {

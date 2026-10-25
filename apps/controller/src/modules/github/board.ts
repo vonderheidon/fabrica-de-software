@@ -18,13 +18,13 @@ const projectSnapshot = `query FactoryCreationBoardSnapshot($id:ID!) { viewer { 
   repositories(first:100) { nodes { id } pageInfo { hasNextPage endCursor } }
   fields(first:100) { nodes { __typename ... on ProjectV2Field { id name dataType } ... on ProjectV2IterationField { id }
     ... on ProjectV2MultiSelectField { id } ... on ProjectV2SingleSelectField { id name options { id name } } } pageInfo { hasNextPage endCursor } }
-  views(first:100) { nodes { id name layout createdAt configuration { visibleFields(first:100) { nodes { __typename id ... on ProjectV2SingleSelectField { options { id name } } } pageInfo { hasNextPage endCursor } } }
-    groupByFields(first:100) { nodes { __typename id ... on ProjectV2SingleSelectField { options { id name } } } pageInfo { hasNextPage endCursor } } } pageInfo { hasNextPage endCursor } }
+  views(first:100) { nodes { id name layout createdAt configuration { visibleFields(first:100) { nodes { __typename ... on ProjectV2FieldCommon { id } ... on ProjectV2SingleSelectField { options { id name } } } pageInfo { hasNextPage endCursor } } }
+    verticalGroupByFields(first:100) { nodes { __typename ... on ProjectV2FieldCommon { id } ... on ProjectV2SingleSelectField { options { id name } } } pageInfo { hasNextPage endCursor } } } pageInfo { hasNextPage endCursor } }
 } } }`;
 const createBoardMutation = `mutation FactoryCreateBoard($input:CreateProjectV2Input!) { createProjectV2(input:$input) { clientMutationId projectV2 { id } } }`;
 const createStatusMutation = `mutation FactoryCreateStatus($input:CreateProjectV2FieldInput!) { createProjectV2Field(input:$input) { clientMutationId projectV2Field { ... on ProjectV2SingleSelectField { id name options { id name } } } } }`;
 const updateStatusMutation = `mutation FactoryUpdateStatus($input:UpdateProjectV2FieldInput!) { updateProjectV2Field(input:$input) { clientMutationId projectV2Field { ... on ProjectV2SingleSelectField { id name options { id name } } } } }`;
-const linkRepositoryMutation = `mutation FactoryLinkBoardRepository($input:LinkProjectV2ToRepositoryInput!) { linkProjectV2ToRepository(input:$input) { clientMutationId projectV2 { id } } }`;
+const linkRepositoryMutation = `mutation FactoryLinkBoardRepository($input:LinkProjectV2ToRepositoryInput!) { linkProjectV2ToRepository(input:$input) { clientMutationId repository { id } } }`;
 const createViewMutation = `mutation FactoryCreateKanbanView($input:CreateProjectV2ViewInput!) { createProjectV2View(input:$input) { clientMutationId projectV2View { id name layout } } }`;
 type Option = { id: string; name: string };
 interface BoardSnapshot {
@@ -32,7 +32,7 @@ interface BoardSnapshot {
   fields: Array<{ id: string; name: string; kind: string; options: Option[] }>;
   views: Array<{ id: string; name: string; layout: string; createdAt: number;
     visibleFields: Array<{ id: string; kind: string; options: Option[] | null }>;
-    groupByFields: Array<{ id: string; kind: string; options: Option[] | null }> }>;
+    columnFields: Array<{ id: string; kind: string; options: Option[] | null }> }>;
 }
 const unknown = (reason: string): BoardResult => ({ state: 'unknown', receipt: null, reason });
 const failed = (reason: string): BoardResult => ({ state: 'failed_known', receipt: null, reason });
@@ -69,7 +69,7 @@ function decodeSnapshot(data: Record<string, unknown>, expected: CreationBoardOp
   });
   const views = viewsPage.nodes.map(node => {
     const value = object(node); const configuration = object(value.configuration);
-    const visible = page(configuration.visibleFields); const grouped = page(value.groupByFields);
+    const visible = page(configuration.visibleFields); const grouped = page(value.verticalGroupByFields);
     if (visible.more || grouped.more || typeof value.id !== 'string' || typeof value.name !== 'string' || typeof value.layout !== 'string' ||
         typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))) throw new Error('INCOMPLETE');
     return { id: value.id, name: value.name, layout: value.layout, createdAt: Date.parse(value.createdAt),
@@ -81,7 +81,7 @@ function decodeSnapshot(data: Record<string, unknown>, expected: CreationBoardOp
           : null;
         return { id: item.id, kind: item.__typename, options };
       }),
-      groupByFields: grouped.nodes.map(field => {
+      columnFields: grouped.nodes.map(field => {
         const item = object(field);
         if (typeof item.id !== 'string' || typeof item.__typename !== 'string') throw new Error('INVALID');
         const options = item.__typename === 'ProjectV2SingleSelectField' && Array.isArray(item.options)
@@ -110,8 +110,8 @@ function exactStatusOptions(options: Option[] | null): options is Option[] {
 }
 function viewHasOrderedStatusColumns(view: BoardSnapshot['views'][number], field: BoardSnapshot['fields'][number]): boolean {
   const visibleStatus = view.visibleFields.filter(candidate => candidate.id === field.id);
-  if (view.groupByFields.length !== 1) return false;
-  const grouped = view.groupByFields[0]!;
+  if (view.columnFields.length !== 1) return false;
+  const grouped = view.columnFields[0]!;
   if (visibleStatus.length !== 1 || visibleStatus[0]!.kind !== 'ProjectV2SingleSelectField' || !exactStatusOptions(visibleStatus[0]!.options) ||
       grouped.id !== field.id || grouped.kind !== 'ProjectV2SingleSelectField' || !exactStatusOptions(grouped.options)) return false;
   return [visibleStatus[0]!.options, grouped.options].every(options =>
@@ -121,7 +121,7 @@ function viewReceipt(snapshot: BoardSnapshot, view: BoardSnapshot['views'][numbe
   const field = statusField(snapshot);
   return { ...receiptFor(snapshot), ...(field ? { status_field_id: field.id, status_field_name: field.name, status_options: field.options } : {}),
     view_id: view.id, view_name: view.name, ...(view.layout === 'BOARD_LAYOUT' ? { view_layout: 'BOARD_LAYOUT' as const } : {}),
-    visible_field_ids: view.visibleFields.map(field => field.id), group_by_field_ids: view.groupByFields.map(field => field.id) };
+    visible_field_ids: view.visibleFields.map(field => field.id), group_by_field_ids: view.columnFields.map(field => field.id) };
 }
 function expectedProject(operation: CreationBoardOperation): string | null { return operation.expected_identity.project_id; }
 function mutationValid(operation: CreationBoardOperation, kind: CreationBoardOperationKind): boolean {
