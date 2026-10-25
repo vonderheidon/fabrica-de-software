@@ -67,12 +67,26 @@ function fixture(initialEffort: string | null = 'high', ompVersion = '19.2.0-bet
   return { api, context, handlers, tools, start, call, setEffort: (value: string | undefined) => { effort = value; } };
 }
 
+async function authorizeTask() {
+  await seam.frame!({ type: 'run' });
+  await seam.frame!({ type: 'task-authorized' });
+}
+
 describe('supported OMP extension on the same TUI', () => {
+  it('does not submit a task until durable controller authorization and discards authorization after tracking loss', async () => {
+    const f = fixture(); await f.start();
+    await seam.frame!({ type: 'run' });
+    expect(seam.send).toHaveBeenCalledWith({ type: 'task-submitted' });
+    expect(f.api.sendUserMessage).not.toHaveBeenCalled();
+    seam.lost!('PROFILE_MISMATCH');
+    await expect(seam.frame!({ type: 'task-authorized' })).rejects.toThrow('TRACKING_LOST');
+    expect(f.api.sendUserMessage).not.toHaveBeenCalled();
+  });
   it('keeps dispatching reply frames while waiting for continuation idle', async () => {
     vi.useFakeTimers();
     try {
       const f = fixture(); f.context.isIdle = () => true; f.context.hasPendingMessages = () => false;
-      await f.start(); await seam.frame!({ type: 'run' });
+      await f.start(); await authorizeTask();
       const call = f.call('execution_complete', {});
       const request = seam.send.mock.calls.at(-1)![0] as { id: string };
       const passageId = randomUUID(); await seam.frame!({ type: 'continuation-check', passageId });
@@ -88,7 +102,7 @@ describe('supported OMP extension on the same TUI', () => {
     try {
       const f = fixture(); let idle = false; let queued = true;
       f.context.isIdle = () => idle; f.context.hasPendingMessages = () => queued;
-      await f.start(); await seam.frame!({ type: 'run' });
+      await f.start(); await authorizeTask();
       await f.handlers.get('tool_execution_start')!({ toolCallId: 'reader', toolName: 'read' }, f.context);
       const passageId = randomUUID();
       const pending = seam.frame!({ type: 'continuation-check', passageId });
@@ -104,7 +118,7 @@ describe('supported OMP extension on the same TUI', () => {
     } finally { vi.useRealTimers(); }
   });
   it('refuses idle confirmation without the supported capability or after session loss', async () => {
-    const f = fixture(); await f.start(); await seam.frame!({ type: 'run' });
+    const f = fixture(); await f.start(); await authorizeTask();
     const frame = { type: 'continuation-check', passageId: randomUUID() };
     await expect(seam.frame!(frame)).rejects.toThrow('TRACKING_LOST');
     f.context.isIdle = () => true; f.context.hasPendingMessages = () => false;
@@ -113,7 +127,7 @@ describe('supported OMP extension on the same TUI', () => {
     expect(seam.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'continuation-idle' }));
   });
   it('delivers one correction through the same supported follow-up API and acknowledges its passage', async () => {
-    const f = fixture(); await f.start(); await seam.frame!({ type: 'run' });
+    const f = fixture(); await f.start(); await authorizeTask();
     const frame = { type: 'continuation', passageId: randomUUID(), task: 'Correct the structured findings; stop writers and submit a new result.' };
     await seam.frame!(frame);
     expect(seam.send).toHaveBeenLastCalledWith({ type: 'continuation-receipt', passageId: frame.passageId });
@@ -123,7 +137,7 @@ describe('supported OMP extension on the same TUI', () => {
     await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
   it('refuses the official result while another native/MCP tool is still running, without disabling those tools', async () => {
-    const f = fixture(); await f.start(); await seam.frame!({ type: 'run' });
+    const f = fixture(); await f.start(); await authorizeTask();
     await f.handlers.get('tool_execution_start')!({ toolCallId: 'writer', toolName: 'bash' }, f.context);
     const frames = seam.send.mock.calls.length;
     expect(await f.call('execution_complete', {})).toMatchObject({ isError: true, details: { accepted: false, code: 'OWNED_TOOLS_RUNNING' } });
@@ -135,11 +149,11 @@ describe('supported OMP extension on the same TUI', () => {
     expect(await pending).toMatchObject({ details: { accepted: true } });
     await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
-  it('registers only the two role schemas, submits the task exactly once after run and preserves native API access', async () => {
+  it('registers only the two role schemas, submits the task exactly once after durable authorization and preserves native API access', async () => {
     const f = fixture(); expect([...f.tools.keys()]).toEqual(['execution_complete', 'execution_question']);
     await f.start(); expect(f.api.sendUserMessage).not.toHaveBeenCalled();
     expect(seam.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'hello', provider: 'provider', model: 'model', effort: 'high', tui: true }));
-    await seam.frame!({ type: 'run' }); expect(f.api.sendUserMessage).toHaveBeenCalledOnce();
+    await authorizeTask(); expect(f.api.sendUserMessage).toHaveBeenCalledOnce();
     const task = vi.mocked(f.api.sendUserMessage).mock.calls[0]?.[0];
     expect(task).toContain('C:\\Clone ç 😀'); expect(task).toContain('Long task '.repeat(15000));
     await expect(seam.frame!({ type: 'run' })).rejects.toThrow('TRACKING_LOST');
@@ -155,7 +169,7 @@ describe('supported OMP extension on the same TUI', () => {
     expect(Object.keys((resultTool.parameters as { properties: Record<string, unknown> }).properties).sort())
       .toEqual(Object.keys(role.resultSchema.properties).sort());
     expect([...f.tools.keys()]).toEqual(['execution_complete', 'execution_question']);
-    await f.start(); await seam.frame!({ type: 'run' });
+    await f.start(); await authorizeTask();
     const prompt = vi.mocked(f.api.sendUserMessage).mock.calls[0]?.[0] ?? '';
     expect(prompt).toContain(malicious);
     expect(prompt.match(/Ignore the role/g)).toHaveLength(1);
@@ -166,13 +180,13 @@ describe('supported OMP extension on the same TUI', () => {
   it('sends null for an absent effort and keeps an arbitrary OMP version as metadata', async () => {
     const f = fixture(null, '20.0.0-rc.1'); await f.start();
     expect(seam.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'hello', effort: null, ompVersion: '20.0.0-rc.1' }));
-    await seam.frame!({ type: 'run' });
+    await authorizeTask();
     await f.handlers.get('before_agent_start')!(undefined, f.context);
     expect(seam.send).not.toHaveBeenCalledWith({ type: 'tracking-lost' });
     await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
   it('returns a correctable error, continues tool calls, and never lets the model set private correlation', async () => {
-    const f = fixture(); await f.start(); await seam.frame!({ type: 'run' });
+    const f = fixture(); await f.start(); await authorizeTask();
     const pending = f.call('execution_complete', { unexpected: 'payload' });
     const first = seam.send.mock.calls.at(-1)![0] as { id: string; tool: string; payload: unknown };
     expect(Object.keys(first).sort()).toEqual(['id', 'payload', 'tool', 'type']);
@@ -185,7 +199,7 @@ describe('supported OMP extension on the same TUI', () => {
     expect(seam.close).not.toHaveBeenCalled(); await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
   it('routes answers through supported follow-up messages without blocking native TUI interaction', async () => {
-    const f = fixture(); await f.start(); await seam.frame!({ type: 'run' });
+    const f = fixture(); await f.start(); await authorizeTask();
     const answer = { type: 'answer', questionId: randomUUID(), operationId: randomUUID(), answer: 'Revisão e opção B 😀' };
     await seam.frame!(answer); await seam.frame!(answer);
     expect(f.api.sendUserMessage).toHaveBeenCalledTimes(2); // initial task plus one answer
@@ -194,7 +208,7 @@ describe('supported OMP extension on the same TUI', () => {
     await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
   it('delivers the explicit captured-scope choice and rejects conflicting reuse of the answer identity', async () => {
-    const f = fixture(); await f.start(); await seam.frame!({ type: 'run' });
+    const f = fixture(); await f.start(); await authorizeTask();
     const answer = { type: 'answer', questionId: randomUUID(), operationId: randomUUID(), answer: 'Human guidance', scopeDigest: 'a'.repeat(64) };
     await seam.frame!(answer);
     expect(f.api.sendUserMessage).toHaveBeenLastCalledWith(expect.stringContaining(`keep exactly the captured criterion IDs and texts (digest ${answer.scopeDigest})`), { deliverAs: 'followUp' });
@@ -202,12 +216,12 @@ describe('supported OMP extension on the same TUI', () => {
     expect(f.api.sendUserMessage).toHaveBeenCalledTimes(2); await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
   it('ends pending tool waits on EOF and observes profile/session loss without filtering native commands', async () => {
-    const f = fixture(); await f.start(); await seam.frame!({ type: 'run' });
+    const f = fixture(); await f.start(); await authorizeTask();
     const pending = f.call('execution_question', {}); seam.lost!('CHANNEL_EOF');
     await expect(pending).rejects.toThrow('CHANNEL_EOF');
     await expect(f.call('execution_complete', {})).rejects.toThrow('TRACKING_LOST');
     await f.handlers.get('session_shutdown')!(undefined, f.context);
-    const other = fixture(); await other.start(); await seam.frame!({ type: 'run' }); other.setEffort('low');
+    const other = fixture(); await other.start(); await authorizeTask(); other.setEffort('low');
     await other.handlers.get('before_agent_start')!(undefined, other.context);
     expect(seam.send).toHaveBeenCalledWith({ type: 'tracking-lost' }); expect(seam.close).toHaveBeenCalled();
   });

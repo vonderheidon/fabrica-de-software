@@ -85,10 +85,13 @@ export default function executionExtension(api: ExtensionApi): void {
   let trackedSession: string | undefined;
   let started = false;
   let alive = false;
+  let awaitingTaskAuthorization = false;
+  let taskAuthorized = false;
   let idleCheck = false;
   let context: Context | undefined;
   const lose = () => {
     alive = false;
+    awaitingTaskAuthorization = false;
     for (const call of pending.values()) call.reject();
     pending.clear();
     context?.ui.notify('Acompanhamento da fábrica interrompido. Trabalho preservado; use nova tentativa para retomar a coordenação.', 'error');
@@ -98,7 +101,7 @@ export default function executionExtension(api: ExtensionApi): void {
   const sameProfile = (ctx: Context) => ctx.model?.provider === initialProfile?.provider && ctx.model?.id === initialProfile?.model && currentEffort() === initialProfile?.effort;
   let initialProfile: { provider: string; model: string; effort: string | null } | undefined;
   const request = async (tool: string, payload: unknown, ctx: Context): Promise<ToolResult> => {
-    if (!alive || !sameSession(ctx) || !sameProfile(ctx) || !wire) throw new ExecutionError('TRACKING_LOST');
+    if (!alive || !taskAuthorized || !sameSession(ctx) || !sameProfile(ctx) || !wire) throw new ExecutionError('TRACKING_LOST');
     if (pending.size >= executionLimits.pendingCalls) throw new ExecutionError('CHANNEL_TIMEOUT');
     const id = randomUUID();
     const reply = await new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -141,7 +144,12 @@ export default function executionExtension(api: ExtensionApi): void {
       if (frame.type === 'run' && Object.keys(frame).length === 1) {
         if (alive || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');
         alive = true;
+        awaitingTaskAuthorization = true;
         await wire?.send({ type: 'task-submitted' });
+      } else if (frame.type === 'task-authorized' && Object.keys(frame).length === 1) {
+        if (!alive || !awaitingTaskAuthorization || taskAuthorized || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');
+        awaitingTaskAuthorization = false;
+        taskAuthorized = true;
         const gitNexus = launch.gitNexusRequired ? `\nGitNexus is required. Analyze and query exactly this clone root: ${launch.cwd}. Confirm that the returned root matches.` : '';
         // This is the sole task submission. No CLI prompt, stdin piping or second hidden agent.
         api.sendUserMessage(`Instruções comportamentais efetivas do perfil capturado:\n${launch.guidance}\n\nContexto da tarefa e contrato técnico capturados:\n${gitNexus}\n\n${launch.task}`);

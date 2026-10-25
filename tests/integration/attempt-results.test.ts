@@ -20,6 +20,19 @@ async function fixture() {
   return { ...f, status, handle, binding, result, accept };
 }
 describe('durable official results', () => {
+  it.each([
+    { version: 'omp/18.11.1', compatible: true },
+    { version: 'omp/18.11.2', compatible: false },
+  ])('compares captured OMP versions without the CLI prefix while rejecting actual changes ($version)', async ({ version, compatible }) => {
+    const f = await attemptFixture(); fixtures.push(f);
+    f.tools.find(tool => tool.tool === 'omp')!.version = version;
+    const c = await f.prepare();
+    const op = await f.pipeline.startAttempt(c.body, c.context); await f.pipeline.drain();
+    expect(f.storage.getAttempt(op.resource.id)).toMatchObject(compatible
+      ? { phase: 'implementing', result: null }
+      : { diagnostic: 'PROFILE_MISMATCH' });
+    if (!compatible) expect(f.persistence.getPassage({ passageId: f.storage.getAttempt(op.resource.id).passageId }).effectiveProfile).toBeNull();
+  });
   it('commits one hash, receipt, summary, criterion evidence and event before returning; duplicates retain the receipt after restart', async () => {
     const f = await fixture(); const accepted = f.accept();
     expect(f.persistence.getResult(f.handle)).toEqual(accepted);
@@ -130,6 +143,7 @@ describe('durable official results', () => {
 describe('private adapter with real SQL persistence', () => {
   it('sends ACK only after SQL commits, keeps invalid/failed payload corrigible, and returns the same receipt on repeat', async () => {
     const f = await attemptFixture(); fixtures.push(f);
+    f.tools.find(tool => tool.tool === 'omp')!.version = 'omp/18.11.1';
     const workspaceId = randomUUID(); const anchorId = randomUUID(); let callbacks!: ChannelCallbacks;
     const frames: unknown[] = []; const recruit = vi.fn(async () => {});
     const adapter = createMaestriOmp({ dataDirectory: f.directory, persistence: f.persistence,
@@ -141,6 +155,11 @@ describe('private adapter with real SQL persistence', () => {
       channel: async cb => {
         callbacks = cb;
         return { port: 1, token: 'x'.repeat(43), close: async () => {}, send: async frame => {
+          if (typeof frame === 'object' && frame && 'type' in frame && frame.type === 'task-authorized') {
+            expect(f.db.prepare('SELECT state,executor_version FROM passages WHERE role=?').get('implementer'))
+              .toEqual({ state: 'ready', executor_version: '18.11.1' });
+            expect(f.db.prepare('SELECT count(*) AS n FROM passage_measurements').get()).toEqual({ n: 1 });
+          }
           if (typeof frame === 'object' && frame && 'receiptId' in frame) {
             expect(f.db.prepare('SELECT receipt_id FROM passage_results WHERE receipt_id=?').get(frame.receiptId)).toEqual({ receipt_id: frame.receiptId });
             expect(f.db.prepare('SELECT count(*) AS n FROM criterion_results').get()).toEqual({ n: 2 });

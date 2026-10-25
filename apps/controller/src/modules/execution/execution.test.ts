@@ -143,6 +143,38 @@ function fixture(role: 'implementer' | 'reviewer' = 'implementer', effort: strin
 }
 
 describe('distributed role contracts', () => {
+  it.each(['confirmed', 'uncertain'] as const)('preserves readiness rejection and withholds task authorization with physical stop=%s', async state => {
+    const f = fixture();
+    f.store.confirmReady = () => { throw new ExecutionError('PROFILE_MISMATCH'); };
+    f.runtime.stop.mockResolvedValue(state);
+    const pending = f.execution.startPassage(f.request); await f.waitLaunch(); await f.callbacks().hello(f.hello);
+    await expect(f.callbacks().frame({ type: 'task-submitted' })).rejects.toThrow('PROFILE_MISMATCH');
+    f.callbacks().lost('PROFILE_MISMATCH');
+    const record = await pending;
+    expect(record).toMatchObject({ state: 'partial', diagnostic: 'PROFILE_MISMATCH' });
+    expect(f.frames).not.toContainEqual({ type: 'task-authorized' });
+    await vi.waitFor(() => expect(f.store.recordStop).toHaveBeenCalledWith(record.handle,
+      { passageId: record.handle.passageId, state }));
+    expect(f.runtime.stop).toHaveBeenCalledOnce();
+    await f.execution.close();
+  });
+  it('stops a late recruitment after startup tracking has already failed without recruiting again', async () => {
+    const f = fixture(); let finishLaunch!: () => void;
+    f.runtime.recruit.mockImplementation(() => new Promise<void>(resolve => { finishLaunch = resolve; }));
+    f.runtime.stop.mockResolvedValue('confirmed');
+    const pending = f.execution.startPassage(f.request); await f.waitLaunch();
+    f.callbacks().lost('TRACKING_LOST');
+    const record = await pending;
+    expect(record).toMatchObject({ state: 'partial', diagnostic: 'TRACKING_LOST' });
+    expect(f.runtime.stop).not.toHaveBeenCalled();
+    expect(f.store.recordStop).toHaveBeenCalledWith(record.handle, { passageId: record.handle.passageId, state: 'requested' });
+    finishLaunch();
+    await vi.waitFor(() => expect(f.store.recordStop).toHaveBeenCalledWith(record.handle,
+      { passageId: record.handle.passageId, state: 'confirmed' }));
+    expect(f.runtime.recruit).toHaveBeenCalledOnce();
+    expect(f.frames).not.toContainEqual({ type: 'task-authorized' });
+    await f.execution.close();
+  });
   it('observes a Maestri build hash as its version without recruiting a terminal', async () => {
     const runCli = vi.fn(async () => ({ exitCode: 0, stdout: '97e32e94\n', stderr: '' }));
     const execution = createMaestriOmp({ dataDirectory: 'C:\\Dados', host, persistence: fixtureStore().store }, loadRoleResources(), {
@@ -533,7 +565,7 @@ describe('passage coordination under controlled native dependencies', () => {
     const ready = await pending; expect(ready.state).toBe('ready');
     expect(ready.effectiveProfile).toEqual(f.request.profile); expect(ready.executorVersion).toBe('18.11.1');
     await f.execution.startPassage(f.request); expect(f.runtime.recruit).toHaveBeenCalledOnce();
-    expect(f.frames).toEqual([{ type: 'run' }]);
+    expect(f.frames).toEqual([{ type: 'run' }, { type: 'task-authorized' }]);
     await f.execution.interactionSurface(ready.handle).open?.();
     expect(f.openExistingTerminal).toHaveBeenCalledWith({ terminalId: f.hello.terminalId, workspaceId });
     await f.execution.close(); expect(f.store.getPassage(ready.handle).state).toBe('interrupted');

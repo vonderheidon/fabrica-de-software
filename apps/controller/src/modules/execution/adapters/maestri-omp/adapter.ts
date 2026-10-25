@@ -25,7 +25,7 @@ interface LivePassage {
   idle?: { resolve: () => void; reject: () => void } | undefined;
   continuation: { resolve: (record: PassageRecord) => void; reject: () => void } | undefined;
   request: PassageRequest; channel: PassageChannel | undefined; bootstrap: Bootstrap | undefined;
-  native: Native; session: Hello | undefined; cancelled: boolean; stopped: boolean;
+  native: Native; session: Hello | undefined; cancelled: boolean; revoked: boolean; stopped: boolean;
   terminalGeneration: number;
   launchPending: boolean; launchIssued: boolean; storageFailed: boolean;
   stopResult?: Promise<StopReceipt>;
@@ -69,11 +69,16 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   };
   const interrupt = (entry: LivePassage, code: ExecutionCode) => {
     if (entry.handoff) return;
+    entry.revoked = true;
     entry.idle?.reject(); entry.idle = undefined;
     entry.continuation?.reject(); entry.continuation = undefined;
     entry.failed(code);
     for (const pending of entry.answers.values()) pending.reject();
     entry.answers.clear();
+    if (!closed) {
+      void entry.channel?.close().catch(() => { entry.storageFailed = true; });
+      void stop(entry).catch(() => { entry.storageFailed = true; });
+    }
   };
   const stop = async (entry: LivePassage): Promise<StopReceipt> => {
     const passageId = entry.request.binding.passageId;
@@ -138,12 +143,12 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     let timer: ReturnType<typeof setTimeout> | undefined;
     const entry: LivePassage = {
       request, native: runtime, channel: undefined, bootstrap: undefined, session: undefined, continuation: undefined,
-      cancelled: false, stopped: false, launchPending: false, launchIssued: false, storageFailed: false, answers: new Map(),
+      cancelled: false, revoked: false, stopped: false, launchPending: false, launchIssued: false, storageFailed: false, answers: new Map(),
       terminalGeneration: sessionCandidate.generation,
       ready: () => {
         if (settled) return;
         try { store.confirmReady(initial.handle, request.profile, validation.ompVersion); }
-        catch { throw new ExecutionError('STORAGE_FAILED'); }
+        catch (error) { throw new ExecutionError(codeOf(error, 'STORAGE_FAILED')); }
         settled = true; clearTimeout(timer); finish();
       },
       failed: (code) => {
@@ -195,7 +200,10 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           }
           if (Value.Check(Submitted, frame)) {
             if (!entry.session || settled) throw new ExecutionError('FRAME_INVALID');
-            entry.ready(); return;
+            entry.ready();
+            // The extension must not invoke the model before readiness is durably accepted.
+            await entry.channel?.send({ type: 'task-authorized' });
+            return;
           }
           if (frame && typeof frame === 'object' && 'type' in frame && frame.type === 'continuation-receipt' && 'passageId' in frame && frame.passageId === entry.request.binding.passageId && entry.continuation) {
             const h = handleOf(entry.request.binding.passageId);
@@ -236,12 +244,12 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           } catch (error) { reply = { type: 'reply', id: frame.id, ok: false, code: codeOf(error, 'STORAGE_FAILED') }; }
           await entry.channel?.send(reply);
         },
-        lost: (code) => { interrupt(entry, code); void entry.channel?.close().catch(() => { entry.storageFailed = true; }); },
+        lost: (code) => { interrupt(entry, code); },
       });
       entry.channel = channel;
       entry.bootstrap = await (dependencies.bootstrap ?? writeBootstrap)(options.dataDirectory, request, host, role, channel, validation.ompVersion,
         options.projectStorageRootForAttempt, sessionCandidate.sessionDirectoryRelative);
-      if (entry.cancelled || closed) return store.getPassage(initial.handle);
+      if (entry.cancelled || entry.revoked || closed) return store.getPassage(initial.handle);
       if (terminalAvailabilityConfirmed) {
         const stillStopped = await host.confirmStoppedTerminal!({ workspaceId: sessionCandidate.workspaceId!, terminalId: sessionCandidate.terminalId!,
           terminalName: sessionCandidate.terminalName, generation: sessionCandidate.generation });
@@ -254,7 +262,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       // One launch only. Timeout/lost response retains the same identity, never recruits again.
       const command = launchCommand(host.powershellExecutable, entry.bootstrap.path);
       const preparedCommand = host.prepareTerminalLaunch ? await host.prepareTerminalLaunch({ workspaceId: validation.anchor.workspaceId, terminalName: sessionCandidate.terminalName, generation: sessionCandidate.generation }, command) : command;
-      if (entry.cancelled || closed) {
+      if (entry.cancelled || entry.revoked || closed) {
         await host.stopPendingTerminal?.({ workspaceId: validation.anchor.workspaceId, terminalName: sessionCandidate.terminalName, generation: sessionCandidate.generation });
         return store.getPassage(initial.handle);
       }
@@ -263,11 +271,11 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       const launching = runtime.recruit(sessionCandidate.terminalName, request.cwd, preparedCommand, terminalAvailabilityConfirmed);
       void launching.then(async () => {
         entry.launchPending = false;
-        if (entry.cancelled || closed) await stop(entry);
+        if (entry.cancelled || entry.revoked || closed) await stop(entry);
       }).catch(async () => {
         entry.launchPending = false;
         interrupt(entry, 'LAUNCH_UNCERTAIN');
-        if (entry.cancelled || closed) await stop(entry);
+        if (entry.cancelled || entry.revoked || closed) await stop(entry);
       }).catch(() => { entry.storageFailed = true; });
       await waiting;
       if (entry.storageFailed) throw new ExecutionError('STORAGE_FAILED');

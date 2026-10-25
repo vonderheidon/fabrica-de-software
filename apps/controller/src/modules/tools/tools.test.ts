@@ -11,6 +11,11 @@ const preferences: ToolPreferences = {
 };
 
 describe('native tool discovery', () => {
+  it('reports the same OMP version format as the execution adapter', async () => {
+    const detector = createToolDetector({ platform: 'win32', stat: async () => ({ isFile: () => true }),
+      access: async () => {}, run: async () => 'omp/18.12.5' });
+    expect(await detector.validate('C:\\OMP\\omp.exe', 'omp')).toEqual({ path: 'C:\\OMP\\omp.exe', version: '18.12.5' });
+  });
   it('validates candidates without a shell and preserves Unicode paths', async () => {
     const calls: Array<{ path: string; args: readonly string[] }> = [];
     const detector = createToolDetector({ environment: () => ({ PATH: 'C:\\Tools ç\\Git\\cmd;D:\\Program Files\\Git\\cmd' }), platform: 'win32',

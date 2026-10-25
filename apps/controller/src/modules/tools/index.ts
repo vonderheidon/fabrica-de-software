@@ -62,7 +62,8 @@ export function createToolDetector(dependencies: ToolDetectorDependencies = {}):
     try {
       if (!(await checkStat(path)).isFile()) return null;
       await checkAccess(path);
-      return { path, version: await run(path, commandArgs[tool]) };
+      const version = await run(path, commandArgs[tool]);
+      return { path, version: tool === 'omp' ? version.replace(/^omp\//i, '') : version };
     } catch { return null; }
   }
 

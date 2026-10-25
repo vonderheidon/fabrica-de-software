@@ -42,7 +42,10 @@ export const writeBootstrap: BootstrapWriter = async (data, request, host, role,
     const script = `$ErrorActionPreference='Stop'; $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; ` +
       `$acl=New-Object System.Security.AccessControl.DirectorySecurity; $acl.SetOwner($sid); $acl.SetAccessRuleProtection($true,$false); ` +
       `$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'); ` +
-      `$acl.AddAccessRule($rule); $directory=[System.IO.DirectoryInfo]::new(${quote(own)}); $directory.SetAccessControl($acl)`;
+      `$acl.AddAccessRule($rule); $directory=[System.IO.DirectoryInfo]::new(${quote(own)}); ` +
+      // Use native ACL APIs without depending on inherited PowerShell module discovery.
+      `if ($PSVersionTable.PSEdition -eq 'Core') { [System.IO.FileSystemAclExtensions]::SetAccessControl($directory,$acl) } ` +
+      `else { $directory.SetAccessControl($acl) }`;
     const response = await runCli(host.powershellExecutable, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], root, host.inheritedEnvironment);
     if (response.exitCode !== 0) throw new ExecutionError('RESOURCE_INVALID');
   }

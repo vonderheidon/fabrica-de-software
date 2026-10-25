@@ -245,7 +245,7 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
       if (!p.request_hash || p.state !== 'starting') throw new ExecutionError('TRACKING_LOST');
       const capture = readCapture(db, p.attempt_id); const expected = p.role === 'implementer' ? capture.configuration.implementer_profile : capture.configuration.reviewer_profile;
       if (!expected || ['name', 'executor', 'provider', 'model', 'effort', 'guidance'].some(key => profile[key as keyof ExecutionProfileValue] !== expected[key as keyof ExecutionProfileValue]) ||
-        capture.tools.find(t => t.tool === 'omp')?.version !== executorVersion) throw new ExecutionError('PROFILE_MISMATCH');
+        capture.tools.find(t => t.tool === 'omp')?.version?.replace(/^omp\//i, '') !== executorVersion.replace(/^omp\//i, '')) throw new ExecutionError('PROFILE_MISMATCH');
       db.prepare("UPDATE passages SET effective_profile_json=?,executor_version=?,state='ready',tracking_state='tracked',diagnostic=NULL WHERE id=?")
         .run(JSON.stringify(profile), executorVersion, p.id);
       db.prepare("UPDATE resources SET launch_state='ready' WHERE passage_id=? AND kind='terminal'").run(p.id);
