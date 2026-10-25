@@ -60,6 +60,12 @@ O hostname real é capturado automaticamente antes da preparação, do início e
 
 O launcher básico fornece os contextos de consulta/execução, sem autorização remota irrestrita. Publicação e scaffold remoto exigem composição confiável explícita via `startController({githubMutationAuthorization, scaffoldAuthorization, ...})`, limitada aos IDs de conta/repositório/Project ou owner/nome/visibilidade/allowPush já autorizados. Consulte os tipos públicos compilados; não obter essas capacidades de body HTTP, flags de ambiente ou credencial no bundle. Abertura nativa/confirmar parada também depende dos callbacks confiáveis do host. Sem capacidade, a UI informa indisponibilidade/incerteza e não cria substituto.
 
+## Notificações locais
+
+Na área **Notificações locais**, clique **Ativar notificações** para habilitar este navegador e solicitar a permissão do site. A escolha de ativação é por navegador e instalação; a permissão pertence ao navegador. Se estiver negada, altere-a nas configurações do site e volte à aplicação. Navegador sem suporte ou permissão negada mantém o controle desativado.
+
+Os avisos usam mensagens genéricas e o clique abre o detalhe local da tentativa relacionada. Não executam publicação nem outra ação de negócio. Perguntas e pendências continuam acessíveis na interface quando os avisos estão desativados, indisponíveis ou incertos. Com a aplicação fechada não há garantia de entrega posterior; um recibo ausente ou incerto não provoca reenvio automático do mesmo evento.
+
 ## Encerrar, reiniciar e atualizar
 
 1. Pause novos inícios da fila e confira o recibo. Fechar aba/modal não cancela trabalho.
@@ -88,7 +94,7 @@ Não apagar WAL/SHM, substituir banco incompatível por vazio, editar ledger/che
 
 ## Provas locais e opt-in real
 
-No repositório de desenvolvimento, executar os comandos efetivamente configurados: `typecheck`, `lint`, `test`, `build`, `test:compiled`, `test:execution-compiled`, `test:verification-compiled`, `test:distribution`, `test:acceptance`, `test:persistence` e `proof:persistence`. `test:maintenance-native` faz build e processos Node de prova local. Comandos de smoke são opt-in **locais**, usam loopback/processos próprios e não provam Maestri/GitHub. A suíte padrão bloqueia rede/subprocessos de produto. O pacote de operação inclui somente `start`; esses checks exigem o repositório, devDependencies e autorização de execução correspondentes.
+No repositório de desenvolvimento, executar os comandos efetivamente configurados: `typecheck`, `lint`, `test`, `test:http`, `test:acceptance`, `build`, `test:compiled`, `test:execution-compiled`, `test:verification-compiled`, `test:distribution`, `test:persistence` e `proof:persistence`. `test:maintenance-native` faz build e processos Node de prova local. Comandos de smoke são opt-in **locais**, usam loopback/processos próprios e não provam Maestri/GitHub. A suíte padrão bloqueia rede/subprocessos de produto. O pacote de operação inclui somente `start`; esses checks exigem o repositório, devDependencies e autorização de execução correspondentes.
 
 Prova Maestri/OMP/Git/GitHub real segue [first-slice](../integration/first-slice/README.md), com alvo, conta, host, perfis, orçamento e efeitos previamente autorizados. Não executar providers, recrutar ou publicar como efeito de build/instalação/health. Preflight Maestri é não pago, mas é consulta nativa real. `acceptance:check` verifica consistência de evidência; exit 2 é pendência, não aceite. Para AC-24, `test:execution-compiled` exercita frames/UTF-8/malformed/oversize/EOF com transporte local; TUI/MCP real exige observação separada.
 

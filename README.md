@@ -2,17 +2,24 @@
 
 Controlador local com persistência, proteção HTTP, operações consultáveis, cadastro/catálogo de projetos e configuração global/por projeto com perfis exatos e revisões imutáveis. A cobertura das sprints e as interfaces disponíveis estão em [SPEC_PROGRESS.md](SPEC_PROGRESS.md).
 
+Para instalar e operar, consulte o [manual local](docs/operation/README.md), que cobre modos ICR/Commit/PR, diretórios, recuperação, notificações locais, pausa e encerramento. As notificações do navegador são opcionais e as pendências continuam disponíveis na interface.
+
 ## Requisitos e instalação
 
 Node.js **24.x** e npm. Execute os comandos na raiz deste repositório canônico, em PowerShell. As versões diretas são exatas em `package.json`; `package-lock.json` fixa a árvore resolvida. O driver SQLite inclui binário nativo para as plataformas distribuídas pelo pacote; esta execução foi validada no Windows com Node 24.20.0.
 
 ```powershell
-npm ci --cache .cache/npm --no-audit --no-fund
-npm run typecheck
-npm run lint
-npm test
-npm run build
-npm run test:compiled
+npm.cmd ci --cache .cache/npm --no-audit --no-fund
+npm.cmd run typecheck
+npm.cmd run lint
+npm.cmd test
+npm.cmd run test:http
+npm.cmd run test:acceptance
+npm.cmd run build
+npm.cmd run test:compiled
+npm.cmd run test:execution-compiled
+npm.cmd run test:verification-compiled
+npm.cmd run test:distribution
 ```
 
 No PowerShell que bloqueia scripts `.ps1`, use `npm.cmd` no lugar de `npm`. O cache explícito mantém a instalação dentro do workspace mesmo quando o ambiente define outro cache. Não é necessário instalar ferramentas globalmente nem executar setup de scaffold.
@@ -180,11 +187,11 @@ Diretórios informados são resolvidos relativamente ao diretório de dados do b
 
 `profile_changes` é uma lista de perfis completos `{id?,name,executor:'maestri-omp',provider,model,effort,guidance}`; `composition_version` é do servidor e não pode ser definido no comando. ID ausente cria um perfil com UUID do servidor e versão de composição 1; ID existente edita por CAS, sem resetar os demais. ID desconhecido recebe 404; duplicado recebe 400; capacidade total 100. Valores são preservados exatamente, sem provider/modelo/esforço demonstrativos ou fallback. Selecione perfis pelos IDs retornados. Não há exclusão de perfil referenciado.
 
-ETags são opacos. Ausência gera 428; revisão alterada gera 412; chave reutilizada com conteúdo/precondição/escopo diferentes gera 409. Repetição idêntica recupera o recibo antes de CAS, validação remota ou acesso a diretórios; a resposta inclui a leitura atual do mesmo recurso e o recibo original. Comando sem mudança efetiva retorna `409 NO_CHANGES`. Nenhuma falha parcial retorna Salvo; revise a edição no cliente e reaplique sobre a leitura atual. O shell web já está conectado às leituras existentes; formulários de edição e os fluxos de domínio restantes ainda não estão disponíveis.
+ETags são opacos. Ausência gera 428; revisão alterada gera 412; chave reutilizada com conteúdo/precondição/escopo diferentes gera 409. Repetição idêntica recupera o recibo antes de CAS, validação remota ou acesso a diretórios; a resposta inclui a leitura atual do mesmo recurso e o recibo original. Comando sem mudança efetiva retorna `409 NO_CHANGES`. A interface oferece formulários de configuração global e por projeto, preserva rascunhos em conflito e orienta consultar uma operação quando a resposta fica incerta.
 
 Interface de serviço: `createProjects({storage,github,workspaces,directoryBase})`, em `modules/projects/index.ts`, oferece `registerProject/listProjects/getProject/getSettings/saveSettings/getConfiguration/saveConfiguration/getConfigurationOptions`. IO remoto/filesystem antecede SQL. `storage` expõe leituras editáveis `{view,etag}`, gravações tipadas e recuperação idempotente; não oferece conexão/transação pública. TypeBox e tipos estão em `packages/contracts/src/projects.ts`, reexportados por `#contracts`; schemas comuns ficam em `base.ts`.
 
-Provas locais incluem SQLite real, HTTP inject, rollback em cada ponto da gravação agregada, duas abas, corrida durante IO, idempotência, histórico e migração real 2→3. O smoke compilado exercita settings/CAS/idempotência e catálogo por HTTP loopback real, além de SSE/shutdown/lock. Neste sandbox, `realpath` retorna EPERM inclusive para o workspace; a prova positiva controla somente essa resolução e usa `stat/access` reais. Produção mantém a canonicalização real e falha segura, sem fallback ou alteração de ACL. Cadastro/opções com Git/GH reais e resolução canônica completa continuam sem prova neste runtime.
+Provas locais incluem SQLite real, HTTP inject, rollback em cada ponto da gravação agregada, duas abas, corrida durante IO, idempotência, histórico e migração real 2→3. O smoke compilado exercita settings/CAS/idempotência e catálogo por HTTP loopback real, além de SSE/shutdown/lock. Um ensaio anterior controlou a resolução de `realpath` por `EPERM`; a Sprint 043 acrescentou a prova separada de distribuição Unicode e correção manual de ferramentas registrada em [sprint043-gates.md](docs/operation/sprint043-gates.md). Esses cenários não equivalem a uma prova irrestrita de canonicalização para todos os diretórios.
 
 ## Scaffold local, remoto e reconciliação
 
@@ -460,9 +467,9 @@ O lock local de instalação é adquirido antes de storage/listen e independe de
 
 Tree igual à base é conferida no Git e precisa coincidir com `hasDelta:false`. Com revisão/evidências aprovadas, o efeito fica `not_applicable/APPROVED_NO_DELTA`, sem commit vazio. O comentário identificado inclui SHA/branch ou motivo de ausência de delta e referências aos resultados/evidências. Conclusão exige commit confirmado/não aplicável e comentário confirmado; Delivered é projeção posterior. Falhas e confirmações tardias conservam aprovação e fatos anteriores sem relançar o Implementador.
 
-Migration 014 amplia os journals de efeitos/pedidos preservando registros, recibos, ordem e guards. As consultas leves apresentam `publication.commit` com estado, SHA, motivo e operationId, separados de revisão, resultado final e limpeza. O suporte backend PR e aumento de modo é descrito abaixo. A interface de preparação ainda conserva seu bloqueio explícito de início PR; esta fatia modifica somente o backend.
+Migration 014 amplia os journals de efeitos/pedidos preservando registros, recibos, ordem e guards. As consultas leves apresentam `publication.commit` com estado, SHA, motivo e operationId, separados de revisão, resultado final e limpeza. O suporte backend PR e aumento de modo é descrito abaixo. O bloqueio inicial de PR mencionado na implementação original do backend foi removido nas sprints 028–029, que conectaram os modos e a continuação à interface.
 
-Provas locais usam SQLite/filesystem/HTTP controlado e Git controlado. Execução de Git temporário real, clone/refs/commit reais, comentário/Status reais e integração Maestri/OMP dependem do contexto autorizado e da autorização correspondente. As restrições desta sessão impedem esses efeitos; testes locais não encerram AC-10/13 ou INT-18 integrais.
+Provas locais usam SQLite/filesystem/HTTP controlado e Git controlado. A [matriz da Sprint 043](docs/operation/sprint043-gates.md) registra separadamente os cenários reais de Git/GitHub e Maestri/OMP, com suas identidades e limites. Uma prova real vale para o cenário documentado e não substitui autorização ou evidência de outros efeitos.
 
 ## PR, reconciliação e aumento de modo
 
@@ -474,11 +481,11 @@ Intenção/claim são confirmados antes de cada mutação e o recibo antes da se
 
 Migration 015 amplia os journals e adiciona `publication_upgrades`, imutável e vinculada a tentativa/versão/operação. O resumo oferece somente modos superiores para tentativa encerrada com versão corrente aprovada; o hash vincula revisões, configuração, versão/revisão técnica e estados dos efeitos. Autorizar valida retenção/evidências, gate atual, CAS e resumo antes da transação. A autorização adicional, recibo e evento são atômicos; a captura original e efeitos confirmados permanecem intactos. `authorizations.capturedMode` e `authorizedMode` são distintos. `complete` usa o modo já autorizado, sem exigir a confirmação adicional novamente, e `publication.localState` distingue conclusão do modo de um resultado anterior entregue.
 
-Após restart não há conclusão automática nem restauração de sessão. A ação explícita exige recursos antigos reconciliados, gate atual e reconciliação dos efeitos. Falha conserva aprovação/refs/recibos; não reimplementa trabalho. Os contratos `publication.push`, `pullRequest` e `upgrades` apresentam estados, recibos, motivos e capacidades. Resumos não leem checkout, caches, diff ou bytes de logs; SQLite guarda somente referências/hashes/autorizações/estado. Provas locais de PR usam adapters controlados; AC-11/12/18/22 e INT-18 integrais ainda exigem alvos e efeitos reais autorizados.
+Após restart não há conclusão automática nem restauração de sessão. A ação explícita exige recursos antigos reconciliados, gate atual e reconciliação dos efeitos. Falha conserva aprovação/refs/recibos; não reimplementa trabalho. Os contratos `publication.push`, `pullRequest` e `upgrades` apresentam estados, recibos, motivos e capacidades. Resumos não leem checkout, caches, diff ou bytes de logs; SQLite guarda somente referências/hashes/autorizações/estado. A prova real delimitada de commit/push/PR está registrada na Sprint 043; os testes com adapters controlados continuam cobrindo outras combinações sem alegar que ocorreram no GitHub.
 
 ## Prova integrada da primeira fatia
 
-O [roteiro de aceitação](docs/integration/first-slice/README.md) cobre cadastro→ICR, TUI/MCP/GitNexus, pergunta/resposta, cancelamento e restart/nova tentativa, consumindo as sprints 017/033/034 do plano. O [registro atual](docs/integration/first-slice/20261017-02/report.md) distingue validação local de execução real e registra bloqueios de host/conta/autorização, preservando a preparação anterior.
+O [roteiro de aceitação](docs/integration/first-slice/README.md) cobre cadastro→ICR, TUI/MCP/GitNexus, pergunta/resposta, cancelamento e restart/nova tentativa, consumindo as sprints 017/033/034 do plano. O [registro da primeira fatia](docs/integration/first-slice/20261017-02/report.md) é histórico; a situação mais recente dos gates operacionais está em [sprint043-gates.md](docs/operation/sprint043-gates.md), com cada prova delimitada ao seu cenário.
 
 `npm.cmd run test:acceptance` executa somente contratos locais. `npm.cmd run acceptance:check -- <manifest.json>` confere evidências locais sem executar efeitos; o manifesto atual retorna pendência. Mesmo um registro apto a revisão exige conferência independente dos anexos e aceite pelos mecanismos do pipeline. Os testes e smokes não autorizam providers, Git/GH, publicação ou parada de recursos reais.
 
