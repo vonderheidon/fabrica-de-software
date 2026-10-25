@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import type { Writable } from 'node:stream';
-import Fastify from 'fastify';
+import Fastify, { LogController } from 'fastify';
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
 import { EmptyQuery, ErrorResponse, HealthResponse, OperationParams, OperationViewWithDeletion } from '#contracts';
 import type { ControllerConfiguration } from '../config.js';
@@ -36,8 +36,16 @@ type ProjectAppDependencies = Partial<Pick<ProjectDependencies, 'github' | 'gith
 
 export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: ProjectAppDependencies, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>, deletionDependencies?: { workspaces: Parameters<typeof createDeletionCoordinator>[0]['workspaces']; coordinator: ReturnType<typeof createDeletionCoordinator> }) {
   const app = Fastify({
+    logController: new LogController({ disableRequestLogging: true }),
     logger: {
       level: configuration.logLevel,
+      hooks: {
+        logMethod(args, method, level) {
+          const entry = args[0] as { event?: string } | undefined;
+          if (level < 40 && entry?.event !== 'github_read') return;
+          method.apply(this, args);
+        },
+      },
       ...(logDestination ? { stream: logDestination } : {}),
       redact: ['req.headers.authorization', 'req.headers.cookie', 'req.headers["x-csrf-token"]', 'res.headers["set-cookie"]'],
       // Do not log URL/query strings, headers, bodies or arbitrary error messages.
