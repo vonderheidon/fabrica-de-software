@@ -16,6 +16,7 @@ import { toHttpQueueObservation } from '../../apps/controller/src/http/observati
 import { QueuePanel } from '../../apps/web/src/features/queue/QueuePanel.js';
 import { observationWire } from '../fixtures/observation-wire.js';
 import { BackendMeasurement } from '../fixtures/backend-measurement.js';
+import { createInspector } from '../../apps/controller/src/modules/workspaces/inspect.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) { await f.pipeline.close(); await f.close(); } });
@@ -38,6 +39,18 @@ async function fixture(enabled = true) {
 function command(observation: QueueObservation, enabled: boolean): QueueCommand {
   return { enabled, scope: observation.scope, ...(observation.observationId ? { observationId: observation.observationId } : {}), ...(observation.summaryHash ? { authorizedSummaryHash: observation.summaryHash } : {}) };
 }
+
+it('observes an enabled registered source using the real origin request validator', async () => {
+  const { f, queue } = await fixture();
+  Object.assign(f.workspaces, createInspector({
+    getRepository: vi.fn(async () => complete(f.issue.repository)),
+    resolveBranch: vi.fn(async () => complete(f.observation.remote!.branch!)),
+  }));
+  const observed = await queue.observe({ projectId: f.projectId });
+  expect(observed.observation.complete).toBe(true);
+  expect(observed.observation.diagnostics.some(item => item.code === 'REMOTE_UNCONFIRMED')).toBe(false);
+  expect(observed.observation.page.items.some(item => item.eligible)).toBe(true);
+});
 
 describe('authorized queue changes', () => {
   it.each(['none', 'account', 'assignee', 'status', 'criteria', 'configuration'] as const)(

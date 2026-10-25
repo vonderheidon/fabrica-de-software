@@ -282,7 +282,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       throw new OperationError(409, 'STATUS_MAPPING_LEGACY', 'O quadro ainda usa um mapeamento histórico de quatro valores.',
         { affected_requirements: ['RF-15'], recovery: 'Selecione novamente o campo Status e confirme as cinco opções V3, incluindo Backlog.' });
     }
-    const origin = await workspaces.inspectOrigin({ source: configuration.source, baseBranch: configuration.base_branch });
+    const origin = await workspaces.inspectOrigin({ source: { kind: configuration.source.kind, location: configuration.source.location }, baseBranch: configuration.base_branch });
     const remoteConfirmed = origin.state === 'identified' && Boolean(origin.remote?.confirmed && origin.remote.repository &&
       origin.remote.repository.id === configuration.source.repository_id && !origin.remote.repository.isArchived);
     if (!remoteConfirmed) {

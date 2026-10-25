@@ -6,6 +6,7 @@ import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
 import { digest } from '../../apps/controller/src/modules/storage/configuration-reads.js';
+import { createInspector } from '../../apps/controller/src/modules/workspaces/inspect.js';
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -30,6 +31,22 @@ function durableRows(f: AttemptFixture) {
     preparations: f.db.prepare('SELECT * FROM preparation_revisions ORDER BY preparation_id, revision').all(),
     operations: f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all(), events: f.storage.getEvents({}) };
 }
+
+it('enables automation for a registered GitHub source through the real origin request validator', async () => {
+  const f = await fixture();
+  const origin = createInspector({
+    getRepository: vi.fn(async () => complete(f.issue.repository)),
+    resolveBranch: vi.fn(async () => complete(f.observation.remote!.branch!)),
+  });
+  Object.assign(f.workspaces, origin);
+  const current = f.storage.getConfiguration(f.projectId);
+  expect(current.view.configuration.source.repository_id).toBe(f.issue.repository.id);
+  const response = await f.app.inject({ method: 'PUT', url: `/api/v1/projects/${f.projectId}/configuration`,
+    headers: { ...f.headers, 'if-match': current.etag, 'idempotency-key': randomUUID() },
+    payload: { project_changes: { automation_enabled: true } } });
+  expect(response.statusCode, response.body).toBe(200);
+  expect(response.json<ConfigurationSaved>().configuration.automation_enabled).toBe(true);
+});
 
 it('exposes the configuration lock and rejects edits while the project is executing', async () => {
   const f = await fixture();

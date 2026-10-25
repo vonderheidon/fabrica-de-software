@@ -93,7 +93,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         diagnostics.push({ code: 'REMOTE_UNCONFIRMED', message: `${projectSummary.name}: a origem GitHub ainda não foi confirmada.`, recovery: 'Configure e confirme um remoto GitHub para este projeto.' });
         continue;
       }
-      const origin = await workspaces.inspectOrigin({ source: configuration.source, baseBranch: configuration.base_branch });
+      const origin = await workspaces.inspectOrigin({ source: { kind: configuration.source.kind, location: configuration.source.location }, baseBranch: configuration.base_branch });
       const remoteConfirmed = origin.state === 'identified' && Boolean(origin.remote?.confirmed && origin.remote.repository &&
         origin.remote.repository.id === configuration.source.repository_id && !origin.remote.repository.isArchived);
       if (!remoteConfirmed) {
