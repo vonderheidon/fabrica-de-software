@@ -17,22 +17,24 @@ vi.mock('./useProjectDeletion.js', () => ({
 import { deletionProgress, deletionWarning, ProjectDeletionDialog } from './ProjectDeletionDialog.js';
 
 const context = { projectId: 'private-project-id', projectName: 'Projeto <exemplo>', projectRevision: 1, contextVersion: 3 };
+const managedRootPath = 'var/factory/projects/private-project-id/v1/managed';
 const targets: ProjectDeletionPreview['targets'] = [
   { targetKey: 'private-target', targetKind: 'original_directory', path: 'C:/pasta muito longa/ação/.git', state: 'pending' },
+  { targetKey: 'managed:managed:root', targetKind: 'exclusive_workspace', path: 'C:/fábrica/var/factory/projects/project-root/v1/managed', state: 'pending' },
   { targetKey: 'work', targetKind: 'exclusive_workspace', path: 'C:/ambientes/um', state: 'pending' },
   { targetKey: 'artifact', targetKind: 'exclusive_artifact', path: 'C:/evidências/log', state: 'pending' },
 ];
-function render(currentRevision = 1) {
+function render(currentRevision = 1, initialOperationId: string | null = null) {
   vi.stubGlobal('document', { body: {} });
   return renderToStaticMarkup(createElement(ProjectDeletionDialog, { originContext: context, currentRevision, installationId: 'private-installation', accountId: null,
-    hasUnsavedChanges: true, pollingIntervalMs: 15000, returnFocusTarget: null, onClose: vi.fn() }));
+    initialOperationId, managedRootPath, hasUnsavedChanges: true, pollingIntervalMs: 15000, returnFocusTarget: null, onClose: vi.fn() }));
 }
 beforeEach(() => {
   mocks.phase = 'preview'; mocks.status = null; mocks.loading = false; mocks.confirm.mockClear();
   mocks.preview = { ...context, sourceKind: 'github', authorizationDigest: 'private-digest', targets, blockers: [], canConfirm: true };
 });
 
-it('renders the full warning, saved-draft notice and every complete escaped target without technical identifiers', () => {
+it('keeps confirmation compact while exposing every authorized path and preserving the complete warning', () => {
   const html = render();
   expect(html).toContain(deletionWarning);
   expect(html).toContain('Alterações não salvas não serão aplicadas.');
@@ -40,6 +42,11 @@ it('renders the full warning, saved-draft notice and every complete escaped targ
   expect(html).toContain('Pastas de origens anteriores serão preservadas.');
   for (const target of targets) expect(html).toContain(target.path);
   for (const label of ['Pasta original inteira', 'Ambiente local exclusivo', 'Artefato exclusivo']) expect(html).toContain(label);
+  expect(html).toContain('Pasta gerenciada');
+  expect(html).toContain('4 destinos autorizados');
+  expect(html).toContain('Ver outros destinos autorizados (2)');
+  expect(html).toContain('<details class="project-deletion-more-targets">');
+  expect(html.indexOf('class="danger-button"')).toBeGreaterThan(html.indexOf('project-deletion-more-targets'));
   expect(html).toContain('Projeto &lt;exemplo&gt;');
   expect(html).not.toMatch(/private-|checkbox|<input|request_id|authorization_digest/);
   expect(mocks.confirm).not.toHaveBeenCalled();
@@ -50,6 +57,8 @@ it('associates the modal title and safe initial focus target and exposes a polit
   expect(html).toContain('aria-modal="true" aria-labelledby="project-deletion-title"');
   expect(html).toContain('id="project-deletion-title" tabindex="-1"');
   expect(html).toContain('role="status" aria-live="polite" aria-atomic="true"');
+  expect(html).toContain('aria-label="Voltar à configuração"');
+  expect(html).toContain('class="project-deletion-action-compact" aria-hidden="true">Voltar</span>');
 });
 
 it('prevents confirmation during loading, stale revision, blocked preview and submitting', () => {
@@ -89,12 +98,29 @@ it('renders the same progress text when only the operation revision changes', ()
   expect(first).not.toContain('class="danger-button"');
 });
 
+it('distinguishes accepted, partial and reconfirmation states and links the same operation to records', () => {
+  mocks.phase = 'accepted';
+  const pending = { operationId: 'private-operation', projectId: context.projectId, projectName: context.projectName, state: 'pending' as const,
+    revision: 1, targets, blockers: [{ reason: 'Destino protegido.', recovery: 'Confira o cadastro.' }], canRetry: true };
+  mocks.status = { ...pending, state: 'accepted', blockers: [], canRetry: false };
+  const accepted = render(1, 'private-operation');
+  expect(accepted).toContain('Exclusão aceita. Aguardando execução.');
+  expect(accepted).toContain('#principal/registros?operationId=private-operation');
+  mocks.status = pending;
+  const partial = render(1, 'private-operation');
+  expect(partial).toContain('Exclusão pendente. Consulte os impedimentos. Itens já removidos não serão restaurados.');
+  expect(partial).toContain('Destino protegido.');
+  expect(partial).toContain('Confira o cadastro.');
+  mocks.status = { ...pending, state: 'reconfirmation_required' };
+  expect(render(1, 'private-operation')).toContain('A conferência dos caminhos precisa ser atualizada. Itens já removidos não serão restaurados.');
+});
+
 function findButton(node: ReactNode, label: string): (() => void) | undefined {
   if (Array.isArray(node)) {
     for (const child of node) { const result = findButton(child, label); if (result) return result; }
   }
-  if (!isValidElement<{ children?: ReactNode; onClick?: () => void }>(node)) return undefined;
-  if (node.type === 'button' && node.props.children === label) return node.props.onClick;
+  if (!isValidElement<{ children?: ReactNode; onClick?: () => void; 'aria-label'?: string }>(node)) return undefined;
+  if (node.type === 'button' && (node.props.children === label || node.props['aria-label'] === label)) return node.props.onClick;
   return findButton(node.props.children, label);
 }
 

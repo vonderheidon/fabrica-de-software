@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { lstat, mkdir, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
-import { observeWindowsReference, removeWindowsReference } from '../../apps/controller/src/modules/workspaces/windows-reference.js';
+import { execFileSync } from 'node:child_process';
+import { observeWindowsReference, observeWindowsReferences, removeWindowsReference } from '../../apps/controller/src/modules/workspaces/windows-reference.js';
 import { createDeletionInspector, nativeDeletionInspectionPlatform, windowsReferenceDeletionPlatform } from '../../apps/controller/src/modules/workspaces/deletion.js';
 
 const fixtures: string[] = [];
@@ -34,6 +35,48 @@ async function expectRenameBlocked(source: string, destination: string) {
 }
 
 describe.skipIf(process.platform !== 'win32')('Windows handle reference platform (mandatory host qualification)', () => {
+  it('observes every path across a full native batch and its remainder in order', async () => {
+    const f = await fixture();
+    const paths = Array.from({length:101}, (_,index)=>join(f.target,`leaf-${index}`));
+    await mkdir(paths[99]!);
+    const observed=await observeWindowsReferences(paths);
+    expect(observed.map(value=>value.path)).toEqual(paths);
+    expect(observed.filter(value=>value.kind!=='absent').map(value=>value.path)).toEqual([paths[99]]);
+    expect(observed.every(value=>value.ancestors.length>0)).toBe(true);
+    expect(await readFile(join(f.outside,'preserve.txt'),'utf8')).toBe('shared and sibling data');
+  });
+  it('treats native access denied as a blocker rather than absence', async () => {
+    const f = await fixture();
+    const setDenied = (deny: boolean) => execFileSync(join(process.env.SystemRoot!, 'System32','WindowsPowerShell','v1.0','powershell.exe'),
+      ['-NoLogo','-NoProfile','-NonInteractive','-Command',`
+        $ErrorActionPreference='Stop'
+        $request=[Console]::ReadLine() | ConvertFrom-Json
+        $acl=[System.IO.Directory]::GetAccessControl($request.path)
+        $sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        $rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'ListDirectory','Deny')
+        if($request.deny){$acl.AddAccessRule($rule)}else{$acl.RemoveAccessRuleSpecific($rule)}
+        [System.IO.Directory]::SetAccessControl($request.path,$acl)
+      `], {input:JSON.stringify({path:f.target,deny})+'\n',windowsHide:true,timeout:15000,stdio:['pipe','pipe','pipe']});
+    setDenied(true);
+    try {
+      const inaccessible=join(f.target,'missing');
+      await expect(observeWindowsReference(inaccessible)).rejects.toMatchObject({code:'EACCES'});
+      await expect(observeWindowsReferences([inaccessible])).rejects.toMatchObject({code:'EACCES'});
+    } finally {setDenied(false);}
+    expect((await observeWindowsReference(f.target)).kind).toBe('directory');
+    expect(await readFile(join(f.outside,'preserve.txt'),'utf8')).toBe('shared and sibling data');
+  });
+  it('subdivides oversized read batches without dropping ordered deep-path observations', async () => {
+    const f=await fixture();let deep=f.target;
+    while(deep.length<220) deep=join(deep,'d');
+    await mkdir(deep,{recursive:true});
+    const paths=Array.from({length:100},(_,index)=>join(deep,`leaf-${index}`));
+    const observed=await observeWindowsReferences(paths);
+    expect(Buffer.byteLength(JSON.stringify(observed))).toBeGreaterThan(1_048_576);
+    expect(observed.map(value=>value.path)).toEqual(paths);
+    expect(observed.every(value=>value.kind==='absent'&&value.ancestors.length>40)).toBe(true);
+    expect(await readFile(join(f.outside,'preserve.txt'),'utf8')).toBe('shared and sibling data');
+  },30000);
   it('rejects an actual ancestor junction in the Node observation adapter', async () => {
     const f = await fixture();
     const linked = join(f.base, 'node-ancestor-link');

@@ -20,6 +20,13 @@
 .records-reference-filters .form-field { margin: 0; }
 .records-panel .custom-select-trigger { background: #fff; }
 .records-panel .records-events { padding: 0; overflow: hidden; }
+.records-deletion-inventory { min-width: 0; overflow: hidden; }
+.records-deletion-inventory-heading { flex-wrap: wrap; justify-content: space-between; }
+.records-deletion-inventory .project-deletion-targets { padding-inline-start: 22px; }
+.records-deletion-inventory .project-deletion-targets li { margin-block: 12px; min-width: 0; }
+.records-deletion-inventory .project-deletion-targets span, .records-deletion-blockers span { display: block; overflow-wrap: anywhere; word-break: break-word; }
+.records-deletion-blockers { display: grid; gap: 12px; margin-block: 18px 0; padding: 16px 16px 16px 36px; border-radius: 8px; background: #fff8f6; color: #63382f; }
+.records-deletion-blockers li { min-width: 0; }
 .records-events > .panel-title { padding: 22px 24px; margin: 0; flex-wrap: wrap; }
 .records-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .records-events > .muted, .records-events > .stale-note, .records-events > .queue-error, .records-events > .empty-inline { margin: 0 24px 18px; }

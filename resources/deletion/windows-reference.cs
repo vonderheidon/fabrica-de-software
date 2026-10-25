@@ -163,7 +163,7 @@ public static class WindowsReferenceDeletion
         }
     }
     public static Observation[] ObserveMany(string[] paths) {
-        if (paths == null || paths.Length > 25) throw new IOException("PATHS_INVALID");
+        if (paths == null || paths.Length > 100) throw new IOException("PATHS_INVALID");
         List<Observation> observations = new List<Observation>(paths.Length);
         foreach (string path in paths) observations.Add(Observe(path));
         return observations.ToArray();

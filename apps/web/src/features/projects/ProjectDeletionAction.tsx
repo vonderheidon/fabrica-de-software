@@ -6,9 +6,9 @@ import { requestJson } from '../../api/http.js';
 import type { DeletionOriginContext } from '../../api/project-deletion.js';
 import { ProjectDeletionDialog } from './ProjectDeletionDialog.js';
 
-export function ProjectDeletionAction({ projectId, projectRevision, installationId, accountId, hasUnsavedChanges, pollingIntervalMs, onProjectNameChange }: {
+export function ProjectDeletionAction({ projectId, projectRevision, installationId, accountId, hasUnsavedChanges, pollingIntervalMs, managedRootPath, onProjectNameChange }: {
   onProjectNameChange?: (name: string) => void;
-  projectId: string; projectRevision: number; installationId: string; accountId: string | null; hasUnsavedChanges: boolean; pollingIntervalMs: number;
+  projectId: string; projectRevision: number; installationId: string; accountId: string | null; hasUnsavedChanges: boolean; pollingIntervalMs: number; managedRootPath: string | null;
 }) {
   const [projectName, setProjectName] = useState<string | null>(null);
   const [error, setError] = useState(false);
@@ -37,6 +37,6 @@ export function ProjectDeletionAction({ projectId, projectRevision, installation
     }}>Excluir definitivamente</button>
     {error && <div role="alert"><p>Não foi possível conferir o cadastro salvo. Atualize seus dados antes de abrir a exclusão.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar cadastro novamente</button></div>}
     {context && <ProjectDeletionDialog originContext={context} currentRevision={projectRevision} installationId={installationId} accountId={accountId}
-      hasUnsavedChanges={hasUnsavedChanges} pollingIntervalMs={pollingIntervalMs} returnFocusTarget={trigger.current} onClose={() => setContext(null)} />}
+      managedRootPath={managedRootPath} hasUnsavedChanges={hasUnsavedChanges} pollingIntervalMs={pollingIntervalMs} returnFocusTarget={trigger.current} onClose={() => setContext(null)} />}
   </>;
 }

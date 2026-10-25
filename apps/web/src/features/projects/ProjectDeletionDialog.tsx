@@ -17,7 +17,42 @@ export function ProjectDeletionWarnings({ sourceKind, hasUnsavedChanges }: { sou
 
 export function ProjectDeletionTargetList({ targets }: { targets: ProjectDeletionPreview['targets'] }) {
   const labels = { original_directory: 'Pasta original inteira', exclusive_workspace: 'Ambiente local exclusivo', exclusive_artifact: 'Artefato exclusivo' };
-  return <ul className="project-deletion-targets">{targets.map((target) => <li key={target.targetKey}><b>{labels[target.targetKind]}</b><span>{target.path}</span></li>)}</ul>;
+  const states = { pending: 'Aguardando remoção', removing: 'Remoção em andamento', removed: 'Removido e conferido', blocked: 'Bloqueado' };
+  return <ul className="project-deletion-targets">{targets.map((target) => <li key={target.targetKey}><b>{labels[target.targetKind]}</b><span>{target.path}</span><small>{states[target.state]}</small></li>)}</ul>;
+}
+
+function matchesManagedRoot(target: ProjectDeletionPreview['targets'][number], managedRootPath: string | null): boolean {
+  if (target.targetKind !== 'exclusive_workspace') return false;
+  if (target.targetKey.startsWith('managed:managed:')) return true;
+  if (!managedRootPath) return false;
+  const root = managedRootPath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '').toLocaleLowerCase();
+  const path = target.path.replaceAll('\\', '/').replace(/\/+$/g, '').toLocaleLowerCase();
+  return path.endsWith(`/${root}`);
+}
+
+export function ProjectDeletionOverview({ targets, managedRootPath }: {
+  targets: ProjectDeletionPreview['targets']; managedRootPath: string | null;
+}) {
+  const managedRoot = targets.find((target) => matchesManagedRoot(target, managedRootPath));
+  const originalTargets = targets.filter((target) => target.targetKind === 'original_directory');
+  const otherTargets = targets.filter((target) => target !== managedRoot && target.targetKind !== 'original_directory');
+  return <section className="project-deletion-overview" aria-label="Destinos autorizados para exclusão">
+    <p className="project-deletion-overview-count">{targets.length} {targets.length === 1 ? 'destino autorizado' : 'destinos autorizados'} na conferência.</p>
+    <div className="project-deletion-location">
+      <b>Pasta gerenciada</b>
+      <span>{managedRoot?.path ?? managedRootPath ?? 'Nenhuma raiz gerenciada está registrada.'}</span>
+      {managedRoot && <small>A pasta inteira será removida.</small>}
+      {!managedRoot && managedRootPath && <small>Esta localização cadastrada não consta como destino autorizado nesta conferência.</small>}
+    </div>
+    {originalTargets.length > 0 && <div className="project-deletion-location">
+      <b>Pasta original inteira</b><span>{originalTargets.map((target) => target.path).join('\n')}</span>
+      <small>Também será removida por inteiro.</small>
+    </div>}
+    {otherTargets.length > 0 && <details className="project-deletion-more-targets">
+      <summary>Ver outros destinos autorizados ({otherTargets.length})</summary>
+      <ProjectDeletionTargetList targets={otherTargets} />
+    </details>}
+  </section>;
 }
 
 export function deletionProgress(status: ProjectDeletionStatus | null): string {
@@ -32,15 +67,16 @@ export function deletionProgress(status: ProjectDeletionStatus | null): string {
   }
 }
 
-export function ProjectDeletionDialog({ originContext, currentRevision, installationId, accountId, hasUnsavedChanges, pollingIntervalMs, returnFocusTarget, onClose, initialOperationId = null }: {
+export function ProjectDeletionDialog({ originContext, currentRevision, installationId, accountId, hasUnsavedChanges, pollingIntervalMs, returnFocusTarget, onClose, initialOperationId = null, managedRootPath = null }: {
   initialOperationId?: string | null;
   currentRevision: number;
-  originContext: DeletionOriginContext; installationId: string; accountId: string | null; hasUnsavedChanges: boolean;
+  originContext: DeletionOriginContext; managedRootPath?: string | null; installationId: string; accountId: string | null; hasUnsavedChanges: boolean;
   pollingIntervalMs: number; returnFocusTarget: HTMLElement | null; onClose: () => void;
 }) {
   const [context] = useState(() => Object.freeze({ ...originContext }));
   const [operationId, setOperationId] = useState<string | null>(initialOperationId);
   const [accepted, setAccepted] = useState<ProjectDeletionStatus | null>(null);
+  const [submittedTargets, setSubmittedTargets] = useState<ProjectDeletionPreview['targets'] | null>(null);
   const [phase, setPhase] = useState<'preview' | 'submitting' | 'uncertain' | 'stale_preview' | 'accepted'>(initialOperationId ? 'accepted' : 'preview');
   const preview = useProjectDeletionPreview(operationId ? null : context);
   const [retrying, setRetrying] = useState(false);
@@ -52,6 +88,8 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
   const titleRef = useRef<HTMLHeadingElement>(null);
   const observation = useProjectDeletionStatus(phase === 'accepted' ? operationId : null, pollingIntervalMs);
   const status = observation.status ?? accepted;
+  const targets = status ? status.state === 'succeeded' ? [] : status.targets : submittedTargets ?? preview.preview?.targets ?? [];
+  const showOverview = status?.state === 'succeeded' ? false : status !== null || submittedTargets !== null || Boolean(preview.preview);
   const stale = currentRevision !== context.projectRevision;
   useEffect(() => {
     mounted.current = true;
@@ -74,6 +112,7 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
     if (submitting.current || stale || phase !== 'preview' || preview.loading || !preview.preview?.canConfirm || !preview.etag || preview.preview.blockers.length) return;
     submitting.current = true;
     const id = crypto.randomUUID();
+    setSubmittedTargets(preview.preview.targets);
     setOperationId(id); setPhase('submitting'); setMessage('');
     try {
       const result = await confirmProjectDeletion({ context, installationId, accountId, operationId: id, etag: preview.etag,
@@ -105,7 +144,8 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
     } catch { if (mounted.current) setMessage('Não foi possível consultar o andamento. Tente consultar novamente.'); }
     finally { if (mounted.current) setQuerying(false); }
   }
-  const blockers = status && status.state !== 'succeeded' ? status.blockers : phase === 'preview' ? preview.preview?.blockers ?? [] : [];
+  const rawBlockers = status && status.state !== 'succeeded' ? status.blockers : phase === 'preview' ? preview.preview?.blockers ?? [] : [];
+  const blockers = [...new Map(rawBlockers.map((blocker) => [`${blocker.reason}\n${blocker.recovery}`, blocker])).values()];
   return createPortal(<dialog ref={dialogRef} className="profile-delete-dialog project-deletion-dialog" aria-modal="true" aria-labelledby="project-deletion-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     onKeyDown={(event) => {
@@ -117,20 +157,25 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
     <div className="line dialog-toolbar"><span className="eyebrow">Exclusão de projeto</span><button type="button" className="close-button" aria-label="Fechar diálogo de exclusão" onClick={onClose}><CloseIcon /></button></div>
     <h2 id="project-deletion-title" ref={titleRef} tabIndex={-1}>{operationId ? `Exclusão de “${context.projectName}”` : `Excluir definitivamente “${context.projectName}”?`}</h2>
     {stale && !operationId && <p role="alert">A configuração salva mudou. Volte à configuração e abra uma nova conferência.</p>}
-    <div role="status" aria-live="polite" aria-atomic="true">{phase === 'submitting' ? 'Enviando pedido de exclusão…' : phase === 'uncertain' ? 'Estado da exclusão não confirmado.' : phase === 'accepted' ? deletionProgress(status) : preview.loading ? 'Conferindo a configuração salva…' : ''}</div>
+    <div role="status" aria-live="polite" aria-atomic="true">{phase === 'submitting' ? 'Enviando pedido de exclusão…' : phase === 'uncertain' ? 'Estado da exclusão não confirmado.' : phase === 'accepted' ? status ? deletionProgress(status) : observation.loading ? 'Consultando o andamento da exclusão…' : 'Aguardando a confirmação do andamento.' : preview.loading ? 'Conferindo a configuração salva…' : ''}</div>
+    {showOverview && <ProjectDeletionOverview targets={targets} managedRootPath={managedRootPath} />}
     {phase !== 'accepted' && <>
       <ProjectDeletionWarnings sourceKind={preview.preview?.sourceKind ?? 'local'} hasUnsavedChanges={hasUnsavedChanges} />
-      {preview.preview && <ProjectDeletionTargetList targets={preview.preview.targets} />}
     </>}
-    {status && status.state !== 'succeeded' && <ProjectDeletionTargetList targets={status.targets} />}
     {(message || preview.error || observation.error) && <p role="alert">{message || preview.error || observation.error}</p>}
     {blockers.length > 0 && <div role="alert">{blockers.map((blocker, index) => <div key={index}><p>{blocker.reason}</p><p><b>Próxima ação:</b> {blocker.recovery}</p></div>)}</div>}
     {phase === 'preview' && preview.preview && !preview.preview.canConfirm && blockers.length === 0 && <p role="alert">A conferência não permite excluir. Atualize a conferência antes de tentar novamente.</p>}
-    {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && <p>Itens já removidos não serão restaurados. Após reiniciar o controlador, pendências seguras serão retomadas; caminhos que exigem nova conferência aguardam Tentar novamente.</p>}
-    {operationId && <p>Fechar ou navegar apenas deixa o acompanhamento. O pedido enviado não pode ser cancelado ou desfeito.</p>}
+    {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && <p>Itens já removidos não serão restaurados. Pendências seguras retomam após reinício; caminhos que exigem nova conferência aguardam nova tentativa.</p>}
+    {operationId && phase === 'accepted' && <p><a href={`#principal/registros?operationId=${encodeURIComponent(operationId)}`}>Consultar inventário detalhado nos Registros</a></p>}
+    {operationId && <p>Fechar ou navegar apenas encerra este acompanhamento. O pedido enviado não pode ser cancelado ou desfeito.</p>}
     <div className="profile-delete-actions dialog-actions">
-      <button type="button" onClick={onClose}>{operationId ? 'Fechar acompanhamento' : 'Voltar à configuração'}</button>
-      {(phase === 'preview' || phase === 'stale_preview') && <button type="button" disabled={preview.loading} onClick={() => { setMessage(''); setPhase('preview'); preview.refetch(); }}>Atualizar conferência</button>}
+      <button type="button" aria-label={operationId ? 'Fechar acompanhamento' : 'Voltar à configuração'} onClick={onClose}>
+        <span className="project-deletion-action-full">{operationId ? 'Fechar acompanhamento' : 'Voltar à configuração'}</span>
+        <span className="project-deletion-action-compact" aria-hidden="true">{operationId ? 'Fechar' : 'Voltar'}</span>
+      </button>
+      {(phase === 'preview' || phase === 'stale_preview') && <button type="button" aria-label="Atualizar conferência" disabled={preview.loading} onClick={() => { setMessage(''); setPhase('preview'); preview.refetch(); }}>
+        <span className="project-deletion-action-full">Atualizar conferência</span><span className="project-deletion-action-compact" aria-hidden="true">Atualizar</span>
+      </button>}
       {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && status.canRetry && <button type="button" disabled={retrying} onClick={() => void resume()}>{retrying ? 'Solicitando retomada…' : 'Tentar novamente'}</button>}
       {phase === 'uncertain' && <button type="button" disabled={querying} onClick={() => void query()}>{querying ? 'Consultando…' : 'Consultar andamento'}</button>}
       {phase === 'preview' && <button type="button" className="danger-button" disabled={stale || preview.loading || !preview.preview?.canConfirm || !preview.etag || blockers.length > 0} onClick={() => void confirm()}>Excluir definitivamente</button>}

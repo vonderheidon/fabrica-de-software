@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -12,8 +12,9 @@ import type { Execution, PassageRequest } from '../../apps/controller/src/module
 import { digest, loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
 
 export const complete = <T>(data: T): GitHubQueryResult<T> => ({ state: 'complete', data, diagnostics: [], retryAtMs: null });
-export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high') {
-  const directory = mkdtempSync(join(temporaryRoot, 'factory-attempt-'));
+export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high', directoryName?: 'factory') {
+  const directory = directoryName ? join(temporaryRoot,directoryName) : mkdtempSync(join(temporaryRoot, 'factory-attempt-'));
+  if (directoryName) mkdirSync(directory);
   const storage = openStorage({ dataDirectory: directory, busyTimeoutMs: 10 });
   const db = new Database(join(directory, 'factory.sqlite')); db.pragma('foreign_keys = ON');
   // Explicit test observation only; no production account seed or invented host authority.

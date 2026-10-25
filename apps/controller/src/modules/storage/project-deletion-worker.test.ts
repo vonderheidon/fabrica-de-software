@@ -130,6 +130,17 @@ it('cannot finalize with a generation invalidated after the last filesystem obse
   expect(f.db.prepare('SELECT id FROM projects WHERE id=?').get(f.projectId)).toBeDefined();
 });
 
+it('rejects an expanded managed target inventory before any physical effect', async () => {
+  const f = await fixture();
+  f.db.prepare(`INSERT INTO project_storage_locations(id,project_id,location_key,layout_version,root_relative,object_identity_json,is_current,created_at_ms,verified_at_ms)
+    VALUES (?,?,'managed',1,?,?,1,0,0)`).run(randomUUID(),f.projectId,`var/factory/projects/${f.projectId}/v1/managed`,
+      JSON.stringify({format_version:1,volume_id:'fixture',object_id:'fixture',ancestors:[{}]}));
+  await f.coordinator.schedule(f.id);
+  expect(f.remove).not.toHaveBeenCalled();
+  expect(f.storage.getProjectDeletion(f.id)).toMatchObject({state:'reconfirmation_required'});
+  expect(f.db.prepare('SELECT * FROM project_deletion_receipts').all()).toEqual([]);
+});
+
 it('keeps failures pending without polling retries and resumes the same operation manually', async () => {
   const f = await fixture(); f.fail();
   await f.coordinator.schedule(f.id);

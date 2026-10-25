@@ -1,3 +1,4 @@
+import { deliveryModeLabel } from '../../app/delivery-modes.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
 import { ProjectConfigurationDialog } from './ProjectConfigurationDialog.js';
 import { knownProjectDeletion, useProjectDeletionRestriction } from './ProjectDeletionPendingNotice.js';
@@ -657,7 +658,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         <SelectField label="Perfil revisor" value={reviewerProfileAvailable ? draft.project.reviewer_profile_id ?? '' : ''} onChange={(value) => updateProject((current) => ({ ...current, reviewer_profile_id: value || null }))} options={reviewerProfiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
         <ProjectConditions diagnostic={projectDiagnostic} section="profiles" projectId={projectId} />
         <NumberField label="Limite de correções" value={draft.project.correction_limit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correction_limit: Math.max(0, Math.min(5, value)) }))} />
-        <SelectField label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: 'ICR' }, { value: 'commit', label: 'Commit' }, { value: 'pr', label: 'Pull request' }]} />
+        <SelectField label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: deliveryModeLabel.icr }, { value: 'commit', label: deliveryModeLabel.commit }, { value: 'pr', label: deliveryModeLabel.pr }]} />
         <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
         <p className="muted field-full">Ready indica elegibilidade na fila; não habilita a automação. Novos inícios exigem remoto GitHub confirmado, branch-base publicada e quadro com os cinco valores de Status, além dos demais pré-requisitos atuais.</p>
         {draft.project.automation_enabled && !draft.global.automation_enabled && <p className="notice" role="status">Automação deste projeto habilitada. Fila global pausada. <a href="#principal/fila">Abrir fila global para habilitar novos inícios</a>.</p>}
@@ -687,7 +688,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
     </section>}
     {projectId && isConfigurationView(load.view) && <section className="card project-danger-zone"><div><h3>Exclusão do projeto</h3><p>Remova o cadastro e os dados locais após conferir o que será perdido. Os recursos do GitHub serão preservados.</p></div><ProjectDeletionAction key={`${projectId}:${accountId ?? ''}`} projectId={projectId} projectRevision={load.view.configuration.revision}
       installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
-      pollingIntervalMs={load.view.settings.time_defaults.polling_interval_ms} onProjectNameChange={setProjectName} /></section>}
+      pollingIntervalMs={load.view.settings.time_defaults.polling_interval_ms} managedRootPath={load.view.storage.managed_root} onProjectNameChange={setProjectName} /></section>}
 
     <section className="card form-actions-card dialog-actions"><div className="save-feedback" aria-live="polite">
       {!projectId && (saveState.status === 'idle' || saveState.status === 'saved') && <span className="muted">{same(draft.global, draft.baselineGlobal) ? 'Nenhuma alteração pendente.' : 'Há alterações não salvas.'}</span>}

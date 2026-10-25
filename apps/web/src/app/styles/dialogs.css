@@ -1,3 +1,12 @@
+.dialog[data-dialog='shutdown'] { display: flex; flex-direction: column; overflow: hidden; }
+.shutdown-layout { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.shutdown-body { overflow-y: auto; min-height: 0; padding-right: 4px; }
+.dialog[data-dialog='shutdown'] .dialog-toolbar, .dialog[data-dialog='shutdown'] > h2 { flex-shrink: 0; }
+.dialog[role='dialog'][data-dialog='shutdown'] .dialog-actions { position: static; flex-shrink: 0; }
+@media (max-width: 600px) {
+  .dialog[role='dialog'][data-dialog='shutdown'] .dialog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding-block: 10px; gap: 6px; }
+  .dialog[role='dialog'][data-dialog='shutdown'] .dialog-actions button { min-width: 0; width: 100%; padding: 8px; }
+}
 .dialog[role='dialog'], .profile-delete-dialog[open] {
   --dialog-padding: 28px;
   box-sizing: border-box;
@@ -80,6 +89,16 @@
 .dialog .onboarding-prompt-layer { z-index: 5; }
 .profile-delete-dialog .project-deletion-targets { padding: 14px; border-radius: 8px; background: #f5f7f8; }
 .profile-delete-dialog .project-deletion-targets span { overflow-wrap: anywhere; }
+.project-deletion-overview { display: grid; gap: 10px; min-width: 0; }
+.project-deletion-overview-count { margin: 0; color: var(--muted); font-size: 12px; }
+.project-deletion-location { display: grid; gap: 5px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: #f8f9fa; }
+.project-deletion-location span { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.project-deletion-location small, .project-deletion-targets small { color: var(--muted); font-size: 12px; }
+.project-deletion-more-targets { min-width: 0; border-top: 1px solid var(--border); padding-top: 8px; }
+.project-deletion-more-targets > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 13px; font-weight: 600; }
+.project-deletion-more-targets > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.project-deletion-more-targets .project-deletion-targets { margin-bottom: 0; }
+.project-deletion-action-compact { display: none; }
 .attempt-block-decision fieldset { margin: 12px 0; padding: 0; border: 0; min-width: 0; }
 .attempt-block-decision legend { margin-bottom: 10px; font-weight: 600; }
 .dialog .attempt-block-decision label:has(input[type='radio']) { display: flex; align-items: center; gap: 10px; min-height: 40px; }
@@ -94,6 +113,8 @@
   .dialog :is(.form-grid, .profile-form-grid) { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .dialog[role="dialog"] .dialog-actions, .profile-delete-dialog[open] .dialog-actions { bottom: calc(-1 * var(--dialog-padding)); margin-inline: calc(-1 * var(--dialog-padding)); margin-bottom: calc(-1 * var(--dialog-padding)); padding: 12px var(--dialog-padding); }
   .dialog[role="dialog"] .dialog-actions > button, .profile-delete-dialog[open] .dialog-actions > button { flex: 1 1 130px; }
+  .project-deletion-dialog[open] .dialog-actions > button { flex: 1 1 80px; }
+  .project-deletion-dialog[open] .dialog-actions > .danger-button { flex-basis: 100%; }
   .dialog[role="dialog"] .dialog-actions > p { flex-basis: 100%; }
   .dialog[data-dialog='project-configuration'] .dialog-actions { flex-direction: row; }
   .dialog[data-dialog='project-configuration'] .dialog-actions > .save-feedback:empty { flex-basis: 0; }
@@ -101,4 +122,10 @@
   #attempt-decision-actions { flex: 1 1 160px; }
   #attempt-decision-actions > button { width: 100%; }
   .dialog .onboarding-footer-secondary { flex: 1 1 100%; }
+}
+@media (max-width: 340px) {
+  .project-deletion-dialog h2 { font-size: 20px; }
+  .project-deletion-dialog .dialog-actions > button:not(.danger-button) { padding-inline: 6px; font-size: 12px; }
+  .project-deletion-dialog .project-deletion-action-full { display: none; }
+  .project-deletion-dialog .project-deletion-action-compact { display: inline; }
 }

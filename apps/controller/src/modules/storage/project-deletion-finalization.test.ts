@@ -104,7 +104,25 @@ describe('exclusive project deletion closure and transactional finalization', ()
   });
   it.each([false, true])('selects every exclusive table, isolates shared contexts and removes the complete cycles (upgrade=%s)', upgrade => {
     const f = fixture(upgrade);
+    f.db.prepare('UPDATE factory_settings SET account_id=?').run(f.accountId);
+    for (const owner of [f.selected, f.other]) {
+      const previous = f.db.prepare('SELECT result FROM attempts WHERE id=?').get(owner.attemptId) as { result: string };
+      const operationId = f.operation('attempt', owner.attemptId, 'attempt.start');
+      const event = (type: string, revision: number) => f.db.prepare(`INSERT INTO events(entity_type,entity_id,project_id,attempt_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms)
+        VALUES ('attempt',?,?,?,?,?,?,'{}',1)`).run(owner.attemptId, owner.projectId, owner.attemptId, operationId, type, revision);
+      f.db.prepare("UPDATE attempts SET phase='implementing',result=NULL WHERE id=?").run(owner.attemptId);
+      event('attempt.accepted', 1);
+      f.db.prepare("UPDATE attempts SET phase='finished',result=? WHERE id=?").run(previous.result, owner.attemptId);
+      const completion = event('attempt.icr-completed', 2);
+      const installation = f.storage.getSettings().installation_id;
+      const dispatchId = randomUUID();
+      f.db.prepare(`INSERT INTO notification_dispatches(installation_id,consumer_id,surface,event_seq,dispatch_id,state,created_at_ms,updated_at_ms)
+        VALUES (?,?,'browser_host',?,?,'reserved',1,1)`).run(installation, randomUUID(), completion.lastInsertRowid, dispatchId);
+      f.operation('notification', dispatchId, 'notification.claim');
+    }
     const inventory = f.storage.getProjectDeletionInventory(f.selected.projectId);
+    const removedNotification = f.db.prepare(`SELECT n.event_seq,n.consumer_id FROM notification_dispatches n JOIN events e ON e.seq=n.event_seq WHERE e.attempt_id=?`)
+      .get(f.selected.attemptId) as { event_seq: number; consumer_id: string };
     expect(inventory.blockers).toEqual([]);
     expect(Object.keys(inventory.keys).sort()).toEqual([...deletionTables].sort());
     for (const table of deletionTables) {
@@ -131,6 +149,9 @@ describe('exclusive project deletion closure and transactional finalization', ()
       expect(actual, table).toEqual(expected);
     }
     expect(f.storage.getProjectDeletionInventory(f.selected.projectId).keys).toEqual(Object.fromEntries(deletionTables.map(table => [table, []])));
+      expect(() => f.storage.claimNotification({ operationId: randomUUID(), expectedRevision: undefined, body: {
+        consumer_id: removedNotification.consumer_id, surface: 'browser_host', event_seq: String(removedNotification.event_seq),
+      } })).toThrow(expect.objectContaining({ statusCode: 404 }));
     for (const table of ['accounts', 'execution_profiles', 'factory_settings', 'controller_authority', 'schema_migrations']) {
       expect(f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all(), table).toEqual(preserved[table]);
     }

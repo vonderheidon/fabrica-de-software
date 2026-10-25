@@ -26,6 +26,7 @@ interface ProjectDeletionHistoryBase {
   insert: (table: string, row: Record<string, string | number | null>) => void;
   operation: (type: string, resourceId: string, kind?: string, id?: string) => string;
   event: (type: string, entityId: string, operationId: string) => number | bigint;
+  addAttempt: (projectId: string) => ProjectHistoryRecord;
 }
 interface ProjectDeletionCommand {
   operationId: string;
@@ -38,9 +39,9 @@ interface ProjectDeletionHistoryWithCommand extends ProjectDeletionHistoryBase {
 /** Complete relational history, with real constraints/triggers enabled throughout. */
 export function projectDeletionHistory(db: Database.Database, beforeAuthorization?: () => void, automationEnabled?: boolean): ProjectDeletionHistoryWithCommand;
 export function projectDeletionHistory(db: Database.Database, beforeAuthorization: () => void, automationEnabled: boolean,
-  includePendingDeletion: false, fixtureDirectory?: string): ProjectDeletionHistoryBase;
+  includePendingDeletion: false, fixtureDirectory?: string, managedSelected?: boolean): ProjectDeletionHistoryBase;
 export function projectDeletionHistory(db: Database.Database, beforeAuthorization: () => void = () => {}, automationEnabled = false,
-  includePendingDeletion = true, fixtureDirectory = tmpdir()): ProjectDeletionHistoryBase & { command?: ProjectDeletionCommand } {
+  includePendingDeletion = true, fixtureDirectory = tmpdir(), managedSelected = false): ProjectDeletionHistoryBase & { command?: ProjectDeletionCommand } {
   const uuid = (): string => randomUUID();
   const hash = 'a'.repeat(64);
   const sha = 'b'.repeat(40);
@@ -102,8 +103,9 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
     })();
     return { projectId, projectRevisionId, currentRevisionId };
   }
-  function history() {
-    const { projectId, projectRevisionId, currentRevisionId } = project();
+  function history(existing?: ReturnType<typeof project>, managed = false) {
+    const { projectId, projectRevisionId, currentRevisionId } = existing ?? project();
+    const issueId = existing ? `fixture-issue-${uuid()}` : 'shared-issue';
     const preparationId = uuid(); const attemptId = uuid();
     db.transaction(() => {
       insert('preparations', { id: preparationId, project_id: projectId, account_id: accountId, revision: 2, created_at_ms: 0, updated_at_ms: 0 });
@@ -113,9 +115,13 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
         project_revision_id: currentRevisionId, choices_json: '{"formatVersion":1,"choices":{}}', created_at_ms: 0 });
     })();
     const attemptOperation = operation('attempt', attemptId, 'attempt.start');
+    const hasSearchHeaders = db.prepare<[], { present: number}>(
+      "SELECT 1 AS present FROM pragma_table_info('attempts') WHERE name='issue_number'",
+    ).get() !== undefined;
     insert('attempts', { id: attemptId, operation_id: attemptOperation, project_id: projectId, project_revision_id: projectRevisionId,
-      preparation_id: preparationId, preparation_revision: 1, account_id: accountId, repository_id: 'shared-repository', issue_id: 'shared-issue',
-      capture_json: JSON.stringify({ formatVersion: 1, configuration: { implementerProfile: { id: profileId } } }),
+      preparation_id: preparationId, preparation_revision: 1, account_id: accountId, repository_id: 'shared-repository', issue_id: issueId,
+      ...(hasSearchHeaders ? { issue_number: 17, issue_title: 'Historical issue' } : {}),
+      capture_json: JSON.stringify({ formatVersion: 1, issue: { number: 17, title: 'Historical issue' }, configuration: { implementerProfile: { id: profileId } } }),
       phase: 'finished', result: 'delivered', source: 'manual', created_at_ms: 0, updated_at_ms: 0 });
     const attemptSessions = new Map<'implementer' | 'reviewer', string>();
     const sessionGenerations = new Map<'implementer' | 'reviewer', number>();
@@ -193,7 +199,7 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       base_sha: sha, repository_relative: `git/${attemptId}.git`, capture_state: 'failed' });
     insert('capture_warnings', { delivery_id: warningDelivery, attempt_id: attemptId, passage_id: warningPassage, path: 'fixture', reason: 'KNOWN_SECRET_EXCLUDED' });
     const resourceId = uuid(); const questionId = uuid();
-    insert('resources', { id: resourceId, attempt_id: attemptId, passage_id: passageId, kind: 'implementation', reference: `work/${attemptId}/implementation`,
+    insert('resources', { id: resourceId, attempt_id: attemptId, passage_id: passageId, kind: 'implementation', reference: managed ? `projects/${projectId}/v1/managed/work/${attemptId}/implementation` : `work/${attemptId}/implementation`,
       owned: 1, launch_state: 'ready', stop_state: 'confirmed', removed: 1, created_at_ms: 0 });
     const questionOperation = operation('question', questionId, 'question.answer');
     insert('execution_questions', { id: questionId, passage_id: passageId, attempt_id: attemptId, question_hash: hash, question_json: '{}',
@@ -210,9 +216,9 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
     insert('publication_upgrades', { operation_id: publicationOperation, attempt_id: attemptId, delivery_id: deliveryId,
       current_mode: 'icr', target_mode: 'commit', summary_hash: hash, created_at_ms: 0 });
     insert('attempt_authority', { attempt_id: attemptId, observed_at_ms: 0 });
-    insert('queue_cycles', { account_id: accountId, project_id: projectId, issue_id: 'shared-issue', last_ready: 1, consumed_attempt_id: attemptId, updated_at_ms: 0 });
+    insert('queue_cycles', { account_id: accountId, project_id: projectId, issue_id: issueId, last_ready: 1, consumed_attempt_id: attemptId, updated_at_ms: 0 });
     insert('queue_consumptions', { id: uuid(), account_id: accountId, project_id: projectId, repository_id: 'shared-repository',
-      issue_id: 'shared-issue', observed_cycle: 1, consumed_at_ms: 0, attempt_id: attemptId });
+      issue_id: issueId, observed_cycle: 1, consumed_at_ms: 0, attempt_id: attemptId });
     const creationId = uuid();
     insert('project_creations', { id: creationId, operation_id: operation('creation', creationId, 'scaffold.create'), installation_id: installationId,
       account_id: accountId, project_id: projectId, plan_hash: hash, plan_json: '{}', destination: resolve(fixtureDirectory, 'fixture', creationId), state: 'completed',
@@ -235,7 +241,7 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
     event('diagnostic', diagnosticId, diagnosticId);
     return { projectId, projectRevisionId, attemptId, deliveryId, passageId, reviewId, creationId, questionId, resourceId };
   }
-  const selected = history(); const other = history();
+  const selected = history(undefined,managedSelected); const other = history();
   beforeAuthorization();
   const deletionOperation = uuid();
   if (includePendingDeletion) {
@@ -246,6 +252,10 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       authorized_path: 'fixture', normalized_path: 'fixture', object_kind: 'absent', identity_json: '{}', owner_kind: 'attempt',
       owner_id: selected.attemptId, state: 'removed', verified_at_ms: 0 });
   }
-  return { selected, other, accountId, profileId, globalOperation, globalQueueOperation, insert, operation, event,
+  const addAttempt = (projectId: string) => {
+    const row = db.prepare<[string], { current_revision_id: string }>('SELECT current_revision_id FROM projects WHERE id=?').get(projectId)!;
+    return history({ projectId,projectRevisionId:row.current_revision_id,currentRevisionId:row.current_revision_id },managedSelected&&projectId===selected.projectId);
+  };
+  return { selected, other, accountId, profileId, globalOperation, globalQueueOperation, insert, operation, event, addAttempt,
     ...(includePendingDeletion ? { command: { operationId: deletionOperation, projectId: selected.projectId, workerGeneration: 2, workerToken: 'fixture-worker' } } : {}) };
 }

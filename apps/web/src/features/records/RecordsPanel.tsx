@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useRecords, type RecordFilters } from './useRecords.js';
 import { operatorEventLabel } from '../../app/operator-language.js';
 import { ProjectPicker } from '../projects/ProjectPicker.js';
+import { DeletionInventoryRecord } from './DeletionInventoryRecord.js';
 import '../../app/styles/records.css';
 
 type Props = { filters: RecordFilters; onFilterChange: (filters: RecordFilters) => void };
@@ -11,6 +12,8 @@ export function RecordsPanel({ filters, onFilterChange }: Props) {
   const [references, setReferences] = useState(filters);
   useEffect(() => setReferences(filters), [filters.projectId, filters.attemptId, filters.operationId]);
   const records = useRecords(filters, includeTechnical);
+  const deletionOperationId = filters.operationId && records.page?.items.some((event) =>
+    event.operation_id === filters.operationId && event.event_type === 'project.deletion.accepted') ? filters.operationId : null;
   function applyFilters(next: RecordFilters): void {
     onFilterChange({ projectId: next.projectId.trim(), attemptId: next.attemptId.trim(), operationId: next.operationId.trim() });
   }
@@ -28,6 +31,8 @@ export function RecordsPanel({ filters, onFilterChange }: Props) {
         <div className="form-field"><label htmlFor="records-operation">Referência da operação</label><input id="records-operation" value={references.operationId} onChange={event => setReferences({ ...references, operationId: event.currentTarget.value })} /></div>
       </div><button type="submit">Aplicar referências</button></form></details>
     </section>
+
+    {deletionOperationId && <DeletionInventoryRecord operationId={deletionOperationId} />}
 
     <section className="card records-events" aria-labelledby="records-heading">
       <div className="line panel-title"><div><span className="eyebrow">Eventos</span><h2 id="records-heading">Histórico de atividades</h2></div>{records.page && <span className="records-count">{records.page.items.length} {records.page.items.length === 1 ? 'evento nesta página' : 'eventos nesta página'}</span>}</div>
@@ -47,6 +52,7 @@ export function RecordsPanel({ filters, onFilterChange }: Props) {
               context?.round ? `Rodada ${context.round}` : null, role,
             ].filter(Boolean).join(' · ')}</p>}
             <div className="record-event-actions">
+              {event.event_type === 'project.deletion.accepted' && <a href={`#principal/registros?operationId=${encodeURIComponent(event.operation_id)}`}>Ver inventário detalhado</a>}
               {event.attempt_id ? <a href={`#principal/tentativas?dialog=detail&attemptId=${encodeURIComponent(event.attempt_id)}`}>Ver tentativa</a> : event.project_id ? <a href={`#principal/projetos?dialog=project-configuration&projectId=${encodeURIComponent(event.project_id)}`}>Ver projeto</a> : null}
               {event.project_id && filters.projectId !== event.project_id && <button type="button" className="inline-link" onClick={() => applyFilters({ projectId: event.project_id!, attemptId: '', operationId: '' })}>Filtrar projeto</button>}
               {event.attempt_id && filters.attemptId !== event.attempt_id && <button type="button" className="inline-link" onClick={() => applyFilters({ projectId: event.project_id ?? '', attemptId: event.attempt_id!, operationId: '' })}>Filtrar tentativa</button>}

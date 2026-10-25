@@ -99,7 +99,7 @@ async function invoke(request: object, beforeEffect?: AdjacentEffect): Promise<u
     child.stdin.on('error', () => finish(failure('UNAVAILABLE')));
     child.stdout.on('data', (chunk: Buffer) => {
       bytes += chunk.length;
-      if (bytes > 1_048_576) finish(failure('PROTOCOL_INVALID'));
+      if (bytes > 1_048_576) finish(failure('RESPONSE_TOO_LARGE'));
     });
     lines.on('line', line => {
       void (async () => {
@@ -130,12 +130,27 @@ export async function observeWindowsReference(path: string, whileHeld?: Adjacent
 }
 
 export async function observeWindowsReferences(paths: readonly string[]): Promise<readonly DeletionPathObservation[]> {
-  const batchSize = 25;
+  // Amortize PowerShell startup and Add-Type; each path still gets fresh handles.
+  const batchSize = 100;
   const observations: DeletionPathObservation[] = [];
-  for (let offset = 0; offset < paths.length; offset += batchSize) {
-    const result = await invoke({ action: 'observe_many', paths: paths.slice(offset, offset + batchSize) });
-    if (!Array.isArray(result) || !result.every(isObservation)) throw failure('PROTOCOL_INVALID');
+  const observeBatch = async (batch: readonly string[]): Promise<void> => {
+    let result: unknown;
+    try { result = await invoke({ action: 'observe_many', paths: batch }); }
+    catch (error) {
+      // Oversized reads grant no authority. Retry smaller, fresh observations;
+      // malformed responses and access/identity failures remain hard failures.
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'RESPONSE_TOO_LARGE' || batch.length < 2) throw error;
+      const middle = Math.ceil(batch.length / 2);
+      await observeBatch(batch.slice(0, middle));
+      await observeBatch(batch.slice(middle));
+      return;
+    }
+    if (!Array.isArray(result) || result.length !== batch.length || !result.every((item, index) =>
+      isObservation(item) && item.path === batch[index])) throw failure('PROTOCOL_INVALID');
     observations.push(...result);
+  };
+  for (let offset = 0; offset < paths.length; offset += batchSize) {
+    await observeBatch(paths.slice(offset, offset + batchSize));
   }
   return observations;
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
@@ -17,6 +17,9 @@ import { createDeletionInspector, windowsReferenceDeletionPlatform } from '../..
 import { attemptFixture } from '../fixtures/attempt.js';
 import { projectDeletionHistory } from '../fixtures/project-deletion-history.js';
 import { assertNoContent, auditDatabase, inventory } from '../fixtures/persistence-measurement.js';
+import { createProjectStorageInspector, projectStorageRootRelative } from '../../apps/controller/src/modules/workspaces/project-storage.js';
+import { digest } from '../../apps/controller/src/modules/storage/configuration-reads.js';
+import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 
 const cacheMarker = 'PROJECT_DELETION_CACHE_CONTENT_AC29_76543210';
 
@@ -99,6 +102,49 @@ function rowsForInventory(db: Database.Database, inventory: ProjectDeletionInven
 }
 
 describe.skipIf(process.platform !== 'win32')('native project deletion integration proof', () => {
+  it('reopens durable managed authorization after SQL rollback without removing confirmed targets again', async () => {
+    const cacheRoot=resolve('.cache');await mkdir(cacheRoot,{recursive:true});
+    const root=await mkdtemp(join(cacheRoot,'deletion-restart-'));await mkdir(join(root,'var'));
+    cleanup.push(async()=>{if(!root.startsWith(cacheRoot+sep+'deletion-restart-'))throw new Error('UNSAFE_TEST_CLEANUP');await rm(root,{recursive:true,force:true});});
+    const f=await attemptFixture(join(root,'var'),'a'.repeat(40),'high','factory');cleanup.push(()=>f.close());
+    const history=projectDeletionHistory(f.db,()=>{},false,false,f.directory,true);
+    const managed=resolve(root,...projectStorageRootRelative(history.selected.projectId,'managed').split('/'));
+    await mkdir(managed,{recursive:true});await writeFile(join(managed,'owned.txt'),'authorized fixture');
+    f.storage.recordProjectStorageLocation(await createProjectStorageInspector(f.directory).inspectProjectStorageRoot(history.selected.projectId,'managed'));
+    const sibling=join(f.directory,'work',history.other.attemptId);await mkdir(sibling,{recursive:true});await writeFile(join(sibling,'preserve.txt'),'sibling');
+    const before=f.storage.getProjectDeletionInventory(history.other.projectId),sql=rowsForInventory(f.db,before);
+    const terminals=f.db.prepare('SELECT * FROM managed_terminals ORDER BY id').all();
+    const platform=windowsReferenceDeletionPlatform();
+    const remove=vi.fn(platform.removeReference!);
+    const workspaces=createDeletionInspector({...platform,removeReference:remove});
+    const input=f.storage.getProjectDeletionPaths(history.selected.projectId);
+    for(const target of input.targets) expect(relative(root,target.path)).not.toMatch(/^\.\./);
+    const inspection=await workspaces.inspectProjectDeletion(input);expect(inspection.preview.blockers).toEqual([]);
+    const project=f.db.prepare<[string],{current_revision_id:string;revision:number}>('SELECT current_revision_id,revision FROM projects WHERE id=?').get(history.selected.projectId)!;
+    const command={operationId:randomUUID(),projectId:history.selected.projectId,expectedRevision:`"${digest([history.selected.projectId,project.current_revision_id,project.revision])}"`,
+      body:{confirmed:true as const,authorization_digest:inspection.preview.authorization_digest}};
+    f.storage.acceptProjectDeletion({command,inspection});
+    const identities=f.db.prepare('SELECT identity_json FROM project_deletion_targets ORDER BY target_key').all();
+    f.db.exec("CREATE TRIGGER fail_native_receipt BEFORE INSERT ON project_deletion_receipts BEGIN SELECT RAISE(ABORT,'NATIVE_FIXTURE_FAILURE'); END");
+    const first=createDeletionCoordinator({storage:f.storage,workspaces,logFailure:f.logFailure});cleanup.push(()=>first.close());
+    await first.schedule(command.operationId);await first.drain();
+    expect(f.storage.getProjectDeletion(command.operationId)).toMatchObject({state:'pending'});
+    for(const target of input.targets) await expect(lstat(target.path)).rejects.toMatchObject({code:'ENOENT'});
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(f.db.prepare('SELECT * FROM project_deletion_receipts').all()).toEqual([]);
+    await first.close();f.storage.close();f.db.exec('DROP TRIGGER fail_native_receipt');
+    const reopened=openStorage({dataDirectory:f.directory});cleanup.push(async()=>reopened.close());
+    expect(f.db.prepare('SELECT identity_json FROM project_deletion_targets ORDER BY target_key').all()).toEqual(identities);
+    const second=createDeletionCoordinator({storage:reopened,workspaces,logFailure:f.logFailure});cleanup.push(()=>second.close());
+    second.recover();await second.drain();
+    expect(reopened.getProjectDeletion(command.operationId)).toEqual({operation_id:command.operationId,state:'succeeded'});
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(rowsForInventory(f.db,before)).toEqual(sql);
+    expect(await readFile(join(sibling,'preserve.txt'),'utf8')).toBe('sibling');
+    expect(f.db.prepare('SELECT * FROM managed_terminals ORDER BY id').all()).toEqual(terminals);
+    expect(f.db.prepare('SELECT * FROM project_deletion_receipts WHERE operation_id=?').all(command.operationId)).toHaveLength(1);
+    expect(f.db.pragma('foreign_key_check')).toEqual([]);
+  },120000);
   it('preserves the complete sibling registration tree through HTTP acceptance and native removal', async () => {
     const cacheRoot = resolve(process.cwd(), '.cache');
     await mkdir(cacheRoot, { recursive: true });

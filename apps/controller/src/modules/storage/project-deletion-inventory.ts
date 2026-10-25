@@ -25,6 +25,8 @@ const ownership = {
   native_open_requests: 'resource_id IN (SELECT id FROM owned_resources)',
   cancellation_requests: 'attempt_id IN (SELECT id FROM owned_attempts)',
   attempt_decisions: 'attempt_id IN (SELECT id FROM owned_attempts)',
+  attempt_stage_intervals: 'attempt_id IN (SELECT id FROM owned_attempts)',
+  notification_dispatches: 'event_seq IN (SELECT seq FROM events WHERE attempt_id IN (SELECT id FROM owned_attempts) OR project_id=@projectId)',
   deliveries: 'attempt_id IN (SELECT id FROM owned_attempts)',
   capture_runs: 'delivery_id IN (SELECT id FROM owned_deliveries)',
   capture_warnings: 'delivery_id IN (SELECT id FROM owned_deliveries)',
@@ -90,6 +92,7 @@ const domains = {
   question: ['execution_questions', 'id'], resource: ['resources', 'id'],
   effect: ['effects', 'operation_id'], diagnostic: ['diagnostic_runs', 'operation_id'],
   operation: ['operation_requests', 'operation_id'],
+  notification: ['notification_dispatches', 'dispatch_id'],
 } as const;
 
 function domainPredicate(type: string, id: string, includeOperations: boolean): string {

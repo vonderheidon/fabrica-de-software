@@ -21,6 +21,8 @@ interface FinalizationContext extends FinalizeProjectDeletion {
 // Leaves before parents; preparation and project pointer cycles are the only
 // intentional residual FK edges during deletion. SQLite checks them at commit.
 const removalOrder: readonly DeletionTable[] = [
+  'notification_dispatches',
+  'attempt_stage_intervals',
   'events', 'effects', 'diagnostic_runs', 'creation_reconciliations', 'creation_board_operations', 'creation_steps',
   'delivery_targets', 'publication_target_selections', 'publication_upgrades', 'publication_requests', 'resource_removals', 'native_open_requests',
   'attempt_decisions', 'cancellation_requests', 'queue_consumptions', 'queue_cycles', 'attempt_authority',
