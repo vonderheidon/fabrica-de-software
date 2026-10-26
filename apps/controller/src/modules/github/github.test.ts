@@ -25,6 +25,12 @@ function fixture(responses: CommandResponse[]) {
 }
 
 describe('GitHub identity and query diagnostics', () => {
+  it('lists branch names across all returned pages without mutating refs',async () => {
+    const f = fixture([http({data:{repository:{refs:page([{name:'main'}],'next')}}}),http({data:{repository:{refs:page([{name:'develop'},{name:'feature/only-here'}])}}})]);
+    expect(await f.client.listBranches({owner:'org',name:'repo'})).toMatchObject({state:'complete',data:['main','develop','feature/only-here']});
+    expect(f.calls[1]?.variables).toMatchObject({cursor:'next'});
+    expect(f.calls.every(call => call.query.startsWith('query FactoryBranches') && call.query.includes('refPrefix:"refs/heads/"'))).toBe(true);
+  });
   it('groups queue field pages by identity, retaining independent cursors, values and failures', async () => {
     const header = http({ data: { node: { __typename: 'Issue', id: 'I_group', number: 17, title: 'Title', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository } } });
     const ids = ['item-a', 'item-b', 'item-c'];

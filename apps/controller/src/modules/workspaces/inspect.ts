@@ -42,9 +42,9 @@ export function githubReference(location: string): RepositoryReference | null {
   if (!name || name === '.' || name === '..') return null;
   return { owner: match[1] ?? '', name };
 }
-const validBranch = (branch: string) => branch.length <= 1024 && branch.length > 0 &&
+export const validBranch = (branch: string) => branch.length <= 1024 && branch.length > 0 &&
   !/[\x00-\x20\x7f~^:?*\[\\]/.test(branch) && !branch.startsWith('-') && !branch.startsWith('/') &&
-  !branch.endsWith('/') && !branch.endsWith('.') && !branch.includes('..') && !branch.includes('@{') && branch !== '@' &&
+  !branch.endsWith('/') && !branch.endsWith('.') && !branch.includes('..') && !branch.includes('@{') && branch !== '@' && branch !== 'HEAD' &&
   branch.split('/').every((part) => part.length > 0 && !part.startsWith('.') && !part.endsWith('.lock'));
 const sha = (value: string) => /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value.trim());
 
@@ -131,8 +131,7 @@ export function createInspector(github: Pick<GitHub, 'getRepository' | 'resolveB
           if (branch.state === 'complete' && branch.data && branch.data.repositoryId === repo.data.id) {
             view.remote.branch = branch.data;
             if (view.source?.kind === 'github') view.base = { branch: input.baseBranch, sha: branch.data.sha, observedFrom: 'github' };
-            else if (view.base && view.base.sha !== branch.data.sha) note('REMOTE_MISMATCH');
-          } else {
+          } else if (view.source?.kind === 'github') {
             note(branch.diagnostics.some((entry) => entry.code === 'BRANCH_NOT_FOUND') ? 'BRANCH_NOT_FOUND' : 'REMOTE_UNCONFIRMED');
           }
         }

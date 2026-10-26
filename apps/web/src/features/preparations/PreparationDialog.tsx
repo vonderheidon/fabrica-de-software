@@ -1,4 +1,5 @@
 import { CustomSelect } from '../../app/CustomSelect.js';
+import { BranchSelector } from '../projects/BranchSelector.js';
 import { deliveryModeLabel, deliveryModeDescription } from '../../app/delivery-modes.js';
 import { knownProjectDeletion, rememberProjectDeletion, useProjectDeletionRestriction } from '../projects/ProjectDeletionPendingNotice.js';
 import { isProjectDeletionCompleted } from '../../api/project-deletion.js';
@@ -56,6 +57,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [startRecovery, setStartRecovery] = useState<string | null>(null);
   const [summaryNotice, setSummaryNotice] = useState<string | null>(null);
   const [authorizedHash, setAuthorizedHash] = useState<string | null>(null);
   const [startState, setStartState] = useState<{ status: 'idle' } | { status: 'sending' } | { status: 'accepted'; operation: OperationAccepted } | { status: 'uncertain'; operationId: string } | { status: 'observed'; operation: OperationView }>(() => {
@@ -260,6 +262,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     };
     startCommandRef.current = command;
     startInFlightRef.current = true;
+    setStartRecovery(null);
     setStartState({ status: 'sending' });
     try {
       try { recordUncertainOperation({ operationId: command.operationId, kind: 'attempt-start', recordedAt: Date.now() }); } catch { /* Keep the stable operation identity in memory for this tab. */ }
@@ -291,6 +294,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
           }
         } else {
           setSaveError(error.message);
+          setStartRecovery(error.recovery ?? 'Confira o impedimento e revise a preparação antes de autorizar outro início.');
         }
         setStartState({ status: 'idle' });
       } else setStartState({ status: 'uncertain', operationId: command.operationId });
@@ -389,7 +393,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
       </div>}
       <div className="form-field field-full"><label htmlFor="preparation-guidance">Orientação</label><textarea id="preparation-guidance" value={guidance} aria-describedby="preparation-guidance-help" onChange={(event) => { const value = event.currentTarget.value; setGuidance(value); updateChoices((current) => ({ ...current, guidance: value })); }} disabled={!draft} maxLength={8192} /><FieldHelp id="preparation-guidance-help" label="Orientação" /></div>
       {draft && <>
-        <div className="form-field"><label htmlFor="preparation-base-branch">Branch-base</label><input id="preparation-base-branch" value={String(draft.choices.overrides.base_branch ?? draft.current.effective_configuration.configuration.base_branch)} aria-describedby="preparation-base-branch-help" onChange={(event) => { const baseBranch = event.currentTarget.value; updateChoices((current) => ({ ...current, overrides: { ...current.overrides, base_branch: baseBranch } })); }} /><FieldHelp id="preparation-base-branch-help" label="Branch-base" /></div>
+        <BranchSelector id="preparation-base-branch" source={draft.current.effective_configuration.configuration.source} value={String(draft.choices.overrides.base_branch ?? draft.current.effective_configuration.configuration.base_branch)} onChange={baseBranch => updateChoices(current => ({...current,overrides:{...current.overrides,base_branch:baseBranch}}))} />
         <div className="form-field"><label htmlFor="preparation-correction-limit">Limite de correções</label><input id="preparation-correction-limit" type="number" min={0} max={5} value={draft.choices.overrides.correction_limit ?? draft.current.effective_configuration.configuration.correction_limit} aria-describedby="preparation-correction-limit-help" onChange={(event) => { const correctionLimit = Math.max(0, Math.min(5, Number(event.currentTarget.value) || 0)); updateChoices((current) => ({ ...current, overrides: { ...current.overrides, correction_limit: correctionLimit } })); }} /><FieldHelp id="preparation-correction-limit-help" label="Limite de correções" /></div>
         <div className="form-field"><label htmlFor="preparation-implementer-profile">Perfil implementador</label><CustomSelect id="preparation-implementer-profile" value={implementerChoiceAvailable ? implementerChoiceId : ''} aria-describedby="preparation-implementer-profile-help" onChange={(event) => updateProfileChoice('implementer_profile', event.currentTarget.value)} disabled={profilesLoadState !== 'ready' || implementerProfiles.length === 0}><option value="">Usar perfil efetivo do projeto</option>{implementerProfiles.map((profile) => <option key={profile.id} value={`${profile.id}:${profile.revision}`}>{profile.name} · {profile.provider}/{profile.model}</option>)}</CustomSelect><FieldHelp id="preparation-implementer-profile-help" label="Perfil implementador" /></div>
         <div className="form-field"><label htmlFor="preparation-reviewer-profile">Perfil revisor</label><CustomSelect id="preparation-reviewer-profile" value={reviewerChoiceAvailable ? reviewerChoiceId : ''} aria-describedby="preparation-reviewer-profile-help" onChange={(event) => updateProfileChoice('reviewer_profile', event.currentTarget.value)} disabled={profilesLoadState !== 'ready' || reviewerProfiles.length === 0}><option value="">Usar perfil efetivo do projeto</option>{reviewerProfiles.map((profile) => <option key={profile.id} value={`${profile.id}:${profile.revision}`}>{profile.name} · {profile.provider}/{profile.model}</option>)}</CustomSelect><FieldHelp id="preparation-reviewer-profile-help" label="Perfil revisor" /></div>
@@ -413,7 +417,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
         <dl className="preparation-facts"><div><dt>Issue atual</dt><dd>{draft.current.issue ? `#${draft.current.issue.number} · ${draft.current.issue.title}` : 'Não confirmada'}</dd></div><div><dt>Estado e responsáveis</dt><dd>{draft.current.issue ? <><OperatorState value={draft.current.issue.state} /> · {draft.current.issue.assignees.map((person) => `@${person.login}`).join(', ') || 'sem responsável observado'}</> : 'Não confirmados'}</dd></div><div><dt>Modo</dt><dd>{modes.find((item) => item.value === draft.current.delivery_mode)?.label}</dd></div><div><dt>Implementador</dt><dd>{profileName(configuration?.implementer_profile ?? null)}</dd></div><div><dt>Revisor</dt><dd>{profileName(configuration?.reviewer_profile ?? null)}</dd></div><div><dt>Limite de correções</dt><dd>{configuration?.configuration.correction_limit ?? '—'}</dd></div><div><dt>Intervalo de consulta</dt><dd>{configuration ? formatMinuteValue(configuration.time_defaults.polling_interval_ms) : '—'}</dd></div><div><dt>Tempo ativo por passagem</dt><dd>{configuration ? formatMinuteValue(configuration.time_defaults.passage_active_time_ms) : '—'}</dd></div><div><dt>TTL da pergunta</dt><dd>{limitLabel(configuration?.time_defaults.question_ttl)}</dd></div><div><dt>Política de artefatos</dt><dd>{configuration?.artifact_policy.automatic_deletion ? 'Exclusão automática habilitada' : 'Sem exclusão automática'}</dd></div></dl>
         <p className="muted">O prazo da pergunta limita a espera por resposta. Intervalo de consulta e tempo ativo são contados separadamente.</p>
 
-        <dl className="preparation-facts"><div><dt>Branch-base</dt><dd>{configuration?.configuration.base_branch ?? 'Não confirmada'}</dd></div><div><dt>Base confirmada</dt><dd>{draft.current.base_sha ? 'Confirmada na leitura atual' : 'Não confirmada'}</dd></div></dl>
+        <dl className="preparation-facts"><div><dt>Branch de origem</dt><dd>{configuration?.configuration.base_branch ?? 'Não confirmada'}</dd></div><div><dt>Commit de partida</dt><dd>{draft.current.base_sha ?? 'Não confirmado'}</dd></div><div><dt>Branch de destino</dt><dd>{configuration?.configuration.delivery_branch ? `${configuration.configuration.delivery_branch.name} (${configuration.configuration.delivery_branch.kind === 'existing' ? 'existente' : 'nova'})` : 'Nova branch com nome automático'}</dd></div></dl>
         {(['origin', 'mapping', 'profiles', 'configuration'] as const).map((section) => <ConditionNotices key={section} items={draft.current.prerequisites} section={section} projectId={projectId} />)}
         <a href={`#principal/projetos?dialog=project-configuration&projectId=${encodeURIComponent(projectId)}`}>Abrir configuração deste projeto</a>
         <h3>Checks capturados</h3>{configuration?.configuration.checks.length ? <ul className="compact-list">{configuration.configuration.checks.map((check, index) => <li key={check.id}>Check {index + 1} · pasta relativa {check.cwd_relative} · prazo {check.timeout_ms ?? 'padrão'} ms</li>)}</ul> : <p className="muted">Nenhum check configurado.</p>}
@@ -423,15 +427,24 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
         <ConditionNotices items={draft.current.prerequisites} section="information" projectId={projectId} />
       </section>
       {draft.conflict && <section className="card conflict-current" role="alert"><h3>Configuração atual do controlador</h3><p>A revisão atual foi consultada separadamente. Seu rascunho continua no formulário.</p><p>Issue atual: {draft.conflict.issue?.title ?? 'Não disponível'} · modo {modes.find((item) => item.value === draft.conflict!.delivery_mode)?.label ?? 'não reconhecido'}</p><button type="button" onClick={() => { const value = { ...draft, etag: `"${draft.conflict!.id}:${draft.conflict!.revision}"`, current: draft.conflict!, savedChoices: draft.conflict!, conflict: null }; installDraft(value); latestChoicesRef.current = draft.choices; void saveLatest(); }}>Manter meu rascunho e salvar sobre os dados atuais</button></section>}
-      {saveError && !issueChanged && <div className="queue-error" role="alert"><b>Não foi possível confirmar a preparação</b><p>{saveError}</p><p><strong>Próxima ação:</strong> revise os campos e o resumo atual antes de autorizar o início.</p></div>}
       {summaryNotice && <div className="notice" role="status"><p>{summaryNotice}</p></div>}
       {activeConflictId && <div className="notice" role="alert"><b>Esta issue já tem uma tentativa ativa</b><p>O controlador identificou a tentativa existente. Consulte-a sem criar outra.</p><button type="button" onClick={() => onOpenAttempt(activeConflictId)}>Consultar tentativa</button></div>}
       {startState.status === 'accepted' && <div className="notice" role="status"><b>Início aceito pelo controlador</b><p>A aceitação não significa que o ambiente ou a passagem estejam prontos.</p>{startState.operation.resource.type === 'attempt' && <button type="button" onClick={() => onOpenAttempt(startState.operation.resource.id)}>Consultar tentativa</button>}</div>}
-      {pendingStartId && <div className="notice" role="status"><b>Resposta do início sem confirmação</b><p>Consulte o resultado original. O cliente não enviará outro início automaticamente.</p><button type="button" onClick={() => void inspectStart(pendingStartId)}>Consultar resultado</button>{startState.status === 'observed' && <><p>Estado observado: {operatorState(startState.operation.state).label}</p></>}</div>}
       {startState.status === 'observed' && !pendingStartId && <div className="notice" role="status"><b>Início {operatorState(startState.operation.state).label.toLocaleLowerCase('pt-BR')}</b>{startState.operation.error && <p>{operatorErrorMessage(startState.operation.error.code, startState.operation.error.message)}</p>}<>{startState.operation.resource.type === 'attempt' && <button type="button" onClick={() => onOpenAttempt(startState.operation.resource.id)}>Consultar tentativa</button>}{startState.operation.state === 'failed' && <p>Revise os dados atuais da preparação antes de autorizar outro início.</p>}</></div>}
       <div className="preparation-actions dialog-actions">
-        {issueLoading && <p>Aguarde a consulta da issue.</p>}
-        {!authorizedHash ? <button type="button" className="primary" disabled={saving || Boolean(saveError) || blocked} onClick={() => void authorizeSummary()}>Revisar e autorizar</button> : <><p role="status">Resumo autorizado. Editar exige nova autorização.</p><button type="button" className="primary" disabled={blocked || authorizedHash !== draft.current.summary_hash || ['sending', 'accepted', 'observed'].includes(startState.status) || Boolean(pendingStartId)} onClick={() => void submitStart()}>Iniciar tentativa</button></>}
+        {saveError && !issueChanged ? <>
+          <div className="preparation-feedback" role="alert"><p>{saveError}</p><p><strong>Próxima ação:</strong> {startRecovery ?? 'Revise os campos e o resumo atual antes de autorizar o início.'}</p></div>
+          {pendingStartId ? <button type="button" onClick={() => void inspectStart(pendingStartId)}>Consultar operação original</button> : <button type="button" onClick={() => {setSaveError(null);setStartRecovery(null);setAuthorizedHash(null);}}>Revisar preparação</button>}
+        </> : startState.status === 'sending' ? <>
+          <p className="preparation-start-status" role="status"><span className="preparation-issue-spinner" aria-hidden="true" />Conferindo a issue, a branch e a disponibilidade do terminal. Aguarde a confirmação do controlador.</p>
+          <button type="button" className="primary" disabled aria-busy="true">Iniciando tentativa…</button>
+        </> : pendingStartId ? <>
+          <p role="status">O início ainda não foi confirmado. Consulte o pedido original antes de continuar.</p>
+          <button type="button" onClick={() => void inspectStart(pendingStartId)}>Consultar operação original</button>
+        </> : <>
+          {issueLoading && <p>Aguarde a consulta da issue.</p>}
+          {!authorizedHash ? <button type="button" className="primary" disabled={saving || blocked} onClick={() => void authorizeSummary()}>Revisar e autorizar</button> : <><p role="status">Resumo autorizado. Editar exige nova autorização.</p><button type="button" className="primary" disabled={blocked || authorizedHash !== draft.current.summary_hash || ['accepted', 'observed'].includes(startState.status)} onClick={() => void submitStart()}>Iniciar tentativa</button></>}
+        </>}
         {saving && !issueLoading && <span role="status">Salvando alterações…</span>}
       </div>
     </>}

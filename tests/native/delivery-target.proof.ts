@@ -7,6 +7,7 @@ import type { Delivery, EffectView, GitHubQueryResult } from '#contracts';
 import type { GitInput, GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
 import { createDeliveryTargetWorkspace } from '../../apps/controller/src/modules/workspaces/delivery-target.js';
 import { createIntegrationImporter } from '../../apps/controller/src/modules/workspaces/integration.js';
+import { createBranchLister } from '../../apps/controller/src/modules/workspaces/branches.js';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root,{ recursive: true,force: true }); });
@@ -24,7 +25,7 @@ function git(cwd: string,...args: string[]) {
   return result.stdout.trim();
 }
 
-it.each([false, true])('commits and reconciles the approved tree with project storage=%s while preserving checkout state', async projectScoped => {
+it.each([[false, 'automatic'], [true, 'automatic'], [true, 'new'], [true, 'existing']] as const)('commits and reconciles with project storage=%s and branch=%s preserving checkout state', async (projectScoped, branchKind) => {
   const root = await mkdtemp(join(process.cwd(),'.cache','delivery-target-git-')); roots.push(root);
   const bare = join(root,'origin.git'); const seed = join(root,'seed'); const targetRoot = join(root,'clone ç');
   const data = join(root,'factory-data'); const attemptRoot = projectScoped ? join(data,'projects','p','v1','managed') : data;
@@ -53,6 +54,12 @@ it.each([false, true])('commits and reconciles the approved tree with project st
   await writeFile(join(targetRoot,'staged.txt'),'staged file\n'); git(targetRoot,'add','--','staged.txt');
   await writeFile(join(targetRoot,'untracked.txt'),'untracked bytes\n');
   git(targetRoot,'update-ref','refs/heads/fix/17-corrigir-acesso-c-e-unicode',git(targetRoot,'rev-parse','HEAD'));
+  if (branchKind === 'existing') {
+    git(targetRoot,'branch','release',baseSha);
+    const list = createBranchLister({},async (cwd,args,input) => realGit(cwd,args,input));
+    expect(await list({kind:'local',location:targetRoot})).toMatchObject({state:'complete',branches:expect.arrayContaining(['main','release'])});
+    expect(realGit(bare,['rev-parse','--verify','refs/heads/release']).exitCode).not.toBe(0);
+  }
   const originalHead = git(targetRoot,'rev-parse','HEAD');
   const originalBranch = git(targetRoot,'symbolic-ref','HEAD');
   const originalStatus = git(targetRoot,'status','--porcelain=v2','-z','--untracked-files=all');
@@ -69,7 +76,7 @@ it.each([false, true])('commits and reconciles the approved tree with project st
       if (result.exitCode === 0) commitIds.push(result.stdout.trim());
       if (loseCommitTreeResponse) { loseCommitTreeResponse = false; throw new Error('controlled response loss after object creation'); }
     }
-    if (loseUpdateRef && cwd === targetRoot && args.includes('update-ref') && args.some(arg => arg.startsWith('refs/heads/fix/17-corrigir-acesso-c-e-unicode-'))) {
+    if (loseUpdateRef && cwd === targetRoot && args.includes('update-ref') && args.some(arg => arg.startsWith('refs/heads/fix/17-corrigir-acesso-c-e-unicode-') || arg === 'refs/heads/custom/result' || arg === 'refs/heads/release')) {
       loseUpdateRef = false; throw new Error('controlled response loss after ref creation');
     }
     return result;
@@ -78,10 +85,16 @@ it.each([false, true])('commits and reconciles the approved tree with project st
   const workspaces = createDeliveryTargetWorkspace(github,data,port,undefined,resolveAttemptRoot);
   const delivery: Delivery = { id:deliveryId,attemptId,producerPassageId:passageId,round:1,baseSha,captureState:'captured',
     gitRef:approvedRef,repositoryRelative:'git/' + attemptId + '.git',contentIdentity,commitSha,hasDelta:true,diagnostic:null,capturedAtMs:1,revision:1,warnings:[] };
-  const task = { attemptId,approvedRef,contentIdentity,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha };
+  const task = { attemptId,approvedRef,contentIdentity,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha, ...(branchKind === 'automatic' ? {} : { sourceKind: 'local' as const, deliveryBranch: { kind:branchKind, name:branchKind === 'existing' ? 'release' : 'custom/result' } }) };
   const plan = await workspaces.inspectDeliveryTarget(targetRoot,task,{ approvedRef,contentIdentity,baseSha });
+  if (branchKind === 'existing') {
+    await expect(workspaces.inspectDeliveryTarget(targetRoot,{ ...task,deliveryBranch:{kind:'existing',name:'main'} },task)).rejects.toMatchObject({code:'DELIVERY_BRANCH_IN_USE'});
+  }
+  if (branchKind === 'new') {
+    await expect(workspaces.inspectDeliveryTarget(targetRoot,{ ...task,deliveryBranch:{kind:'new',name:'main'} },task)).rejects.toMatchObject({code:'DELIVERY_BRANCH_COLLISION'});
+  }
   expect(plan.task_type).toBe('fix'); expect(plan.task_description).toBe('Corrigir acesso ç e Unicode');
-  expect(plan.branch_ref).toBe('refs/heads/fix/17-corrigir-acesso-c-e-unicode-' + attemptId.replaceAll('-','').slice(0,8));
+  expect(plan.branch_ref).toBe(branchKind === 'automatic' ? 'refs/heads/fix/17-corrigir-acesso-c-e-unicode-' + attemptId.replaceAll('-','').slice(0,8) : branchKind === 'existing' ? 'refs/heads/release' : 'refs/heads/custom/result');
   const target = { operation_id:targetOperationId,selection_operation_id:null,delivery_id:deliveryId,attempt_id:attemptId,repository_id:repository.id,
     local_path:plan.local_path,local_identity:plan.local_identity,branch_ref:plan.branch_ref,task_type:plan.task_type,task_description:plan.task_description,
     issue_number:17,base_branch:'main',base_sha:baseSha,approved_ref:approvedRef,content_identity:contentIdentity,format_version:1 as const,created_at_ms:1 };
@@ -110,6 +123,7 @@ it.each([false, true])('commits and reconciles the approved tree with project st
   expect(git(targetRoot,'rev-parse','refs/heads/fix/17-corrigir-acesso-c-e-unicode')).toBe(baseSha);
   expect(git(targetRoot,'rev-parse',plan.branch_ref)).toBe(reconciled.receipt!.id);
   expect(git(retainedRepo,'rev-parse',plan.branch_ref)).toBe(reconciled.receipt!.id);
+  if (branchKind === 'existing') return;
   // Advance only a ref in the disposable operator clone; staged/unstaged/untracked bytes stay intact.
   const newBase = git(targetRoot,'-c','user.name=Fixture','-c','user.email=fixture@example.test','commit-tree',contentIdentity,'-p',baseSha,'-m','new base');
   git(targetRoot,'update-ref','refs/heads/main',newBase,baseSha);

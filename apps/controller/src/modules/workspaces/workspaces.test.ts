@@ -109,12 +109,20 @@ describe('local origin inspection with controlled Git responses', () => {
     const view = await createWorkspaces({ github: createGitHub() }).inspectOrigin({ source: { kind: 'local', location: join(tmpdir(), 'origin') }, baseBranch: 'main' });
     expect(view).toMatchObject({ state: 'unavailable', diagnostics: [{ code: 'CONTEXT_UNAVAILABLE' }] });
   });
-  it('diagnoses branch divergence rather than adopting a different base silently', async () => {
+  it('keeps the selected local commit even when it has not been pushed', async () => {
     const directory = join(tmpdir(), 'origin');
     const remote = { ...github(), resolveBranch: async () => complete({ repositoryId: repo.id, name: 'main', sha: 'b'.repeat(40) }) };
     const view = await createInspector(remote, gitFixture(directory).run, async (path) => path).inspectOrigin({ source: { kind: 'local', location: directory }, baseBranch: 'main' });
     expect(view.base?.sha).toBe(head);
-    expect(view.diagnostics.map((note) => note.code)).toContain('REMOTE_MISMATCH');
+    expect(view.diagnostics.map((note) => note.code)).not.toContain('REMOTE_MISMATCH');
+  });
+  it('accepts a local branch absent from GitHub while confirming the repository identity', async () => {
+    const directory = join(tmpdir(), 'origin');
+    const remote = { ...github(), resolveBranch: async (): Promise<GitHubQueryResult<GitHubBranch>> => ({ state:'unavailable',data:null,diagnostics:[],retryAtMs:null }) };
+    const view = await createInspector(remote,gitFixture(directory).run,async path => path).inspectOrigin({ source:{ kind:'local',location:directory },baseBranch:'local-only' });
+    expect(view.base).toMatchObject({ branch:'local-only',sha:head,observedFrom:'local' });
+    expect(view.remote?.confirmed).toBe(true);
+    expect(view.diagnostics.map(note => note.code)).not.toContain('BRANCH_NOT_FOUND');
   });
 });
 

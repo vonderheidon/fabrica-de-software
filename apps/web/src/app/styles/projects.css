@@ -46,3 +46,4 @@ input:focus-visible, select:focus-visible, textarea:focus-visible { outline: non
   .project-configuration-dialog { padding: 20px; }
   .project-configuration-dialog .form-grid, .project-configuration-dialog .configuration-guidance { grid-template-columns: minmax(0, 1fr); }
 }
+.branch-refresh-button { margin-top: 8px; }

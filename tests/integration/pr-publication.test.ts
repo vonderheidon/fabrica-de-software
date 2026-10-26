@@ -54,6 +54,25 @@ it('completes PR in durable commit/push/PR order using the same approved version
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
 });
 
+it.each(['new','existing'] as const)('uses the captured %s destination for commit, push and PR', async kind => {
+  const f = await publicationFixture(true,'pr',true,{ deliveryBranch:{ kind,name:'release/selected' } }); fixtures.push(f);
+  await f.implement(); await f.approve();
+  expect(f.status()).toMatchObject({phase:'finished',result:'delivered'});
+  for (const kind of ['local_commit','push','pull_request'] as const) expect(effect(f,kind).expectedIdentity).toMatchObject({branchRef:'refs/heads/release/selected'});
+  expect(effect(f,'push').expectedIdentity.branchKind).toBe(kind);
+  expect(effect(f,'pull_request').expectedIdentity.baseBranch).toBe('main');
+});
+
+it('preserves the captured existing destination when continuing an ICR delivery', async () => {
+  const deliveryBranch = {kind:'existing' as const,name:'release/selected'};
+  const f = await publicationFixture(true,'icr',true,{targetForIcr:true,deliveryBranch}); fixtures.push(f);
+  await f.implement(); await f.approve();
+  expect(f.storage.getPublicationSummary(f.attemptId).upgrades![0]!.deliveryBranch).toEqual(deliveryBranch);
+  await f.pipeline.authorizePublicationUpgrade(f.attemptId,upgrade(f,'pr'),f.context()); await f.pipeline.drain();
+  expect(effect(f,'local_commit').expectedIdentity.branchRef).toBe('refs/heads/release/selected');
+  expect(effect(f,'pull_request').state).toBe('confirmed');
+});
+
 it('marks all code publication effects not applicable for an approved no-delta version', async () => {
   const f = await fixture('pr',false); await f.implement(); await f.approve();
   for (const kind of ['local_commit','push','pull_request'] as const) expect(effect(f,kind)).toMatchObject({ state: 'not_applicable',reason: 'APPROVED_NO_DELTA',receipt: null });
@@ -334,7 +353,7 @@ it('migrates actual v14 journals without fabricating upgrades, preserving receip
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(49); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
+    expect(storage.getDiagnostics().schemaVersion).toBe(50); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }

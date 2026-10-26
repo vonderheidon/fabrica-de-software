@@ -336,11 +336,13 @@ export function insertRevision(db: Database.Database, projectId: string, revisio
     throw new OperationError(400, 'STATUS_MAPPING_INVALID', 'A V3 Status mapping requires five distinct option IDs.');
   }
   assertProjectProfileRoles(db, c);
-  db.prepare(`INSERT INTO project_revisions(id, project_id, revision_number, source_kind, source_location, repository_id, repository_url, base_branch, github_project_id, github_project_owner_id, status_field_id, status_options_json, implementer_profile_id, reviewer_profile_id, checks_json, correction_limit, default_delivery_mode, automation_enabled, queue_order_json, guidance, origin_notes_json, created_at_ms)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+  const hasBranchChoice = db.prepare<[], { name: string }>("PRAGMA table_info('project_revisions')").all().some(column => column.name === 'delivery_branch_json');
+  if (!hasBranchChoice && c.delivery_branch != null) throw new OperationError(409, 'MIGRATION_REQUIRED', 'Atualize o banco antes de escolher a branch de destino.');
+  db.prepare(`INSERT INTO project_revisions(id, project_id, revision_number, source_kind, source_location, repository_id, repository_url, base_branch, github_project_id, github_project_owner_id, status_field_id, status_options_json, implementer_profile_id, reviewer_profile_id, checks_json, correction_limit, default_delivery_mode, automation_enabled, queue_order_json, guidance, origin_notes_json, created_at_ms${hasBranchChoice ? ", delivery_branch_json" : ""})
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${hasBranchChoice ? ", ?" : ""})`)
     .run(revisionId, projectId, revision, c.source.kind, c.source.location, c.source.repository_id ?? null, c.source.repository_url ?? null, c.base_branch,
       c.github_project?.id ?? null, c.github_project?.owner_id ?? null, c.github_project?.status_field_id ?? null, JSON.stringify(c.github_project ? storeStatusOptions(c.github_project.status_option_ids) : {}),
-      c.implementer_profile_id, c.reviewer_profile_id, JSON.stringify(c.checks.map(storeCheck)), c.correction_limit, c.default_delivery_mode, Number(c.automation_enabled), JSON.stringify(storeQueueOrder(c.queue_order)), c.guidance, JSON.stringify(notes), Date.now());
+      c.implementer_profile_id, c.reviewer_profile_id, JSON.stringify(c.checks.map(storeCheck)), c.correction_limit, c.default_delivery_mode, Number(c.automation_enabled), JSON.stringify(storeQueueOrder(c.queue_order)), c.guidance, JSON.stringify(notes), Date.now(), ...(hasBranchChoice ? [c.delivery_branch === undefined ? null : JSON.stringify(c.delivery_branch)] : []));
 }
 export function registerProject(db: Database.Database, input: RegisterProject): StoredOperation {
   if (input.githubProject !== undefined && (!Value.Check(ProjectMapping, input.githubProject) ||

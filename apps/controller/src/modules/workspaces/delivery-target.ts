@@ -11,6 +11,7 @@ import type { AttemptRootResolver } from './project-storage.js';
 import { githubReference } from './inspect.js';
 
 export interface DeliveryTaskInput {
+  sourceKind?: 'local' | 'github' | undefined; deliveryBranch?: { kind: 'new' | 'existing'; name: string } | null | undefined;
   attemptId: string; approvedRef: string; contentIdentity: string; issueNumber: number; issueTitle: string; repositoryId: string; repositoryUrl: string; baseBranch: string; baseSha: string;
 }
 export interface DeliveryTargetInspection {
@@ -113,8 +114,10 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         if (r.exitCode === 0) { if (!oid.test(r.stdout.trim())) targetError('DELIVERY_BASE_INVALID'); observedBase = r.stdout.trim(); break; }
       }
       if (observedBase !== approved.baseSha) targetError('DELIVERY_BASE_CHANGED');
-      const remoteBase = await github.resolveBranch({ owner: matches[0]!.owner,name: matches[0]!.repo },task.baseBranch);
-      if (remoteBase.state !== 'complete' || remoteBase.data?.repositoryId !== task.repositoryId || remoteBase.data.sha !== approved.baseSha) targetError('DELIVERY_BASE_CHANGED');
+      if (task.sourceKind !== 'local' && task.deliveryBranch?.kind !== 'existing') {
+        const remoteBase = await github.resolveBranch({ owner: matches[0]!.owner,name: matches[0]!.repo },task.baseBranch);
+        if (remoteBase.state !== 'complete' || remoteBase.data?.repositoryId !== task.repositoryId || remoteBase.data.sha !== approved.baseSha) targetError('DELIVERY_BASE_CHANGED');
+      }
     }
     if (!oid.test(approved.baseSha) || !oid.test(approved.contentIdentity) || !/^refs\/factory\/deliveries\/[a-f0-9-]{36}$/u.test(approved.approvedRef) ||
         approved.baseSha !== task.baseSha) targetError('DELIVERY_APPROVED_VERSION_INVALID');
@@ -155,17 +158,26 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     const identity = taskIdentity(task.issueTitle,nul(diff.stdout));
     const candidate = (description: string) => `${identity.type}/${task.issueNumber}-${description}`;
     const suffix = task.attemptId.replaceAll('-','').slice(0,8);
-    let branch = candidate(identity.slug);
+    let branch = task.deliveryBranch?.name ?? candidate(identity.slug);
     let check = await isolated!(found.root,['check-ref-format','--branch',branch]);
     if (check.exitCode !== 0) targetError('DELIVERY_BRANCH_INVALID');
     const refs = (await isolated!(found.root,['for-each-ref','--format=%(refname)','refs/heads/'])).stdout.trim().split(/\r?\n/u).filter(Boolean);
     const exists = (name: string) => refs.some(ref => ref.toLowerCase() === `refs/heads/${name}`.toLowerCase());
-    if (await exists(branch)) {
+    if (task.deliveryBranch?.kind === 'existing') {
+      if (!exists(branch)) targetError('DELIVERY_BRANCH_NOT_FOUND');
+      const tip = (await gitRun(found.root,['rev-parse','--verify','--end-of-options',`refs/heads/${branch}^{commit}`])).trim();
+      if (tip !== task.baseSha) targetError('DELIVERY_BASE_CHANGED');
+      const worktrees = await gitRun(found.root,['worktree','list','--porcelain']);
+      if (worktrees.split(/\r?\n/u).includes(`branch refs/heads/${branch}`)) targetError('DELIVERY_BRANCH_IN_USE');
+    } else if (await exists(branch)) {
+      if (task.deliveryBranch) targetError('DELIVERY_BRANCH_COLLISION');
       branch = `${branch}-${suffix}`;
       check = await isolated!(found.root,['check-ref-format','--branch',branch]);
       if (check.exitCode !== 0 || await exists(branch)) targetError('DELIVERY_BRANCH_COLLISION');
     }
     return { repository_id: task.repositoryId,local_path: found.root,local_identity: {
+      ...(task.deliveryBranch ? { branch_kind: task.deliveryBranch.kind } : {}),
+      ...(task.sourceKind ? { source_kind: task.sourceKind } : {}),
       format_version: 1,root_identity: found.rootIdentity,git_directory_identity: found.gitDirectoryIdentity,remote_name:found.remoteName,remote_hash:found.remoteHash,
       base_branch: task.baseBranch,base_sha: task.baseSha,observed_head: found.head,observed_branch_ref: found.observedBranchRef,
       working_state_hash: found.workingStateHash,index_hash: found.indexHash,
@@ -173,12 +185,15 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
   }
   async function inspectIntegrationTarget(path: string,task: DeliveryTaskInput) {
     const found = await observe(path,task,task,false);
-    await gitRun(found.root,['check-ref-format','--branch',task.baseBranch]);
-    const local = (await gitRun(found.root,['rev-parse','--verify','--end-of-options',`refs/heads/${task.baseBranch}^{commit}`])).trim();
+    const baseBranch = task.deliveryBranch?.kind === 'existing' ? task.deliveryBranch.name : task.baseBranch;
+    await gitRun(found.root,['check-ref-format','--branch',baseBranch]);
+    const local = (await gitRun(found.root,['rev-parse','--verify','--end-of-options',`refs/heads/${baseBranch}^{commit}`])).trim();
     const ref = githubReference(task.repositoryUrl)!;
-    const remote = await github.resolveBranch(ref,task.baseBranch);
-    if (!oid.test(local) || remote.state !== 'complete' || remote.data?.repositoryId !== task.repositoryId || remote.data.sha !== local) targetError('DELIVERY_BASE_CHANGED');
-    await gitRun(found.root,['merge-base','--is-ancestor',task.baseSha,local]);
+    if (!oid.test(local)) targetError('DELIVERY_BASE_CHANGED');
+    if (task.sourceKind !== 'local' && !task.deliveryBranch) {
+      const remote = await github.resolveBranch(ref,baseBranch);
+      if (remote.state !== 'complete' || remote.data?.repositoryId !== task.repositoryId || remote.data.sha !== local) targetError('DELIVERY_BASE_CHANGED');
+    }
     return { baseSha:local,localPath:found.root,rootIdentity:found.rootIdentity };
   }
   async function reconcileLocalCommit(delivery: Delivery,effect: EffectView,target: SealedTarget): Promise<TargetCommitResult> {
@@ -186,6 +201,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const c = await localContext(delivery,effect,target,false); const observed = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       if (observed.exitCode === 1) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
       const sha = observed.stdout.trim();
+      if (target.local_identity.branch_kind === 'existing' && sha === delivery.baseSha) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
       if (!oid.test(sha) || (await c.commitMessage(sha)).trimEnd() !== c.message.trimEnd() || await c.tree(sha) !== delivery.contentIdentity || await c.parent(sha) !== delivery.baseSha) targetError('COMMIT_IDENTITY_CONFLICT');
       await transferBranch(c,target,sha);
       await verifyWorkingState(c,target);
@@ -202,7 +218,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     const expected = await observe(target.local_path,{ attemptId:delivery.attemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,
       issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,
       repositoryUrl:`https://github.com/${effect.expectedIdentity.repositoryOwner!}/${effect.expectedIdentity.repositoryName!}`,
-      baseBranch:target.base_branch,baseSha:target.base_sha },{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },compareWorkingState);
+      baseBranch:target.base_branch,baseSha:target.base_sha,sourceKind:target.local_identity.source_kind },{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },compareWorkingState && target.local_identity.branch_kind !== 'existing');
     if (expected.rootIdentity !== target.local_identity.root_identity || expected.gitDirectoryIdentity !== target.local_identity.git_directory_identity || expected.remoteName !== target.local_identity.remote_name || expected.remoteHash !== target.local_identity.remote_hash ||
         compareWorkingState && (expected.head !== target.local_identity.observed_head || expected.observedBranchRef !== target.local_identity.observed_branch_ref ||
           expected.workingStateHash !== target.local_identity.working_state_hash || expected.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
@@ -224,9 +240,13 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       async parent(sha: string) { return (await run(['rev-list','--parents','-n','1',sha])).trim().split(' ').slice(1).join(' '); } };
   }
   async function verifyWorkingState(c: Awaited<ReturnType<typeof localContext>>,target: SealedTarget) {
+    if (target.local_identity.branch_kind === 'existing') {
+      const worktrees = await c.run(['worktree','list','--porcelain']);
+      if (worktrees.split(/\r?\n/u).includes(`branch ${target.branch_ref}`)) targetError('DELIVERY_BRANCH_IN_USE');
+    }
     const observed = await observe(target.local_path,{ attemptId:c.sourceAttemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,
-      issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,repositoryUrl:c.repositoryUrl,baseBranch:target.base_branch,baseSha:target.base_sha },
-      { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha });
+      issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,repositoryUrl:c.repositoryUrl,baseBranch:target.base_branch,baseSha:target.base_sha,sourceKind:target.local_identity.source_kind },
+      { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },target.local_identity.branch_kind !== 'existing');
     if (observed.workingStateHash !== target.local_identity.working_state_hash || observed.indexHash !== target.local_identity.index_hash) targetError('DELIVERY_CHECKOUT_CHANGED');
   }
   async function transferBranch(c: Awaited<ReturnType<typeof localContext>>,target: SealedTarget,sha: string) {
@@ -252,8 +272,10 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       if (!effect.authorized || !['running','unknown'].includes(effect.state)) targetError('COMMIT_NOT_AUTHORIZED');
       const c = await localContext(delivery,effect,target);
       const current = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
-      if (current.exitCode === 0) return reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
-      if (current.exitCode !== 1 || effect.state !== 'running') return { state:'unknown',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
+      const existing = target.local_identity.branch_kind === 'existing';
+      if (current.exitCode === 0 && (!existing || current.stdout.trim() !== delivery.baseSha)) return reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+      if (existing && (current.exitCode !== 0 || current.stdout.trim() !== delivery.baseSha)) targetError('DELIVERY_BASE_CHANGED');
+      if ((!existing && current.exitCode !== 1) || effect.state !== 'running') return { state:'unknown',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
       const fetch = await isolated!(c.repository,['fetch','--no-tags','--no-recurse-submodules','--',c.retained,delivery.gitRef!]);
       if (fetch.exitCode !== 0 || (await isolated!(c.repository,['rev-parse','--verify','FETCH_HEAD'])).stdout.trim() !== delivery.commitSha) targetError('DELIVERY_INTEGRITY_FAILED');
       if ((await isolated!(c.repository,['rev-parse','--verify',`${delivery.commitSha}^{tree}`])).stdout.trim() !== target.content_identity) targetError('DELIVERY_INTEGRITY_FAILED');
@@ -265,7 +287,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const created = await isolated!(c.repository,['-c','user.name=Nova Fábrica','-c','user.email=fabrica@localhost','commit-tree',delivery.contentIdentity!,'-p',delivery.baseSha],{input:c.message,commitTime:c.commitTime,isolatedConfig:true});
       const sha = created.stdout.trim();
       if (created.exitCode !== 0 || !oid.test(sha)) targetError('COMMIT_IDENTITY_INVALID');
-      const update = await isolated!(c.repository,['update-ref','--no-deref',target.branch_ref,sha,'0'.repeat(sha.length)]);
+      const update = await isolated!(c.repository,['update-ref','--no-deref',target.branch_ref,sha,existing ? delivery.baseSha : '0'.repeat(sha.length)]);
       if (update.exitCode !== 0) {
         const reconciled = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
         if (reconciled.state === 'confirmed') return reconciled;
@@ -277,7 +299,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     } catch (e) { return { state:mutationStarted ? 'unknown' : 'failed_known',receipt:null,reason:e instanceof CaptureError ? e.code : 'DELIVERY_TARGET_UNAVAILABLE' }; }
   }
   async function verifyDeliveryTarget(target: SealedTarget,task: DeliveryTaskInput): Promise<void> {
-    const found = await observe(target.local_path,task,{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha });
+    const found = await observe(target.local_path,task,{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },target.local_identity.branch_kind !== 'existing');
     if (found.rootIdentity !== target.local_identity.root_identity || found.gitDirectoryIdentity !== target.local_identity.git_directory_identity ||
         found.remoteHash !== target.local_identity.remote_hash || found.remoteName !== target.local_identity.remote_name ||
         found.head !== target.local_identity.observed_head || found.observedBranchRef !== target.local_identity.observed_branch_ref ||

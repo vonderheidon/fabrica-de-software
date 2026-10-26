@@ -281,6 +281,7 @@ function fixture(realAdapters = false, selectionCallbacks: Pick<ProjectDependenc
   const inspection: OriginInspection = { state: 'identified', source: { kind: 'local', location: directory }, local: { root: directory, headSha: 'a'.repeat(40), dirty: true }, base: { branch: 'main', sha: 'a'.repeat(40), observedFrom: 'local' }, remote: null,
     diagnostics: [{ code: 'REMOTE_MISSING', message: 'No remote.', recovery: 'Configure remote.' }, { code: 'LOCAL_CHANGES_EXCLUDED', message: 'Dirty excluded.', recovery: 'Use committed base.' }], githubDiagnostics: [], retryAtMs: null, executionReady: false };
   const inspectOrigin = vi.fn(async (): Promise<OriginInspection> => structuredClone(inspection));
+  const listBranches = vi.fn(async () => ({branches:['feature/local-only','main'],state:'complete' as const,message:null}));
   const github: ProjectDependencies['github'] = {
     getIdentity: vi.fn(async () => complete({ id: 'ACCOUNT_test', login: 'test-user' })),
     getProjectOwner: vi.fn(async (id) => complete({ ...projectDetails.project.owner, id })),
@@ -303,10 +304,10 @@ function fixture(realAdapters = false, selectionCallbacks: Pick<ProjectDependenc
   const resolvedExecution = execution === undefined ? { getCatalog: vi.fn(async () => structuredClone(profileCatalog)) } : execution;
   const app = createApp(configuration, storage, undefined, realAdapters
     ? { ...selectionCallbacks, ...(resolvedExecution ? { execution: resolvedExecution } : {}) }
-    : { github, githubSetup, workspaces: { inspectOrigin }, ...selectionCallbacks, ...(resolvedExecution ? { execution: resolvedExecution } : {}) }); resources.push(app);
+    : { github, githubSetup, workspaces: { inspectOrigin,listBranches }, ...selectionCallbacks, ...(resolvedExecution ? { execution: resolvedExecution } : {}) }); resources.push(app);
   const db = new Database(join(directory, 'factory.sqlite')); db.pragma('foreign_keys = ON'); resources.push(db);
   createProjectDeletionPersistence(db);
-  return { app, storage, db, directory, github, githubSetup, inspectOrigin, inspection, execution: resolvedExecution };
+  return { app, storage, db, directory, github, githubSetup, inspectOrigin,listBranches, inspection, execution: resolvedExecution };
 }
 type Fixture = ReturnType<typeof fixture>;
 async function session(f: Fixture) {
@@ -477,7 +478,30 @@ describe('project registration and lightweight catalog', () => {
     expect(['dirty.txt', 'HEAD', 'index'].map((name) => readFileSync(join(f.directory, name)))).toEqual(before);
     expect(f.inspectOrigin).toHaveBeenCalledOnce(); expect(f.github.validateProjectSelection).not.toHaveBeenCalled();
   });
-  it.each(['remote', 'published_base', 'board'] as const)('refuses direct project automation while %s readiness is missing', async missing => {
+  it('lists branches through the authenticated API without persisting an operation',async () => {
+    const f=fixture(); const headers=await session(f);
+    const source={kind:'local',location:f.directory};
+    const before=f.db.prepare('SELECT count(*) AS n FROM operation_requests').get();
+    const denied=await f.app.inject({method:'POST',url:'/api/v1/branches',payload:{source},headers:{...headers,'x-csrf-token':''}});
+    expect(denied.statusCode).toBe(403);expect(f.listBranches).not.toHaveBeenCalled();
+    const response=await f.app.inject({method:'POST',url:'/api/v1/branches',payload:{source},headers});
+    expect(response.statusCode,response.body).toBe(200);
+    expect(response.json()).toMatchObject({state:'complete',branches:['feature/local-only','main']});
+    expect(f.listBranches).toHaveBeenCalledWith(source);
+    expect(f.db.prepare('SELECT count(*) AS n FROM operation_requests').get()).toEqual(before);
+  });
+  it.each(['new','existing'] as const)('persists the chosen %s destination branch independently from the source', async kind => {
+    const f = fixture(); const headers = await session(f); const registered = await register(f,headers);
+    const project = registered.json<ProjectDetail>().project;
+    const before = f.storage.getConfiguration(project.id);
+    const delivery_branch = { kind,name:'release/validacao' };
+    const response = await f.app.inject({ method:'PUT',url:`/api/v1/projects/${project.id}/configuration`,
+      headers:{ ...headers,'if-match':before.etag,'idempotency-key':randomUUID() },payload:{ project_changes:{ delivery_branch } } });
+    expect(response.statusCode,response.body).toBe(200);
+    expect(f.storage.getConfiguration(project.id).view.configuration).toMatchObject({ base_branch:before.view.configuration.base_branch,delivery_branch });
+    expect(f.db.prepare('SELECT delivery_branch_json FROM project_revisions WHERE id=?').get(f.storage.getConfiguration(project.id).view.configuration.id)).toEqual({ delivery_branch_json:JSON.stringify(delivery_branch) });
+  });
+  it.each(['remote', 'published_base', 'board'] as const)('requires repository and board identity but permits an unpublished local base: %s', async missing => {
     const f = fixture(); const headers = await session(f); const registration = await register(f, headers);
     const project = registration.json<ProjectDetail>().project;
     const expectedCode = missing === 'remote' ? 'REMOTE_UNCONFIRMED' : missing === 'published_base' ? 'CODE_NOT_PUBLISHED' : 'PROJECT_REQUIRED';
@@ -503,6 +527,11 @@ describe('project registration and lightweight catalog', () => {
     const response = await f.app.inject({ method: 'PUT', url: `/api/v1/projects/${project.id}/configuration`,
       headers: { ...headers, 'if-match': etag, 'idempotency-key': randomUUID() },
       payload: { project_changes: { ...projectFields, automation_enabled: true } } });
+    if (missing === 'published_base') {
+      expect(response.statusCode).toBe(200);
+      expect(f.storage.getConfiguration(project.id).view.configuration.automation_enabled).toBe(true);
+      return;
+    }
     expect(response.statusCode).toBe(409);
     expect(response.json()).toMatchObject({ code: expectedCode, affected_requirements: ['RF-15'] });
     expect(f.storage.getConfiguration(project.id).view.configuration.automation_enabled).toBe(false);
@@ -1095,7 +1124,7 @@ describe('global and aggregate configuration', () => {
       const accepted = saveTimeDefaults(db, { operationId: randomUUID(), expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
       const identity = db.prepare('SELECT installation_id FROM factory_settings').get();
       applyMigrations(db, loadMigrations(), () => { throw new Error('Must not reseed'); });
-      expect(db.pragma('user_version', { simple: true })).toBe(49); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
+      expect(db.pragma('user_version', { simple: true })).toBe(50); expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
       expect(db.prepare('SELECT * FROM projects').all()).toEqual([]); expect(db.prepare('SELECT * FROM execution_profiles').all()).toEqual([]);
       expect(db.pragma('foreign_key_check')).toEqual([]);
       expect(readOperation(db, accepted.operation_id)).toEqual(accepted);

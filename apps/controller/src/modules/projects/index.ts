@@ -13,6 +13,7 @@ import {
 import { OperationError, type ConfigurationCommand, type Storage, type StoredOperation } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import type { Workspaces } from '../workspaces/index.js';
+import { validBranch } from '../workspaces/index.js';
 import { ExecutionError, type Execution } from '../execution/index.js';
 import { createToolDetector, type ManagedTool, type ToolDetector } from '../tools/index.js';
 import { createQueue } from './queue.js';
@@ -29,7 +30,7 @@ export interface ProjectDependencies {
   github: Pick<GitHub, 'getIdentity' | 'getProjectOwner' | 'listProjects' | 'getProject' | 'validateProjectSelection' | 'listProjectItems' | 'getIssueContextById'>;
   githubSetup?: Pick<GitHub, 'resolveExecutable' | 'validateExecutable' | 'activateExecutable' | 'getAuthenticationAccounts'>;
   execution?: Pick<Execution, 'getCatalog'> & Partial<Pick<Execution, 'preflight'>>;
-  workspaces: Pick<Workspaces, 'inspectOrigin'> & Partial<Pick<Workspaces, 'inspectProjectStorageTransition' | 'moveProjectStorageTransition'>>;
+  workspaces: Pick<Workspaces, 'inspectOrigin'> & Partial<Pick<Workspaces, 'listBranches' | 'inspectProjectStorageTransition' | 'moveProjectStorageTransition'>>;
   directoryBase: string;
   selectProjectsDirectory?: (signal?: AbortSignal) => Promise<string | null>;
   selectGitHubExecutable?: (signal?: AbortSignal) => Promise<string | null>;
@@ -117,6 +118,8 @@ export function validateProjectConfiguration(configuration: ProjectConfiguration
     fail(400, 'STATUS_MAPPING_INVALID', 'A V3 Status mapping requires five distinct option IDs.');
   }
   if (!Value.Check(ProjectConfiguration, configuration)) fail(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');
+  if (configuration.delivery_branch && !validBranch(configuration.delivery_branch.name)) fail(400,'DELIVERY_BRANCH_INVALID','Informe um nome válido para a branch de destino.');
+  if (configuration.default_delivery_mode === 'pr' && configuration.delivery_branch?.name === configuration.base_branch) fail(400,'PR_BRANCH_EQUALS_BASE','A branch entregue e a base do PR precisam ser diferentes.');
   const ids = configuration.checks.map((c) => c.id);
   if (new Set(ids).size !== ids.length) fail(400, 'CHECK_DUPLICATED', 'Checks require distinct IDs.');
   for (const check of configuration.checks) {
@@ -289,9 +292,9 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       throw new OperationError(409, 'REMOTE_UNCONFIRMED', 'O remoto GitHub não pôde ser confirmado para este projeto.',
         { affected_requirements: ['RF-15'], recovery: 'Confira a pasta, o remoto e o acesso ao repositório GitHub antes de habilitar a automação.' });
     }
-    const published = Boolean(origin.base && origin.remote?.branch && origin.base.branch === configuration.base_branch &&
+    const published = Boolean(origin.base && (origin.base.observedFrom === 'local' || origin.remote?.branch && origin.base.branch === configuration.base_branch &&
       origin.remote.branch.name === configuration.base_branch && origin.remote.branch.repositoryId === configuration.source.repository_id &&
-      origin.remote.branch.sha === origin.base.sha);
+      origin.remote.branch.sha === origin.base.sha));
     if (!published) {
       throw new OperationError(409, 'CODE_NOT_PUBLISHED', 'O commit da branch-base ainda não está publicado e confirmado no GitHub.',
         { affected_requirements: ['RF-15'], recovery: 'Publique a branch-base configurada e confira se o commit remoto corresponde ao commit observado na origem.' });
@@ -542,6 +545,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       return operation;
     },
     getQueue: queue.read,
+    listBranches: (source: import('#contracts').OriginSource) => workspaces.listBranches?.(source) ?? Promise.resolve({branches:[],state:'unavailable' as const,message:'A consulta de branches não está disponível neste host.'}),
     saveQueue: queue.save,
     async registerProject(body: ProjectRegistration, context: CommandContext) {
       if (!Value.Check(ProjectRegistration, body)) fail(400, 'REGISTRATION_INVALID', 'Project registration is invalid.');

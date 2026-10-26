@@ -4,6 +4,7 @@ import {
   CatalogQuery, ConfigurationOptions, ConfigurationOptionsQuery, ConfigurationSaved, ConfigurationUpdate, ConfigurationView, ExecutionCatalog, GitHubSetupOptions,
   EmptyQuery, ErrorResponse, OperationAccepted, ProjectDetail, ProjectPage, ProjectParams, ProjectRegistered, ProjectRegistration,
   StorageTransitionCommand,
+  BranchOptionsRequest, BranchOptions,
   NativeSelectionRequest, NativeSelectionResult, SettingsSaved, SettingsUpdate, SettingsView, ToolOptions,
 } from '#contracts';
 import type { Projects } from '../../modules/projects/index.js';
@@ -12,6 +13,7 @@ import { commandHeaders } from '../security/index.js';
 export function installProjectRoutes(instance: FastifyInstance, projects: Projects): void {
   const app = instance.withTypeProvider<TypeBoxTypeProvider>();
   const errors = { '4xx': ErrorResponse, '5xx': ErrorResponse };
+  app.post('/api/v1/branches', { schema:{querystring:EmptyQuery,body:BranchOptionsRequest,response:{200:BranchOptions,...errors}} },async request => projects.listBranches(request.body.source));
   app.get('/api/v1/projects', { schema: { querystring: CatalogQuery, response: { 200: ProjectPage, ...errors } } }, async (request) => projects.listProjects(request.query));
   app.post('/api/v1/projects', { schema: { querystring: EmptyQuery, body: ProjectRegistration, response: { 201: ProjectRegistered, ...errors } } }, async (request, reply) => {
     const result = await projects.registerProject(request.body, commandHeaders(request));

@@ -126,6 +126,7 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     ]);
     const issue = issueResult.state === 'complete' && issueResult.data && 'repository' in issueResult.data ? issueResult.data : null;
     const reasons = [...resolved.reasons];
+    if (record.delivery_mode === 'pr' && config.delivery_branch?.name === config.base_branch) reasons.push('PR_BRANCH_EQUALS_BASE');
     const target = record.publication_target;
     const targetValid = target === null || config.source.kind === 'github' && target.repository_id === config.source.repository_id && isLocalAbsoluteTargetPath(publicationTargetPath(target));
     const targetRequired = config.source.kind === 'github' && record.delivery_mode !== 'icr';
@@ -140,9 +141,9 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     const remoteConfirmed = origin.state === 'identified' && Boolean(origin.remote?.confirmed && origin.remote.repository && config.source.repository_id &&
       origin.remote.repository.id === config.source.repository_id && !origin.remote.repository.isArchived);
     if (!remoteConfirmed) reasons.push('REMOTE_UNCONFIRMED');
-    const basePublished = remoteConfirmed && Boolean(origin.base && origin.remote?.branch && origin.base.branch === config.base_branch &&
+    const basePublished = remoteConfirmed && Boolean(origin.base && (origin.base.observedFrom === 'local' || origin.remote?.branch && origin.base.branch === config.base_branch &&
       origin.remote.branch.name === config.base_branch && origin.remote.branch.repositoryId === config.source.repository_id &&
-      origin.remote.branch.sha === origin.base.sha);
+      origin.remote.branch.sha === origin.base.sha));
     if (remoteConfirmed && !basePublished) reasons.push('CODE_NOT_PUBLISHED');
     for (const diagnostic of origin.diagnostics) {
       if (['LOCAL_CHANGES_EXCLUDED', 'PROJECT_REQUIRED', 'REMOTE_MISSING', 'REMOTE_UNCONFIRMED', 'BRANCH_NOT_FOUND', 'BASE_UNCONFIRMED', 'REMOTE_MISMATCH'].includes(diagnostic.code)) continue;

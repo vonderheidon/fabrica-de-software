@@ -102,9 +102,9 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         diagnostics.push({ code: 'REMOTE_UNCONFIRMED', message: `${projectSummary.name}: o remoto GitHub não pôde ser confirmado para esta configuração.`, recovery: 'Confira a origem local, o remoto e o acesso ao repositório GitHub; depois consulte a fila novamente.' });
         continue;
       }
-      const basePublished = Boolean(origin.base && origin.remote?.branch && origin.base.branch === configuration.base_branch &&
+      const basePublished = Boolean(origin.base && (origin.base.observedFrom === 'local' || origin.remote?.branch && origin.base.branch === configuration.base_branch &&
         origin.remote.branch.name === configuration.base_branch && origin.remote.branch.repositoryId === configuration.source.repository_id &&
-        origin.remote.branch.sha === origin.base.sha);
+        origin.remote.branch.sha === origin.base.sha));
       if (!basePublished) {
         complete = false;
         blockedProjects.push(projectSummary.id);

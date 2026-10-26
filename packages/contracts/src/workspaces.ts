@@ -6,6 +6,13 @@ const closed = { additionalProperties: false } as const;
 const text = (maxLength = 4096) => Type.String({ minLength: 1, maxLength });
 export const OriginSource = Type.Object({ kind: Type.Union([Type.Literal('local'), Type.Literal('github')]), location: text(32768) }, closed);
 export type OriginSource = Static<typeof OriginSource>;
+export const BranchOptionsRequest = Type.Object({ source: OriginSource }, closed);
+export const BranchOptions = Type.Object({
+  branches: Type.Array(Type.String({ minLength:1,maxLength:1024 }), { maxItems:5000 }),
+  state: Type.Union([Type.Literal('complete'),Type.Literal('partial'),Type.Literal('unavailable')]),
+  message: Type.Union([Type.String({ maxLength:2048 }),Type.Null()]),
+}, closed);
+export type BranchOptions = Static<typeof BranchOptions>;
 export const OriginRequest = Type.Object({ source: OriginSource, baseBranch: text(1024), remoteName: Type.Optional(text(128)) }, closed);
 export type OriginRequest = Static<typeof OriginRequest>;
 export const OriginDiagnostic = Type.Object({

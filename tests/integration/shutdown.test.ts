@@ -376,9 +376,9 @@ it('upgrades schema 48 without rewriting accepted receipts and offers resume in 
   const before = f.db.prepare('SELECT receipt_json FROM operation_requests WHERE operation_id=?').get(pause.operationId);
   f.db.exec('DROP TRIGGER shutdown_start_barrier; DROP TRIGGER shutdown_final_barrier; DROP TRIGGER shutdown_receipt_immutable; DROP INDEX shutdown_control_order;');
   f.db.exec(readFileSync(new URL('../../apps/controller/src/modules/storage/migrations/048_shutdown_barriers.sql', import.meta.url), 'utf8'));
-  f.db.exec('DELETE FROM schema_migrations WHERE version=49; PRAGMA user_version=48;');
+  f.db.exec('DROP INDEX delivery_targets_existing_branch_base; DROP INDEX delivery_targets_repository_branch; CREATE UNIQUE INDEX delivery_targets_repository_branch ON delivery_targets(repository_id,branch_ref); ALTER TABLE project_revisions DROP COLUMN delivery_branch_json; DELETE FROM schema_migrations WHERE version>=49; PRAGMA user_version=48;');
   f.reopen();
-  expect(f.storage.getDiagnostics().schemaVersion).toBe(49);
+  expect(f.storage.getDiagnostics().schemaVersion).toBe(50);
   expect(f.db.prepare('SELECT receipt_json FROM operation_requests WHERE operation_id=?').get(pause.operationId)).toEqual(before);
   expect(f.storage.getShutdown().resume_starts_capability.available).toBe(true);
   f.storage.acceptShutdown(command(f, 'resume_starts'));

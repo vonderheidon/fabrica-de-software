@@ -174,6 +174,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
     {error && <div className="queue-error" role="alert"><p>{error}</p><button type="button" onClick={() => { setError(null); onRefresh(); }}>Atualizar antes de revisar</button></div>}
     <div className="delivery-continuation">
       {upgrades.map(upgrade => <div className="publication-upgrade" key={upgrade.target_mode}>
+        <p>Branch de destino: {upgrade.delivery_branch ? `${upgrade.delivery_branch.name} (${upgrade.delivery_branch.kind === 'existing' ? 'existente' : 'nova'})` : 'nova branch com nome automático'}.</p>
         <p>{upgrade.additional_effects.map(kind => effectLabel[kind]).join(' · ')}.</p>
         {upgrade.publication_target && <p className="muted">Intenção capturada: {upgrade.publication_target.selection.kind === 'clone'
           ? 'clonar em ' + upgrade.publication_target.selection.destination : 'usar clone em ' + upgrade.publication_target.selection.path}.</p>}

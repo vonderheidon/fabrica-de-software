@@ -119,7 +119,7 @@ export function prerequisites(config: Pick<ProjectConfiguration, 'source' | 'imp
   if (!config.source.repository_id || noteSet.has('REMOTE_MISSING') || noteSet.has('REMOTE_UNCONFIRMED')) {
     add('REMOTE_UNCONFIRMED', 'A origem GitHub do projeto ainda não foi confirmada.', 'Configure um remoto GitHub acessível para esta pasta e confirme a identidade do repositório.');
   }
-  if (['BRANCH_NOT_FOUND', 'BASE_UNCONFIRMED', 'REMOTE_MISMATCH'].some(code => noteSet.has(code))) {
+  if (['BRANCH_NOT_FOUND', 'BASE_UNCONFIRMED', ...(config.source.kind === 'github' ? ['REMOTE_MISMATCH'] : [])].some(code => noteSet.has(code))) {
     add('CODE_NOT_PUBLISHED', 'O commit da branch-base ainda não está confirmado no remoto GitHub.', 'Publique o commit da branch-base no repositório configurado e confira novamente a origem.');
   }
   if (!config.github_project) add('PROJECT_REQUIRED', 'O quadro GitHub e o mapeamento de Status ainda não foram configurados.', 'Selecione o quadro pelo nome e mapeie os valores de Status na configuração do projeto.');
@@ -173,6 +173,7 @@ export function readConfiguration(db: Database.Database, projectId: string): Con
   if (!r) throw new StorageError('PROJECT_DATA_INVALID');
   const configuration: unknown = { id: r.id, project_id: projectId, revision: r.revision_number, created_at_ms: r.created_at_ms,
     source: project.project.source, base_branch: r.base_branch,
+    ...(r.delivery_branch_json == null ? {} : { delivery_branch: JSON.parse(String(r.delivery_branch_json)) as unknown }),
     github_project: r.github_project_id === null ? null : { id: r.github_project_id, owner_id: r.github_project_owner_id, status_field_id: r.status_field_id, status_option_ids: readStatusOptionIds(JSON.parse(String(r.status_options_json)) as unknown) },
     implementer_profile_id: r.implementer_profile_id, reviewer_profile_id: r.reviewer_profile_id,
     checks: readCheckDefinitions(JSON.parse(String(r.checks_json)) as unknown), correction_limit: r.correction_limit, default_delivery_mode: r.default_delivery_mode,

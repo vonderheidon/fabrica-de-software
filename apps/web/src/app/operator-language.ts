@@ -244,6 +244,11 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
 };
 
 const errorCopy: Readonly<Record<string, string>> = {
+  DELIVERY_BRANCH_IN_USE: 'A branch de destino está aberta em um checkout. Troque a branch desse checkout e tente concluir a entrega novamente.',
+  DELIVERY_BRANCH_NOT_FOUND: 'A branch de destino não existe no repositório local. Confira o nome e disponibilize essa branch antes de concluir a entrega.',
+  DELIVERY_BRANCH_INVALID: 'Informe um nome Git válido para a branch de destino.',
+  DELIVERY_BRANCH_COLLISION: 'A nova branch escolhida já existe ou está reservada. Confira o destino antes de continuar.',
+  PR_BRANCH_EQUALS_BASE: 'A branch entregue e a base do PR são iguais. Escolha branches diferentes antes de iniciar uma tentativa com PR.',
   PUSH_NOT_AUTHORIZED: 'O controlador não reconheceu a autorização para enviar a versão aprovada. Verifique se o controlador está atualizado e consulte novamente a tentativa.',
   MUTATION_NOT_AUTHORIZED: 'O controlador não reconheceu a autorização para publicar no GitHub. Verifique se o controlador está atualizado e consulte novamente a tentativa.',
   VALIDATION_FAILED: 'Revise os campos destacados e corrija os valores informados.',

@@ -499,7 +499,7 @@ it('migrates schema 33 without rewriting session identities, captures or accepte
   expect(f.db.pragma('user_version', { simple: true })).toBe(33);
   const ledger = f.db.prepare('SELECT * FROM schema_migrations ORDER BY version').all();
   applyMigrations(f.db, loadMigrations(), () => { throw new Error('NO_RESEED'); });
-  expect(f.db.pragma('user_version', { simple: true })).toBe(49);
+  expect(f.db.pragma('user_version', { simple: true })).toBe(50);
   expect(existing.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
   expect(f.db.prepare('SELECT * FROM schema_migrations WHERE version<=33 ORDER BY version').all()).toEqual(ledger);
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -644,7 +644,7 @@ it('migrates real SQLite v7 without reseeding, changing captured refs or fabrica
   await f.pipeline.close(); f.storage.close(); removeReviewSchema(f.db);
   const reopened = openStorage({ dataDirectory: f.directory });
   try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(49); expect(reopened.getSettings().installation_id).toBe(identity);
+    expect(reopened.getDiagnostics().schemaVersion).toBe(50); expect(reopened.getSettings().installation_id).toBe(identity);
     expect(reopened.getDelivery(d)).toMatchObject({ delivery: old.delivery, verification: old.verification }); expect(reopened.getReview(d)).toBeNull();
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   } finally { reopened.close(); }
@@ -919,7 +919,7 @@ it('migrates v38 decisions additively without rewriting blocked attempts or acce
   expect(tables.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
   expect(f.db.prepare('SELECT * FROM attempt_decisions').all()).toEqual([]);
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
-  expect(f.db.pragma('user_version', { simple: true })).toBe(49);
+  expect(f.db.pragma('user_version', { simple: true })).toBe(50);
 });
 
 it('blocks human decisions with a stale ETag and rejects guidance after the captured correction limit', async () => {

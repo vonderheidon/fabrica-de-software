@@ -65,6 +65,13 @@ export function createClient(rootReader: GraphQLReader) {
     const reader = rootReader.scope();
     return collect(reader, queries.repositoriesQuery, {}, (data) => child(data, 'viewer', 'repositories'), repository);
   }
+  async function listBranches(reference: RepositoryReference): Promise<GitHubQueryResult<string[]>> {
+    if (!Value.Check(RepositoryReference,reference)) return invalid();
+    return collect(rootReader.scope(),queries.branchesQuery,reference,data => child(data,'repository','refs'),node => {
+      if (!validBranch(node.name)) throw new Error('RESPONSE_INVALID');
+      return node.name;
+    },node => string(node.name));
+  }
   async function getRepository(reference: RepositoryReference): Promise<GitHubQueryResult<GitHubRepository>> {
     const reader = rootReader.scope();
     if (!Value.Check(RepositoryReference, reference)) return invalid();
@@ -215,7 +222,7 @@ export function createClient(rootReader: GraphQLReader) {
     if (context.data && context.data.id !== id) return result('unavailable', null, ['RESPONSE_INVALID']);
     return context;
   }
-  return { getIdentity, getProjectOwner, listRepositories, getRepository, resolveBranch, listProjects, getProject, validateProjectSelection, listProjectItems, getIssueContext, getIssueContextById };
+  return { getIdentity, getProjectOwner, listRepositories, listBranches, getRepository, resolveBranch, listProjects, getProject, validateProjectSelection, listProjectItems, getIssueContext, getIssueContextById };
 }
 function baseIssue(issue: Record<string, unknown>) {
   return { id: issue.id, number: issue.number, url: issue.url, title: issue.title, body: issue.body, state: issue.state, repository: repository(issue.repository) };

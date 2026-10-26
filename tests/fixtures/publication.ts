@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { vi } from 'vitest';
-import type { CheckDefinition, GitHubMutationResult, ImplementerResult, ReviewerResult } from '#contracts';
+import type { CheckDefinition, GitHubMutationResult, ImplementerResult, ReviewerResult, ProjectConfiguration } from '#contracts';
 import { attemptFixture, complete } from './attempt.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
@@ -9,14 +9,14 @@ import type { GitHubEffectRequest } from '../../apps/controller/src/modules/gith
 import type { Workspaces } from '../../apps/controller/src/modules/workspaces/index.js';
 
 export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
-  options: { temporaryRoot?: string; checks?: CheckDefinition[]; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean } = {}) {
+  options: { temporaryRoot?: string; checks?: CheckDefinition[]; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch'] } = {}) {
   const f = await attemptFixture(options.temporaryRoot, options.baseSha); await f.pipeline.close();
-  if (options.checks || options.correctionLimit !== undefined) {
+  if (options.checks || options.correctionLimit !== undefined || options.deliveryBranch !== undefined) {
     const current = f.storage.getConfiguration(f.projectId);
     const { id: _id, project_id: _project, revision: _revision, created_at_ms: _time, ...configuration } = current.view.configuration;
     f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
-      body: { project_changes: { ...(options.checks ? { checks:options.checks } : {}),...(options.correctionLimit === undefined ? {} : { correction_limit:options.correctionLimit }) } },
-      configuration: { ...configuration,...(options.checks ? { checks:options.checks } : {}),...(options.correctionLimit === undefined ? {} : { correction_limit:options.correctionLimit }) }, globalChanges: {} });
+      body: { project_changes: { ...(options.checks ? { checks:options.checks } : {}),...(options.correctionLimit === undefined ? {} : { correction_limit:options.correctionLimit }),...(options.deliveryBranch === undefined ? {} : { delivery_branch:options.deliveryBranch }) } },
+      configuration: { ...configuration,...(options.checks ? { checks:options.checks } : {}),...(options.correctionLimit === undefined ? {} : { correction_limit:options.correctionLimit }),...(options.deliveryBranch === undefined ? {} : { delivery_branch:options.deliveryBranch }) }, globalChanges: {} });
   }
   const verifyRetainedDelivery = vi.fn(async () => {});
   const folderCapability = vi.fn(async () => ({ available: false, reason: 'NATIVE_OPEN_UNAVAILABLE' }));
@@ -57,9 +57,9 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
     observePublicationTarget: vi.fn<Workspaces['observePublicationTarget']>(async expected => expected),
     clonePublicationTarget: vi.fn<Workspaces['clonePublicationTarget']>(async () => { throw new Error('Clone not authorized by this fixture'); }),
     inspectDeliveryTarget: vi.fn<Workspaces['inspectDeliveryTarget']>(async (root,task) => ({ repository_id: f.issue.repository.id,local_path: root,
-      local_identity: { format_version: 1,root_identity: 'controlled-target',git_directory_identity: 'controlled-git',remote_name:'origin',remote_hash:'f'.repeat(64),base_branch: 'main',base_sha: task.baseSha,
+      local_identity: { ...(task.deliveryBranch ? { branch_kind:task.deliveryBranch.kind } : {}),format_version: 1,root_identity: 'controlled-target',git_directory_identity: 'controlled-git',remote_name:'origin',remote_hash:'f'.repeat(64),base_branch: task.baseBranch,base_sha: task.baseSha,
         observed_head: options.baseSha ?? 'a'.repeat(40),observed_branch_ref: 'refs/heads/main',working_state_hash: 'd'.repeat(64),index_hash: 'e'.repeat(64) },
-      branch_ref: 'refs/heads/feat/17-executable-issue',task_type: 'feat',task_description: 'Executable issue' })),
+      branch_ref: task.deliveryBranch ? `refs/heads/${task.deliveryBranch.name}` : 'refs/heads/feat/17-executable-issue',task_type: 'feat',task_description: 'Executable issue' })),
     getDeliveryDiff: vi.fn<Workspaces['getDeliveryDiff']>(async delivery => ({ deliveryId: delivery.id, baseSha: delivery.baseSha,
       contentIdentity: delivery.contentIdentity!, entries: [], nextCursor: null, hasMore: false })),
     createLocalCommit,

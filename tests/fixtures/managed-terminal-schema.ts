@@ -2,6 +2,9 @@ import type Database from 'better-sqlite3';
 
 /** Disposable migration fixtures only; this never downgrades an installation. */
 export function removeAttemptDecisionSchema(db: Database.Database): void {
+  if (db.pragma('user_version', { simple: true }) === 50) {
+    db.exec('DROP INDEX delivery_targets_existing_branch_base; DROP INDEX delivery_targets_repository_branch; CREATE UNIQUE INDEX delivery_targets_repository_branch ON delivery_targets(repository_id,branch_ref); ALTER TABLE project_revisions DROP COLUMN delivery_branch_json; DELETE FROM schema_migrations WHERE version=50; PRAGMA user_version=49;');
+  }
   if (db.pragma('user_version', { simple: true }) === 49) {
     db.exec('DELETE FROM schema_migrations WHERE version=49; PRAGMA user_version=48;');
   }

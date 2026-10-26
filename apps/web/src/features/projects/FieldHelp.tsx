@@ -1,4 +1,7 @@
 const guidance: Readonly<Record<string, string>> = {
+  'branch de origem': 'Branch usada para iniciar a tentativa. Somente commits entram no ambiente de trabalho.',
+  'branch de destino': 'Escolha uma nova branch ou uma existente para receber a entrega aprovada.',
+  'nome da branch de destino': 'Nome Git completo, como develop ou feat/minha-tarefa. Uma branch em uso deve ser liberada antes da entrega.',
   'status backlog': 'Opção Backlog do campo Status do quadro. Necessária no mapeamento V3; selecione a opção confirmada pelo GitHub, sem substituir os valores históricos automaticamente.',
   'definir prazo para perguntas': 'Tempo para responder ao agente antes de a pergunta expirar. Desativado usa o padrão.',
   'duracao': 'Prazo em minutos. Exemplo: 0,5 equivale a 30 segundos.',

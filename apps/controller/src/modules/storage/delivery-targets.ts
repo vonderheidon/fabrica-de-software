@@ -20,13 +20,17 @@ export function sealDeliveryTarget(db: Database.Database, plan: DeliveryTargetPl
     }
     const attempt = readAttempt(db,plan.attempt_id); const capture = readCapture(db,plan.attempt_id);
     const delivery = readDelivery(db,plan.delivery_id); assertProjectAvailable(db,attempt.projectId); assertDeletionPathsAvailable(db,[plan.local_path]);
+    const chosenBranch = capture.configuration.configuration.delivery_branch;
+    if (chosenBranch && (plan.branch_ref !== `refs/heads/${chosenBranch.name}` || plan.local_identity.branch_kind !== chosenBranch.kind)) {
+      throw new OperationError(409,'DELIVERY_TARGET_AUTHORIZATION_INVALID','A branch de destino diverge da escolha capturada no início.');
+    }
     const operation = db.prepare<[string,string,string], { kind: string; authorized_mode: string; state: string }>(`SELECT p.kind,p.authorized_mode,p.state
       FROM publication_requests p WHERE p.operation_id=? AND p.attempt_id=? AND p.delivery_id=?`).get(plan.operation_id,plan.attempt_id,plan.delivery_id);
     if (!operation || !['publication.complete','publication.authorize-upgrade'].includes(operation.kind) ||
         !['commit','pr'].includes(operation.authorized_mode) || !['accepted','running'].includes(operation.state) ||
         capture.issue.repository.id !== plan.repository_id || delivery.baseSha !== plan.base_sha || delivery.gitRef !== plan.approved_ref ||
         delivery.contentIdentity !== plan.content_identity || capture.issue.number !== plan.issue_number ||
-        capture.configuration.configuration.base_branch !== plan.base_branch) {
+        (capture.configuration.configuration.delivery_branch?.kind === 'existing' ? capture.configuration.configuration.delivery_branch.name : capture.configuration.configuration.base_branch) !== plan.base_branch) {
       throw new OperationError(409,'DELIVERY_TARGET_AUTHORIZATION_INVALID','O destino não corresponde à autorização e à versão aprovada atuais.');
     }
     const prior = db.prepare<[string,string], { operation_id: string }>('SELECT operation_id FROM delivery_targets WHERE attempt_id=? AND delivery_id=? ORDER BY created_at_ms,rowid LIMIT 1').get(plan.attempt_id,plan.delivery_id);

@@ -55,6 +55,7 @@ it('upgrades schema 43 without rewriting history and repairs its managed deletio
       is_current:1,revision:1,created_at_ms:0,verified_at_ms:0});
     const tables=db.prepare<[],{name:string}>("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'schema_migrations'").all();
     const snapshot=()=>tables.map(({name})=>[name,db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all().map(row=>{
+      if(name==='project_revisions') { const {delivery_branch_json:_branch,...legacy}=row as Record<string,unknown>; return legacy; }
       if(name!=='attempts')return row;
       const {issue_number:_number,issue_title:_title,...legacyColumns}=row as Record<string,unknown>;
       return legacyColumns;
@@ -67,7 +68,7 @@ it('upgrades schema 43 without rewriting history and repairs its managed deletio
     expect(snapshot()).toEqual(before);
     expect(db.prepare('SELECT count(*) AS n FROM attempts WHERE issue_number IS NOT NULL OR issue_title IS NOT NULL').get()).toEqual({n:0});
     expect(db.prepare('SELECT * FROM schema_migrations WHERE version<=43 ORDER BY version').all()).toEqual(ledger);
-    expect(db.pragma('user_version',{simple:true})).toBe(49);
+    expect(db.pragma('user_version',{simple:true})).toBe(50);
     expect(persistence.finalize(history.command)).toEqual({operation_id:history.command.operationId,state:'succeeded'});
     expect(db.pragma('foreign_key_check')).toEqual([]);
   } finally {db.close();}

@@ -41,6 +41,13 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     if (r.exitCode) return { state: 'unknown',receipt: null,reason: 'REMOTE_REF_UNAVAILABLE' };
     const lines = r.stdout.trim().split(/\r?\n/).filter(Boolean);
     if (!lines.length) return { state: 'unknown',receipt: null,reason: 'REMOTE_REF_NOT_OBSERVED' };
+    if (c.i.branchKind === 'existing' && lines.length === 1 && lines[0] !== `${c.i.commitSha}\t${c.i.branchRef}`) {
+      const [tip,ref] = lines[0]!.split('\t');
+      if (tip && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(tip) && ref === c.i.branchRef) {
+        const fetched = await c.run(['fetch','--no-write-fetch-head','--no-tags','--no-recurse-submodules','--',c.remote,tip]);
+        if (fetched.exitCode === 0 && (await c.run(['merge-base','--is-ancestor',tip,c.i.commitSha!])).exitCode === 0) return { state:'unknown',receipt:null,reason:'REMOTE_REF_NOT_OBSERVED' };
+      }
+    }
     if (lines.length !== 1 || lines[0] !== `${c.i.commitSha}\t${c.i.branchRef}`) return { state: 'unknown',receipt: null,reason: 'REMOTE_REF_CONFLICT' };
     return { state: 'confirmed',receipt: { id: c.i.commitSha!,commitSha: c.i.commitSha!,branchRef: c.i.branchRef!,repositoryId: c.i.repositoryId!,
       ...(c.i.targetOperationId ? { targetOperationId:c.i.targetOperationId,taskType:c.i.taskType!,taskDescription:c.i.taskDescription! } : {}) },reason: null };

@@ -9,6 +9,7 @@ function projectChanges(value: ProjectChanges) {
   return {
     ...(value.source === undefined ? {} : { source: value.source }),
     ...(value.base_branch === undefined ? {} : { baseBranch: value.base_branch }),
+    ...(value.delivery_branch === undefined ? {} : { deliveryBranch: value.delivery_branch }),
     ...(value.github_project === undefined ? {} : { githubProject: value.github_project === null ? null : storeMapping(value.github_project) }),
     ...(value.implementer_profile_id === undefined ? {} : { implementerProfileId: value.implementer_profile_id }),
     ...(value.reviewer_profile_id === undefined ? {} : { reviewerProfileId: value.reviewer_profile_id }),

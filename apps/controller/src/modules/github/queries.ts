@@ -9,6 +9,7 @@ export const projectOwnerQuery = 'query FactoryProjectOwner($id:ID!) { node(id:$
 export const repositoriesQuery = `query FactoryRepositories($cursor:String) { viewer { repositories(first:100,after:$cursor,affiliations:[OWNER,COLLABORATOR,ORGANIZATION_MEMBER]) { nodes { ${repositoryFields} } ${page} } } }`;
 export const repositoryQuery = `query FactoryRepository($owner:String!,$name:String!) { repository(owner:$owner,name:$name) { ${repositoryFields} } }`;
 export const branchQuery = `query FactoryBranch($owner:String!,$name:String!,$qualifiedName:String!) { repository(owner:$owner,name:$name) { id ref(qualifiedName:$qualifiedName) { name target { ... on Commit { oid } } } } }`;
+export const branchesQuery = `query FactoryBranches($owner:String!,$name:String!,$cursor:String) { repository(owner:$owner,name:$name) { refs(refPrefix:"refs/heads/",first:100,after:$cursor) { nodes { name } ${page} } } }`;
 export function projectsQuery(kind: 'user' | 'organization'): string {
   return `query FactoryProjects($login:String!,$cursor:String) { ${kind}(login:$login) { projectsV2(first:100,after:$cursor) { nodes { ${projectFields} } ${page} } } }`;
 }

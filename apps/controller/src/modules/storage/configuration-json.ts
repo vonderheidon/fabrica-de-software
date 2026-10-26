@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { ComposedExecutionProfileValue, DeliveryMode, GitHubId, ExecutionProfileValue, OperationId, OriginSource, PublicationTargetIntent, ScopeChange, type ProjectConfiguration, type PreparationChoices, type EffectiveConfiguration, type Criterion } from '#contracts';
+import { ComposedExecutionProfileValue, DeliveryMode, GitHubId, ExecutionProfileValue, OperationId, OriginSource, PublicationTargetIntent, ScopeChange, ProjectConfiguration, type PreparationChoices, type EffectiveConfiguration, type Criterion } from '#contracts';
 import { StorageError } from './errors.js';
 import { storedTimeDefaults, storedArtifactPolicy, readTimeDefaults, storeTimeDefaults, readArtifactPolicy, storeArtifactPolicy } from './common-json.js';
 
@@ -25,7 +25,7 @@ export const projectMappingJson = Type.Object({ id: text(256), ownerId: text(256
 export const queueOrderJson = Type.Object({ priorityFieldId: nullable(), priorityDirection: Type.Union([Type.Literal('asc'), Type.Literal('desc')]), useBoardPosition: Type.Boolean() }, closed);
 export const projectConfigurationJson = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repositoryId: Type.Optional(text(256)), repositoryUrl: Type.Optional(text(4096)) }, closed),
-  baseBranch: text(1024), githubProject: Type.Union([projectMappingJson, Type.Null()]),
+  baseBranch: text(1024), deliveryBranch: ProjectConfiguration.properties.delivery_branch, githubProject: Type.Union([projectMappingJson, Type.Null()]),
   implementerProfileId: Type.Union([OperationId, Type.Null()]), reviewerProfileId: Type.Union([OperationId, Type.Null()]),
   checks: Type.Array(checkDefinitionJson, { maxItems: 50 }), correctionLimit: Type.Integer({ minimum: 0, maximum: 5 }),
   defaultDeliveryMode: DeliveryMode, automationEnabled: Type.Boolean(), queueOrder: queueOrderJson,
@@ -155,6 +155,7 @@ export function readProjectConfiguration(value: Static<typeof projectConfigurati
   return {
     source: readSource(value.source),
     base_branch: value.baseBranch,
+    ...(value.deliveryBranch === undefined ? {} : { delivery_branch: value.deliveryBranch }),
     github_project: value.githubProject === null ? null : readMapping(value.githubProject),
     implementer_profile_id: value.implementerProfileId,
     reviewer_profile_id: value.reviewerProfileId,
@@ -171,6 +172,7 @@ export function storeProjectConfiguration(value: ProjectConfiguration): Static<t
   return {
     source: storeSource(value.source),
     baseBranch: value.base_branch,
+    ...(value.delivery_branch === undefined ? {} : { deliveryBranch: value.delivery_branch }),
     githubProject: value.github_project === null ? null : storeMapping(value.github_project),
     implementerProfileId: value.implementer_profile_id,
     reviewerProfileId: value.reviewer_profile_id,

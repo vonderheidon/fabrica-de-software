@@ -51,6 +51,21 @@ it('pushes a single explicit approved SHA/ref to the authorized HTTPS repository
   expect(await readFile(join(f.implementation,'.git/index'))).toEqual(index);
 });
 
+it.each([true,false])('updates an existing remote branch only for a fast-forward: %s', async ancestor => {
+  const f = await fixture(); f.remote('d'.repeat(40));
+  const git: GitReader = async (cwd,args,input) => {
+    if (args.includes('fetch')) return { exitCode:0,stdout:'' };
+    if (args.includes('merge-base')) return { exitCode:ancestor ? 0 : 1,stdout:'' };
+    return f.git(cwd,args,input);
+  };
+  const publisher = createRemotePublisher(f.root,git,{ accountId:'A',repositoryIds:['R'] },async path => path);
+  const effect = { ...f.effect,expectedIdentity:{ ...f.effect.expectedIdentity,branchKind:'existing' as const } };
+  const result = await publisher.pushApproved(f.d,effect,'A',async () => {});
+  expect(result.state).toBe(ancestor ? 'confirmed' : 'failed_known');
+  expect(f.git.mock.calls.filter(([,args]) => args.includes('push'))).toHaveLength(ancestor ? 1 : 0);
+  expect(f.git.mock.calls.every(([,args]) => !args.some(arg => arg.startsWith('--force') || arg.startsWith('+')))).toBe(true);
+});
+
 it('keeps a lost response unknown and reconciles exact remote ref/SHA without another push', async () => {
   const f = await fixture(); f.lose();
   expect((await f.publisher.pushApproved(f.d,f.effect,'A',async () => {})).state).toBe('unknown');

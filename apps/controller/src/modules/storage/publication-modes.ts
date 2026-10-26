@@ -25,8 +25,9 @@ export function upgradeSummaries(db: Database.Database, attemptId: string, deliv
   return modeOrder.slice(modeOrder.indexOf(mode) + 1).map(targetMode => {
     const additionalEffects: ModeUpgradeSummary['additionalEffects'] = [...(mode === 'icr' ? ['local_commit' as const] : []), ...(targetMode === 'pr' ? ['push' as const, 'pull_request' as const] : [])];
     const targetRequired = capture.configuration.configuration.source.kind === 'github' && targetMode !== 'icr';
-    const blocked = a.phase !== 'finished' || !a.result ? 'ATTEMPT_NOT_FINISHED' : reason ?? (targetRequired && !publicationTarget ? 'PUBLICATION_TARGET_REQUIRED' : null);
-    return { targetMode, additionalEffects,publicationTarget,
+    const deliveryBranch = capture.configuration.configuration.delivery_branch;
+    const blocked = a.phase !== 'finished' || !a.result ? 'ATTEMPT_NOT_FINISHED' : reason ?? (targetRequired && !publicationTarget ? 'PUBLICATION_TARGET_REQUIRED' : targetMode === 'pr' && deliveryBranch?.name === capture.configuration.configuration.base_branch ? 'PR_BRANCH_EQUALS_BASE' : null);
+    return { targetMode, additionalEffects,publicationTarget,...(deliveryBranch === undefined ? {} : { deliveryBranch }),
       summaryHash: digest([s.installation_id,s.account_id,s.revision,a.id,a.revision,deliveryId,version,review,mode,targetMode,additionalEffects,effects,publicationTarget,selections,targets,
         configurationETag(readConfiguration(db,a.projectId))]),
       capability: blocked ? { available: false, reason_code: blocked } : { available: true } };

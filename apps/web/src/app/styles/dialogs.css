@@ -190,6 +190,7 @@
   .project-deletion-dialog[open] .dialog-actions > button { flex: 1 1 80px; }
   .project-deletion-dialog[open] .dialog-actions > .danger-button { flex-basis: 100%; }
   .dialog[role="dialog"] .dialog-actions > p { flex-basis: 100%; }
+  .dialog[role="dialog"] .preparation-actions > :is(button, .preparation-feedback, .preparation-start-status) { flex: 0 0 auto; }
   .dialog[data-dialog='project-configuration'] .dialog-actions { flex-direction: row; }
   .dialog[data-dialog='project-configuration'] .dialog-actions > .save-feedback:empty { flex-basis: 0; }
   .dialog .profile-catalog-row { align-items: stretch; flex-direction: column; gap: 8px; }

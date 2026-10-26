@@ -3,10 +3,12 @@ import { Type, type Static } from "@sinclair/typebox";
 import { Capability, DeliveryMode, OperationId } from "../base.js";
 import { GitHubId } from "../github.js";
 import { PublicationTargetIntent } from "../preparations.js";
+import { ProjectConfiguration } from '../projects.js';
 const closed = { additionalProperties: false } as const;
 const text = Type.String({ minLength: 1, maxLength: 4096 });
 const nullable = <T extends import('@sinclair/typebox').TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 export const EffectIdentity = Type.Object({
+    branch_kind: Type.Optional(Type.Union([Type.Literal('new'), Type.Literal('existing')])),
     repository_id: Type.Optional(GitHubId), issue_id: Type.Optional(GitHubId),
     owner_id: Type.Optional(GitHubId), visibility: Type.Optional(Type.Union([Type.Literal('private'), Type.Literal('public')])),
     plan_hash: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
@@ -47,6 +49,7 @@ export const AuthorizeUpgrade = Type.Object({ delivery_id: OperationId, current_
     authorized_additional_effects_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), authorized: Type.Literal(true) }, closed);
 export type AuthorizeUpgrade = Static<typeof AuthorizeUpgrade>;
 export const ModeUpgradeSummary = Type.Object({ target_mode: DeliveryMode, additional_effects: Type.Array(EffectView.properties.kind),
+    delivery_branch: ProjectConfiguration.properties.delivery_branch,
     publication_target: Type.Optional(nullable(PublicationTargetIntent)), summary_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability }, closed);
 export type ModeUpgradeSummary = Static<typeof ModeUpgradeSummary>;
 export const PublicationSummary = Type.Object({

@@ -13,6 +13,8 @@ export const SetPublicationTarget = Type.Object({
 export type SetPublicationTarget = Static<typeof SetPublicationTarget>;
 export const DeliveryTaskType = Type.Union(['feat','fix','docs','refactor','test','chore','perf','build','ci','revert'].map(v => Type.Literal(v)));
 export const DeliveryTargetLocalIdentity = Type.Object({
+  branch_kind: Type.Optional(Type.Union([Type.Literal('new'), Type.Literal('existing')])),
+  source_kind: Type.Optional(Type.Union([Type.Literal('local'), Type.Literal('github')])),
   format_version: Type.Literal(1), root_identity: Type.String({ minLength: 1, maxLength: 512 }), git_directory_identity: Type.String({ minLength: 1, maxLength: 512 }),
   remote_name: Type.String({ minLength: 1, maxLength: 128 }), remote_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }),
   base_branch: Type.String({ minLength: 1, maxLength: 1024 }), base_sha: Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' }),
