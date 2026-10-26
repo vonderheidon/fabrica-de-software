@@ -24,10 +24,11 @@ function git(cwd: string,...args: string[]) {
   return result.stdout.trim();
 }
 
-it('commits the approved tree to a descriptive branch while preserving checkout state and reconciling a lost response', async () => {
+it.each([false, true])('commits and reconciles the approved tree with project storage=%s while preserving checkout state', async projectScoped => {
   const root = await mkdtemp(join(process.cwd(),'.cache','delivery-target-git-')); roots.push(root);
   const bare = join(root,'origin.git'); const seed = join(root,'seed'); const targetRoot = join(root,'clone ç');
-  const data = join(root,'factory-data'); const retained = join(data,'git');
+  const data = join(root,'factory-data'); const attemptRoot = projectScoped ? join(data,'projects','p','v1','managed') : data;
+  const retained = join(attemptRoot,'git');
   await (await import('node:fs/promises')).mkdir(retained,{ recursive:true });
   git(root,'init','--bare',bare);
   git(root,'init','-b','main',seed);
@@ -73,7 +74,8 @@ it('commits the approved tree to a descriptive branch while preserving checkout 
     }
     return result;
   };
-  const workspaces = createDeliveryTargetWorkspace(github,data,port);
+  const resolveAttemptRoot = vi.fn(async (id: string) => { expect(id).toBe(attemptId); return attemptRoot; });
+  const workspaces = createDeliveryTargetWorkspace(github,data,port,undefined,resolveAttemptRoot);
   const delivery: Delivery = { id:deliveryId,attemptId,producerPassageId:passageId,round:1,baseSha,captureState:'captured',
     gitRef:approvedRef,repositoryRelative:'git/' + attemptId + '.git',contentIdentity,commitSha,hasDelta:true,diagnostic:null,capturedAtMs:1,revision:1,warnings:[] };
   const task = { attemptId,approvedRef,contentIdentity,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha };

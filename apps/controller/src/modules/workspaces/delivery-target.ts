@@ -7,6 +7,7 @@ import { Delivery, DeliveryTarget, type DeliveryTarget as SealedTarget, EffectVi
 import type { GitHub } from '../github/index.js';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory } from './capture.js';
 import type { GitReader } from './git.js';
+import type { AttemptRootResolver } from './project-storage.js';
 import { githubReference } from './inspect.js';
 
 export interface DeliveryTaskInput {
@@ -70,7 +71,7 @@ function inside(root: string,path: string): boolean {
 
 /** Creates commits and refs in the registered clone's object database without opening or changing its checkout. */
 export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository'|'resolveBranch'>,dataDirectory: string | undefined,git: GitReader | undefined,
-  canonicalize: (path: string) => Promise<string> = realpath) {
+  canonicalize: (path: string) => Promise<string> = realpath, resolveAttemptRoot?: AttemptRootResolver) {
   const isolated: GitReader | undefined = git ? (cwd,args,input) => git(cwd,args,{ ...input,isolatedConfig: true }) : undefined;
   async function gitRun(root: string,args: string[],input?: string,config: string[] = []) {
     const runGit = isolated; if (!runGit) targetError('CONTEXT_UNAVAILABLE');
@@ -146,7 +147,8 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
   async function inspectDeliveryTarget(path: string,task: DeliveryTaskInput,approved: { approvedRef: string; contentIdentity: string; baseSha: string }): Promise<DeliveryTargetInspection> {
     if (!dataDirectory) targetError('CONTEXT_UNAVAILABLE');
     const found = await observe(path,task,approved);
-    const retained = resolve(dataDirectory!,'git',task.attemptId + '.git');
+    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(task.attemptId) : dataDirectory!,canonicalize);
+    const retained = resolve(data,'git',task.attemptId + '.git');
     await plainDirectory(retained,canonicalize);
     const diff = await isolated!(retained,['--git-dir=' + retained,'diff-tree','--no-commit-id','--name-only','--no-renames','-r','-z',task.baseSha,approved.approvedRef]);
     if (diff.exitCode !== 0) targetError('DELIVERY_APPROVED_VERSION_INVALID');
@@ -205,7 +207,8 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         compareWorkingState && (expected.head !== target.local_identity.observed_head || expected.observedBranchRef !== target.local_identity.observed_branch_ref ||
           expected.workingStateHash !== target.local_identity.working_state_hash || expected.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
     const repository = expected.root;
-    const data = await managedRoot(dataDirectory!,canonicalize); const retained = resolve(data,'git',`${delivery.attemptId}.git`);
+    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory!,canonicalize);
+    const retained = resolve(data,'git',`${delivery.attemptId}.git`);
     await plainDirectory(retained,canonicalize); await noBorrowedObjects(retained);
     if ((await metadataBytes(resolve(retained,'factory-owner'),36)).toString('utf8') !== delivery.attemptId) targetError('RETAINED_REPOSITORY_INVALID');
     const run = async (args: string[],input?: string,commitTime?: number) => {

@@ -42,7 +42,7 @@ export function createWorkspaces(options: WorkspaceOptions) {
   const projectStorage = createProjectStorageInspector(options.dataDirectory ?? resolve('.'), undefined, options.projectStorage);
   const projectStorageTransition = createProjectStorageTransitionWorkspace(options.dataDirectory ?? resolve('.'));
   const resolveAttemptRoot = projectStorage.resolveAttemptRoot;
-  const deliveryTargetWorkspace = createDeliveryTargetWorkspace(options.github,options.dataDirectory,git);
+  const deliveryTargetWorkspace = createDeliveryTargetWorkspace(options.github,options.dataDirectory,git,undefined,resolveAttemptRoot);
   const sharedAttempt = createAttemptMaterializer(options.dataDirectory, git, undefined, resolveAttemptRoot);
   return { ...createPublicationTargetWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot), ...projectStorage, ...projectStorageTransition, prepareAttempt: createWorkspacePreparer(options.dataDirectory, git, undefined, resolveAttemptRoot),
     captureDelivery: createCapturer(options.dataDirectory, git, undefined, resolveAttemptRoot), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git, undefined, resolveAttemptRoot),
