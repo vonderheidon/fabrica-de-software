@@ -43,7 +43,7 @@ import { StorageError } from './errors.js';
 import { applyMigrations, inspectHistory, loadMigrations } from './migrations.js';
 import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, recordToolPreferenceValidation, seedSettings } from './settings.js';
 import { hasUncertainAccountCleanup, OperationError, readOperation, readCompletedProjectDeletion, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
-import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceReference, readCapture, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
+import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceReference, readCapture, recordImplementationBlocked, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
 import { createExecutionPersistence } from './execution.js';
 import { acceptRecovery, recoverRecovery, finishRecovery, readResources, readOwnedPassage, resourceSnapshot, validatePreviousAttempt, type RecoveryCommand, type ResourceSnapshot } from './recovery.js';
 export type { RecoveryCommand, ResourceSnapshot } from './recovery.js';
@@ -225,6 +225,7 @@ export interface Storage {
   getAttemptCapture(id: string): AttemptCapture;
   recordWorkspace(id: string, state: 'starting' | 'ready' | 'failed', owned: boolean, diagnostic: string | null): void;
   recordDispatchFailure(id: string, code: string): void;
+  recordImplementationBlocked(id: string): void;
   interruptAttempts(): void;
   executionPersistence(): ExecutionPersistence;
   getPreparation(id: string): StoredPreparation;
@@ -437,6 +438,7 @@ export function openStorage(options: StorageOptions): Storage {
       getAttemptCapture: (id) => guarded(() => connection.transaction(() => readCapture(connection, id))()),
       recordWorkspace: (id, state, owned, diagnostic) => recordWorkspace(connection, id, state, owned, diagnostic),
       recordDispatchFailure: (id, code) => recordDispatchFailure(connection, id, code),
+      recordImplementationBlocked: id => recordImplementationBlocked(connection, id),
       interruptAttempts: () => { if (connection.open) interruptAttempts(connection); },
       executionPersistence: () => createExecutionPersistence(connection, binding => { for (const listener of resultListeners) listener(binding); }),
       getPreparation: (id) => guarded(() => connection.transaction(() => readPreparation(connection, id))()),

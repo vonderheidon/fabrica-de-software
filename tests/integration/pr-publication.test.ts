@@ -17,6 +17,19 @@ async function fixture(mode: 'icr' | 'commit' | 'pr' = 'pr',delta = true) { cons
 const effects = (f: PublicationFixture) => f.storage.getEffects(f.attemptId);
 const effect = (f: PublicationFixture,kind: EffectView['kind']) => effects(f).find(e => e.kind === kind)!;
 const complete = (f: PublicationFixture) => f.pipeline.completePublication(f.attemptId,{ deliveryId: f.status().deliveryId!,authorizedMode: f.storage.getPublicationSummary(f.attemptId).mode,authorized: true },f.context());
+it.each([true, false])('revalidates delivered resources only with host stop confirmation=%s', async confirmed => {
+  const f = await fixture('icr'); await f.implement(); await f.approve();
+  f.db.prepare("UPDATE resources SET stop_state='uncertain',diagnostic='TRACKING_LOST' WHERE attempt_id=? AND kind='terminal'").run(f.attemptId);
+  f.execution.reconcilePassageStop = vi.fn(async handle => {
+    if (confirmed) f.persistence.recordStop(handle, { passageId: handle.passageId, state: 'confirmed' });
+    return confirmed;
+  });
+  expect(f.storage.getPublicationSummary(f.attemptId).upgrades!.find(u => u.targetMode === 'commit')!.capability.available).toBe(false);
+  const operation = f.pipeline.revalidateAuthority(f.attemptId, f.context()); await f.pipeline.drain();
+  expect(f.storage.getOperation(operation.operation_id)?.state).toBe(confirmed ? 'succeeded' : 'failed');
+  expect(f.storage.getPublicationSummary(f.attemptId).upgrades!.find(u => u.targetMode === 'commit')!.capability.available).toBe(confirmed);
+  expect(effects(f).some(e => ['local_commit', 'push', 'pull_request'].includes(e.kind))).toBe(false);
+});
 function upgrade(f: PublicationFixture,targetMode: 'commit' | 'pr'): AuthorizeUpgrade {
   const summary = f.storage.getPublicationSummary(f.attemptId);
   return { deliveryId: f.status().deliveryId!,currentMode: summary.mode,targetMode,authorized: true,authorizedAdditionalEffectsHash: summary.upgrades!.find(u => u.targetMode === targetMode)!.summaryHash };
@@ -128,6 +141,32 @@ it('uses a single durable upgrade for ICR to PR, preserves confirmed comments an
   expect(JSON.parse((f.db.prepare('SELECT authorization_json FROM publication_target_selections WHERE operation_id=?').get(selection.operation_id) as { authorization_json: string }).authorization_json)).toMatchObject({ origin:'publication_upgrade' });
   expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 1 });
   expect(() => f.db.prepare("UPDATE publication_upgrades SET target_mode='commit'").run()).toThrow();
+});
+
+it.each(['commit', 'pr'] as const)('continues ICR to %s after issue closure and clears the previously recorded eligibility suspension', async targetMode => {
+  const f = await fixture('icr'); await f.implement(); await f.approve();
+  const deliveryId = f.status().deliveryId!;
+  const capture = f.storage.getAttemptCapture(f.attemptId);
+  const comment = effect(f, 'issue_comment');
+  f.issue.state = 'CLOSED';
+  const snapshot = f.storage.getPublicationSnapshot(f.attemptId);
+  f.storage.recordAuthority(f.attemptId, snapshot.stamp, {
+    reason: 'ISSUE_INELIGIBLE', observedAccountId: capture.accountId,
+    expectedStatusId: 'delivered', observedStatusId: null,
+  });
+  const revalidation = f.pipeline.revalidateAuthority(f.attemptId, f.context()); await f.pipeline.drain();
+  expect(f.storage.getOperation(revalidation.operation_id)?.state).toBe('succeeded');
+  expect(f.status()).toMatchObject({ result: 'delivered', suspension: null });
+  const body = upgrade(f, targetMode); const context = f.context();
+  const operation = await f.pipeline.authorizePublicationUpgrade(f.attemptId, body, context); await f.pipeline.drain();
+  expect(f.storage.getOperation(operation.operation_id)?.state).toBe('succeeded');
+  await f.pipeline.authorizePublicationUpgrade(f.attemptId, body, context); await f.pipeline.drain();
+  expect(f.storage.getDeliveryDetail(deliveryId, {}).publication).toMatchObject({ mode: targetMode, localState: 'completed', commit: { state: 'confirmed' } });
+  expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce();
+  expect(f.workspaces.pushApproved).toHaveBeenCalledTimes(targetMode === 'pr' ? 1 : 0);
+  expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(capture);
+  expect(effect(f, 'issue_comment')).toEqual(comment);
+  expect(f.issue.state).toBe('CLOSED');
 });
 
 it('blocks a URL-only ICR upgrade when it has no saved delivery target', async () => {

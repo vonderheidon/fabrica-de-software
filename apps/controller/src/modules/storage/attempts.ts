@@ -207,6 +207,15 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
   }).immediate());
 }
 
+export function recordImplementationBlocked(db: Database.Database, id: string): void {
+  guarded(() => db.transaction(() => {
+    readAttempt(db, id);
+    const changed = db.prepare("UPDATE attempts SET suspension='HUMAN_DECISION',diagnostic='IMPLEMENTATION_BLOCKED',revision=revision+1,updated_at_ms=? WHERE id=? AND result IS NULL")
+      .run(Date.now(), id);
+    if (changed.changes) attemptEvent(db, id, 'implementation.blocked');
+  }).immediate());
+}
+
 export function recordDispatchFailure(db: Database.Database, id: string, code: string): void {
   guarded(() => db.transaction(() => {
     // Internal journal completion remains writable when the observed account changes during IO.

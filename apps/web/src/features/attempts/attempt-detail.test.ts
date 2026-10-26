@@ -78,6 +78,24 @@ it('keeps publication completion separate from uncertain effects', async () => {
   expect(container.textContent).toContain('sem confirmação');
 });
 
+it('revalidates authority and resources explicitly with the current revision', async () => {
+  await mount();
+  const previous = metadata.getMockImplementation()!;
+  metadata.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') return { data: { operation_id: new Headers(init.headers).get('Idempotency-Key') }, etag: null };
+    const value = await previous(path);
+    if (path.startsWith(`/api/v1/attempts/${id}`) && !path.includes('section=')) value.data.capabilities.revalidate = { available: true };
+    return value;
+  });
+  await act(async () => button('Atualizar tentativa').click());
+  expect(metadata.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
+  await act(async () => button('Revalidar tentativa').click());
+  const post = metadata.mock.calls.find(([, init]) => init?.method === 'POST');
+  expect(post?.[0]).toBe(`/api/v1/attempts/${id}/revalidate`);
+  expect(new Headers(post?.[1].headers).get('If-Match')).toBe('"1"');
+  expect(JSON.parse(post?.[1].body)).toEqual({});
+});
+
 it('opens with no effects, consolidates authority and preserves separate suspension/resources', async () => {
   await mount();
   expect(calls.every((call) => call.method === 'GET')).toBe(true);

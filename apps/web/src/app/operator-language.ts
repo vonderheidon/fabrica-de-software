@@ -16,6 +16,7 @@ const stateLabels: Readonly<Record<string, string>> = {
 };
 
 const codeLabels: Readonly<Record<string, string>> = {
+  IMPLEMENTATION_BLOCKED: 'Implementação impedida por pré-requisito',
   ISSUE_CLOSED: 'Issue fechada', NOT_AN_ISSUE: 'O item não é uma issue executável',
   READ_INCOMPLETE: 'Leitura incompleta', REPOSITORY_MISMATCH: 'Repositório diferente do projeto',
   PROJECT_MEMBERSHIP_MISSING: 'Vínculo da issue ao quadro não confirmado', STATUS_MISMATCH: 'Status diferente do esperado', OPEN_BLOCKERS: 'Dependências abertas',
@@ -53,6 +54,7 @@ const codeLabels: Readonly<Record<string, string>> = {
 };
 
 const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; nextAction: string }>> = {
+  IMPLEMENTATION_BLOCKED: { title: 'Implementação impedida', cause: 'O Implementador registrou um pré-requisito bloqueante. A tentativa não avançou para revisão.', nextAction: 'Consulte o resultado do Implementador, resolva o pré-requisito e prepare uma nova tentativa, ou encerre a atual.' },
   ACCOUNT_CHANGED: { title: 'Conta ativa diferente da vinculada', cause: 'A conta GitHub observada mudou em relação à conta vinculada à preparação.', nextAction: 'Confira a conta ativa e o vínculo em Configuração; depois, consulte a preparação novamente.' },
   ISSUE_CLOSED: { title: 'Issue fechada', cause: 'A issue selecionada está fechada no GitHub.', nextAction: 'Selecione uma issue aberta ou revise seu estado no GitHub e consulte novamente.' },
   NOT_AN_ISSUE: { title: 'Item não executável', cause: 'O item selecionado não é uma issue executável; pode ser um rascunho ou pull request.', nextAction: 'Selecione uma issue vinculada ao quadro configurado.' },

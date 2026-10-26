@@ -239,7 +239,7 @@ export function readOperation(db: Database.Database, operationId: string): Store
     const valid = q && receipt && event?.entity_type === 'question' && event.entity_id === row.resource_id && receipt.revision === event.entity_revision && receipt.event_cursor === String(event.seq);
     if (!valid) throw new StorageError('OPERATION_DATA_INVALID');
     return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'question', id: row.resource_id }, state:
-      q.state === 'delivered' ? 'succeeded' : q.state === 'delivery_unknown' ? 'unknown' : ['expired', 'cancelled'].includes(q.state) ? 'failed' : q.state === 'sending' ? 'running' : 'accepted', ...(receipt ? { receipt } : {}) };
+      q.state === 'delivered' || q.state === 'cancelled' && db.prepare('SELECT 1 FROM cancellation_requests WHERE operation_id=?').get(operationId) ? 'succeeded' : q.state === 'delivery_unknown' ? 'unknown' : ['expired', 'cancelled'].includes(q.state) ? 'failed' : q.state === 'sending' ? 'running' : 'accepted', ...(receipt ? { receipt } : {}) };
   }
   if (row.operation_kind === 'capture.retry' && row.resource_type === 'delivery') {
     const run = db.prepare<[string, string], { state: string }>('SELECT state FROM capture_runs WHERE operation_id=? AND delivery_id=?').get(operationId, row.resource_id);

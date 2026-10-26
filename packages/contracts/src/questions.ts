@@ -25,6 +25,7 @@ export const Question = Type.Object({
 export type Question = Static<typeof Question>;
 export const QuestionParams = Type.Object({ attemptId: OperationId, questionId: OperationId }, closed);
 export const AnswerQuestion = Type.Object({
+  action: Type.Optional(Type.Literal('end_attempt')),
   answer: Type.String({ minLength: 1, maxLength: 8192, pattern: '.*\\S.*' }),
   scopeChoice: Type.Optional(Type.Union([Type.Literal('keep_captured'), Type.Literal('adopt_new')])),
 }, closed);

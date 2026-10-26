@@ -140,9 +140,10 @@ it('respects a captured zero limit and preserves the approved version with no ne
   expect(f.workspaces.createTargetCommit).not.toHaveBeenCalled();
 });
 
-it('keeps the authorized continuation mode across adaptation after a finished ICR delivery',async () => {
+it('keeps the authorized continuation mode across adaptation after a finished ICR delivery with a closed issue',async () => {
   const f = await publicationFixture(true,'icr',true,{ targetForIcr:true }); fixtures.push(f);
   await f.implement(); await f.approve(); const original = f.status().deliveryId!;
+  f.issue.state = 'CLOSED';
   const summary = f.storage.getPublicationSummary(f.attemptId,original);
   const upgrade = summary.upgrades!.find(x => x.targetMode === 'commit')!;
   changedBase(f);

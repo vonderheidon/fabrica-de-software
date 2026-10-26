@@ -67,8 +67,9 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
       <label htmlFor={`answer-${question.id}`}>Sua resposta
         <textarea id={`answer-${question.id}`} value={decision.draft} onChange={(event) => decision.setDraft(event.currentTarget.value)} maxLength={8192} required aria-describedby={`answer-help-${question.id}`} />
       </label>
-      <small id={`answer-help-${question.id}`}>Explique a decisão em texto claro, com até 8.192 caracteres. A resposta segue para a passagem original; o rascunho fica neste diálogo enquanto ele estiver aberto.</small>
-      <button type="submit" className="primary" disabled={!canAnswer}>{decision.submitting ? 'Gravando resposta…' : 'Enviar resposta à passagem'}</button>
+      <small id={`answer-help-${question.id}`}>A resposta em texto segue para o agente continuar. Para impedir novas etapas, use Encerrar tentativa.</small>
+      <button type="submit" className="primary" disabled={!canAnswer}>{decision.submitting ? 'Gravando resposta…' : 'Enviar resposta e continuar'}</button>
+      <button type="button" className="danger-button" disabled={decision.submitting || decision.submissionLocked || decision.etag === null} onClick={() => void decision.submit('end_attempt')}>Encerrar tentativa</button>
     </form> : question.answer !== null ? <div className="decision-answer-recorded"><b>Resposta registrada</b><p>{question.answer}</p>
       {decision.draft && <div className="decision-preserved-draft"><b>Rascunho local preservado · não enviado</b><p>{decision.draft}</p></div>}
     </div> : <div className="decision-answer-recorded"><b>Resposta não enviada</b><p>O estado da pergunta mudou e impede o envio deste rascunho.</p>

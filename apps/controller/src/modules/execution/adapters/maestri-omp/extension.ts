@@ -89,11 +89,14 @@ export default function executionExtension(api: ExtensionApi): void {
   let taskAuthorized = false;
   let idleCheck = false;
   let context: Context | undefined;
+  let lossNotified = false;
   const lose = () => {
     alive = false;
     awaitingTaskAuthorization = false;
     for (const call of pending.values()) call.reject();
     pending.clear();
+    if (lossNotified) return;
+    lossNotified = true;
     context?.ui.notify('Acompanhamento da fábrica interrompido. Trabalho preservado; use nova tentativa para retomar a coordenação.', 'error');
   };
   const sameSession = (ctx: Context) => ctx.sessionManager.getSessionId() === trackedSession && ctx.cwd === launch.cwd;
@@ -159,9 +162,8 @@ export default function executionExtension(api: ExtensionApi): void {
         const isIdle = ctx.isIdle; const hasPendingMessages = ctx.hasPendingMessages;
         // Do not block frame dispatch: replies already in flight must drain pending calls.
         void (async () => {
-          const deadline = Date.now() + executionLimits.requestMs;
           while (!isIdle.call(ctx) || hasPendingMessages.call(ctx) || activeTools.size || pending.size) {
-            if (!alive || !sameSession(ctx) || !sameProfile(ctx) || Date.now() >= deadline) throw new ExecutionError('TRACKING_LOST');
+            if (!alive || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');
             await new Promise<void>(resolve => setTimeout(resolve, 25));
           }
           if (!alive || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');

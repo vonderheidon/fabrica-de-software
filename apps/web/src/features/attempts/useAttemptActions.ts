@@ -8,7 +8,7 @@ import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.
 type AttemptResources = Static<typeof AttemptResourcesSchema>;
 type FolderSurface = Static<typeof FolderSurfaceSchema>;
 type PassageInteraction = Static<typeof PassageInteractionSchema>;
-type OperationKind = 'cancel' | 'capture' | 'remove' | 'open-terminal' | 'open-folder';
+type OperationKind = 'cancel' | 'capture' | 'remove' | 'open-terminal' | 'open-folder' | 'revalidate';
 type ActionOperation = { kind: OperationKind; id: string; accepted: OperationAccepted | null; view: OperationView | null; uncertain: boolean };
 type Snapshot = { passages: Static<typeof HttpPassageSummary>[]; resources: AttemptResources | null; producerResult: ProducerResult; plans: Record<string, { value: RemovalPlan; etag: string | null }>; folders: Record<string, FolderSurface>; interactions: Record<string, PassageInteraction>; surfaceErrors: Record<string, string>; error: string | null };
 type ActionState = Snapshot & { identity: string; operation: ActionOperation | null; busy: boolean; actionErrors: Record<string, string>; copied: string | null };
@@ -123,6 +123,11 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
     }
   }, [refresh]);
 
+  const revalidate = useCallback(() => {
+    if (!attempt?.capabilities.revalidate.available || !attemptEtag) return;
+    void send(`revalidate:${attemptId}:${attemptEtag}`, 'revalidate', `/api/v1/attempts/${encodeURIComponent(attemptId)}/revalidate`, {}, { 'If-Match': attemptEtag });
+  }, [attempt, attemptEtag, attemptId, send]);
+
   const cancel = useCallback(() => {
     if (!attempt?.capabilities.cancel.available) return;
     void send(`cancel:${attemptId}`, 'cancel', `/api/v1/attempts/${encodeURIComponent(attemptId)}/cancel`, {});
@@ -171,5 +176,5 @@ export function useAttemptActions(attemptId: string, attempt: AttemptDetail | nu
         : state.operation.accepted ? 'accepted' : 'uncertain'
     : null;
 
-  return { ...state, ...(state.identity === snapshotIdentity ? {} : { operation: null, busy: false, actionErrors: {}, copied: null }), ...(loadedIdentity === snapshotIdentity ? {} : emptySnapshot()), refresh, cancel, retryCaptureFor, requestRemoval, openFolder, openTerminal, copyReference, cancelStatus: state.identity === snapshotIdentity ? cancelStatus : null };
+  return { ...state, ...(state.identity === snapshotIdentity ? {} : { operation: null, busy: false, actionErrors: {}, copied: null }), ...(loadedIdentity === snapshotIdentity ? {} : emptySnapshot()), refresh, revalidate, cancel, retryCaptureFor, requestRemoval, openFolder, openTerminal, copyReference, cancelStatus: state.identity === snapshotIdentity ? cancelStatus : null };
 }

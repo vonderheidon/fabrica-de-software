@@ -212,7 +212,26 @@ describe('shutdown coordination', () => {
     expect(f.execution.getResult(handle)).toEqual(receipt);
     expect(f.store.getPassage(handle)).toMatchObject(handedOff ? { state: 'ready', diagnostic: null } : { state: 'interrupted', diagnostic: 'TRACKING_LOST' });
     if (handedOff) expect(f.store.recordStop).toHaveBeenCalledWith(handle, { passageId: handle.passageId, state: 'confirmed' });
-    else expect(f.runtime.stop).not.toHaveBeenCalled();
+    else expect(f.store.recordStop).toHaveBeenCalledWith(handle, { passageId: handle.passageId, state: 'uncertain' });
+  });
+  it('persists physical stop before closing the native owner during shutdown', async () => {
+    const f = fixture('reviewer'); await f.start();
+    f.runtime.stop.mockResolvedValue('confirmed');
+    await f.execution.close();
+    expect(f.store.recordStop).toHaveBeenCalledWith({ passageId: f.request.binding.passageId },
+      { passageId: f.request.binding.passageId, state: 'confirmed' });
+    expect(f.runtime.stop.mock.invocationCallOrder[0]).toBeLessThan(f.close.mock.invocationCallOrder[0]!);
+  });
+  it.each([true, false])('reconciles only a physically confirmed terminal: %s', async confirmed => {
+    const f = fixture('reviewer'); await f.start();
+    vi.mocked(f.store.recordStop).mockClear();
+    f.confirmStoppedTerminal.mockResolvedValue(confirmed);
+    const restarted = createMaestriOmp({ dataDirectory: 'C:\\Dados', host, persistence: f.store }, loadRoleResources());
+    expect(await restarted.reconcilePassageStop!({ passageId: f.request.binding.passageId })).toBe(confirmed);
+    expect(f.store.recordStop).toHaveBeenCalledTimes(confirmed ? 1 : 0);
+    expect(f.runtime.stop).not.toHaveBeenCalled();
+    await f.execution.close();
+    await restarted.close();
   });
   it('settles answer waits without replay and shares an idempotent close promise', async () => {
     const f = fixture(); const ready = await f.start();
@@ -308,6 +327,36 @@ describe('correction in the same tracked session', () => {
     await assertion;
     expect(f.runtime.recruit).toHaveBeenCalledOnce();
     expect(f.store.getPassage({ passageId: f.request.binding.passageId }).state).toBe('interrupted');
+    await f.execution.close();
+  });
+  it('waits beyond the RPC timeout for finalization before stopping and handing off', async () => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload());
+    f.runtime.stop.mockResolvedValue('confirmed');
+    vi.useFakeTimers();
+    try {
+      const source = { passageId: f.request.binding.passageId };
+      let completed = false;
+      const preparing = f.execution.preparePassageHandoff(source).then(() => { completed = true; });
+      const assertion = expect(preparing).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(executionLimits.requestMs + 1_000);
+      expect(completed).toBe(false);
+      expect(f.runtime.stop).not.toHaveBeenCalled();
+      expect(f.store.getPassage(source).state).toBe('ready');
+      await f.callbacks().frame({ type: 'continuation-idle', passageId: source.passageId });
+      await assertion;
+      expect(f.runtime.stop).toHaveBeenCalledOnce();
+      expect(f.store.getResult(source)).not.toBeNull();
+    } finally { vi.useRealTimers(); await f.execution.close(); }
+  });
+  it('rejects finalization wait on actual channel loss while preserving the accepted result', async () => {
+    const f = fixture(); await f.start(); await f.call('execution_complete', payload());
+    const source = { passageId: f.request.binding.passageId };
+    const preparing = f.execution.preparePassageHandoff(source);
+    const assertion = expect(preparing).rejects.toThrow('TRACKING_LOST');
+    f.callbacks().lost('CHANNEL_EOF');
+    await assertion;
+    expect(f.store.getResult(source)).not.toBeNull();
+    expect(f.store.getPassage(source).state).toBe('interrupted');
     await f.execution.close();
   });
   it('rebinds a new passage only after continuation ACK, without another recruit', async () => {

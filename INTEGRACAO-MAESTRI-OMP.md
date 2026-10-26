@@ -42,6 +42,8 @@ Pergunta contém decisão, contexto e alternativas. Validar schema e vínculo, s
 
 A integração usa transporte local suportado e correlação suficiente para não misturar sessões. Se houver canal próprio, restringi-lo a loopback, proteger o bootstrap, não expor segredos e usar framing/decodificação UTF-8 corretos ou biblioteca consolidada. Fechamento deve encerrar esperas com diagnóstico. Isso não exige construir uma plataforma genérica de protocolos.
 
+A ação explícita “Encerrar tentativa” na pergunta usa `action=end_attempt`: resposta e cancelamento lógico são gravados na mesma transação, antes da parada física. Resultados e respostas atrasados não podem reabrir a tentativa nem iniciar revisão/correção. Texto livre é orientação ao agente, não comando de cancelamento interpretado por palavras-chave. O Implementador registra pré-requisito impeditivo em check com `outcome=blocked`; o controlador suspende a tentativa antes da captura/revisão. O Revisor confere primeiro a existência dos arquivos necessários e, se ausentes, registra evidência e parecer de rejeição sem repetir testes visuais de uma página inexistente.
+
 ## 4. MCPs e ferramentas
 
 Usar a configuração e o gerenciamento normal suportado do OMP. A fábrica não impõe exclusividade de servidores, precedência própria entre várias fontes, interceptação de reload, sentinelas contra descoberta ou allowlist de ambiente por servidor. Não criar launcher MCP sanitizador como requisito de produção.

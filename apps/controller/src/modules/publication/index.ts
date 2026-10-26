@@ -12,6 +12,7 @@ type Stage = 'inProgress' | 'inReview' | 'delivered';
 const statusKey = (stage: Stage) => stage === 'inProgress' ? 'in_progress' : stage === 'inReview' ? 'in_review' : 'delivered';
 type Snapshot = ReturnType<Storage['getPublicationSnapshot']>;
 export interface PublicationDependencies {
+  reconcileResources?: (attemptId: string) => Promise<void>;
   storage: Storage;
   github: Pick<GitHub, 'getIdentity' | 'getIssueContextById' | 'getProject' | 'getRepository'> & Partial<Pick<GitHub,'reconcilePullRequest'>> & { mutateEffect: (input: GitHubEffectRequest) => Promise<GitHubMutationResult> };
   workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget' | 'inspectIntegrationTarget'>> & Partial<TargetWorkspaces>;
@@ -50,6 +51,9 @@ export function createPublication(deps: PublicationDependencies) {
     const last = snapshot.effects.filter(e => e.kind === 'project_status' && e.state === 'confirmed').at(-1);
     const original = capture.issue.memberships.find(m => m.projectId === mapping?.id)?.statusValues.find(v => v.fieldId === mapping?.status_field_id)?.optionId ?? null;
     const expectedStatusId = last?.expectedIdentity.optionId ?? original;
+    // Integration adaptation clears the current result but preserves the earlier completed delivery.
+    const deliveredBefore = snapshot.status.result === 'delivered' || snapshot.effects.some(effect =>
+      effect.kind === 'project_status' && effect.state === 'confirmed' && effect.expectedIdentity.optionId === mapping?.status_option_ids.delivered);
     let observation: AuthorityObservation = { reason: null, observedAccountId: null, expectedStatusId, observedStatusId: null };
     const identity = await github.getIdentity();
     if (identity.state !== 'complete' || !identity.data) observation.reason = 'AUTHORITY_UNAVAILABLE';
@@ -61,7 +65,9 @@ export function createPublication(deps: PublicationDependencies) {
       const issueResult = await github.getIssueContextById(capture.issue.id);
       const issue = issueResult.data;
       if (issueResult.state !== 'complete' || !issue || !('body' in issue)) observation.reason = 'AUTHORITY_UNAVAILABLE';
-      else if (issue.id !== capture.issue.id || issue.repository.id !== capture.issue.repository.id || issue.state !== 'OPEN' || issue.repository.isArchived || issue.blockers.some(b => b.state === 'OPEN')) observation.reason = 'ISSUE_INELIGIBLE';
+      else if (issue.id !== capture.issue.id || issue.repository.id !== capture.issue.repository.id ||
+        (issue.state !== 'OPEN' && !(issue.state === 'CLOSED' && deliveredBefore)) ||
+        issue.repository.isArchived || issue.blockers.some(b => b.state === 'OPEN')) observation.reason = 'ISSUE_INELIGIBLE';
       else if (issue.assignees.length !== 1 || issue.assignees[0]?.id !== capture.accountId) observation.reason = 'ASSIGNEE_CHANGED';
       else if (!mapping || !mappingMatches || snapshot.configuration.configuration.source.repository_id !== capture.issue.repository.id) observation.reason = 'PUBLICATION_CONFIGURATION_CHANGED';
       else {
@@ -455,7 +461,10 @@ export function createPublication(deps: PublicationDependencies) {
         let targetPending = false;
         if (command.kind === 'publication.complete' || command.kind === 'publication.authorize-upgrade') await completeMode(command);
         else if (command.kind === 'publication.reconcile' && 'deliveryId' in command.body) { targetPending = await targets.reconcile(command.attemptId,command.body.deliveryId); await reconcile(command.attemptId); }
-        else if (!await observeAuthority(command.attemptId)) blocked('PUBLICATION_BLOCKED');
+        else {
+          await deps.reconcileResources?.(command.attemptId);
+          if (!await observeAuthority(command.attemptId)) blocked('PUBLICATION_BLOCKED');
+        }
         const unknown = targetPending || storage.getEffects(command.attemptId).some(e => ['running','unknown'].includes(e.state));
         storage.finishPublicationRequest(command.operationId, unknown ? 'unknown' : 'succeeded', unknown ? 'EFFECT_UNRESOLVED' : null);
       } catch (error) {

@@ -8,6 +8,7 @@ import { digest, guarded } from './configuration-reads.js';
 import { readSettings } from './settings.js';
 import { OperationError, readOperation, type StoredOperation } from './operations.js';
 import { checkpoint, expireLimits } from './measurements.js';
+import { createExecutionPersistence } from './execution.js';
 
 export interface AnswerCommand { attemptId: string; questionId: string; operationId: string; expectedRevision: string | undefined; body: AnswerQuestion }
 export interface QuestionRow {
@@ -57,8 +58,8 @@ export function recordAnswer(db: Database.Database, c: AnswerCommand): StoredOpe
     if (q.state !== 'pending' || (q.ttl_ms !== null && q.created_at_ms + q.ttl_ms <= Date.now()) || a.result || a.suspension !== 'HUMAN_DECISION' || a.round !== passage.round_number || passage.state !== 'ready' || passage.tracking_state !== 'tracked') {
       throw new OperationError(409, 'ANSWER_NOT_ALLOWED', 'The question is not pending in a tracked passage.');
     }
-    if (c.body.scopeChoice === 'adopt_new') throw new OperationError(409, 'NEW_ATTEMPT_REQUIRED', 'Update the GitHub issue and prepare a new attempt to adopt new criteria.');
-    if (q.scope_json && c.body.scopeChoice !== 'keep_captured') throw new OperationError(409, 'SCOPE_DECISION_REQUIRED', 'Explicitly keep the captured scope or prepare a new attempt.');
+    if (!c.body.action && c.body.scopeChoice === 'adopt_new') throw new OperationError(409, 'NEW_ATTEMPT_REQUIRED', 'Update the GitHub issue and prepare a new attempt to adopt new criteria.');
+    if (!c.body.action && q.scope_json && c.body.scopeChoice !== 'keep_captured') throw new OperationError(409, 'SCOPE_DECISION_REQUIRED', 'Explicitly keep the captured scope or prepare a new attempt.');
     const seq = db.prepare<[], { seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()!.seq;
     const receipt = { revision: q.revision + 1, event_cursor: String(seq) }; const now = Date.now();
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)
@@ -69,6 +70,10 @@ export function recordAnswer(db: Database.Database, c: AnswerCommand): StoredOpe
     db.prepare('UPDATE attempts SET revision=revision+1,updated_at_ms=? WHERE id=?').run(now, c.attemptId);
     db.prepare(`INSERT INTO events(seq,entity_type,entity_id,project_id,attempt_id,operation_id,event_type,entity_revision,facts_json,occurred_at_ms)
       VALUES (?,'question',?,?,?,?,'question.answer-recorded',?,'{}',?)`).run(seq, q.id, a.projectId, a.id, c.operationId, receipt.revision, now);
+    if (c.body.action === 'end_attempt') {
+      createExecutionPersistence(db).recordCancellation(c.attemptId, c.operationId);
+      db.prepare('INSERT INTO cancellation_requests VALUES (?,?,?)').run(c.operationId, c.attemptId, now);
+    }
     return readOperation(db, c.operationId)!;
   }).immediate());
 }

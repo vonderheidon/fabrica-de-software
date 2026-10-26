@@ -23,7 +23,7 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
   setDraft: (value: string) => void;
   scopeChoice: 'keep_captured' | 'adopt_new' | null;
   setScopeChoice: (value: 'keep_captured' | 'adopt_new') => void;
-  submit: () => Promise<void>;
+  submit: (action?: 'end_attempt') => Promise<void>;
   refresh: () => Promise<void>;
 } {
   const [state, setState] = useState<DecisionState>({ question: null, etag: null, operation: null, correlationId: null, loading: true, submitting: false, submissionLocked: false, error: null, errorDetails: null, notice: null });
@@ -63,10 +63,10 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const submit = useCallback(async (): Promise<void> => {
+  const submit = useCallback(async (action?: 'end_attempt'): Promise<void> => {
     const current = stateRef.current;
-    if (!current.question || current.question.state !== 'pending' || !current.etag || current.submitting || current.submissionLocked || !draft.trim()) return;
-    if (current.question.scope_change && scopeChoice !== 'keep_captured') return;
+    if (!current.question || current.question.state !== 'pending' || !current.etag || current.submitting || current.submissionLocked || (!action && !draft.trim())) return;
+    if (!action && current.question.scope_change && scopeChoice !== 'keep_captured') return;
     const id = operationId.current ?? crypto.randomUUID();
     operationId.current = id;
     setState((value) => ({ ...value, submitting: true, submissionLocked: true, error: null, errorDetails: null, correlationId: id, notice: null }));
@@ -74,10 +74,10 @@ export function useDecision(attemptId: string, questionId: string): DecisionStat
       const headers = new Headers({ 'Idempotency-Key': id, 'If-Match': current.etag });
       const result = await requestJsonWithMetadata<OperationAccepted>(
         `/api/v1/attempts/${encodeURIComponent(attemptId)}/questions/${encodeURIComponent(questionId)}/answer`,
-        { method: 'POST', headers, body: JSON.stringify(answerQuestionBody(draft, current.question.scope_change ? scopeChoice ?? undefined : undefined)) },
+        { method: 'POST', headers, body: JSON.stringify(action ? { answer: draft.trim() || 'Encerrar tentativa', action } : answerQuestionBody(draft, current.question.scope_change ? scopeChoice ?? undefined : undefined)) },
       );
       if (result.data.operation_id !== id) throw new Error('O recibo retornou uma operação diferente.');
-      setState((value) => ({ ...value, operation: null, notice: 'Resposta gravada. Aguardando confirmação de entrega na mesma passagem.' }));
+      setState((value) => ({ ...value, operation: null, notice: action ? 'Encerramento registrado. Novas etapas foram bloqueadas; a parada física dos recursos será acompanhada separadamente.' : 'Resposta gravada. Aguardando confirmação de entrega na mesma passagem.' }));
       await refresh();
     } catch (reason: unknown) {
       if (reason instanceof HttpError && reason.status < 500) operationId.current = null;

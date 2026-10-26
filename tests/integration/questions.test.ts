@@ -29,6 +29,39 @@ async function fixture(ttl: number | null = null, active = 100_000) {
 }
 
 describe('formal decisions and durable answers', () => {
+  it('ends the attempt atomically instead of delivering an instruction to continue', async () => {
+    const f = await fixture(); const q = f.raise(); const c = f.command(q);
+    c.body = { answer: 'encerrar', action: 'end_attempt' };
+    const operation = await f.pipeline.answerQuestion(c);
+    expect(operation.state).toBe('succeeded');
+    expect(f.storage.getAttempt(f.id)).toMatchObject({ result: 'cancelled', suspension: null });
+    expect(f.storage.getQuestion(f.id, q).view).toMatchObject({ state: 'cancelled', answer: 'encerrar' });
+    expect(() => f.persistence.acceptResult({ binding: f.binding, result: f.result, sha256: digest(f.result) })).toThrow();
+    await f.pipeline.drain();
+    expect(f.execution.answerQuestion).not.toHaveBeenCalled();
+    expect(f.execution.cancelAttempt).toHaveBeenCalledTimes(1);
+    expect(await f.pipeline.answerQuestion(c)).toEqual(operation);
+    expect(f.db.prepare("SELECT count(*) AS n FROM passages WHERE attempt_id=? AND role='reviewer'").get(f.id)).toEqual({ n: 0 });
+  });
+  it('keeps an explicit blocked implementation out of capture and review', async () => {
+    const f = await fixture();
+    const blocked: ImplementerResult = { ...f.result, checks: [{ id: 'source', outcome: 'blocked', evidence: 'Required entry point is absent.' }] };
+    f.persistence.acceptResult({ binding: f.binding, result: blocked, sha256: digest(blocked) });
+    await f.pipeline.drain();
+    expect(f.storage.getAttempt(f.id)).toMatchObject({ result: null, suspension: 'HUMAN_DECISION', diagnostic: 'IMPLEMENTATION_BLOCKED' });
+    expect(f.db.prepare("SELECT count(*) AS n FROM passages WHERE attempt_id=? AND role='reviewer'").get(f.id)).toEqual({ n: 0 });
+    expect(f.db.prepare('SELECT count(*) AS n FROM capture_runs WHERE delivery_id=?').get(f.binding.deliveryVersion)).toEqual({ n: 0 });
+  });
+  it('rolls back an end decision if its cancellation record cannot be persisted', async () => {
+    const f = await fixture(); const q = f.raise(); const c = f.command(q);
+    c.body = { answer: 'encerrar', action: 'end_attempt' };
+    f.db.exec("CREATE TRIGGER fail_end BEFORE INSERT ON cancellation_requests BEGIN SELECT RAISE(ABORT,'fixture'); END");
+    await expect(f.pipeline.answerQuestion(c)).rejects.toThrow();
+    expect(f.storage.getAttempt(f.id)).toMatchObject({ result: null, suspension: 'HUMAN_DECISION' });
+    expect(f.storage.getQuestion(f.id, q).view).toMatchObject({ state: 'pending', answer: null });
+    expect(f.storage.getOperation(c.operationId)).toBeNull();
+    expect(f.execution.cancelAttempt).not.toHaveBeenCalled();
+  });
   it('validates schema and exact binding without classifying maintenance; preserves phase, round, tools and capture', async () => {
     const f = await fixture(); const before = f.storage.getAttemptCapture(f.id);
     expect(() => f.persistence.raiseQuestion({ binding: { ...f.binding, deliveryVersion: randomUUID() }, question: f.question, sha256: digest(f.question) })).toThrow('RESULT_INVALID');

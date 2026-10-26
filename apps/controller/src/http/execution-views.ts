@@ -43,7 +43,7 @@ export function toHttpQuestion(value: Static<typeof Question>): Static<typeof Ht
 }
 
 export function toHttpAnswerQuestion(value: Static<typeof AnswerQuestion>): Static<typeof HttpAnswerQuestion> {
-  return { answer: value.answer, ...(value.scopeChoice === undefined ? {} : { scope_choice: value.scopeChoice }) };
+  return { answer: value.answer, ...(value.action ? { action: value.action } : {}), ...(value.scopeChoice === undefined ? {} : { scope_choice: value.scopeChoice }) };
 }
 
 export function toHttpPassageMeasurements(value: Static<typeof PassageMeasurements>): Static<typeof HttpPassageMeasurements> {
@@ -265,7 +265,7 @@ export function fromHttpMakeAttemptDecision(value: Static<typeof HttpMakeAttempt
 }
 
 export function fromHttpAnswerQuestion(value: Static<typeof HttpAnswerQuestion>): Static<typeof AnswerQuestion> {
-  return { answer: value.answer, ...(value.scope_choice === undefined ? {} : { scopeChoice: value.scope_choice }) };
+  return { answer: value.answer, ...(value.action ? { action: value.action } : {}), ...(value.scope_choice === undefined ? {} : { scopeChoice: value.scope_choice }) };
 }
 
 export function fromHttpRemoveResource(value: Static<typeof HttpRemoveResource>): Static<typeof RemoveResource> {

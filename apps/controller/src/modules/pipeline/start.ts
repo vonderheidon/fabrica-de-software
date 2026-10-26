@@ -245,6 +245,17 @@ export function createPipeline(deps: PipelineDependencies) {
   }
   const recovery = createRecovery(deps, enqueue, revoke, () => closed);
   const publication = deps.publication ? createPublication({ ...deps.publication, storage, enqueue, isClosed: () => closed, logFailure: deps.logFailure,
+    reconcileResources: async id => {
+      if (!['delivered', 'interrupted'].includes(storage.getAttempt(id).result ?? '')) return;
+      const resources = storage.getResources(id).entries;
+      if (!resources.some(resource => resource.kind === 'terminal' && resource.stopState !== 'confirmed' && resource.diagnostic === 'TRACKING_LOST')) return;
+      for (const resource of resources) {
+        if (resource.kind !== 'terminal' || !resource.owned || resource.stopState === 'confirmed') continue;
+        if (!await execution.reconcilePassageStop?.({ passageId: resource.passageId })) {
+          throw new OperationError(409, 'RESOURCES_NOT_RECONCILED', 'Physical terminal stop could not be confirmed on this host.');
+        }
+      }
+    },
     adaptIntegration: async (id,operationId,target) => {
       if (!workspaces.importIntegrationBase) throw new OperationError(409,'INTEGRATION_CONTEXT_UNAVAILABLE','Ambiente de adaptação indisponível. A versão aprovada foi preservada.');
       const plan = storage.beginIntegration(id,operationId,target);
@@ -330,6 +341,7 @@ export function createPipeline(deps: PipelineDependencies) {
              findings, disputes, producerResult: storage.getProducerResult(deliveryId), previousDelivery: previousRound?.deliveryId ?? null, previousDiff,
              disputeResponse: 'Respond once to every supplied disputeId in disputeResponses, with maintained/resolved, justification and evidence. Match the resolution of its findingId: maintained requires unresolved; resolved requires resolved. IDs and original version are supplied facts. A maintained dispute blocks automatic correction and requires an operator decision.',
             reviewScope: { mode: previousReview ? 'focused' : 'complete',
+              prerequisites: 'First confirm that the required product files exist. If a required entry point is absent, verify the absence directly, report the affected criteria as failed with concrete evidence, and submit a rejected result promptly. Do not open a browser or repeat visual checks for a missing page. A blocked producer result requires this prerequisite check before any broader review.',
               focus: previousReview ? 'Review the diff, every pending finding and regressions in affected areas; expand inspection whenever needed.' : 'Independently inspect every captured criterion.',
               approval: 'Report every current criterion exactly once with independent evidence for this delivery. Historical approval is never inherited. Build and typecheck do not replace required visual proof.',
               repetitions: 'Reuse pertinent valid evidence from this delivery. Record every repeated command with its concrete reason and prior evidence in commandRepetitions; check_id must reference a supplied check from this verification, or null for another command.' },
@@ -387,6 +399,7 @@ export function createPipeline(deps: PipelineDependencies) {
             integrationInstructions: 'In this owned attempt checkout only, adapt the previously approved task delta to the supplied baseSha, already imported locally. Preserve changes present in that base, resolve conflicts within captured scope, and report additionalChangesJustification. Never touch the supplied operator localPath, never publish or change retained refs. The prior approval is historical. This round requires fresh mandatory checks, visual evidence when required, and independent review before any delivery commit, push or PR.' } : {}),
           checks: await checkContext(deliveryId, plan.review.verificationId),
           ...(plan.guidance ? { operatorGuidance: plan.guidance, guidanceHandling: 'Apply this contextual guidance without changing the captured criteria, profile, or correction limit.' } : {}),
+          prerequisites: 'If a missing prerequisite prevents implementation, report a check with outcome exactly blocked and concrete evidence. This suspends the attempt instead of starting review. Do not claim that a text answer ended the attempt; only the controller can end it.',
           authority: 'Correct the supplied findings and their necessary consequences in this same checkout and session. Do not add requirements. Report findingResponses for every supplied finding id. Report additionalChangesJustification as null when no additional change was needed, otherwise explain additional changes for the independent Reviewer. Treat technical execution errors separately from demonstrated product defects. Stop all owned writers before execution_complete. This creates a new captured delivery and independent review.' }) });
     } catch (error) {
       storage.recordDispatchFailure(plan.review.attemptId, error instanceof ExecutionError || error instanceof CaptureError ? error.code : 'CORRECTION_DELIVERY_UNKNOWN'); throw error;
@@ -434,6 +447,11 @@ export function createPipeline(deps: PipelineDependencies) {
       catch (error) {
         storage.recordDispatchFailure(binding.attemptId, error instanceof ExecutionError ? error.code : 'CAPTURE_HANDOFF_FAILED'); throw error;
       }
+      const producer = storage.getProducerResult(binding.deliveryVersion);
+      if (producer?.result.checks.some(check => check.outcome === 'blocked')) {
+        storage.recordImplementationBlocked(binding.attemptId);
+        return;
+      }
       const claim = storage.beginCapture(binding.deliveryVersion); if (claim) await capture(claim);
     });
   });
@@ -465,6 +483,7 @@ export function createPipeline(deps: PipelineDependencies) {
           objective: capture.issue.body, criteria: capture.criteria, baseSha: capture.baseSha,
           guidance: capture.configuration.guidance, checks: capture.configuration.configuration.checks,
           deliveryMode: capture.configuration.configuration.default_delivery_mode,
+          prerequisites: 'If a missing prerequisite prevents implementation, report a check with outcome exactly blocked and concrete evidence. This suspends the attempt instead of starting review. Do not claim that a text answer ended the attempt; only the controller can end it.',
           authority: 'Implement in the owned checkout. Stop all owned product writers before execution_complete. Publication is performed only by the controller.' }) };
       await execution.startPassage(request, signalFor(id));
     };
@@ -523,6 +542,11 @@ export function createPipeline(deps: PipelineDependencies) {
       if (closed) throw new OperationError(503, 'PIPELINE_CLOSED', 'The controller is shutting down.');
       storage.expireLimits();
       const operation = storage.recordAnswer(command);
+      if (command.body.action === 'end_attempt') {
+        revoke(command.attemptId);
+        enqueue(async () => { await execution.cancelAttempt(command.attemptId, command.operationId); });
+        return operation;
+      }
       const question = storage.getQuestion(command.attemptId, command.questionId).view;
       enqueue(async () => {
         if (closed) return;

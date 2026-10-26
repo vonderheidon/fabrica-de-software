@@ -4,11 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import type { ExecutionHost } from './index.js';
 import { ExecutionError } from './errors.js';
+import { observeStoppedTerminal } from './terminal-observation.js';
 
 type Reference = { workspaceId: string; terminalName: string; terminalId?: string; generation?: number };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Process-local ownership only: restart never adopts an old job or terminal. */
+/** Stop authority remains process-local; reuse requires a fresh observation after restart. */
 export function withWindowsTerminalJobs(host: ExecutionHost, cwd: string): ExecutionHost {
   if (process.platform !== 'win32' || host.prepareTerminalLaunch || host.stopTerminal || host.confirmStoppedTerminal) return host;
   const executable = fileURLToPath(new URL('../../../../../resources/execution/terminal-job.exe', import.meta.url));
@@ -75,6 +76,9 @@ export function withWindowsTerminalJobs(host: ExecutionHost, cwd: string): Execu
     confirmStoppedTerminal: async reference => {
       try {
         const job = jobs.get(key(reference));
+        // The prior owner's last Job Object handle closes on restart, stopping its writers.
+        // The canvas identity may still be running a different process, so observe it now.
+        if (!job) return observeStoppedTerminal(host, reference);
         if (!job || !reference.terminalId || job.terminalId !== reference.terminalId.toLowerCase() ||
           (reference.generation !== job.generation && reference.generation !== job.generation + 1)) return false;
         return await job.ask('check') === 'stopped';

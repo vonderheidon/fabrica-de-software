@@ -335,7 +335,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       </details>}
       {actions.operation && <div className={actions.operation.uncertain || actions.operation.view?.state === 'failed' ? 'queue-error' : 'notice'} role="status">
         <b>{actions.operation.kind === 'cancel' ? actions.cancelStatus === 'stopped' ? 'Parada comprovada' : actions.cancelStatus === 'cleanup-uncertain' ? 'Limpeza incerta' : actions.cancelStatus === 'accepted' ? 'Pedido de cancelamento aceito' : 'Pedido de cancelamento em consulta'
-          : actions.operation.kind === 'capture' ? 'Repetição da captura' : actions.operation.kind === 'remove' ? 'Remoção do ambiente' : actions.operation.kind === 'open-terminal' ? 'Abertura do terminal' : 'Abertura da pasta'} · {operationStateLabel(actions.operation.view?.state ?? (actions.operation.accepted ? 'accepted' : 'unknown'))}</b>
+          : actions.operation.kind === 'revalidate' ? 'Revalidação da tentativa' : actions.operation.kind === 'capture' ? 'Repetição da captura' : actions.operation.kind === 'remove' ? 'Remoção do ambiente' : actions.operation.kind === 'open-terminal' ? 'Abertura do terminal' : 'Abertura da pasta'} · {operationStateLabel(actions.operation.view?.state ?? (actions.operation.accepted ? 'accepted' : 'unknown'))}</b>
         <p>{actions.operation.accepted ? 'Recibo de aceitação recebido.' : 'Resposta sem confirmação; consulte o estado antes de qualquer nova ação.'}</p>
         {actions.operation.view?.error && <p>{operatorErrorMessage(actions.operation.view.error.code, actions.operation.view.error.message)}</p>}
 
@@ -352,6 +352,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     <div className="dialog-actions">
       <p>Fechar este detalhe não altera o estado da tentativa.</p>
       <button type="button" onClick={() => setReload((value) => value + 1)}>Atualizar tentativa</button>
+      {attempt?.capabilities.revalidate.available && <button type="button" onClick={actions.revalidate} disabled={actions.busy || attemptRefreshing || !attemptEtag}>Revalidar tentativa</button>}
       <span id="attempt-decision-actions" />
       {attempt?.result && <button type="button" className="primary" onClick={() => onRetry(attempt)}>Nova tentativa</button>}
     </div>

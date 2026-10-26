@@ -106,7 +106,8 @@ describe('supported OMP extension on the same TUI', () => {
       await f.handlers.get('tool_execution_start')!({ toolCallId: 'reader', toolName: 'read' }, f.context);
       const passageId = randomUUID();
       const pending = seam.frame!({ type: 'continuation-check', passageId });
-      await vi.advanceTimersByTimeAsync(50);
+      await vi.advanceTimersByTimeAsync(16_000);
+      expect(seam.close).not.toHaveBeenCalled();
       expect(seam.send).not.toHaveBeenCalledWith({ type: 'continuation-idle', passageId });
       idle = true; queued = false;
       await vi.advanceTimersByTimeAsync(50);
@@ -115,6 +116,19 @@ describe('supported OMP extension on the same TUI', () => {
       await vi.advanceTimersByTimeAsync(25); await pending;
       expect(seam.send).toHaveBeenLastCalledWith({ type: 'continuation-idle', passageId });
       await f.handlers.get('session_shutdown')!(undefined, f.context);
+    } finally { vi.useRealTimers(); }
+  });
+  it('stops waiting on actual channel loss and reports it only once', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); f.context.isIdle = () => false; f.context.hasPendingMessages = () => false;
+      await f.start(); await authorizeTask();
+      await seam.frame!({ type: 'continuation-check', passageId: randomUUID() });
+      seam.lost!('CHANNEL_EOF');
+      await vi.advanceTimersByTimeAsync(25);
+      seam.lost!('CHANNEL_EOF');
+      expect(f.context.ui.notify).toHaveBeenCalledOnce();
+      expect(seam.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'continuation-idle' }));
     } finally { vi.useRealTimers(); }
   });
   it('refuses idle confirmation without the supported capability or after session loss', async () => {

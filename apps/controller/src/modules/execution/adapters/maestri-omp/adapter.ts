@@ -295,6 +295,21 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   };
 
   return {
+    reconcilePassageStop: async handle => {
+      if (closed || !options.host?.confirmStoppedTerminal) return false;
+      try {
+        const session = store.getAttemptSession(handle);
+        if (!session.workspaceId || !session.terminalId) return false;
+        const reference = { workspaceId: session.workspaceId, terminalId: session.terminalId,
+          terminalName: session.terminalName, generation: session.generation };
+        if (!await options.host.confirmStoppedTerminal(reference) || closed) return false;
+        const current = store.getAttemptSession(handle);
+        if (current.id !== session.id || current.generation !== session.generation ||
+            current.terminalId !== session.terminalId || current.workspaceId !== session.workspaceId) return false;
+        store.recordStop(handle, { passageId: handle.passageId, state: 'confirmed' });
+        return true;
+      } catch { return false; }
+    },
     preparePassageHandoff: async source => {
       const entry = live.get(source.passageId); const prior = store.getPassage(source);
       if (entry?.handoff && entry.stopped && (await entry.stopResult)?.state === 'confirmed' && prior.state === 'ready') return;
@@ -304,8 +319,8 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       if (session.state !== 'completed' || session.terminalState !== 'available' || session.ompSessionId !== entry.session.sessionId) throw new ExecutionError('TRACKING_LOST');
       try {
         await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => entry.idle?.reject(), executionLimits.requestMs);
-          entry.idle = { resolve: () => { clearTimeout(timer); resolve(); }, reject: () => { clearTimeout(timer); reject(new ExecutionError('TRACKING_LOST')); } };
+          // Finalization is agent activity, not an RPC deadline. Loss/cancellation rejects this wait.
+          entry.idle = { resolve, reject: () => reject(new ExecutionError('TRACKING_LOST')) };
           void entry.channel?.send({ type: 'continuation-check', passageId: source.passageId }).catch(() => entry.idle?.reject());
         });
         if (closed || entry.cancelled || store.getPassage(source).state !== 'ready') throw new ExecutionError('TRACKING_LOST');
@@ -458,7 +473,11 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
         const outcomes = await Promise.allSettled([...live.values()].map(async entry => {
           try { interrupt(entry, 'TRACKING_LOST'); }
           finally {
-            try { await entry.channel?.close(); }
+            try {
+              // Keep the native job owner alive until the physical stop receipt is durable.
+              await stop(entry);
+              await entry.channel?.close();
+            }
             finally { await entry.bootstrap?.removeSecret(); }
           }
           if (entry.storageFailed) throw new ExecutionError('STORAGE_FAILED');
