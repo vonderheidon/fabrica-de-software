@@ -74,6 +74,7 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const persistence = storage.executionPersistence();
   const roles = [...loadRoleResources().values()].map(r => r.reference);
   const execution: Execution = {
+    observeManagedTerminal: vi.fn(async () => 'stopped' as const),
     preparePassageHandoff: vi.fn(async source => { persistence.recordStop(source, { passageId: source.passageId, state: 'confirmed' }); }),
     getCatalog: vi.fn(async () => ({ state: 'unavailable' as const, observed_at_ms: 1,
       diagnostics: [{ code: 'OMP_CATALOG_UNAVAILABLE', message: 'Test catalog unavailable.', recovery: 'Use a controlled catalog fixture.' }] })),

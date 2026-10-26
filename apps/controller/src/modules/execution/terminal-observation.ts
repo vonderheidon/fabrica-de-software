@@ -5,15 +5,15 @@ import { inheritedAnchor } from './adapters/maestri-omp/native.js';
 type Reference = { workspaceId: string; terminalName: string; terminalId?: string };
 
 /** Read the native host, never the validation Wire credentials or terminal screen. */
-export async function observeStoppedTerminal(host: ExecutionHost, reference: Reference): Promise<boolean> {
+export async function observeTerminalAvailability(host: ExecutionHost, reference: Reference): Promise<'stopped' | 'running' | 'missing' | 'uncertain'> {
   try {
     const anchor = inheritedAnchor(host);
     if (anchor.workspaceId !== reference.workspaceId.toLowerCase() || !reference.terminalId ||
         !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(reference.terminalId) ||
-        !/^factory-[0-9a-f-]{36}$/i.test(reference.terminalName)) return false;
+        !/^factory-[0-9a-f-]{36}$/i.test(reference.terminalName)) return 'uncertain';
     const body = await new Promise<string>((resolve, reject) => {
       const call = request({ socketPath: host.inheritedEnvironment.MAESTRI_PIPE, path: '/list', agent: false,
-        headers: { 'X-Terminal-ID': anchor.terminalId } }, response => {
+        headers: { 'X-Terminal-ID': anchor.terminalId, 'X-Workspace-ID': anchor.workspaceId } }, response => {
         if (response.statusCode !== 200) { response.resume(); reject(new Error('OBSERVATION_UNAVAILABLE')); return; }
         let bytes = 0; const chunks: Buffer[] = [];
         response.on('data', (chunk: Buffer) => {
@@ -29,13 +29,24 @@ export async function observeStoppedTerminal(host: ExecutionHost, reference: Ref
       call.on('error', reject); call.end();
     });
     const value: unknown = JSON.parse(body);
-    if (!value || typeof value !== 'object' || !('terminals' in value) || !Array.isArray(value.terminals)) return false;
-    if (value.terminals.filter((item: unknown) => item !== null && typeof item === 'object' &&
-      'name' in item && item.name === reference.terminalName).length !== 1) return false;
+    if (!value || typeof value !== 'object' || !('terminals' in value) || !Array.isArray(value.terminals)) return 'uncertain';
+    if (value.terminals.some((item: unknown) => !item || typeof item !== 'object' ||
+        !('id' in item) || typeof item.id !== 'string' || !('name' in item) || typeof item.name !== 'string' ||
+        !('running' in item) || typeof item.running !== 'boolean')) return 'uncertain';
+    const named = value.terminals.filter((item: unknown) => item !== null && typeof item === 'object' &&
+      'name' in item && item.name === reference.terminalName);
     const matches: unknown[] = value.terminals.filter((item: unknown) => item !== null && typeof item === 'object' &&
       'id' in item && typeof item.id === 'string' && item.id.toLowerCase() === reference.terminalId!.toLowerCase());
-    if (matches.length !== 1) return false;
+    // /list contains only peers connected to the anchor, so omission proves no absence.
+    if (matches.length === 0 && named.length === 0) return 'uncertain';
+    if (matches.length !== 1 || named.length !== 1) return 'uncertain';
     const terminal = matches[0] as Record<string, unknown>;
-    return terminal.name === reference.terminalName && terminal.running === false;
-  } catch { return false; }
+    if (terminal.name !== reference.terminalName || (terminal.environmentKind !== undefined && terminal.environmentKind !== 'local') ||
+        (terminal.connection !== undefined && terminal.connection !== null)) return 'uncertain';
+    return terminal.running === false ? 'stopped' : terminal.running === true ? 'running' : 'uncertain';
+  } catch { return 'uncertain'; }
+}
+
+export async function observeStoppedTerminal(host: ExecutionHost, reference: Reference): Promise<boolean> {
+  return await observeTerminalAvailability(host, reference) === 'stopped';
 }

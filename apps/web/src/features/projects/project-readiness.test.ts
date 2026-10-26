@@ -166,7 +166,7 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
   const container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   await act(async () => root!.render(createElement(PreparationDialog, { projectId: preparationProjectId, initialIssueId: 'ISSUE_test', onOpenAttempt: () => {} })));
   expect(container.querySelector('.preparation-section')?.textContent).toContain('A consulta das issues está incompleta');
-  expect(container.textContent).toContain('Configuração efetiva'); expect(container.textContent).toContain('Critérios não executáveis');
+  expect(container.textContent).toContain('Resumo da tentativa'); expect(container.textContent).toContain('Critérios não executáveis');
   expect(container.textContent).toContain('Issue fechada');
   expect(container.textContent).toContain('Base local e remota divergentes');
   expect(container.textContent).toContain('Confirme o repositório GitHub');
@@ -185,4 +185,55 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
   expect(request.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
   expect(metadata.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
   expect(metadata.mock.calls[0]![0]).toBe(`/api/v1/projects/${preparationProjectId}/preparations`);
+});
+
+async function mountReadyStart() {
+  await mount(); await act(async () => root!.unmount());
+  const projectId = crypto.randomUUID();
+  const {id:_id,project_id:_project,revision:_revision,created_at_ms:_created,...configuration} = savedConfiguration.configuration;
+  const profile = {name:'Test profile',executor:'maestri-omp' as const,provider:'test',model:'test',effort:null,guidance:''};
+  const preparation:Preparation = {
+    id:crypto.randomUUID(),project_id:projectId,project_revision_id:'revision',revision:1,issue_id:'I_start',delivery_mode:'icr',guidance:'',overrides:{},can_start:false,
+    prerequisites:[prerequisite('EXECUTOR_REVALIDATION_REQUIRED')],
+    effective_configuration:{configuration,project_revision_id:'revision',settings_revision:1,implementer_profile:profile,reviewer_profile:profile,
+      time_defaults:savedConfiguration.settings.time_defaults,artifact_policy:savedConfiguration.settings.artifact_policy,guidance:'',
+      origins:{base_branch:'project',implementer_profile:'project',reviewer_profile:'project',checks:'project',correction_limit:'project',time_defaults:'global',artifact_policy:'global',guidance:'project',delivery_mode:'preparation'}},
+    criteria_preview:{executable:true,objective:'Start fixture',criteria:[],digest:'a'.repeat(64),reasons:[]},effects_preview:[],
+    issue:{id:'I_start',number:1,title:'Start fixture',state:'OPEN',assignees:[]} as unknown as NonNullable<Preparation['issue']>,
+    base_sha:'a'.repeat(40),summary_hash:'b'.repeat(64),diagnostics:[],retry_at_ms:null,publication_target:null,
+  };
+  request.mockImplementation(async (path:string) => path === '/api/v1/settings' || path.endsWith('/configuration') ? savedConfiguration
+    : path.includes('/issues?') ? {items:[],completeness:'complete',has_more:false,diagnostics:[],prerequisites:[]} : {project:{name:'Start fixture'},deletion:null});
+  let rejectStart!:(reason:unknown)=>void;
+  metadata.mockImplementation((path:string) => path === '/api/v1/attempts' ? new Promise((_resolve,reject) => {rejectStart=reject;}) : Promise.resolve({data:{preparation},etag:'"start"'}));
+  const container=document.createElement('div');document.body.append(container);root=createRoot(container);
+  await act(async () => root!.render(createElement(PreparationDialog,{projectId,initialIssueId:'I_start',onOpenAttempt:()=>{}})));
+  await act(async () => button(container,'Revisar e autorizar').click());
+  return {container,rejectStart:(reason:unknown)=>rejectStart(reason)};
+}
+it('shows pending start feedback in the fixed footer and keeps one request in flight',async () => {
+  const f=await mountReadyStart();
+  await act(async () => {button(f.container,'Iniciar tentativa').click();button(f.container,'Iniciar tentativa').click();});
+  const footer=f.container.querySelector('.preparation-actions')!;
+  expect(footer.textContent).toContain('Iniciando tentativa');
+  expect(footer.querySelector('[role="status"]')?.textContent).toContain('Conferindo');
+  expect(metadata.mock.calls.filter(([path]) => path === '/api/v1/attempts')).toHaveLength(1);
+  await act(async () => f.rejectStart(new HttpError(409,'TERMINAL_AVAILABILITY_UNCONFIRMED','Não foi possível confirmar a disponibilidade do terminal próprio.',null,[],null,null,null,[], 'Confira o terminal no Maestri antes de tentar novamente.')));
+  expect(footer.querySelector('[role="alert"]')?.textContent).toContain('terminal próprio');
+  expect(footer.textContent).not.toContain('Resumo autorizado.');
+  expect(footer.querySelector('button')?.textContent).toBe('Revisar preparação');
+  await act(async () => button(f.container,'Revisar preparação').click());
+  expect(button(f.container,'Revisar e autorizar')).not.toBeNull();
+  expect(metadata.mock.calls.filter(([path]) => path === '/api/v1/attempts')).toHaveLength(1);
+});
+it('keeps recovery of an uncertain start in the footer without sending another start',async () => {
+  const f=await mountReadyStart();
+  const original=request.getMockImplementation()!;
+  request.mockImplementation((path:string,...args:unknown[]) => path.includes('/operations/') ? Promise.reject(new Error('Read unavailable')) : original(path,...args));
+  await act(async () => button(f.container,'Iniciar tentativa').click());
+  await act(async () => f.rejectStart(new Error('Response lost')));
+  const footer=f.container.querySelector('.preparation-actions')!;
+  expect(footer.textContent).toContain('Consultar operação original');
+  expect(footer.textContent).not.toContain('Iniciar tentativa');
+  expect(metadata.mock.calls.filter(([path]) => path === '/api/v1/attempts')).toHaveLength(1);
 });

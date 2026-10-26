@@ -9,6 +9,7 @@ import type { ToolObservation } from '#contracts';
 import { openChannel, type ChannelFactory, type Hello, type PassageChannel } from './channel.js';
 import { writeBootstrap, type Bootstrap, type BootstrapWriter } from './bootstrap.js';
 import { executionLimits } from './wire.js';
+import { observeTerminalAvailability } from '../../terminal-observation.js';
 
 const Call = Type.Object({
   type: Type.Literal('call'), id: OperationId,
@@ -117,7 +118,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     const initial: PassageRecord = { handle: handleOf(request.binding.passageId), binding: request.binding,
       requestHash: digest(request), state: 'starting', roleResource: role.reference, terminalName, diagnostic: null,
       effectiveProfile: null, executorVersion: null };
-    let sessionCandidate = store.getAttemptSession(initial.handle, request.binding);
+    const sessionCandidate = store.getAttemptSession(initial.handle, request.binding);
     if (sessionCandidate.ompSessionId && sessionCandidate.ompSessionId !== resumedSessionId) throw new ExecutionError('TRACKING_LOST');
     let terminalAvailabilityConfirmed = false;
     if (sessionCandidate.terminalState === 'available') {
@@ -128,8 +129,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
         } catch { terminalAvailabilityConfirmed = false; }
       }
       if (!terminalAvailabilityConfirmed) {
-        if (resumedSessionId) throw new ExecutionError('TRACKING_LOST');
-        sessionCandidate = store.allocateTerminal(initial.handle, request.binding);
+        throw new ExecutionError('TRACKING_LOST');
       }
     }
     const claim = store.reserve(initial, terminalAvailabilityConfirmed);
@@ -295,6 +295,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   };
 
   return {
+    observeManagedTerminal: async reference => options.host && !closed ? observeTerminalAvailability(options.host, reference) : 'uncertain',
     reconcilePassageStop: async handle => {
       if (closed || !options.host?.confirmStoppedTerminal) return false;
       try {

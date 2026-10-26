@@ -3,7 +3,7 @@ import { request, type IncomingMessage, type RequestOptions } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { withWindowsTerminalJobs, type ExecutionHost } from './index.js';
-import { observeStoppedTerminal } from './terminal-observation.js';
+import { observeStoppedTerminal, observeTerminalAvailability } from './terminal-observation.js';
 
 vi.mock('node:http', () => ({ request: vi.fn() }));
 
@@ -15,7 +15,7 @@ async function fixture() {
   let response: unknown = { terminals: [terminal] };
   let status = 200; let observations = 0;
   const invoke = (options: RequestOptions, callback: (response: IncomingMessage) => void) => {
-    expect(options).toEqual({ socketPath: pipe, path: '/list', agent: false, headers: { 'X-Terminal-ID': anchorId } });
+    expect(options).toEqual({ socketPath: pipe, path: '/list', agent: false, headers: { 'X-Terminal-ID': anchorId, 'X-Workspace-ID': workspaceId } });
     const call = Object.assign(new EventEmitter(), {
       destroy: (error: Error) => { call.emit('error', error); call.emit('close'); },
       end: () => queueMicrotask(() => {
@@ -36,6 +36,16 @@ async function fixture() {
 }
 
 describe.skipIf(process.platform !== 'win32')('terminal availability after controller restart', () => {
+  it('distinguishes running and stopped while omissions and conflicting identities stay uncertain', async () => {
+    const f = await fixture();
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('stopped');
+    f.terminal.running = true;
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('running');
+    f.reply({ terminals: [] });
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('uncertain');
+    f.reply({ terminals: [{ ...f.terminal, id: randomUUID() }] });
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('uncertain');
+  });
   it('confirms the persisted terminal with a fresh host wrapper that has no prior job map', async () => {
     const f = await fixture();
     const restarted = withWindowsTerminalJobs(f.host, process.cwd());

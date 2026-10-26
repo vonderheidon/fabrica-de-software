@@ -44,6 +44,7 @@ import { applyMigrations, inspectHistory, loadMigrations } from './migrations.js
 import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, recordToolPreferenceValidation, seedSettings } from './settings.js';
 import { hasUncertainAccountCleanup, OperationError, readOperation, readCompletedProjectDeletion, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
 import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceReference, readCapture, recordImplementationBlocked, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
+import { terminalRecoveryCandidates, reconcileTerminalAvailability, type TerminalRecoveryCandidate } from './terminal-recovery.js';
 import { createExecutionPersistence } from './execution.js';
 import { acceptRecovery, recoverRecovery, finishRecovery, readResources, readOwnedPassage, resourceSnapshot, validatePreviousAttempt, type RecoveryCommand, type ResourceSnapshot } from './recovery.js';
 export type { RecoveryCommand, ResourceSnapshot } from './recovery.js';
@@ -98,6 +99,8 @@ export interface StorageDiagnostics {
 }
 
 export interface Storage {
+  terminalRecoveryCandidates(): TerminalRecoveryCandidate[];
+  reconcileTerminalAvailability(candidate: TerminalRecoveryCandidate): void;
   readonly controllerInstanceId: string;
   getShutdown(query?: ShutdownQuery): ShutdownView;
   acceptShutdown(command: ShutdownRequest): StoredOperation;
@@ -432,6 +435,8 @@ export function openStorage(options: StorageOptions): Storage {
       finishCapture: (claim, content, diagnostic) => finishCapture(connection, claim, content, diagnostic),
       recoverCaptureRetry: (command) => guarded(() => connection.transaction(() => recoverCaptureRetry(connection, command))()),
       retryCapture: (command) => retryCapture(connection, command),
+      terminalRecoveryCandidates: () => terminalRecoveryCandidates(connection),
+      reconcileTerminalAvailability: candidate => reconcileTerminalAvailability(connection, candidate),
       createAttempt: (input) => createAttempt(connection, input),
       recoverAttempt: (command) => guarded(() => connection.transaction(() => recoverAttempt(connection, command))()),
       getAttempt: (id) => guarded(() => connection.transaction(() => readAttempt(connection, id))()),

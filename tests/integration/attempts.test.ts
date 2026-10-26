@@ -87,15 +87,14 @@ describe('manual attempt composition and HTTP', () => {
   });
   it('never reuses an uncertain physical terminal when a later attempt needs a role resource', async () => {
     const f = await fixture(); const first = await start(f); const firstHandle = { passageId: first.status.passageId };
+    vi.mocked(f.execution.observeManagedTerminal!).mockResolvedValue('uncertain');
     const firstSession = f.persistence.getAttemptSession(firstHandle);
     f.persistence.releaseOccupancy(firstHandle, 'uncertain', 'TRACKING_LOST');
     f.db.prepare("UPDATE attempts SET phase='finished',result='interrupted' WHERE id=?").run(first.id);
     f.issue.id = 'I_after_uncertain'; f.issue.number = 19;
-    const second = await start(f); const secondSession = f.persistence.getAttemptSession({ passageId: second.status.passageId });
-    expect(secondSession.managedTerminalId).not.toBe(firstSession.managedTerminalId);
+    await expect(start(f)).rejects.toMatchObject({ code: 'TERMINAL_AVAILABILITY_UNCONFIRMED' });
     expect(f.db.prepare('SELECT state FROM managed_terminals WHERE id=?').get(firstSession.managedTerminalId)).toEqual({ state: 'uncertain' });
-    expect(f.db.prepare('SELECT managed_terminal_id FROM terminal_occupancies WHERE passage_id=?').get(second.status.passageId))
-      .toEqual({ managed_terminal_id: secondSession.managedTerminalId });
+    expect(f.db.prepare('SELECT count(*) AS count FROM attempts').get()).toEqual({ count: 1 });
     const current = f.storage.getConfiguration(f.projectId);
     const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _createdAtMs, ...configuration } = current.view.configuration;
     expect(() => f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,

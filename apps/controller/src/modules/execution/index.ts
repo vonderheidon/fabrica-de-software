@@ -88,6 +88,7 @@ export interface InteractionSurface {
   open: (() => Promise<void>) | null;
 }
 export interface Execution {
+  observeManagedTerminal?: (reference: { workspaceId: string; terminalName: string; terminalId?: string }) => Promise<'stopped' | 'running' | 'missing' | 'uncertain'>;
   reconcilePassageStop?: (handle: PassageHandle) => Promise<boolean>;
   /** Quiesce a live, completed reviewer before preparing its next immutable checkout. */
   preparePassageHandoff(source: PassageHandle): Promise<void>;

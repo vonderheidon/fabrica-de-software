@@ -566,16 +566,16 @@ describe('passage coordination under controlled native dependencies', () => {
     expect((await pending).state).toBe('ready');
     await f.execution.close();
   });
-  it('keeps an unavailable managed terminal untouched and creates a distinct owned terminal', async () => {
+  it('blocks launch when a managed terminal cannot be confirmed instead of allocating a substitute', async () => {
     const f = fixture(); const handle = { passageId: f.request.binding.passageId };
     const session = f.store.getAttemptSession(handle, f.request.binding);
     f.sessionRows.set(f.request.binding.attemptId, { ...session, terminalId: randomUUID(), workspaceId, ompSessionId: null,
       terminalState: 'available', state: 'reserved', generation: 2 });
     const priorTerminalId = f.store.getAttemptSession(handle, f.request.binding).managedTerminalId;
     f.confirmStoppedTerminal.mockResolvedValue(false);
-    const record = await f.start(); const current = f.store.getAttemptSession(handle);
-    expect(record.state).toBe('ready'); expect(current.managedTerminalId).not.toBe(priorTerminalId);
-    expect(f.runtime.recruit).toHaveBeenCalledWith(current.terminalName, f.request.cwd, expect.any(String), false);
+    await expect(f.execution.startPassage(f.request)).rejects.toMatchObject({ code: 'TRACKING_LOST' });
+    expect(f.store.getAttemptSession(handle, f.request.binding).managedTerminalId).toBe(priorTerminalId);
+    expect(f.runtime.recruit).not.toHaveBeenCalled();
     expect(f.confirmStoppedTerminal).toHaveBeenCalledOnce();
   });
   it('reuses only the confirmed factory terminal and starts a distinct OMP session', async () => {

@@ -172,10 +172,6 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
       if (!occupancy || occupancy.state !== 'occupied') throw new ExecutionError('TRACKING_LOST');
       db.prepare("UPDATE managed_terminals SET terminal_id=?,workspace_id=?,state='occupied',observed_at_ms=?,updated_at_ms=? WHERE id=? AND generation=?")
         .run(observation.terminalId, observation.workspaceId, Date.now(), Date.now(), p.managed_terminal_id, p.terminal_generation);
-      db.prepare(`UPDATE resources SET stop_state='confirmed',diagnostic=NULL WHERE kind='terminal' AND stop_state<>'confirmed' AND passage_id IN (
-        SELECT old_passage.id FROM passages old_passage JOIN attempt_sessions old_session ON old_session.id=old_passage.attempt_session_id
-        WHERE old_session.managed_terminal_id=? AND old_session.id<>?
-      )`).run(p.managed_terminal_id, p.attempt_session_id);
       const updated = db.prepare("UPDATE attempt_sessions SET omp_session_id=?,state='active',updated_at_ms=? WHERE id=? AND (omp_session_id IS NULL OR omp_session_id=?)")
         .run(observation.ompSessionId, Date.now(), p.attempt_session_id, observation.ompSessionId);
       if (updated.changes !== 1) throw new ExecutionError('TRACKING_LOST');
