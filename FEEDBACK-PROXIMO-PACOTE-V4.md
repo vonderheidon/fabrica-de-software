@@ -87,3 +87,27 @@ Remover do produto o mecanismo de checks cadastrados manualmente na configuraç�
 - Atualizar os documentos normativos e os critérios afetados na implementação futura, deixando explícito como a esteira obtém e registra as validações após a retirada desse mecanismo.
 
 Este registro não remove funcionalidades agora nem autoriza apagar dados, evidências ou histórico existentes.
+
+## Remoção da comparação entre tentativas
+
+Decisão registrada em 25/10/2026. Registro documental para o próximo pacote, sem iniciar implementação ou pipeline.
+
+Remover a funcionalidade de comparação entre tentativas. O usuário informou que não solicitou esse recurso e determinou sua retirada no V4.
+
+- Remover as ações “Selecionar para comparar” e “Comparar tentativas”, o estado de seleção e o diálogo de comparação.
+- Remover a rota de comparação, os contratos, as consultas, os parâmetros de navegação e o código exclusivo dessa funcionalidade; adequar os testes e documentos pertinentes.
+- Preservar a listagem, os filtros, a consulta individual, o histórico e as evidências das tentativas, além da ação “Nova tentativa”.
+
+Este registro não altera a implementação agora nem autoriza apagar dados ou histórico das tentativas.
+
+## Seleção da branch de destino da publicação
+
+Decisão registrada em 26/10/2026. Registro documental para o próximo pacote, sem iniciar implementação ou pipeline.
+
+Permitir ao usuário selecionar em qual branch será publicado o resultado aprovado, inclusive ao continuar uma entrega ICR para integração e commit local. A publicação deve usar a branch escolhida, em vez de impor sempre uma branch própria gerada pela fábrica.
+
+A interface deve apresentar a branch de destino antes da autorização e informar o resultado da publicação. Preservar a versão aprovada e o trabalho local do usuário; alterações na base que exijam adaptação continuam sujeitas à validação e à revisão pertinentes.
+
+A seleção da branch de publicação não define, por si só, a troca da branch aberta no checkout. Esse comportamento deve ser explicitado no detalhamento do V4 para que o usuário saiba onde os arquivos estarão visíveis após a entrega.
+
+Este registro não implementa a seleção agora nem autoriza publicar, trocar branches ou alterar repositórios nesta tarefa.
