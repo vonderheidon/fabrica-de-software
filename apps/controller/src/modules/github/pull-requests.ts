@@ -37,6 +37,7 @@ export async function inspectPullRequest(reader: GraphQLReader, effect: EffectVi
       object(p.author).id !== accountId || object(p.repository).id !== i.repositoryId || object(p.headRepository).id !== i.repositoryId || object(p.baseRepository).id !== i.repositoryId ||
       createHash('sha256').update(string(p.body)).digest('hex') !== i.bodyHash ||
       typeof p.url !== 'string' || !p.url.startsWith(`https://github.com/${i.repositoryOwner}/${i.repositoryName}/pull/`) || !/\/pull\/[1-9][0-9]*$/.test(p.url)) return prUnknown('PR_IDENTITY_CONFLICT');
-    return { state: 'confirmed',receipt: { id: string(p.id),url: p.url,commitSha: i.commitSha,branchRef: i.branchRef,repositoryId: i.repositoryId,baseBranch: i.baseBranch },reason: null,retryAtMs: null };
+    return { state: 'confirmed',receipt: { id: string(p.id),url: p.url,commitSha: i.commitSha,branchRef: i.branchRef,repositoryId: i.repositoryId,baseBranch: i.baseBranch,
+      ...(i.targetOperationId ? { targetOperationId: i.targetOperationId } : {}) },reason: null,retryAtMs: null };
   } catch { return prUnknown('PR_IDENTITY_CONFLICT'); }
 }
