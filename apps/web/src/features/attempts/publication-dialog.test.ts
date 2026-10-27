@@ -38,9 +38,24 @@ it('authorizes on one click, blocks a synchronous duplicate and presents 202 as 
   await mount(); expect(container.querySelectorAll('input[type=checkbox]')).toHaveLength(0);
   await act(async () => { button('Integrar e criar commit').click(); button('Integrar e criar commit').click(); });
   expect(send).toHaveBeenCalledOnce();
+  expect(container.textContent).toContain('Enviando solicitação');
+  expect(container.textContent).not.toContain('Sem confirmação');
+  expect(container.querySelector('[role="status"][aria-busy="true"]')).not.toBeNull();
+  expect(read.mock.calls.some(([path]) => String(path).includes('/operations/'))).toBe(false);
   expect(JSON.parse(send.mock.calls[0]![1].body)).toMatchObject({ authorized:true,authorized_additional_effects_hash:'a'.repeat(64),delivery_id:version });
   await act(async () => release({}));
-  expect(container.textContent).toContain('Aceitação recebida.'); expect(container.textContent).not.toContain('Entrega concluída');
+  expect(container.textContent).not.toContain('Enviando solicitação'); expect(container.textContent).not.toContain('Entrega concluída');
+  expect(button('Integrar e criar commit').disabled).toBe(true);
+});
+
+it('shows accepted work as in progress while automatically observing the original operation', async () => {
+  read.mockImplementation(async (path: string) => path.includes('/projects/') ? { deletion: null } : { resource: { type: 'attempt', id }, state: 'running' });
+  send.mockImplementation(async (_path: string, init: RequestInit) => ({ data: { operation_id: (init.headers as Record<string, string>)['Idempotency-Key'] } }));
+  await mount();
+  await act(async () => button('Integrar e criar commit').click());
+  expect(container.textContent).toContain('Em andamento');
+  expect(container.textContent).toContain('Acompanhando a operação automaticamente');
+  expect(container.textContent).not.toContain('Resposta sem confirmação');
   expect(button('Integrar e criar commit').disabled).toBe(true);
 });
 

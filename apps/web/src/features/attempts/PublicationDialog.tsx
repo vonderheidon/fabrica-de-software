@@ -18,7 +18,7 @@ type Props = {
   onRefresh: () => void;
 };
 type Action = 'complete' | 'reconcile' | 'upgrade';
-type PublicationAction = { kind: Action; id: string; accepted: OperationAccepted | null; view: OperationView | null; uncertain: boolean; targetMode?: DeliveryMode };
+type PublicationAction = { kind: Action; id: string; accepted: OperationAccepted | null; view: OperationView | null; uncertain: boolean; submitting?: boolean; targetMode?: DeliveryMode };
 
 const modeOrder: readonly DeliveryMode[] = ['icr', 'commit', 'pr'];
 const effectLabel: Record<EffectView["kind"], string> = {
@@ -101,7 +101,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
     return () => { mounted = false; };
   }, [attemptId, deliveryId]);
 
-  const operationId = action?.id ?? null;
+  const operationId = action?.submitting ? null : action?.id ?? null;
   useEffect(() => {
     if (!operationId) return;
     let mounted = true;
@@ -136,7 +136,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
     sentFingerprint.current = effectFingerprint;
     const id = crypto.randomUUID();
     setError(null);
-    setAction({ kind, id, accepted: null, view: null, uncertain: true, ...(targetMode ? { targetMode } : {}) });
+    setAction({ kind, id, accepted: null, view: null, uncertain: false, submitting: true, ...(targetMode ? { targetMode } : {}) });
     try { recordUncertainOperation({ operationId: id, kind: 'delivery-publish', recordedAt: Date.now(),attemptId,deliveryId }); } catch { /* Operation remains in this dialog state. */ }
     const path: `/api/v1/${string}` = kind === 'upgrade'
       ? `/api/v1/attempts/${encodeURIComponent(attemptId)}/publication/authorize-upgrade`
@@ -162,8 +162,8 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
     }
   }
 
-  const actionState = action?.view?.state ?? (action?.accepted ? 'accepted' : action?.uncertain ? 'unknown' : undefined);
-  const busy = Boolean(error) || restoring || !current || !attemptEtag || ['accepted','running','unknown','succeeded'].includes(actionState ?? '');
+  const actionState = action?.submitting ? 'submitting' : action?.uncertain ? 'unknown' : action?.view?.state ?? (action?.accepted ? 'accepted' : undefined);
+  const busy = Boolean(error) || restoring || !current || !attemptEtag || ['submitting','accepted','running','unknown','succeeded'].includes(actionState ?? '');
   const actionLabel = action?.kind === 'complete' ? 'Conclusão do modo' : action?.kind === 'reconcile' ? 'Reconciliação' : `Autorização de ${action?.targetMode ? modeLabel[action.targetMode] : 'modo superior'}`;
 
   return <section className="card publication-panel" aria-label="Entrega da versão selecionada">
@@ -190,9 +190,11 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
       </div>}
       {canReconcile && <button type="button" onClick={() => void send('reconcile')} disabled={busy || deletionRestricted || !projectChecked}>Reconciliar efeitos desta versão</button>}
     </div>
-    {action && <div className={actionState === 'unknown' || actionState === 'failed' ? 'queue-error' : 'notice'} role="status">
-      <b>{actionLabel} · {effectStateLabel(actionState ?? 'unknown')}</b>
-      <p>{action.accepted ? 'Aceitação recebida.' : 'Resposta sem confirmação; consulte o resultado original antes de qualquer nova ação.'}</p>
+    {action && <div className={actionState === 'unknown' || actionState === 'failed' ? 'queue-error' : 'notice'} role="status" aria-busy={['submitting','accepted','running'].includes(actionState ?? '')}>
+      <b>{actionLabel} · {actionState === 'submitting' ? 'Enviando solicitação' : ['accepted','running'].includes(actionState ?? '') ? 'Em andamento' : effectStateLabel(actionState ?? 'unknown')}</b>
+      {actionState === 'submitting' && <p>Enviando autorização. Aguarde a confirmação do controlador.</p>}
+      {['accepted','running'].includes(actionState ?? '') && <p>Aceitação recebida. Acompanhando a operação automaticamente.</p>}
+      {actionState === 'unknown' && <p>Resposta sem confirmação; consulte o resultado original antes de qualquer nova ação.</p>}
       {action.view?.error && <p>{operatorErrorMessage(action.view.error.code, action.view.error.message)}</p>}
 
       {actionState === 'succeeded' && <p>Operação concluída; consultando o resultado atualizado desta versão.</p>}
