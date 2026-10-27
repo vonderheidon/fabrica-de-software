@@ -89,14 +89,16 @@ it('locates independent conditions, consolidates missing profiles and never post
   expect(container.textContent).not.toContain('Papel Implementador ausente');
   expect(container.textContent).not.toContain('Papel Revisor ausente');
   expect(container.querySelector('a[href="#principal/perfis"]')).not.toBeNull();
-  expect(container.textContent).toContain('Observação pontual');
-  expect(container.textContent).toContain('Não comprova execução de provider nem disponibilidade de MCP');
+  expect(container.querySelector('.settings-integration')).toBeNull();
+  expect(container.textContent).not.toContain('Verificar integração');
+  expect(container.textContent).not.toContain('Verificar pasta e perfis');
+  expect(container.querySelector('.global-verification')).toBeNull();
   expect(container.querySelector('#diagnostic-scope')).toBeNull();
   expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
   expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
   expect([...container.querySelectorAll('button')].filter((node) => node.textContent === 'Verificar status')).toHaveLength(1);
 });
-it.each([400, 412])('preserves draft and save failure %s through refresh and verification', async (status) => {
+it.each([400, 412])('preserves draft and save failure %s through GitHub status refresh', async (status) => {
   const container = await mount();
   const input = container.querySelector<HTMLInputElement>('#projects-root-path')!;
   await act(async () => {
@@ -111,63 +113,9 @@ it.each([400, 412])('preserves draft and save failure %s through refresh and ver
   expect(container.textContent).toContain(failure);
   const sent = metadata.mock.calls.find(([, init]) => init?.method === 'PUT');
   expect(new Headers(sent?.[1].headers).get('If-Match')).toBe('"original"');
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Atualizar leitura de pasta e perfis"]')!.click());
-  await act(async () => button(container, 'Verificar pasta e perfis').click());
+  await act(async () => button(container, 'Verificar status').click());
   expect(input.value).toBe('C:\\draft');
   expect(container.textContent).toContain(failure);
   expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
   if (status === 412) expect(container.textContent).toContain('Dados atuais consultados em separado');
-});
-it.each(['Verificar pasta e perfis', 'Verificar integração'])('sends only the explicit global check from %s and consults the original operation', async (label) => {
-  const container = await mount();
-  request.mockImplementationOnce(async () => { throw new Error('Resposta perdida'); });
-  await act(async () => button(container, label).click());
-  const posts = request.mock.calls.filter(([, init]) => init?.method === 'POST');
-  expect(posts).toHaveLength(1);
-  expect(posts[0]?.[0]).toBe('/api/v1/diagnostics?scope=host');
-  expect(JSON.parse(posts[0]?.[1].body as string)).toEqual({ checks: [label === 'Verificar integração' ? 'maestri_context' : 'configuration'] });
-  expect([...container.querySelectorAll('button')].filter((node) => node.textContent === 'Consultar resultado')).toHaveLength(1);
-  const id = new Headers(posts[0]?.[1].headers).get('Idempotency-Key');
-  await act(async () => button(container, 'Consultar resultado').click());
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  expect(request.mock.calls.some(([path]) => path === `/api/v1/operations/${id}`)).toBe(true);
-  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
-  expect(container.textContent).not.toContain('Consultar resultado');
-});
-it('keeps the unsaved folder and focus when updating diagnostic facts', async () => {
-  const container = await mount();
-  const input = container.querySelector<HTMLInputElement>('#projects-root-path')!;
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'C:\\draft');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  const refresh = container.querySelector<HTMLButtonElement>('[aria-label="Atualizar leitura de pasta e perfis"]')!;
-  refresh.focus();
-  await act(async () => refresh.click());
-  expect(document.activeElement).toBe(refresh);
-  expect(container.querySelector('#projects-root-path')).toBe(input);
-  expect(input.value).toBe('C:\\draft');
-  expect(container.textContent).toContain('A edição atual ainda não foi salva');
-  expect(container.textContent).toContain('Não valida o rascunho');
-  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
-});
-
-it('keeps verification content stable while a background refresh blocks actions', async () => {
-  const container = await mount({ ...view(), diagnostics: [] });
-  const sections = [...container.querySelectorAll('.global-verification')];
-  const text = sections.map((section) => section.textContent);
-  const input = container.querySelector<HTMLInputElement>('#projects-root-path')!;
-  input.focus();
-  const normal = request.getMockImplementation()!;
-  let finish!: (value: HttpDiagnosticsView) => void;
-  const pending = new Promise<HttpDiagnosticsView>((resolve) => { finish = resolve; });
-  request.mockImplementation((path: string, init?: RequestInit) => path.startsWith('/api/v1/diagnostics') ? pending : normal(path, init));
-  await act(async () => button(container, 'Atualizar leitura').click());
-  expect(sections.map((section) => section.textContent)).toEqual(text);
-  expect(sections.every((section) => section.getAttribute('aria-busy') === 'true')).toBe(true);
-  expect(button(container, 'Verificar pasta e perfis').disabled).toBe(true);
-  expect(document.activeElement).toBe(input);
-  await act(async () => finish({ ...view(), diagnostics: [] }));
-  expect(sections.map((section) => section.textContent)).toEqual(text);
-  expect(button(container, 'Verificar pasta e perfis').disabled).toBe(false);
 });

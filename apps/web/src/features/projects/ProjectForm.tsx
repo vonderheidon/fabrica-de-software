@@ -26,7 +26,7 @@ import { nativeSelectionMessage, useNativeSelection } from './useNativeSelection
 import { FieldHelp, fieldGuidanceFor } from './FieldHelp.js';
 import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 import { ProjectDeletionAction } from './ProjectDeletionAction.js';
-import { GlobalConditions, GlobalVerification, useGlobalDiagnostics } from './GlobalReadiness.js';
+import { GlobalConditions, useGlobalDiagnostics } from './GlobalReadiness.js';
 import { ProjectConditions, ProjectVerification, useProjectDiagnostics } from './ProjectReadiness.js';
 
 type EditableView = EditableConfigurationView;
@@ -621,7 +621,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       />
       <div className="field-full"><GlobalConditions diagnostic={globalDiagnostic} section="folder" /></div>
       <div className="field-full settings-profiles"><div className="settings-section-heading"><h3>Perfis de execução</h3><a href="#principal/perfis">Gerenciar Perfis</a></div><dl className="settings-profile-counts"><div><dt>Implementador</dt><dd>{load.view.profile_counts.implementer}</dd></div><div><dt>Revisor</dt><dd>{load.view.profile_counts.reviewer}</dd></div></dl><GlobalConditions diagnostic={globalDiagnostic} section="profiles" /></div>
-      <div className="field-full"><GlobalConditions diagnostic={globalDiagnostic} section="configuration" /><GlobalVerification diagnostic={globalDiagnostic} check="configuration" /></div>
+      <div className="field-full"><GlobalConditions diagnostic={globalDiagnostic} section="configuration" /></div>
     </div></section>}
     {!projectId && <section className="card form-section settings-execution"><div className="panel-title"><span className="eyebrow">Execução</span><h2>Automação e acompanhamento</h2><p>Padrões compartilhados pelas próximas execuções.</p></div>
       <Checkbox label="Automação global habilitada" checked={draft.global.automation_enabled} onChange={(value) => updateGlobal('automation_enabled', value)} />
@@ -631,7 +631,6 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       <ConfiguredLimitField label="Definir prazo para perguntas" value={draft.global.time_defaults.question_ttl} onValidityChange={(message) => updateTimeFieldValidity('question_ttl', message)} onChange={(value) => updateGlobal('time_defaults', { ...draft.global.time_defaults, question_ttl: value })} />
     </div></details></section>}
 
-    {!projectId && <section className="card form-section settings-integration" aria-labelledby="global-integration-heading"><div className="panel-title"><span className="eyebrow">Executor</span><h2 id="global-integration-heading">Integração Maestri/OMP</h2></div><GlobalConditions diagnostic={globalDiagnostic} section="integration" /><GlobalVerification diagnostic={globalDiagnostic} check="maestri_context" /></section>}
 
     {conflictView && conflictETagRef.current && <button type="button" onClick={() => {
       const etag = conflictETagRef.current;

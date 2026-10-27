@@ -1,4 +1,12 @@
 .creation-flow { display: grid; gap: 18px; }
+.creation-progress { display: grid; gap: 8px; }
+.creation-progress > div { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.creation-progress progress { display: block; width: 100%; height: 10px; border: 0; border-radius: 8px; overflow: hidden; background: #e9edef; accent-color: #397653; }
+.creation-progress progress::-webkit-progress-bar { background: #e9edef; }
+.creation-progress progress::-webkit-progress-value { background: #397653; border-radius: 8px; }
+.creation-progress progress::-moz-progress-bar { background: #397653; }
+.creation-progress small { color: var(--muted); }
+.creation-effect-row .pill { white-space: nowrap; }
 .creation-section-heading h3, .creation-result-banner h3 { margin: 7px 0; font-size: 20px; }
 .creation-section-heading p, .creation-result-banner p { margin: 0; color: var(--muted); line-height: 1.55; }
 .creation-plan-grid, .creation-result-grid, .creation-progress-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

@@ -7,7 +7,6 @@ import { readUncertainOperations, recordUncertainOperation, resolveUncertainOper
 import { OperatorDiagnosticCard, OperatorState } from '../../app/OperatorSupport.js';
 import { operatorState } from '../../app/operator-language.js';
 import './ProjectCreationDialog.css';
-import { CreationConditions } from './CreationConditions.js';
 import { visibleCreationEffects } from './creation-effects.js';
 
 type FormState = {
@@ -426,6 +425,10 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   </form>;
 }
 
+function CreationStepState({ value }: { value: string }) {
+  return <span className={`pill ${value === 'confirmed' ? '' : 'warn'}`}><OperatorState value={value} /></span>;
+}
+
 export function CreationResult({ creationId, load, onRefresh, onOpenProject, onNewPlan, canReconcile, reconciling, reconcileUncertain, reconcileNotice, onReconcile, onConsultReconcile }: {
   creationId: string;
   onNewPlan?: (() => void) | undefined;
@@ -437,18 +440,22 @@ export function CreationResult({ creationId, load, onRefresh, onOpenProject, onN
   const complete = creation.state === 'completed';
   const heading = complete ? 'Criação concluída' : creation.state === 'partial' ? 'Criação parcial' : creation.state === 'failed' ? 'Criação falhou' : 'Criação em andamento';
   const visibleEffects = visibleCreationEffects(load.view);
+  const stages = [...confirmedEffects, ...pendingEffects, ...visibleEffects, ...load.view.board_operations];
+  const confirmed = stages.filter((stage) => stage.state === 'confirmed').length;
+  const total = Math.max(creation.plan.effects.length, stages.length);
+  const percent = total ? Math.floor(confirmed / total * 100) : 0;
   return <section className="creation-flow" aria-labelledby="creation-result-title">
     {load.error && <div role="alert">{load.error}<p>Resultado anterior. Atualize a leitura antes de uma nova ação.</p></div>}
-    <div className={`creation-result-banner ${complete ? 'is-complete' : creation.state === 'partial' || creation.state === 'failed' ? 'is-problem' : ''}`}><span className="eyebrow">{creation.plan.input.name}</span><h3 id="creation-result-title">{heading}</h3><p>{complete ? 'O projeto foi criado e cadastrado. Abra sua configuração para conferir os pré-requisitos e preparar uma issue.' : 'O trabalho confirmado foi preservado. Confira as etapas pendentes e consulte novamente antes de continuar.'}</p></div>
+    <div className={`creation-result-banner ${complete ? 'is-complete' : creation.state === 'partial' || creation.state === 'failed' ? 'is-problem' : ''}`}><span className="eyebrow">{creation.plan.input.name}</span><h3 id="creation-result-title">{heading}</h3><p>{complete ? 'O projeto foi criado e cadastrado. Abra sua configuração para conferir os pré-requisitos e preparar uma issue.' : creation.state === 'running' || creation.state === 'pending' ? 'Acompanhe as etapas abaixo. O progresso é atualizado automaticamente.' : 'O trabalho confirmado foi preservado. Confira a pendência para continuar.'}</p></div>
+    <div className="creation-progress" aria-label="Progresso da criação"><div><b>{confirmed} de {total} etapas confirmadas</b><span>{percent}%</span></div><progress max={Math.max(total, 1)} value={confirmed} aria-label="Etapas confirmadas" /><small>Progresso por etapas confirmadas</small></div>
     <dl className="creation-result-grid"><div><dt>Pasta</dt><dd><code>{creation.plan.destination}</code></dd></div><div><dt>Modalidade</dt><dd>{modeLabels[creation.plan.input.creation_mode]}</dd></div><div><dt>Branch-base</dt><dd>{creation.plan.input.base_branch}</dd></div><div><dt>Conta</dt><dd>{creation.plan.account.login ?? 'Não confirmada'}</dd></div>
       <div><dt>Quadro Kanban</dt><dd>{boardName ?? 'Aguardando confirmação'}</dd>{boardUrl && <a href={boardUrl} target="_blank" rel="noreferrer">Abrir quadro</a>}</div>
       <div><dt>Próxima ação</dt><dd>{{ wait: 'Aguardar conclusão', reconcile: 'Reconciliar os efeitos incertos', create_new_plan: 'Revisar e autorizar um novo plano', review_effect: 'Revisar o efeito pendente', none: 'Nenhuma ação pendente' }[nextAction]}</dd></div></dl>
     {creation.plan.input.creation_mode === 'local' && <p>O projeto está somente nesta máquina. Confirme um remoto GitHub antes de iniciar uma issue.</p>}
     {creation.plan.input.creation_mode === 'remote_no_push' && <p>O repositório remoto foi solicitado sem envio do commit inicial. Confira os efeitos abaixo; a publicação do conteúdo local ainda precisa ser feita.</p>}
-    <div className="creation-progress-grid"><div><h4>Etapas confirmadas</h4><ul>{confirmedEffects.map((item) => <li key={item.step}>{stepLabels[item.step]}: <OperatorState value={item.state} /></li>)}</ul></div><div><h4>Etapas locais pendentes ou incertas</h4><ul>{pendingEffects.map((item) => <li key={item.step}>{stepLabels[item.step]}: <OperatorState value={item.state} /></li>)}</ul>{pendingEffects.length === 0 && <p>Nenhuma etapa local pendente registrada.</p>}</div></div>
-    <div className="creation-effect-list"><h4>Efeitos remotos e pendências</h4>{visibleEffects.length === 0 && <p>Nenhum efeito remoto solicitado.</p>}{visibleEffects.map((effect) => <div key={`${effect.kind}:${effect.operation_id}`}><div className="creation-effect-row"><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><span className={`pill ${effect.state === 'confirmed' ? '' : 'warn'}`}><OperatorState value={effect.state} /></span></div><small>{effect.source}</small>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state={effect.state === 'confirmed' ? 'passed' : 'blocked'} />}</div>)}</div>
-    {load.view.board_operations.length > 0 && <div className="creation-effect-list"><h4>Quadro Kanban e vínculo</h4>{load.view.board_operations.map((effect) => <div key={effect.operation_id}><div className="creation-effect-row"><b>{stepLabels[effect.kind]}</b><OperatorState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state="blocked" />}</div>)}</div>}
-    <CreationConditions creationId={creationId} />
+    <div className="creation-effect-list"><h4>Etapas locais</h4>{[...confirmedEffects, ...pendingEffects].map((item) => <div key={item.step} className="creation-effect-row"><b>{stepLabels[item.step]}</b><CreationStepState value={item.state} /></div>)}</div>
+    <div className="creation-effect-list"><h4>Efeitos remotos e pendências</h4>{visibleEffects.length === 0 && <p>Nenhum efeito remoto solicitado.</p>}{visibleEffects.map((effect) => <div key={`${effect.kind}:${effect.operation_id}`}><div className="creation-effect-row"><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><CreationStepState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state={effect.state === 'confirmed' ? 'passed' : 'blocked'} />}</div>)}</div>
+    {load.view.board_operations.length > 0 && <div className="creation-effect-list"><h4>Quadro Kanban e vínculo</h4>{load.view.board_operations.map((effect) => <div key={effect.operation_id}><div className="creation-effect-row"><b>{stepLabels[effect.kind]}</b><CreationStepState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state="blocked" />}</div>)}</div>}
     {(creation.diagnostic || diagnostics.length > 0) && <div className="read-state" role="alert"><b>A criação precisa de atenção</b>{[...new Set([creation.diagnostic, ...diagnostics].filter((code): code is string => Boolean(code)))].map(code => <div key={code}><code>{code}</code><OperatorDiagnosticCard code={code} state="blocked" /></div>)}</div>}
     {prerequisites.length > 0 && <div className="notice"><b>Antes de iniciar uma issue</b>{prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} projectId={creation.project_id} />)}</div>}
 

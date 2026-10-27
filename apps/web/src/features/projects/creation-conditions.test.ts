@@ -39,23 +39,16 @@ async function mount() {
   return container;
 }
 function button(container: HTMLElement, name: string) { const node = [...container.querySelectorAll('button')].find((item) => item.textContent === name); if (!node) throw new Error(name); return node; }
-it('keeps conditions visually stable during a background read while blocking verification effects', async () => {
+it('shows confirmed progress and removes manual diagnostic controls', async () => {
   const container = await mount();
-  const region = container.querySelector('[aria-label="Condições da criação"]')!;
-  const text = region.textContent;
-  const normal = request.getMockImplementation()!;
-  let finish: ((value: unknown) => void) | undefined;
-  request.mockImplementation((path: string, init?: RequestInit) => path.startsWith('/api/v1/diagnostics') && !init?.method
-    ? new Promise(resolve => { finish = resolve; }) : normal(path, init));
-  await act(async () => { window.dispatchEvent(new Event('factory-controller-resync')); await new Promise(resolve => setTimeout(resolve, 130)); });
-  expect(region.textContent).toBe(text);
-  expect(button(container, 'Verificar recursos').disabled).toBe(false);
-  expect(button(container, 'Verificar recursos').getAttribute('aria-disabled')).toBe('true');
-  await act(async () => button(container, 'Verificar recursos').click());
-  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
-  await act(async () => finish?.(await normal(`/api/v1/diagnostics?scope=creation&id=${id}`)));
-  expect(region.textContent).toBe(text);
-  expect(button(container, 'Verificar recursos').getAttribute('aria-disabled')).toBe('false');
+  const progress = container.querySelector('progress')!;
+  expect(progress.value).toBe(1);
+  expect(progress.max).toBe(2);
+  expect(container.textContent).toContain('1 de 2 etapas confirmadas');
+  expect(container.textContent).toContain('50%');
+  expect(container.textContent).not.toContain('Verificar recursos');
+  expect(container.querySelector('[aria-label="Condições da criação"]')).toBeNull();
+  expect(request.mock.calls.some(([path]) => path.startsWith('/api/v1/diagnostics'))).toBe(false);
 });
 it('keeps completion independent, renders each remote effect once and opens with GET only', async () => {
   const container = await mount();
@@ -65,22 +58,6 @@ it('keeps completion independent, renders each remote effect once and opens with
   expect(container.textContent).not.toContain('Maestri');
   expect(button(container, 'Abrir configuração do projeto')).toBeDefined();
   expect(request.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
-});
-it('keeps the original verification error through receipt failure and reopening without another POST', async () => {
-  let container = await mount();
-  await act(async () => button(container, 'Verificar recursos').click());
-  expect(container.textContent).toContain('Falha original da verificação.');
-  await act(async () => button(container, 'Consultar resultado original').click());
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
-  expect(container.textContent).toContain('Falha original da verificação.');
-  expect(container.textContent).toContain('Não foi possível consultar');
-  await act(async () => roots.pop()!.unmount());
-  container = await mount();
-  expect(container.textContent).toContain('Falha original da verificação.');
-  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
-  const [path, init] = request.mock.calls.find(([, options]) => options?.method === 'POST')!;
-  expect(path).toContain(`scope=creation&id=${id}`);
-  expect(JSON.parse(String(init.body))).toEqual({ checks: ['resources'] });
 });
 it('merges only matching remote operation identities and never mutates the sources', () => {
   const data = structuredClone(view);
