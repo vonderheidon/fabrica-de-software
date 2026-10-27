@@ -52,7 +52,8 @@ function fixture() {
     getIssueContextById: vi.fn(async () => complete(structuredClone(issue))),
     getProject: vi.fn(async () => complete(structuredClone(project))),
     listProjectItems: vi.fn(async () => complete([
-      { id: 'ITEM_test', kind: 'issue' as const, archived: false, contentId: issue.id, title: issue.title, url: issue.url, executable: true },
+      { id: 'ITEM_test', kind: 'issue' as const, archived: false, contentId: issue.id, title: issue.title, url: issue.url, executable: true, status: { fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready } },
+      { id: 'ITEM_ready2', kind: 'issue' as const, archived: false, contentId: 'I_second', title: 'Second Ready issue', url: issue.url, executable: true, status: { fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready } },
       { id: 'ITEM_pr', kind: 'pull_request' as const, archived: false, contentId: 'PR_test', title: 'Pull request', url: `${repository.url}/pull/20`, executable: false },
     ])),
   };
@@ -215,7 +216,22 @@ describe('persistent preparation HTTP contracts', () => {
     const first = await f.app.inject({ url: `${url}?limit=1`, headers }); expect(first.statusCode, first.body).toBe(200);
     const page = first.json<{ next_cursor: string; has_more: boolean }>(); expect(page.has_more).toBe(true);
     const second = await f.app.inject({ url: `${url}?limit=1&cursor=${page.next_cursor}`, headers }); expect(second.statusCode).toBe(200);
-    const all = await f.preparations.listIssues(f.projectId, {}); expect(all.items.find((v) => v.kind === 'pull_request')?.executable).toBe(false);
+    const all = await f.preparations.listIssues(f.projectId, {}); expect(all.items.every((v) => v.kind === 'issue')).toBe(true);
     await expect(f.preparations.listIssues(f.projectId, { cursor: page.next_cursor, search: 'other' })).rejects.toMatchObject({ code: 'ISSUE_OPTIONS_CHANGED' });
+  });
+  it('only lists unarchived issues with the configured Ready status and field', async () => {
+    const f = fixture();
+    const base = { id: 'ITEM', kind: 'issue' as const, archived: false, contentId: f.issue.id, title: 'Issue', url: f.issue.url, executable: true };
+    const items = [
+      ...Object.values(mapping.status_option_ids).map((optionId) => ({ ...base, id: optionId, status: { fieldId: mapping.status_field_id, optionId } })),
+      { ...base, id: 'missing' },
+      { ...base, id: 'unset', status: { fieldId: mapping.status_field_id, optionId: null } },
+      { ...base, id: 'wrong-field', status: { fieldId: 'OTHER', optionId: mapping.status_option_ids.ready } },
+      { ...base, id: 'archived', archived: true, status: { fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready } },
+      { ...base, id: 'pr', kind: 'pull_request' as const, status: { fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready } },
+    ];
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete(items));
+    expect((await f.preparations.listIssues(f.projectId, {})).items.map((item) => item.id)).toEqual(['READY']);
+    expect((await f.preparations.listIssues(f.projectId, { search: 'absent' })).items).toEqual([]);
   });
 });

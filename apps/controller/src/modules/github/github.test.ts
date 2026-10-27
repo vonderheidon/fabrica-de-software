@@ -143,11 +143,15 @@ describe('complete repository and Project queries', () => {
       http({ data: { node: { ...wireProject, __typename: 'ProjectV2' } } }),
       http({ data: { node: { fields: page([], 'fields2') } } }),
       http({ data: { node: { fields: page([{ __typename: 'ProjectV2Field', id: 'PRIORITY', name: 'Priority', dataType: 'NUMBER' }]) } } }),
-      http({ data: { node: { items: page([{ id: 'ITEM9', isArchived: false, content: { __typename: 'Issue', id: 'I9', title: 'Ninth', url: 'https://github.com/o/r/issues/9' } }], 'items2') } } }),
+      http({ data: { node: { items: page([{ id: 'ITEM9', isArchived: false, status: { optionId: 'READY', field: { id: 'STATUS' } }, content: { __typename: 'Issue', id: 'I9', title: 'Ninth', url: 'https://github.com/o/r/issues/9' } }], 'items2') } } }),
       http({ data: { node: { items: page([{ id: 'ITEM1', isArchived: false, content: { __typename: 'Issue', id: 'I1', title: 'First', url: 'https://github.com/o/r/issues/1' } }]) } } }),
     ]);
     expect(await f.client.getProject('PVT_1')).toMatchObject({ state: 'complete', data: { numberFields: [{ id: 'PRIORITY', name: 'Priority' }] } });
-    expect((await f.client.listProjectItems('PVT_1')).data?.map((item) => [item.id, item.position])).toEqual([['ITEM9', 1], ['ITEM1', 2]]);
+    const items = (await f.client.listProjectItems('PVT_1')).data;
+    expect(items?.map((item) => [item.id, item.position])).toEqual([['ITEM9', 1], ['ITEM1', 2]]);
+    expect(items?.[0]?.status).toEqual({ fieldId: 'STATUS', optionId: 'READY' });
+    expect(items?.[1]?.status).toBeUndefined();
+    expect(f.calls[3]?.query).toContain('status: fieldValueByName(name:"Status")');
     expect(f.calls[3]?.query).toContain('orderBy:{field:POSITION,direction:ASC}');
     expect(f.calls[4]?.variables.cursor).toBe('items2');
   });

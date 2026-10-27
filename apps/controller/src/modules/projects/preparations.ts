@@ -286,8 +286,10 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
       const observation = await github.listProjectItems(mapping.id);
       if (storage.getConfiguration(projectId).etag !== config.etag) fail(412, 'REVISION_CONFLICT', 'Configuration changed during issue selection.');
       const search = (query.search ?? '').toLocaleLowerCase('en');
-      const items = (observation.data ?? []).filter((item) => (item.title ?? '').toLocaleLowerCase('en').includes(search)).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
-        .map(({ contentId, ...item }) => ({ ...item, content_id: contentId, executable: item.kind === 'issue' && !item.archived && observation.state === 'complete',
+      const items = (observation.data ?? []).filter((item) => item.kind === 'issue' && !item.archived &&
+        item.status?.fieldId === mapping.status_field_id && item.status.optionId === mapping.status_option_ids.ready &&
+        (item.title ?? '').toLocaleLowerCase('en').includes(search)).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+        .map(({ contentId, status: _status, ...item }) => ({ ...item, content_id: contentId, executable: item.kind === 'issue' && !item.archived && observation.state === 'complete',
           reasons: item.kind !== 'issue' ? ['NOT_AN_ISSUE'] : item.archived ? ['PROJECT_ITEM_ARCHIVED'] : ['ISSUE_REVALIDATION_REQUIRED'] }));
       const scope = preparationDigest([config.view.settings.installation_id, config.view.settings.account_id, projectId, config.etag, search, observation.state, items]);
       let offset = 0;

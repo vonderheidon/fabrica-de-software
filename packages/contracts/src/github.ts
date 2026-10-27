@@ -62,6 +62,7 @@ export const ProjectItem = Type.Object({
   contentId: Type.Union([GitHubId, Type.Null()]), title: Type.Union([text(65536), Type.Null()]),
   url: Type.Union([text(), Type.Null()]), executable: Type.Boolean(),
   position: Type.Optional(Type.Integer({ minimum: 1 })),
+  status: Type.Optional(Type.Object({ fieldId: GitHubId, optionId: Type.Union([GitHubId, Type.Null()]) }, closed)),
 }, closed);
 export type ProjectItem = Static<typeof ProjectItem>;
 export const IssueComment = Type.Object({
