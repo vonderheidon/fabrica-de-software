@@ -16,14 +16,13 @@ export function hostContext(args = []) {
   }
   const cwd = fileURLToPath(new URL('../', import.meta.url));
   const selection = createWindowsNativeSelection(cwd);
-  const context = { discoverTools: true, githubAccess: { kind: /** @type {const} */ ('windows_keyring'), cwd }, ...selection };
+  const context = { discoverTools: true, githubAccess: { kind: /** @type {const} */ ('windows_keyring'), cwd }, scaffoldAuthorization: { kind: /** @type {const} */ ('confirmed_plan') }, ...selection };
   if (args.length === 0) return context;
   const git = args[0]; const maestri = args[1]; const omp = args[2]; const powershell = args[3];
   if (!git || !maestri || !omp || !powershell) return context;
   return {
     ...context,
     git: { kind: /** @type {const} */ ('windows_keyring'), executable: resolve(git), cwd },
-    scaffoldAuthorization: { kind: /** @type {const} */ ('confirmed_plan') },
     execution: { maestriExecutable: resolve(maestri), ompExecutable: resolve(omp), powershellExecutable: resolve(powershell), inheritedEnvironment: process.env },
   };
 }
