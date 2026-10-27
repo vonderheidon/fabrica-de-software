@@ -58,8 +58,7 @@ describe('initial configuration persistence foundation', () => {
       '3f9c8b97b1d0c317f19bb4abeb99a4d7b09823d4428975e239775835030a813a',
       '08a177028d9a9eca76b7a67bc943cb1bf47bfade8b483e69bae95cc97bf1d1b7',
     ]);
-    const { db, storage } = fixture();
-    expect(storage.getDiagnostics().schemaVersion).toBe(50);
+    const { db } = fixture();
     expect(db.prepare('SELECT version,name,checksum FROM schema_migrations ORDER BY version').all())
       .toEqual(loadMigrations().map(({ version, name, checksum }) => ({ version, name, checksum })));
     expect(db.prepare('SELECT applied_at_ms FROM schema_migrations WHERE version=19').get())

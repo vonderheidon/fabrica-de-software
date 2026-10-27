@@ -34,6 +34,7 @@ import type { ToolObservation } from '#contracts';
 export { WorkspacePreparationError } from './prepare.js';
 
 export type { GitContext } from './git.js';
+export { gitSafety } from './git.js';
 export { TargetError } from './publication-target.js';
 export type { TargetIdentity } from './publication-target.js';
 export type { DeliveryTaskInput, DeliveryTargetInspection, TargetCommitResult } from './delivery-target.js';

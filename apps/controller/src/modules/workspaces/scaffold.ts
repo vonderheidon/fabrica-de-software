@@ -3,7 +3,7 @@ import { access, lstat, open, realpath } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path';
 import type { ScaffoldPlan, CreationStep } from '#contracts';
-import type { GitReader } from './git.js';
+import { GitReadError, type GitReader, type GitResponse } from './git.js';
 import { acquireScaffoldPathGuard, ScaffoldWorkspaceError, type ScaffoldPathGuardFactory } from './scaffold-path-guard.js';
 
 export { ScaffoldWorkspaceError } from './scaffold-path-guard.js';
@@ -63,8 +63,16 @@ export function createLocalScaffolder(git?: GitReader, acquireGuard: ScaffoldPat
         pathParts(file.path); const expected = plan.files.find(f => f.path === file.path);
         return !expected || expected.bytes !== Buffer.byteLength(file.content) || expected.sha256 !== createHash('sha256').update(file.content).digest('hex');
       })) throw new ScaffoldWorkspaceError('SCAFFOLD_PLAN_CHANGED');
-      const identity = await Promise.all(['user.name', 'user.email'].map(key => git(plan.projectsRoot, ['config', '--get', key])));
-      if (identity.some(value => value.exitCode !== 0 || !value.stdout.trim() || /[\r\n\x00<>]/.test(value.stdout.trim()))) throw new ScaffoldWorkspaceError('SCAFFOLD_GIT_IDENTITY_REQUIRED');
+      const identity = await Promise.all(['user.name', 'user.email'].map(async key => {
+        let value: GitResponse;
+        try { value = await git(plan.projectsRoot, ['config', '--get', key]); }
+        catch (error) { throw new ScaffoldWorkspaceError(error instanceof GitReadError ? error.code : 'SCAFFOLD_GIT_CONFIG_FAILED'); }
+        // --get returns 1 only for an absent key. Usage/configuration failures
+        // (including unsupported global options) must retain their real exit.
+        if (value.exitCode !== 0 && value.exitCode !== 1) throw new ScaffoldWorkspaceError(`SCAFFOLD_GIT_CONFIG_FAILED_EXIT_${value.exitCode}`);
+        return value;
+      }));
+      if (identity.some(value => value.exitCode === 1 || !value.stdout.trim() || /[\r\n\x00<>]/.test(value.stdout.trim()))) throw new ScaffoldWorkspaceError('SCAFFOLD_GIT_IDENTITY_REQUIRED');
       const [authorName, authorEmail] = identity.map(value => value.stdout.trim());
       // Pin before revalidation and keep the same guard through every write.
       // Directory creation also runs in the helper that owns the pinned handles.

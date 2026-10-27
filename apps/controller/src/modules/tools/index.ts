@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { access, stat } from 'node:fs/promises';
 import { delimiter, join, win32 } from 'node:path';
 import type { ToolOptions, ToolPreferences } from '#contracts';
+import { gitSafety } from '../workspaces/index.js';
 
 export type ManagedTool = 'git' | 'maestri' | 'omp' | 'powershell';
 type ExecutableTool = ManagedTool | 'gh';
@@ -57,14 +58,23 @@ export function createToolDetector(dependencies: ToolDetectorDependencies = {}):
   const run = dependencies.run ?? nativeRun;
   const clock = dependencies.clock ?? now;
 
-  async function validate(path: string, tool: ManagedTool): Promise<ToolCandidate | null> {
-    if (platform !== 'win32' || !absoluteWindowsPath(path) || !exeNames[tool].includes(win32.basename(path).toLowerCase())) return null;
+  async function inspect(path: string, tool: ManagedTool): Promise<{ candidate: ToolCandidate | null; unsupported?: boolean }> {
+    if (platform !== 'win32' || !absoluteWindowsPath(path) || !exeNames[tool].includes(win32.basename(path).toLowerCase())) return { candidate: null };
     try {
-      if (!(await checkStat(path)).isFile()) return null;
+      if (!(await checkStat(path)).isFile()) return { candidate: null };
       await checkAccess(path);
       const version = await run(path, commandArgs[tool]);
-      return { path, version: tool === 'omp' ? version.replace(/^omp\//i, '') : version };
-    } catch { return null; }
+      if (tool === 'git') {
+        // A bare --version succeeds on Git 2.43, but does not attest the
+        // no-lazy-fetch protection required by every workspace operation.
+        try { await run(path, [...gitSafety.options, '--version']); }
+        catch { return { candidate: null, unsupported: true }; }
+      }
+      return { candidate: { path, version: tool === 'omp' ? version.replace(/^omp\//i, '') : version } };
+    } catch { return { candidate: null }; }
+  }
+  async function validate(path: string, tool: ManagedTool): Promise<ToolCandidate | null> {
+    return (await inspect(path, tool)).candidate;
   }
 
   async function detectOne(tool: ExecutableTool, preferredPath: string | null, forcedPath?: string | null): Promise<ToolOptions['tools'][ManagedTool]> {
@@ -79,11 +89,16 @@ export function createToolDetector(dependencies: ToolDetectorDependencies = {}):
     const unique = uniquePaths.slice(0, 64);
     const valid: ToolCandidate[] = [];
     let incomplete = directories.length > 128 || uniquePaths.length > 64;
+    let unsupportedGit = false;
     for (const [index, path] of unique.entries()) {
       const found = tool === 'gh' ? await (async () => {
         if (win32.basename(path).toLowerCase() !== 'gh.exe') return null;
         try { if (!(await checkStat(path)).isFile()) return null; await checkAccess(path); return { path, version: await run(path, commandArgs.gh) }; } catch { return null; }
-      })() : await validate(path, tool);
+      })() : await (async () => {
+        const inspected = await inspect(path, tool);
+        unsupportedGit ||= inspected.unsupported === true;
+        return inspected.candidate;
+      })();
       if (found && !valid.some(item => item.path.toLowerCase() === found.path.toLowerCase())) valid.push(found);
       if (valid.length === 8) { incomplete ||= index < unique.length - 1; break; }
     }
@@ -91,8 +106,8 @@ export function createToolDetector(dependencies: ToolDetectorDependencies = {}):
     const selectedCandidate = selected ? valid.find(item => item.path.toLowerCase() === selected.toLowerCase()) : undefined;
     const state = selectedCandidate ? 'available' : valid.length === 1 && !incomplete ? 'available' : valid.length > 1 || incomplete ? 'ambiguous' : 'unavailable';
     return { state, candidates: valid, selected_path: selectedCandidate?.path ?? (valid.length === 1 && !incomplete ? valid[0]!.path : null),
-      diagnostic: state === 'available' ? null : state === 'ambiguous' ? incomplete ? 'TOOL_DISCOVERY_INCOMPLETE' : 'TOOL_SELECTION_AMBIGUOUS' : valid.length === 0 ? 'TOOL_NOT_FOUND' : 'TOOL_UNAVAILABLE',
-      recovery: state === 'available' ? '' : 'Selecione um executável válido ou instale a ferramenta e execute nova detecção.' };
+      diagnostic: state === 'available' ? null : state === 'ambiguous' ? incomplete ? 'TOOL_DISCOVERY_INCOMPLETE' : 'TOOL_SELECTION_AMBIGUOUS' : unsupportedGit ? 'GIT_VERSION_UNSUPPORTED' : valid.length === 0 ? 'TOOL_NOT_FOUND' : 'TOOL_UNAVAILABLE',
+      recovery: state === 'available' ? '' : state === 'unavailable' && unsupportedGit ? `Instale ou selecione Git ${gitSafety.minimumVersion} ou superior com suporte a --no-lazy-fetch e execute nova detecção; a proteção contra fetch implícito não pode ser desativada.` : 'Selecione um executável válido ou instale a ferramenta e execute nova detecção.' };
   }
 
   return {

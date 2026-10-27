@@ -57,7 +57,16 @@ export function acceptCreation(db: Database.Database, command: CreationCommand):
     assertDeletionPathsAvailable(db, [plan.destination]);
     if (plan.installationId !== s.installation_id || plan.settingsETag !== configurationETag(readSettingsView(db)) ||
       (plan.input.creationMode !== 'local' && (!s.account_id || plan.account.id !== s.account_id || plan.account.state !== 'complete' || !plan.input.remote || plan.ownerId !== plan.input.remote.ownerId || !plan.ownerLogin))) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration or account changed. Review a new creation plan.');
-    if (db.prepare('SELECT id FROM project_creations WHERE destination=? COLLATE NOCASE').get(plan.destination)) throw new OperationError(409, 'SCAFFOLD_DESTINATION_RESERVED', 'A creation already identifies this destination. Inspect that creation.');
+    const reserved = db.prepare<[string], { id: string; state: string; diagnostic: string | null }>(`SELECT c.id,c.state,c.diagnostic FROM project_creations c
+      WHERE c.destination=? COLLATE NOCASE AND NOT (
+        c.state='failed' AND c.project_id IS NULL AND c.baseline_sha IS NULL AND c.baseline_ref IS NULL
+        AND NOT EXISTS(SELECT 1 FROM creation_steps s WHERE s.creation_id=c.id)
+        AND NOT EXISTS(SELECT 1 FROM effects e WHERE e.creation_id=c.id)
+        AND NOT EXISTS(SELECT 1 FROM creation_board_operations b WHERE b.creation_id=c.id)
+        AND NOT EXISTS(SELECT 1 FROM creation_reconciliations r WHERE r.creation_id=c.id)
+      ) LIMIT 1`).get(plan.destination);
+    if (reserved) throw new OperationError(409, 'SCAFFOLD_DESTINATION_RESERVED',
+      `Destination reserved by creation ${reserved.id} (${reserved.state}${reserved.diagnostic ? `; ${reserved.diagnostic}` : ''}). Effects may have started; inspect that creation before choosing another destination.`);
     const id = randomUUID();
     db.prepare("INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json) VALUES (?,?,?,'scaffold.create','creation',?,?,'{}',NULL)")
       .run(command.operationId,s.installation_id,s.account_id,id,hashCommand(command));

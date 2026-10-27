@@ -11,6 +11,34 @@ const preferences: ToolPreferences = {
 };
 
 describe('native tool discovery', () => {
+  it('rejects a Git 2.43 executable that reports its version but lacks the no-lazy-fetch protection', async () => {
+    const path = 'C:\\Git 2.43\\cmd\\git.exe';
+    const run = vi.fn(async (_path: string, args: readonly string[]) => {
+      if (args.includes('--no-lazy-fetch')) throw new Error('synthetic-private-stderr');
+      return 'git version 2.43.0.windows.1';
+    });
+    const detector = createToolDetector({ environment: () => ({ PATH: '' }), platform: 'win32',
+      stat: async () => ({ isFile: () => true }), access: async () => {}, run });
+    const stored = { ...preferences, git: { preferred_path: path, last_validated_at_ms: 1 } };
+    expect(await detector.validate(path, 'git')).toBeNull();
+    await expect(detector.stamp(stored, { git: path })).rejects.toThrow('TOOL_PREFERENCE_INVALID');
+    const result = await detector.detect(stored, null);
+    expect(result.git).toMatchObject({ state: 'unavailable', selected_path: null, candidates: [], diagnostic: 'GIT_VERSION_UNSUPPORTED' });
+    expect(result.git.recovery).toContain('2.45.0');
+    expect(JSON.stringify(result)).not.toContain('synthetic-private-stderr');
+    expect(run.mock.calls.every(([, args]) => args.at(-1) === '--version')).toBe(true);
+    expect(run).toHaveBeenCalledWith(path, ['--no-optional-locks', '--no-lazy-fetch', '--version']);
+  });
+  it('approves Git only after the selected executable accepts the protected version probe', async () => {
+    const path = 'C:\\Git 2.45\\cmd\\git.exe';
+    const run = vi.fn(async () => 'git version 2.45.0.windows.1');
+    const detector = createToolDetector({ environment: () => ({ PATH: '' }), platform: 'win32',
+      stat: async () => ({ isFile: () => true }), access: async () => {}, run });
+    const result = await detector.detect({ ...preferences, git: { preferred_path: path, last_validated_at_ms: 1 } }, null);
+    expect(result.git).toMatchObject({ state: 'available', selected_path: path, diagnostic: null,
+      candidates: [{ path, version: 'git version 2.45.0.windows.1' }] });
+    expect(run.mock.calls).toEqual([[path, ['--version']], [path, ['--no-optional-locks', '--no-lazy-fetch', '--version']]]);
+  });
   it('reports the same OMP version format as the execution adapter', async () => {
     const detector = createToolDetector({ platform: 'win32', stat: async () => ({ isFile: () => true }),
       access: async () => {}, run: async () => 'omp/18.12.5' });

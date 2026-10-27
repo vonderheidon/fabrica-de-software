@@ -208,9 +208,12 @@ export function toHttpCreationView(value: Static<typeof CreationView>): Static<t
   const board_url = confirmedGitHubUrl(provenBoard?.project_url);
   const uncertain = value.effects.some(item => item.state === 'running' || item.state === 'unknown') ||
     value.board_operations.some(item => item.state === 'running' || item.state === 'unknown');
+  const failedWithoutEffects = value.creation.state === 'failed' && !value.creation.projectId && !value.creation.baselineSha &&
+    value.confirmedEffects.length === 0 && value.pendingEffects.every(item => item.state === 'not_started') &&
+    value.effects.length === 0 && value.board_operations.length === 0;
   const next_action = value.creation.state === 'completed' ? 'none' as const
     : ['pending','running'].includes(value.creation.state) ? 'wait' as const
-      : value.creation.diagnostic === 'LEGACY_CREATION_REPLAN_REQUIRED' ? 'create_new_plan' as const
+      : failedWithoutEffects || value.creation.diagnostic === 'LEGACY_CREATION_REPLAN_REQUIRED' ? 'create_new_plan' as const
         : uncertain ? 'reconcile' as const : 'review_effect' as const;
   return { creation: toHttpProjectCreation(value.creation), confirmed_effects: value.confirmedEffects, pending_effects: value.pendingEffects,
     effects: value.effects.map(entry1 => (toHttpCreationEffect(entry1))),
