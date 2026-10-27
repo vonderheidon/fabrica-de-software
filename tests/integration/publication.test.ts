@@ -12,6 +12,16 @@ import { observationWire } from '../fixtures/observation-wire.js';
 import { BackendMeasurement } from '../fixtures/backend-measurement.js';
 
 const fixtures: PublicationFixture[] = [];
+
+it('respects a preparation branch override throughout authority checks and delivery', async () => {
+  const f = await publicationFixture(true, 'icr', true, { baseBranch: 'feat/landing' }); fixtures.push(f);
+  expect(f.storage.getConfiguration(f.projectId).view.configuration.base_branch).toBe('main');
+  expect(f.status().suspension).toBeNull();
+  expect(f.status().phase).toBe('implementing');
+  await f.implement(); await f.approve();
+  expect(f.status().suspension).toBeNull();
+  expect(f.status().result).toBe('delivered');
+});
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 async function fixture() { const f = await publicationFixture(); fixtures.push(f); return f; }
 function publicationServiceFixture(f: PublicationFixture, storage = f.storage) {

@@ -79,7 +79,7 @@ export function createPublication(deps: PublicationDependencies) {
         if (projectResult.state !== 'complete' || repositoryResult.state !== 'complete' || !project || !repositoryResult.data) observation.reason = 'AUTHORITY_UNAVAILABLE';
         else if (project.project.id !== mapping.id || project.project.owner.id !== mapping.owner_id || project.project.closed || repositoryResult.data.id !== capture.issue.repository.id || repositoryResult.data.isArchived ||
           membership.length !== 1 || membership[0]!.archived || membership[0]!.itemId !== capture.issue.memberships.find(m => m.projectId === mapping.id)?.itemId || values.length !== 1 ||
-          snapshot.configuration.configuration.base_branch !== capture.configuration.configuration.base_branch ||
+          (capture.configuration.origins.base_branch === 'project' && snapshot.configuration.configuration.base_branch !== capture.configuration.configuration.base_branch) ||
           !Object.values(mapping.status_option_ids).every(option => project.singleSelectFields.find(f => f.id === mapping.status_field_id)?.options.some(o => o.id === option))) observation.reason = 'PUBLICATION_CONFIGURATION_CHANGED';
         else {
           const pendingSameStage = snapshot.effects.some(e => e.kind === 'project_status' && e.expectedIdentity.optionId === mapping.status_option_ids[statusKey(stage)] && ['running','unknown','confirmed'].includes(e.state));

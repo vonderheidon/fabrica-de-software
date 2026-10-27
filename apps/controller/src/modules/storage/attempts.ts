@@ -145,10 +145,10 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     const active = db.prepare<[string, string, string], { id: string }>('SELECT id FROM attempts WHERE account_id=? AND repository_id=? AND issue_id=? AND result IS NULL')
       .get(capture.accountId, capture.issue.repository.id, capture.issue.id);
     if (active) throw new AttemptConflict(active.id);
-    // A first manual start cannot repeat a consumed issue after failure/restart. Retry is a separate explicit command.
-    const previous = db.prepare('SELECT id FROM attempts WHERE account_id=? AND repository_id=? AND issue_id=?').get(capture.accountId, capture.issue.repository.id, capture.issue.id);
+    // A new preparation is a fresh authorization; an accepted preparation must not dispatch twice.
+    const previous = db.prepare('SELECT id FROM attempts WHERE preparation_id=?').get(preparation.view.id);
     if (preparation.view.previous_attempt_id) validatePreviousAttempt(db, preparation.view.previous_attempt_id, preparation.view.project_id, capture.issue.id);
-    else if (previous && !input.queueCycle) throw new OperationError(409, 'EXPLICIT_RETRY_REQUIRED', 'This issue has already started. Prepare an explicit new attempt.');
+    else if (previous && !input.queueCycle) throw new OperationError(409, 'EXPLICIT_RETRY_REQUIRED', 'This preparation has already started. Create a new preparation for another attempt.');
     const id = randomUUID(); const passageId = randomUUID(); const deliveryVersion = randomUUID(); const now = Date.now();
     const suspension = capture.tools.some(t => t.state === 'unavailable') ? 'TOOL_VERSION_UNAVAILABLE' : null;
     const seq = Number(eventCursor(db)) + 1;

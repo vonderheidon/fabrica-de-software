@@ -9,7 +9,7 @@ import type { GitHubEffectRequest } from '../../apps/controller/src/modules/gith
 import type { Workspaces } from '../../apps/controller/src/modules/workspaces/index.js';
 
 export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
-  options: { temporaryRoot?: string; checks?: CheckDefinition[]; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch'] } = {}) {
+  options: { baseBranch?: string; temporaryRoot?: string; checks?: CheckDefinition[]; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch'] } = {}) {
   const f = await attemptFixture(options.temporaryRoot, options.baseSha); await f.pipeline.close();
   if (options.checks || options.correctionLimit !== undefined || options.deliveryBranch !== undefined) {
     const current = f.storage.getConfiguration(f.projectId);
@@ -74,7 +74,8 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
     materializeReview: vi.fn(async (d: { attemptId: string }, id: string) => join(f.directory,'work',d.attemptId,'reviews',id,'checkout')) };
   const verification = { getArtifact, verifyDelivery: vi.fn(async (id: string) => { const run = f.storage.beginVerification(id); f.storage.finishVerification(run.id); }) };
   const pipeline = createPipeline({ ...f.dependencies, github, workspaces, verification, ...(composed ? { publication: { github, workspaces, verification } } : {}) });
-  const prepare = await f.prepare(f.projectId,mode,options.targetKind,options.targetForIcr ?? false); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
+  if (options.baseBranch) { f.observation.base!.branch = options.baseBranch; f.observation.remote!.branch!.name = options.baseBranch; }
+  const prepare = await f.prepare(f.projectId,mode,options.targetKind,options.targetForIcr ?? false,options.baseBranch); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
   const attemptId = op.resource.id;
   const status = () => f.storage.getAttempt(attemptId);
   const context = () => ({ operationId: randomUUID(), expectedRevision: `"${attemptId}:${status().revision}"` });

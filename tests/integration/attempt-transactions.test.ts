@@ -36,12 +36,30 @@ describe('atomic attempt acceptance', () => {
     expect(f.storage.getOperation(c.context.operationId)).toBeNull(); expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
     await f.pipeline.startAttempt(c.body, c.context); await f.pipeline.drain(); expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
   });
-  it('does not repeat a previously consumed manual issue after restart', async () => {
+  it('does not repeat an already accepted preparation after restart', async () => {
     const f = await fixture(); const c = await f.prepare(); const op = await f.pipeline.startAttempt(c.body, c.context); await f.pipeline.drain();
     f.storage.interruptAttempts();
     expect(f.storage.getAttempt(op.resource.id).result).toBe('interrupted');
     await expect(f.pipeline.startAttempt(c.body, { ...c.context, operationId: randomUUID() })).rejects.toMatchObject({ code: 'EXPLICIT_RETRY_REQUIRED' });
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
+  });
+  it('accepts a fresh manual preparation for an interrupted issue using the newly selected branch', async () => {
+    const f = await fixture(); const first = await f.prepare();
+    const original = await f.pipeline.startAttempt(first.body, first.context); await f.pipeline.drain();
+    f.storage.interruptAttempts();
+    const branch = 'feat/landing'; const sha = 'b'.repeat(40);
+    f.observation.base = { branch, sha, observedFrom: 'github' };
+    f.observation.remote!.branch = { repositoryId: f.issue.repository.id, name: branch, sha };
+    const saved = await f.preparations.createPreparation(f.projectId, {
+      issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: { base_branch: branch },
+    }, { operationId: randomUUID(), expectedRevision: undefined });
+    const p = saved.view.preparation;
+    const next = await f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision,
+      authorizedSummaryHash: p.summary_hash, authorized: true }, { operationId: randomUUID(), expectedRevision: saved.etag });
+    await f.pipeline.drain();
+    expect(next.resource.id).not.toBe(original.resource.id);
+    expect(f.storage.getAttempt(original.resource.id).result).toBe('interrupted');
+    expect(f.workspaces.prepareAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ baseSha: sha }));
   });
   it('automatically consumes one durable Ready cycle and rearms only after observed exit and eligible return', async () => {
     const f = await fixture();
