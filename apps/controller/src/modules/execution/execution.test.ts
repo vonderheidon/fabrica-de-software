@@ -233,6 +233,21 @@ describe('shutdown coordination', () => {
     await f.execution.close();
     await restarted.close();
   });
+  it.each(['confirmed', 'uncertain'] as const)('stops a persisted terminal after restart with result %s', async state => {
+    const f = fixture(); await f.start();
+    f.confirmStoppedTerminal.mockResolvedValue(false);
+    const handle = { passageId: f.request.binding.passageId };
+    const session = f.store.getAttemptSession(handle);
+    const native = { ...f.runtime, stop: vi.fn(async () => state) };
+    const restarted = createMaestriOmp({ dataDirectory: 'C:\\Dados', host, persistence: f.store }, loadRoleResources(), { native });
+    vi.mocked(f.store.recordStop).mockClear();
+    const result = await restarted.cancelAttempt(f.request.binding.attemptId, randomUUID());
+    expect(native.stop).toHaveBeenCalledWith(session.terminalName,
+      { workspaceId: session.workspaceId, terminalId: session.terminalId }, session.generation);
+    expect(result).toEqual([{ passageId: handle.passageId, state }]);
+    expect(f.store.recordStop).toHaveBeenCalledWith(handle, { passageId: handle.passageId, state });
+    await f.execution.close(); await restarted.close();
+  });
   it('settles answer waits without replay and shares an idempotent close promise', async () => {
     const f = fixture(); const ready = await f.start();
     const question = await f.call('execution_question', { formatVersion: 1, decision: 'Escolha?', context: 'Contexto 😀', alternatives: ['Manter', 'Alterar'] });
@@ -438,7 +453,7 @@ describe('native Maestri and Windows launch', () => {
     expect(await native.stop(name)).toBe('uncertain');
     stopPendingTerminal.mockResolvedValue(true);
     expect(await native.stop(name, { workspaceId, terminalId: randomUUID() }, 2)).toBe('confirmed');
-    expect(stopPendingTerminal).toHaveBeenLastCalledWith({ workspaceId, terminalName: name, generation: 2 });
+    expect(stopPendingTerminal).toHaveBeenLastCalledWith({ workspaceId, terminalName: name, terminalId: expect.any(String), generation: 2 });
     await expect(native.stop('manual')).rejects.toThrow('RESOURCE_INVALID');
     expect(stopPendingTerminal).toHaveBeenCalledTimes(3); expect(run).not.toHaveBeenCalled();
   });

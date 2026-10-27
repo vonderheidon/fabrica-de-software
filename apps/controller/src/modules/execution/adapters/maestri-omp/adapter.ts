@@ -456,7 +456,23 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       const handles = store.recordCancellation(attemptId, operationId);
       return Promise.all(handles.map(async handle => {
         const entry = live.get(handle.passageId);
-        if (!entry) { const record = store.getPassage(handle); const receipt: StopReceipt = { passageId: handle.passageId, state: record.requestHash ? 'uncertain' : 'confirmed' }; store.recordStop(handle, receipt); return receipt; }
+        if (!entry) {
+          const record = store.getPassage(handle);
+          let state: StopReceipt['state'] = record.requestHash ? 'uncertain' : 'confirmed';
+          if (record.requestHash) {
+            try {
+              const session = store.getAttemptSession(handle);
+              const identity = session.workspaceId && session.terminalId
+                ? { workspaceId: session.workspaceId, terminalId: session.terminalId } : undefined;
+              const confirmed = identity && await options.host?.confirmStoppedTerminal?.({ ...identity,
+                terminalName: session.terminalName, generation: session.generation });
+              state = confirmed ? 'confirmed' : await (await native()).stop(session.terminalName, identity, session.generation);
+            } catch { state = 'uncertain'; }
+          }
+          const receipt: StopReceipt = { passageId: handle.passageId, state };
+          store.recordStop(handle, receipt);
+          return receipt;
+        }
         entry.cancelled = true; interrupt(entry, 'CANCELLED');
         await entry.channel?.close();
         return stop(entry);

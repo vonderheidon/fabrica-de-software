@@ -67,6 +67,35 @@ it('owns a single effect across concurrent schedules and resumes, without timeou
   expect(f.db.prepare('SELECT * FROM project_deletion_targets').all()).toEqual([]);
 });
 
+it('prepares owned work after durable acceptance and before removing any target', async () => {
+  const f = await fixture();
+  let release!: () => void;
+  const wait = new Promise<void>(resolve => { release = resolve; });
+  const prepareAttempts = vi.fn(async () => {
+    expect(f.storage.getProjectDeletion(f.id)).toMatchObject({ state: 'accepted' });
+    expect(f.remove).not.toHaveBeenCalled();
+    await wait;
+  });
+  const coordinator = createDeletionCoordinator({ storage: f.storage, workspaces: f.workspaces, logFailure: f.logFailure, prepareAttempts });
+  const task = coordinator.schedule(f.id);
+  await vi.waitFor(() => expect(prepareAttempts).toHaveBeenCalledWith([], f.id));
+  expect(f.remove).not.toHaveBeenCalled();
+  release(); await task;
+  expect(f.storage.getProjectDeletion(f.id)).toEqual({ operation_id: f.id, state: 'succeeded' });
+});
+
+it('preserves authorization without removal when stopping work fails and retries preparation', async () => {
+  const f = await fixture();
+  const prepareAttempts = vi.fn().mockRejectedValueOnce(new Error('STOP_UNCONFIRMED')).mockResolvedValueOnce(undefined);
+  const coordinator = createDeletionCoordinator({ storage: f.storage, workspaces: f.workspaces, logFailure: f.logFailure, prepareAttempts });
+  await coordinator.schedule(f.id);
+  expect(f.remove).not.toHaveBeenCalled();
+  expect(f.storage.getProjectDeletion(f.id)).toMatchObject({ state: 'pending', can_retry: true });
+  await coordinator.resume(f.id); await coordinator.drain();
+  expect(prepareAttempts).toHaveBeenCalledTimes(2);
+  expect(f.storage.getProjectDeletion(f.id)).toEqual({ operation_id: f.id, state: 'succeeded' });
+});
+
 it.each(['recreated', 'unobservable'])('rechecks absence after removal and refuses a %s target before the SQL commit', async failure => {
   const f = await fixture();
   const reconcile = f.workspaces.reconcileProjectDeletion;

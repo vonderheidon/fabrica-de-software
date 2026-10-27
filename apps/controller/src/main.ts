@@ -82,7 +82,11 @@ export async function startController(hostContext: ControllerHostContext = {}, d
     const activeExecution = execution;
     const preparations = createPreparations({ storage, github, workspaces });
     const logFailure = (code: string) => console.error(JSON.stringify({ level: 'error', code, message: 'Pipeline operation failed.' }));
-    deletions = createDeletionCoordinator({ storage, workspaces, logFailure });
+    deletions = createDeletionCoordinator({ storage, workspaces, logFailure,
+      prepareAttempts: async (ids, operationId) => {
+        if (!pipeline) throw new Error('PIPELINE_UNAVAILABLE');
+        await pipeline.prepareProjectDeletion(ids, operationId);
+      } });
     const verification = createVerification({ storage, workspaces, dataDirectory: configuration.dataDirectory, logFailure });
     const queue = createQueue({ storage, github, workspaces });
     pipeline = createPipeline({ storage, execution, preparations, workspaces, verification, github, queue, publication: { github, workspaces, verification },

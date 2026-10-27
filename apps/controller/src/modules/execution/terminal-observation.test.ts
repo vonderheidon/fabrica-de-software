@@ -88,6 +88,21 @@ describe.skipIf(process.platform !== 'win32')('terminal availability after contr
       expect(await f.observe()).toBe(false);
     }
   });
+  it('releases a persisted launch only on confirmed native absence, not disconnection', async () => {
+    const f = await fixture();
+    const restarted = withWindowsTerminalJobs(f.host, process.cwd());
+    f.reply({ terminals: [] });
+    expect(await restarted.confirmStoppedTerminal!(f.reference)).toBe(true);
+    expect(await restarted.stopPendingTerminal!(f.reference)).toBe(true);
+    f.reply({ terminals: [{ ...f.terminal, name: 'renamed' }] });
+    expect(await restarted.stopPendingTerminal!(f.reference)).toBe(false);
+    f.reply({ terminals: [] });
+    f.lookupReply(403, `No connection to '${f.reference.terminalName}'`);
+    expect(await restarted.confirmStoppedTerminal!(f.reference)).toBe(false);
+    expect(await restarted.stopPendingTerminal!(f.reference)).toBe(false);
+    f.lookupReply(500);
+    expect(await restarted.stopPendingTerminal!(f.reference)).toBe(false);
+  });
   it('preserves uncertainty on host refusal, malformed data or an unrelated anchor', async () => {
     const f = await fixture();
     for (const [body, status] of [['locked', 403], ['{', 200], [{ error: 'unavailable' }, 200],

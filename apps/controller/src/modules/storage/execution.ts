@@ -367,7 +367,7 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
         attemptEvent(db, attemptId, 'attempt.cancelled');
       }
       // One handle for each physical factory terminal, including known pending launches.
-      return db.prepare<[string], PassageHandle>("SELECT passage_id AS passageId FROM resources WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed'").all(attemptId);
+      return db.prepare<[string], PassageHandle>("SELECT passage_id AS passageId FROM resources WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed' AND (owned=1 OR launch_state<>'planned')").all(attemptId);
     }),
     recordStop: (handle, receipt) => atomic(() => {
       const p = row(handle);

@@ -3,10 +3,11 @@ import { OperationError } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 
 /** Installation-scoped coordinator. No timer, HTTP session or external authority. */
-export function createDeletionCoordinator({ storage, workspaces, logFailure }: {
+export function createDeletionCoordinator({ storage, workspaces, logFailure, prepareAttempts }: {
   storage: Pick<Storage, 'deletionWorker' | 'getProjectDeletion' | 'finalizeProjectDeletion'>;
   workspaces: Pick<Workspaces, 'inspectProjectDeletion' | 'reconcileProjectDeletion' | 'removeProjectDeletion'>;
   logFailure: (code: string) => void;
+  prepareAttempts?: (attemptIds: readonly string[], operationId: string) => Promise<void>;
 }) {
   const active = new Map<string, Promise<void>>();
   const checked = new Map<string, Promise<void>>();
@@ -16,6 +17,9 @@ export function createDeletionCoordinator({ storage, workspaces, logFailure }: {
     const worker = storage.deletionWorker.claim(id);
     if (!worker) return;
     try {
+      const attempts = storage.deletionWorker.attempts(worker);
+      if (prepareAttempts) await prepareAttempts(attempts, id);
+      storage.deletionWorker.assertQuiescent(worker);
       const snapshot = storage.deletionWorker.snapshot(worker);
       const { input } = snapshot;
       // An empty target set grants no filesystem identity. No policy was stored
@@ -25,6 +29,7 @@ export function createDeletionCoordinator({ storage, workspaces, logFailure }: {
       const verify = async () => {
         if (closing) throw new Error('PROJECT_DELETION_INTERRUPTED');
         const snapshot = storage.deletionWorker.snapshot(worker);
+        storage.deletionWorker.assertQuiescent(worker);
         const inspection = await workspaces.reconcileProjectDeletion(snapshot.input, authorization);
         const latest = storage.deletionWorker.snapshot(worker);
         if (latest.input.inventoryVersion !== snapshot.input.inventoryVersion || latest.input.blockers.length) {
@@ -62,9 +67,9 @@ export function createDeletionCoordinator({ storage, workspaces, logFailure }: {
     } catch (error) {
       logFailure(error instanceof OperationError ? error.code : 'PROJECT_DELETION_INTERRUPTED');
       try {
-        storage.deletionWorker.finish(worker, error instanceof OperationError ? 'reconfirmation_required' : 'pending',
+        storage.deletionWorker.finish(worker, error instanceof OperationError && error.code !== 'PROJECT_DELETION_ACTIVITY_BLOCKED' ? 'reconfirmation_required' : 'pending',
           error instanceof OperationError ? error.message : 'A execução foi interrompida; o progresso realizado foi preservado.',
-          error instanceof OperationError ? error.details?.recovery ?? 'Confira os alvos e tente novamente.' : 'Confira o andamento e clique em Tentar novamente.');
+          'Clique em Tentar novamente para continuar a exclusão.');
       } catch { logFailure('PROJECT_DELETION_PROGRESS_UNCONFIRMED'); }
     }
   }

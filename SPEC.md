@@ -242,7 +242,7 @@ Cada linha define uma obrigação verificável. A coluna de integração indica 
 | RF-68 | Adaptar criação, leitura, execução, recuperação, retenção, publicação e exclusão à organização por projeto. | US-15 | interfaces públicas dos módulos |
 | RF-69 | Mostrar confirmação compacta da pasta gerenciada e informar remoção integral, expondo separadamente original e outros destinos autorizados. | US-16 | preview de exclusão e dialog |
 | RF-70 | Manter inventário detalhado nos registros e causa/próxima ação de bloqueios na confirmação. | US-16 | deletion inventory e UI |
-| RF-71 | Preservar autorização durável e barreiras contra atividade, efeitos incertos, caminhos compartilhados/substituídos e links. | US-16 | acceptance, barrier e paths |
+| RF-71 | Aceitar a confirmação de exclusão com pendências operacionais e resolvê-las automaticamente após persistir a autorização: revogar novos trabalhos, encerrar processos próprios e conferir a parada antes de remover pastas. Recursos somente planejados não exigem posse física. Preservar as barreiras contra efeitos incertos e caminhos compartilhados/substituídos e links na fronteira da remoção. Falha mantém progresso e permite Tentar novamente. | US-16 | acceptance, barrier e paths |
 | RF-72 | Retomar exclusão parcial e declarar sucesso somente após conferir todos os destinos e dados previstos. | US-16 | worker e finalization |
 | RF-73 | Medir baseline por etapa, definir meta após a medição, aplicar otimização efetiva orientada ao custo observado e validar comparativamente o resultado frente à meta em carga representativa. Apenas medir não atende o V3; preservar todas as garantias de exclusão e não declarar ganho sem prova. | US-16 | measurements e provas de exclusão |
 
@@ -2301,7 +2301,7 @@ Erros comuns `E`: 400 entrada inválida; 401 sessão ausente/invalidada; 403 per
 | --- | --- |
 | Metodo | POST |
 | Path | `/api/v1/projects/:projectId/deletion` |
-| Descricao | Aceita exclusão explicitamente confirmada do inventário/digest/revisão apresentados; autorização durável e barreiras precedem worker. |
+| Descricao | Aceita exclusão explicitamente confirmada do inventário/digest/revisão apresentados, inclusive com trabalho pendente. A autorização durável precede o encerramento automático dos recursos próprios; as barreiras de parada e segurança são verificadas pelo worker antes da remoção. |
 | Auth | Sim; sessão técnica + guardas do domínio |
 | Request Body | `DeletionConfirmation` (JSON Schema abaixo) |
 | Params / Query | Params `ProjectParams`; query `EmptyQuery` |

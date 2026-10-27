@@ -67,7 +67,7 @@ export interface ExecutionHost {
    */
   stopTerminal?: (reference: { workspaceId: string; terminalName: string; terminalId: string; generation?: number }) => Promise<void>;
   /** Only a process-local owned launch may be stopped before terminal handshake. */
-  stopPendingTerminal?: (reference: { workspaceId: string; terminalName: string; generation?: number }) => Promise<boolean>;
+  stopPendingTerminal?: (reference: { workspaceId: string; terminalName: string; terminalId?: string; generation?: number }) => Promise<boolean>;
   /** Optional host capability: true requires current observation of this exact factory
    * terminal identity and confirmation that its prior process and known writers are stopped.
    * It gates both reuse/replacement and cleanup; CLI acceptance or a missing list entry is insufficient.

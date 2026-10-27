@@ -8,7 +8,7 @@ import { OperationError, readOperation } from './operations.js';
 import { StorageError } from './errors.js';
 import { readSettings } from './settings.js';
 import { readProjectDeletionPaths } from './project-deletion-paths.js';
-import { assertDeletionQuiescent, assertProjectAvailable, normalizedDeletionPath } from './project-deletion-barrier.js';
+import { assertProjectAvailable, normalizedDeletionPath } from './project-deletion-barrier.js';
 
 export interface ProjectDeletionCommand {
   readonly operationId: string;
@@ -104,7 +104,6 @@ export function acceptProjectDeletion(db: Database.Database, dataDirectory: stri
         recovery: 'Consulte novamente os alvos antes de confirmar a exclusão.',
       });
     }
-    assertDeletionQuiescent(db, project.id);
     const settings = readSettings(db); const now = Date.now();
     const seq = db.prepare<[], { seq: number }>('SELECT coalesce(max(seq),0)+1 AS seq FROM events').get()!.seq;
     db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,account_id,operation_kind,resource_type,resource_id,request_hash,expected_revision_json,receipt_json)

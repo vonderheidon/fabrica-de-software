@@ -15,7 +15,7 @@ import { acceptProjectDeletion, recoverProjectDeletion, type ProjectDeletionComm
 import { assertDeletionPathsAvailable, assertDeletionQuiescent } from './project-deletion-barrier.js';
 import { createProjectDeletionPersistence } from './project-deletions.js';
 import { createDeletionInspector } from '../workspaces/index.js';
-import { createProjectDeletions, createQueue } from '../projects/index.js';
+import { createProjectDeletions, createQueue, createDeletionCoordinator } from '../projects/index.js';
 import { createPipeline } from '../pipeline/index.js';
 import { recordQueueObservations } from './queue-cycles.js';
 import { attemptFixture, complete, confirmTerminalStops } from '../../../../../tests/fixtures/attempt.js';
@@ -53,6 +53,41 @@ function fixture() {
 }
 
 describe('durable project deletion acceptance and shared authorization barrier', () => {
+  it('accepts active work and automatically stops it before the deletion barrier opens', async () => {
+    const f = await attemptFixture(); close.push(() => f.close());
+    const prepared = await f.prepare();
+    const started = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
+    expect(() => assertDeletionQuiescent(f.db, f.projectId)).toThrow();
+    const removed = new Set<string>();
+    const removeReference = vi.fn(async (observation: { path: string }) => {
+      expect(() => assertDeletionQuiescent(f.db, f.projectId)).not.toThrow();
+      removed.add(observation.path);
+    });
+    const workspaces = createDeletionInspector({ pathStyle: 'windows', caseSensitive: false,
+      policyVersion: 'controlled-reference-capability/v1', safeReferenceRemoval: true, removeReference,
+      observe: async path => ({ path, resolvedPath: removed.has(path) ? null : path,
+        kind: removed.has(path) ? 'absent' : 'directory', identity: removed.has(path) ? null : path.toLowerCase(),
+        ancestors: [{ path: 'C:\\', resolvedPath: 'C:\\', identity: 'volume-root' }] }) });
+    const inspection = await workspaces.inspectProjectDeletion(f.storage.getProjectDeletionPaths(f.projectId));
+    expect(inspection.preview.can_confirm).toBe(true);
+    const operationId = randomUUID();
+    expect(f.storage.acceptProjectDeletion({ inspection, command: { operationId, projectId: f.projectId,
+      expectedRevision: f.storage.getProject(f.projectId).etag,
+      body: { confirmed: true, authorization_digest: inspection.preview.authorization_digest } } })).toMatchObject({ state: 'accepted' });
+    vi.mocked(f.execution.cancelAttempt).mockImplementation(async (attemptId, id) => {
+      const handles = f.persistence.recordCancellation(attemptId, id);
+      for (const handle of handles) f.persistence.recordStop(handle, { passageId: handle.passageId, state: 'confirmed' });
+      return handles.map(handle => ({ passageId: handle.passageId, state: 'confirmed' as const }));
+    });
+    const coordinator = createDeletionCoordinator({ storage: f.storage, workspaces, logFailure: f.logFailure,
+      prepareAttempts: (ids, id) => f.pipeline.prepareProjectDeletion(ids, id) });
+    await coordinator.schedule(operationId);
+    expect(f.execution.cancelAttempt).toHaveBeenCalledWith(started.resource.id, operationId);
+    expect(removeReference).toHaveBeenCalled();
+    expect(f.storage.getProjectDeletion(operationId)).toEqual({ operation_id: operationId, state: 'succeeded' });
+    expect(f.db.prepare('SELECT id FROM projects WHERE id=?').get(f.projectId)).toBeUndefined();
+    expect(f.db.pragma('foreign_key_check')).toEqual([]);
+  });
   it('commits one operation, pending authorization, metadata-only targets and event; replay precedes CAS', async () => {
     const f = fixture(); const input = await f.request();
     const pending = f.accept(input);
@@ -295,7 +330,7 @@ describe('durable project deletion acceptance and shared authorization barrier',
     expect(f.execution.cancelAttempt).not.toHaveBeenCalled();
   });
 
-  it.each(['relative', 'absolute', 'traversal', 'foreign-attempt', 'unowned'] as const)(
+  it.each(['relative', 'absolute', 'traversal', 'foreign-attempt', 'unowned', 'unowned-planned'] as const)(
     'checks implementation ownership for a %s reference', async referenceKind => {
       const f = await attemptFixture(); close.push(() => f.close());
       const prepared = await f.prepare();
@@ -307,13 +342,14 @@ describe('durable project deletion acceptance and shared authorization barrier',
         : `work/${attemptId}/implementation`;
       if (referenceKind !== 'relative') {
         f.db.prepare(`INSERT INTO resources(id,attempt_id,passage_id,kind,reference,owned,launch_state,created_at_ms)
-          SELECT ?,attempt_id,passage_id,kind,?,?,'ready',created_at_ms FROM resources
+          SELECT ?,attempt_id,passage_id,kind,?,?,?,created_at_ms FROM resources
           WHERE attempt_id=? AND kind='implementation'`)
-          .run(randomUUID(), reference, referenceKind === 'unowned' ? 0 : 1, attemptId);
+          .run(randomUUID(), reference, referenceKind.startsWith('unowned') ? 0 : 1,
+            referenceKind === 'unowned-planned' ? 'planned' : 'ready', attemptId);
       }
       const paths = f.storage.getProjectDeletionPaths(f.projectId);
       const ownershipBlockers = paths.blockers.filter(b => b.reason === 'O pertencimento de um ambiente não pôde ser comprovado.');
-      expect(ownershipBlockers).toHaveLength(['relative', 'absolute'].includes(referenceKind) ? 0 : 1);
+      expect(ownershipBlockers).toHaveLength(['relative', 'absolute', 'unowned-planned'].includes(referenceKind) ? 0 : 1);
       expect(paths.targets).toContainEqual(expect.objectContaining({
         kind: 'exclusive_workspace', path: resolve(f.directory, 'work', attemptId), ownerId: attemptId,
       }));

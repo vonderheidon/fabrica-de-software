@@ -102,6 +102,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   installProjectRoutes(app, projects);
   const deletionWorkspaces = deletionDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory, projectStorage: storage });
   const deletionCoordinator = deletionDependencies?.coordinator ?? createDeletionCoordinator({ storage, workspaces: deletionWorkspaces,
+    prepareAttempts: (ids, operationId) => pipeline.prepareProjectDeletion(ids, operationId),
     logFailure: code => app.log.error({ code }, 'Project deletion stopped') });
   installProjectDeletionRoutes(app, storage, createProjectDeletions({ storage, workspaces: deletionWorkspaces, coordinator: deletionCoordinator }), deletionCoordinator);
   if (!deletionDependencies) app.addHook('preClose', async () => { await deletionCoordinator.close(); });

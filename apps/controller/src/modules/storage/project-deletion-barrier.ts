@@ -83,7 +83,7 @@ export function assertDeletionQuiescent(db: Database.Database, projectId: string
   const probes = [
     'SELECT 1 FROM attempts WHERE project_id=? AND result IS NULL',
     `SELECT 1 FROM resources WHERE attempt_id IN (${attempts}) AND
-      ((kind='terminal' AND stop_state<>'confirmed') OR launch_state='starting')`,
+      ((kind='terminal' AND stop_state<>'confirmed' AND (owned=1 OR launch_state<>'planned')) OR launch_state='starting')`,
     `SELECT 1 FROM passages WHERE attempt_id IN (${attempts}) AND state='starting'`,
     `SELECT 1 FROM capture_runs WHERE delivery_id IN (SELECT id FROM deliveries WHERE attempt_id IN (${attempts})) AND state='running'`,
     `SELECT 1 FROM verification_runs WHERE attempt_id IN (${attempts}) AND state='running'`,

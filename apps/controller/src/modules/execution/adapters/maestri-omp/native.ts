@@ -134,7 +134,8 @@ export function createNative(host: ExecutionHost, cwd: string, run: CliRunner = 
       const anchor = inheritedAnchor(host);
       if (identity && (identity.workspaceId.toLowerCase() !== anchor.workspaceId || !uuid.test(identity.terminalId))) return 'uncertain';
       if (host.stopPendingTerminal) {
-        try { if (await host.stopPendingTerminal({ workspaceId: anchor.workspaceId, terminalName: name, ...(generation === undefined ? {} : { generation }) }) === true) return 'confirmed'; }
+        try { if (await host.stopPendingTerminal({ workspaceId: anchor.workspaceId, terminalName: name,
+          ...(identity ? { terminalId: identity.terminalId } : {}), ...(generation === undefined ? {} : { generation }) }) === true) return 'confirmed'; }
         catch { return 'uncertain'; }
       }
       if (!identity) return 'uncertain';

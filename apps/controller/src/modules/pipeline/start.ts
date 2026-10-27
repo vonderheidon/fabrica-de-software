@@ -517,6 +517,12 @@ export function createPipeline(deps: PipelineDependencies) {
   }
   return {
     ...recovery,
+    async prepareProjectDeletion(attemptIds: readonly string[], operationId: string) {
+      for (const id of attemptIds) revoke(id);
+      const inFlight = [...pending];
+      for (const id of attemptIds) await execution.cancelAttempt(id, operationId);
+      await Promise.all(inFlight);
+    },
     setPublicationTarget(id: string, body: import('#contracts').SetPublicationTarget, context: { operationId: string; expectedRevision: string | undefined }) {
       if (!publication) throw new OperationError(503,'PUBLICATION_UNAVAILABLE','A publicação não está disponível neste host.');
       return publication.selectTarget(id,body,context);

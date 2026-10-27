@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline';
 import type { ExecutionHost } from './index.js';
 import { ExecutionError } from './errors.js';
-import { observeStoppedTerminal } from './terminal-observation.js';
+import { observeTerminalAvailability } from './terminal-observation.js';
 
 type Reference = { workspaceId: string; terminalName: string; terminalId?: string; generation?: number };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -70,7 +70,10 @@ export function withWindowsTerminalJobs(host: ExecutionHost, cwd: string): Execu
     stopTerminal: async reference => { await stop(find(reference)); },
     stopPendingTerminal: async reference => {
       const job = jobs.get(key(reference));
-      if (!job || job.generation !== reference.generation || job.terminalId) return false;
+      // Restart closes the former owner's kill-on-close Job Objects. A missing
+      // native terminal can therefore release an old launch, unlike a disconnected peer.
+      if (!job) return await observeTerminalAvailability(host, reference) === 'missing';
+      if (job.generation !== reference.generation || job.terminalId) return false;
       return stop(job);
     },
     confirmStoppedTerminal: async reference => {
@@ -78,7 +81,10 @@ export function withWindowsTerminalJobs(host: ExecutionHost, cwd: string): Execu
         const job = jobs.get(key(reference));
         // The prior owner's last Job Object handle closes on restart, stopping its writers.
         // The canvas identity may still be running a different process, so observe it now.
-        if (!job) return observeStoppedTerminal(host, reference);
+        if (!job) {
+          const observed = await observeTerminalAvailability(host, reference);
+          return observed === 'stopped' || observed === 'missing';
+        }
         if (!job || !reference.terminalId || job.terminalId !== reference.terminalId.toLowerCase() ||
           (reference.generation !== job.generation && reference.generation !== job.generation + 1)) return false;
         return await job.ask('check') === 'stopped';

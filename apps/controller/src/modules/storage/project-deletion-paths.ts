@@ -5,7 +5,6 @@ import { OperationId } from '#contracts';
 import { digest, readProject } from './configuration-reads.js';
 import { projectDeletionInventory } from './project-deletion-inventory.js';
 import { readSettings } from './settings.js';
-import { assertDeletionQuiescent } from './project-deletion-barrier.js';
 import { OperationError } from './operations.js';
 
 /** One read snapshot. No filesystem access or persistence of the inspection. */
@@ -25,11 +24,6 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     source: { kind: authorized.source_kind, location: authorized.source_location } } : readProject(db, projectId).project;
   const inventory = projectDeletionInventory(db, projectId);
   const blockers = inventory.blockers.map(({ reason, recovery }) => ({ reason, recovery }));
-  try { assertDeletionQuiescent(db, projectId); }
-  catch (error) {
-    if (!(error instanceof OperationError) || error.code !== 'PROJECT_DELETION_ACTIVITY_BLOCKED') throw error;
-    blockers.push({ reason: error.message, recovery: error.details?.recovery ?? 'Confira o encerramento dos recursos antes de excluir.' });
-  }
   const targets: { key: string; kind: 'original_directory' | 'exclusive_workspace' | 'exclusive_artifact';
     path: string; ownerKind: 'project' | 'attempt'; ownerId: string }[] = [];
   const addAttempt = (id: string): void => {
@@ -91,8 +85,8 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     }
     else blockers.push({ reason: 'Uma passagem não tem identidade válida.', recovery: 'Corrija o inventário antes de tentar excluir o projeto.' });
   }
-  const resources = db.prepare<[string], { id: string; owned: number; reference: string; attempt_id: string; kind: string }>(
-    'SELECT id,owned,reference,attempt_id,kind FROM resources WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
+  const resources = db.prepare<[string], { id: string; owned: number; reference: string; attempt_id: string; kind: string; launch_state: string }>(
+    'SELECT id,owned,reference,attempt_id,kind,launch_state FROM resources WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
   ).all(projectId);
   const deliveryTargets = db.prepare<[string], { operation_id: string; attempt_id: string; local_path: string }>(`SELECT t.operation_id,t.attempt_id,t.local_path
     FROM delivery_targets t JOIN attempts a ON a.id=t.attempt_id WHERE a.project_id=? ORDER BY t.operation_id`).all(projectId);
@@ -113,6 +107,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
       recovery: 'Corrija o vínculo da evidência antes de tentar excluir o projeto.' });
   }
   for (const resource of resources) {
+    if (!resource.owned && resource.launch_state === 'planned') continue;
     // Attempt registration stores this exact relative reference. Keep accepting
     // the absolute form, but never normalize arbitrary input into ownership.
     const implementationReferences = [
