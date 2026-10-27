@@ -125,7 +125,6 @@ it.each(['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'REMOTE_UNCONFIRMED', 'PR
   expect(container.querySelector('.save-feedback [role="alert"]')?.textContent).toContain('Próxima ação:');
   expect(container.querySelector('.save-feedback [role="alert"]')?.textContent).toContain(recovery);
   expect(container.querySelector('.save-feedback')?.textContent).not.toContain(code);
-  expect(container.textContent).toContain('Ready indica elegibilidade na fila; não habilita a automação');
   expect(automation.checked).toBe(true);
   expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(1);
 });

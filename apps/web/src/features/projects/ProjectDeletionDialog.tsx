@@ -5,13 +5,11 @@ import { isDefiniteDeletionRejection, type DeletionOriginContext, type ProjectDe
 import { wrapDialogTabFocus } from '../../app/dialog-focus.js';
 import { confirmProjectDeletion, recoverUncertainOperation, useProjectDeletionPreview, useProjectDeletionStatus, resumeProjectDeletion } from './useProjectDeletion.js';
 
-export const deletionWarning = 'Serão removidos o cadastro, o histórico, as evidências, a pasta original inteira e os ambientes locais exclusivos indicados, incluindo .git, arquivos ignorados, arquivos pessoais e trabalho não publicado. Não há backup automático. Retire antes tudo o que deseja preservar. Após confirmar, não há cancelamento. Arquivos adicionados nessas pastas durante a remoção também serão apagados; não use essas pastas durante a exclusão. Recursos do GitHub, outros cadastros e recursos compartilhados serão preservados.';
+export const deletionWarning = 'Os dados e as pastas locais deste projeto serão apagados permanentemente, sem backup. O GitHub será preservado.';
 
-export function ProjectDeletionWarnings({ sourceKind, hasUnsavedChanges }: { sourceKind: 'local' | 'github'; hasUnsavedChanges: boolean }) {
+export function ProjectDeletionWarnings({ hasUnsavedChanges }: { sourceKind: 'local' | 'github'; hasUnsavedChanges: boolean }) {
   return <section aria-label="Perdas e preservações"><p>{deletionWarning}</p>
-    <p>A exclusão considera a origem atualmente salva. Pastas de origens anteriores serão preservadas.</p>
-    {sourceKind === 'github' && <p>A origem salva é somente uma URL. Não existe busca de pasta externa; nenhuma pasta de origem local histórica será removida.</p>}
-    {hasUnsavedChanges && <p role="note">A exclusão usa a configuração salva. Alterações não salvas não serão aplicadas.</p>}
+    {hasUnsavedChanges && <p role="note">Será usada a configuração salva, sem as alterações deste rascunho.</p>}
   </section>;
 }
 
@@ -21,35 +19,17 @@ export function ProjectDeletionTargetList({ targets }: { targets: ProjectDeletio
   return <ul className="project-deletion-targets">{targets.map((target) => <li key={target.targetKey}><b>{labels[target.targetKind]}</b><span>{target.path}</span><small>{states[target.state]}</small></li>)}</ul>;
 }
 
-function matchesManagedRoot(target: ProjectDeletionPreview['targets'][number], managedRootPath: string | null): boolean {
-  if (target.targetKind !== 'exclusive_workspace') return false;
-  if (target.targetKey.startsWith('managed:managed:')) return true;
-  if (!managedRootPath) return false;
-  const root = managedRootPath.replaceAll('\\', '/').replace(/^\/+|\/+$/g, '').toLocaleLowerCase();
-  const path = target.path.replaceAll('\\', '/').replace(/\/+$/g, '').toLocaleLowerCase();
-  return path.endsWith(`/${root}`);
-}
-
-export function ProjectDeletionOverview({ targets, managedRootPath }: {
+export function ProjectDeletionOverview({ targets }: {
   targets: ProjectDeletionPreview['targets']; managedRootPath: string | null;
 }) {
-  const managedRoot = targets.find((target) => matchesManagedRoot(target, managedRootPath));
   const originalTargets = targets.filter((target) => target.targetKind === 'original_directory');
-  const otherTargets = targets.filter((target) => target !== managedRoot && target.targetKind !== 'original_directory');
+  const otherTargets = targets.filter((target) => target.targetKind !== 'original_directory');
   return <section className="project-deletion-overview" aria-label="Destinos autorizados para exclusão">
-    <p className="project-deletion-overview-count">{targets.length} {targets.length === 1 ? 'destino autorizado' : 'destinos autorizados'} na conferência.</p>
-    <div className="project-deletion-location">
-      <b>Pasta gerenciada</b>
-      <span>{managedRoot?.path ?? managedRootPath ?? 'Nenhuma raiz gerenciada está registrada.'}</span>
-      {managedRoot && <small>A pasta inteira será removida.</small>}
-      {!managedRoot && managedRootPath && <small>Esta localização cadastrada não consta como destino autorizado nesta conferência.</small>}
-    </div>
     {originalTargets.length > 0 && <div className="project-deletion-location">
-      <b>Pasta original inteira</b><span>{originalTargets.map((target) => target.path).join('\n')}</span>
-      <small>Também será removida por inteiro.</small>
+      <b>Pasta do projeto</b><span>{originalTargets.map((target) => target.path).join('\n')}</span>
     </div>}
     {otherTargets.length > 0 && <details className="project-deletion-more-targets">
-      <summary>Ver outros destinos autorizados ({otherTargets.length})</summary>
+      <summary>Ver detalhes das pastas internas</summary>
       <ProjectDeletionTargetList targets={otherTargets} />
     </details>}
   </section>;
@@ -169,12 +149,11 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
     {operationId && phase === 'accepted' && <p><a href={`#principal/registros?operationId=${encodeURIComponent(operationId)}`}>Consultar inventário detalhado nos Registros</a></p>}
     {operationId && <p>Fechar ou navegar apenas encerra este acompanhamento. O pedido enviado não pode ser cancelado ou desfeito.</p>}
     <div className="profile-delete-actions dialog-actions">
-      <button type="button" aria-label={operationId ? 'Fechar acompanhamento' : 'Voltar à configuração'} onClick={onClose}>
-        <span className="project-deletion-action-full">{operationId ? 'Fechar acompanhamento' : 'Voltar à configuração'}</span>
-        <span className="project-deletion-action-compact" aria-hidden="true">{operationId ? 'Fechar' : 'Voltar'}</span>
+      <button type="button" aria-label={operationId ? 'Fechar acompanhamento' : 'Cancelar exclusão'} onClick={onClose}>
+        {operationId ? 'Fechar' : 'Cancelar'}
       </button>
-      {(phase === 'preview' || phase === 'stale_preview') && <button type="button" aria-label="Atualizar conferência" disabled={preview.loading} onClick={() => { setMessage(''); setPhase('preview'); preview.refetch(); }}>
-        <span className="project-deletion-action-full">Atualizar conferência</span><span className="project-deletion-action-compact" aria-hidden="true">Atualizar</span>
+      {(phase === 'stale_preview' || (phase === 'preview' && (preview.error || blockers.length > 0))) && <button type="button" aria-label="Atualizar conferência" disabled={preview.loading} onClick={() => { setMessage(''); setPhase('preview'); preview.refetch(); }}>
+        Atualizar
       </button>}
       {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && status.canRetry && <button type="button" disabled={retrying} onClick={() => void resume()}>{retrying ? 'Solicitando retomada…' : 'Tentar novamente'}</button>}
       {phase === 'uncertain' && <button type="button" disabled={querying} onClick={() => void query()}>{querying ? 'Consultando…' : 'Consultar andamento'}</button>}

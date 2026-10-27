@@ -34,17 +34,14 @@ beforeEach(() => {
   mocks.preview = { ...context, sourceKind: 'github', authorizationDigest: 'private-digest', targets, blockers: [], canConfirm: true };
 });
 
-it('keeps confirmation compact while exposing every authorized path and preserving the complete warning', () => {
+it('keeps the project folder visible and internal paths in collapsed details with a concise warning', () => {
   const html = render();
   expect(html).toContain(deletionWarning);
-  expect(html).toContain('Alterações não salvas não serão aplicadas.');
-  expect(html).toContain('Não existe busca de pasta externa');
-  expect(html).toContain('Pastas de origens anteriores serão preservadas.');
+  expect(html).toContain('Será usada a configuração salva, sem as alterações deste rascunho.');
   for (const target of targets) expect(html).toContain(target.path);
-  for (const label of ['Pasta original inteira', 'Ambiente local exclusivo', 'Artefato exclusivo']) expect(html).toContain(label);
-  expect(html).toContain('Pasta gerenciada');
-  expect(html).toContain('4 destinos autorizados');
-  expect(html).toContain('Ver outros destinos autorizados (2)');
+  for (const label of ['Pasta do projeto', 'Ambiente local exclusivo', 'Artefato exclusivo']) expect(html).toContain(label);
+  expect(html).not.toContain('destinos autorizados');
+  expect(html).toContain('Ver detalhes das pastas internas');
   expect(html).toContain('<details class="project-deletion-more-targets">');
   expect(html.indexOf('class="danger-button"')).toBeGreaterThan(html.indexOf('project-deletion-more-targets'));
   expect(html).toContain('Projeto &lt;exemplo&gt;');
@@ -57,8 +54,8 @@ it('associates the modal title and safe initial focus target and exposes a polit
   expect(html).toContain('aria-modal="true" aria-labelledby="project-deletion-title"');
   expect(html).toContain('id="project-deletion-title" tabindex="-1"');
   expect(html).toContain('role="status" aria-live="polite" aria-atomic="true"');
-  expect(html).toContain('aria-label="Voltar à configuração"');
-  expect(html).toContain('class="project-deletion-action-compact" aria-hidden="true">Voltar</span>');
+  expect(html).toContain('aria-label="Cancelar exclusão"');
+  expect(html).not.toContain('aria-label="Atualizar conferência"');
 });
 
 it('prevents confirmation during loading, stale revision, blocked preview and submitting', () => {
@@ -126,7 +123,7 @@ function findButton(node: ReactNode, label: string): (() => void) | undefined {
 
 it('uses a fixed initiating context and one operation for rapid clicks; closing before submission has no effects', async () => {
   render();
-  findButton(mocks.tree, 'Voltar à configuração')?.();
+  findButton(mocks.tree, 'Cancelar exclusão')?.();
   expect(mocks.confirm).not.toHaveBeenCalled();
   mocks.confirm.mockImplementation(() => new Promise(() => undefined));
   const confirm = findButton(mocks.tree, 'Excluir definitivamente');

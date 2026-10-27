@@ -93,6 +93,8 @@
 .dialog[data-dialog='project-configuration'] .project-storage { padding: 16px; margin: 0 0 18px; border: 1px solid var(--border); border-radius: 10px; background: #f8f9fa; }
 .project-storage-heading, .project-storage-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 .dialog .project-storage-heading h3 { margin: 0; font-size: 14px; }
+.project-folder-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.project-folder-row .storage-path { flex: 1; min-width: 0; font-size: 12px; line-height: 1.5; }
 .project-storage-state { padding: 4px 8px; border-radius: 5px; background: #edf0f3; color: var(--muted); font-size: 11px; }
 .project-storage-state.is-current { background: #eaf0ed; color: #445c4e; }
 .project-storage-state.needs-attention { background: #fff0db; color: #80531e; }
@@ -164,7 +166,6 @@
 .profile-delete-dialog .project-deletion-targets { padding: 14px; border-radius: 8px; background: #f5f7f8; }
 .profile-delete-dialog .project-deletion-targets span { overflow-wrap: anywhere; }
 .project-deletion-overview { display: grid; gap: 10px; min-width: 0; }
-.project-deletion-overview-count { margin: 0; color: var(--muted); font-size: 12px; }
 .project-deletion-location { display: grid; gap: 5px; min-width: 0; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: #f8f9fa; }
 .project-deletion-location span { white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .project-deletion-location small, .project-deletion-targets small { color: var(--muted); font-size: 12px; }
@@ -172,7 +173,7 @@
 .project-deletion-more-targets > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-size: 13px; font-weight: 600; }
 .project-deletion-more-targets > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .project-deletion-more-targets .project-deletion-targets { margin-bottom: 0; }
-.project-deletion-action-compact { display: none; }
+.project-deletion-dialog[open] .dialog-actions { flex-wrap: nowrap; }
 .attempt-block-decision fieldset { margin: 12px 0; padding: 0; border: 0; min-width: 0; }
 .attempt-block-decision legend { margin-bottom: 10px; font-weight: 600; }
 .dialog .attempt-block-decision label:has(input[type='radio']) { display: flex; align-items: center; gap: 10px; min-height: 40px; }
@@ -188,7 +189,7 @@
   .dialog[role="dialog"] .dialog-actions, .profile-delete-dialog[open] .dialog-actions { bottom: calc(-1 * var(--dialog-padding)); margin-inline: calc(-1 * var(--dialog-padding)); margin-bottom: calc(-1 * var(--dialog-padding)); padding: 12px var(--dialog-padding); }
   .dialog[role="dialog"] .dialog-actions > button, .profile-delete-dialog[open] .dialog-actions > button { flex: 1 1 130px; }
   .project-deletion-dialog[open] .dialog-actions > button { flex: 1 1 80px; }
-  .project-deletion-dialog[open] .dialog-actions > .danger-button { flex-basis: 100%; }
+  .project-deletion-dialog[open] .dialog-actions > .danger-button { flex-basis: auto; }
   .dialog[role="dialog"] .dialog-actions > p { flex-basis: 100%; }
   .dialog[role="dialog"] .preparation-actions > :is(button, .preparation-feedback, .preparation-start-status) { flex: 0 0 auto; }
   .dialog[data-dialog='project-configuration'] .dialog-actions { flex-direction: row; }
@@ -201,6 +202,4 @@
 @media (max-width: 340px) {
   .project-deletion-dialog h2 { font-size: 20px; }
   .project-deletion-dialog .dialog-actions > button:not(.danger-button) { padding-inline: 6px; font-size: 12px; }
-  .project-deletion-dialog .project-deletion-action-full { display: none; }
-  .project-deletion-dialog .project-deletion-action-compact { display: inline; }
 }

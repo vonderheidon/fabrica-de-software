@@ -13,6 +13,7 @@ type Props = {
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   searchLabel?: string;
+  searchable?: boolean;
   loading?: boolean;
   footer?: ReactNode;
 };
@@ -31,7 +32,7 @@ function readChoices(children: ReactNode): Choice[] {
   return result;
 }
 
-export function CustomSelect({ id, value, children, disabled, required, onChange, searchValue, onSearchChange, searchLabel = 'Buscar opção', loading, footer, ...aria }: Props) {
+export function CustomSelect({ id, value, children, disabled, required, onChange, searchValue, onSearchChange, searchLabel = 'Buscar opção', searchable = true, loading, footer, ...aria }: Props) {
   const generatedId = useId();
   const controlId = id ?? generatedId;
   const [open, setOpen] = useState(false);
@@ -43,13 +44,19 @@ export function CustomSelect({ id, value, children, disabled, required, onChange
   const popup = useRef<HTMLSpanElement>(null);
   const choices = readChoices(children);
   const query = searchValue ?? search;
-  const filtered = onSearchChange ? choices : choices.filter(choice => choice.label.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR')));
+  const filtered = !searchable || onSearchChange ? choices : choices.filter(choice => choice.label.toLocaleLowerCase('pt-BR').includes(query.toLocaleLowerCase('pt-BR')));
   const selected = choices.find(choice => choice.value === value);
 
   function close(restoreFocus = false) { setOpen(false); if (restoreFocus) trigger.current?.focus(); }
   function changeSearch(next: string) { setSearch(next); onSearchChange?.(next); }
 
   useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
+  useEffect(() => {
+    if (open && !searchable) {
+      const selectedOption = popup.current?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]:not(:disabled)');
+      (selectedOption ?? popup.current?.querySelector<HTMLButtonElement>('button:not(:disabled)'))?.focus();
+    }
+  }, [open, searchable]);
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) close(); };
@@ -99,9 +106,9 @@ export function CustomSelect({ id, value, children, disabled, required, onChange
       const firstInvalid = event.currentTarget.form?.querySelector(':invalid');
       if (!firstInvalid || firstInvalid === event.currentTarget) { trigger.current?.focus(); changeSearch(''); setOpen(true); }
     }} />}
-    {open && !disabled && <span ref={popup} id={`${controlId}-popup`} className="custom-select-popup" role="dialog" aria-label={searchLabel} style={position}>
-      <span className="custom-select-search-label" id={`${controlId}-search-label`}>{searchLabel}</span>
-      <input autoFocus id={`${controlId}-search`} aria-labelledby={`${controlId}-search-label`} placeholder="Digite para buscar" value={query} onChange={event => changeSearch(event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} />
+    {open && !disabled && <span ref={popup} id={`${controlId}-popup`} className="custom-select-popup" role="dialog" aria-label={searchable ? searchLabel : 'Opções'} style={position}>
+      {searchable && <><span className="custom-select-search-label" id={`${controlId}-search-label`}>{searchLabel}</span>
+      <input autoFocus id={`${controlId}-search`} aria-labelledby={`${controlId}-search-label`} placeholder="Digite para buscar" value={query} onChange={event => changeSearch(event.currentTarget.value)} onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }} /></>}
       <span className="custom-select-options">
         {filtered.map(choice => <button type="button" key={choice.value} data-value={choice.value} disabled={choice.disabled} aria-pressed={choice.value === value} onClick={event => { event.preventDefault(); onChange?.({ currentTarget: { value: choice.value } }); setInvalid(false); close(true); }}>{choice.label}</button>)}
         {loading && <span className="custom-select-notice" role="status">Consultando opções…</span>}
