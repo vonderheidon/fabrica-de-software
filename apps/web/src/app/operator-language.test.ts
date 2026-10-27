@@ -3,6 +3,15 @@ import { diagnosticCopyFor, isKnownOperatorEvent, isPortugueseOperatorText, oper
 import { fieldGuidanceFor } from '../features/projects/FieldHelp.js';
 
 describe('operator language', () => {
+  it('explains Git incompatibility and config failures without blaming the configured identity', () => {
+    const unsupported = diagnosticCopyFor('GIT_VERSION_UNSUPPORTED', 'unavailable');
+    expect(unsupported.cause).toContain('--no-lazy-fetch');
+    expect(unsupported.nextAction).toContain('2.45.0');
+    const config = diagnosticCopyFor('SCAFFOLD_GIT_CONFIG_FAILED_EXIT_129', 'failed');
+    expect(config.cause).toContain('Código de saída do Git: 129');
+    expect(config.nextAction).toContain('Não reconfigure nome e e-mail');
+    expect(config.title).not.toBe(diagnosticCopyFor('SCAFFOLD_GIT_IDENTITY_REQUIRED', 'failed').title);
+  });
   it('recognizes persisted creation events and explains missing project configuration', () => {
     for (const event of ['creation.accepted', 'creation.completed', 'creation.stopped', 'creation.directory.running', 'creation.files.confirmed', 'creation.git.unknown', 'creation.baseline.confirmed', 'creation.reconcile.accepted', 'creation.reconciled']) {
       expect(isKnownOperatorEvent(event), event).toBe(true);

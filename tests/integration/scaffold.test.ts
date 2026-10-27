@@ -11,7 +11,7 @@ import { createScaffold } from '../../apps/controller/src/modules/projects/index
 import { loadScaffoldCatalog, renderEngineering, renderScaffoldReadme } from '../../apps/controller/src/modules/projects/scaffold-resources.js';
 import { createLocalScaffolder } from '../../apps/controller/src/modules/workspaces/scaffold.js';
 import { ScaffoldWorkspaceError } from '../../apps/controller/src/modules/workspaces/scaffold-path-guard.js';
-import type { GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
+import { GitReadError, type GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
@@ -38,9 +38,14 @@ function fixture() {
   const storage = openStorage({ dataDirectory: join(directory,'data'), busyTimeoutMs: 20 }); cleanup.push(() => storage.close());
   storage.saveSettings({ operationId: randomUUID(), expectedRevision: storage.getGlobalConfiguration().etag, body: { changes: { projects_root: projectsRoot } }, changes: { projects_root: projectsRoot } });
   let login = 'fixture-user'; let branch = 'main'; let failGit = false; let missingIdentity = false;
+  let configExit = 0; let configError: Error | undefined;
   const calls: string[][] = [];
   const git: GitReader = async (cwd, args) => {
-    if (args[0] === 'config') return missingIdentity ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: args.at(-1) === 'user.name' ? 'Pessoa operadora' : 'operator@example.test' };
+    if (args[0] === 'config') {
+      if (configError) throw configError;
+      if (configExit) return { exitCode: configExit, stdout: '' };
+      return missingIdentity ? { exitCode: 1, stdout: '' } : { exitCode: 0, stdout: args.at(-1) === 'user.name' ? 'Pessoa operadora' : 'operator@example.test' };
+    }
     calls.push([...args]);
     expect(storage.getEvents({}).items.some(e => e.eventType === 'creation.accepted')).toBe(true);
     if (args[0] === 'init') { mkdirSync(join(cwd,'.git')); branch = args.find(a => a.startsWith('--initial-branch='))!.split('=')[1]!; }
@@ -62,7 +67,8 @@ function fixture() {
   const github = { getIdentity: vi.fn(async () => ({ state: 'complete' as const, data: { id: login, login }, diagnostics: [], retryAtMs: null })) };
   const logFailure = vi.fn(); const scaffold = createScaffold({ storage, github, workspaces, logFailure }); cleanup.push(() => scaffold.close());
   const db = new Database(join(directory,'data','factory.sqlite')); cleanup.push(() => { db.close(); });
-  return { directory, projectsRoot, storage, scaffold, workspaces, github, calls, db, logFailure, guard, acquireGuard, changeAccount: () => { login = 'other-user'; }, failGit: () => { failGit = true; }, clearIdentity: () => { missingIdentity = true; } };
+  return { directory, projectsRoot, storage, scaffold, workspaces, github, calls, db, logFailure, guard, acquireGuard, changeAccount: () => { login = 'other-user'; }, failGit: () => { failGit = true; }, clearIdentity: () => { missingIdentity = true; },
+    failConfig: (exitCode: number) => { configExit = exitCode; }, rejectConfig: (error: Error) => { configError = error; } };
 }
 async function choices(f: ReturnType<typeof fixture>, destinationRelative = 'new-project'): Promise<ScaffoldInput> {
   const options = await f.scaffold.getOptions(); const template = options.templates[0]!;
@@ -86,6 +92,55 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const operation = await f.scaffold.create(body,randomUUID()); await f.scaffold.drain();
     expect(existsSync(body.plan.destination)).toBe(false);
     expect(f.scaffold.getCreation(operation.resource.id).creation.diagnostic).toBe('SCAFFOLD_GIT_IDENTITY_REQUIRED');
+    expect(f.calls).toEqual([]);
+  });
+  it.each([3, 128, 129])('preserves git config failure exit %i instead of reporting a missing identity', async exitCode => {
+    const f = fixture(); const body = await authorized(f); f.failConfig(exitCode);
+    const operation = await f.scaffold.create(body, randomUUID()); await f.scaffold.drain();
+    expect(f.scaffold.getCreation(operation.resource.id).creation).toMatchObject({ state: 'failed', diagnostic: `SCAFFOLD_GIT_CONFIG_FAILED_EXIT_${exitCode}` });
+    expect(existsSync(body.plan.destination)).toBe(false); expect(f.calls).toEqual([]); expect(f.acquireGuard).not.toHaveBeenCalled();
+  });
+  it.each([
+    { error: new GitReadError('GIT_UNAVAILABLE'), diagnostic: 'GIT_UNAVAILABLE' },
+    { error: new Error('synthetic-private-process-output'), diagnostic: 'SCAFFOLD_GIT_CONFIG_FAILED' },
+  ])('keeps process failures separate from identity absence ($diagnostic)', async ({ error, diagnostic }) => {
+    const f = fixture(); const body = await authorized(f); f.rejectConfig(error);
+    const operation = await f.scaffold.create(body, randomUUID()); await f.scaffold.drain();
+    const view = f.scaffold.getCreation(operation.resource.id);
+    expect(view.creation).toMatchObject({ state: 'failed', diagnostic });
+    expect(JSON.stringify(view)).not.toContain('synthetic-private-process-output');
+    expect(existsSync(body.plan.destination)).toBe(false); expect(f.calls).toEqual([]);
+  });
+  it('allows a newly authorized plan at a failed destination without deleting its creation, receipt or events', async () => {
+    const f = fixture(); const body = await authorized(f);
+    f.acquireGuard.mockRejectedValueOnce(new ScaffoldWorkspaceError('SCAFFOLD_PATH_GUARD_UNAVAILABLE'));
+    const first = await f.scaffold.create(body, randomUUID()); await f.scaffold.drain();
+    const original = f.scaffold.getCreation(first.resource.id);
+    const receipt = f.storage.getOperation(first.operation_id);
+    const events = f.storage.getEvents({}).items.filter(item => item.entityId === first.resource.id);
+    expect(toHttpCreationView(original).next_action).toBe('create_new_plan');
+    const freshPlan = await f.scaffold.plan(body.plan.input);
+    const second = await f.scaffold.create({ planHash: freshPlan.planHash, plan: freshPlan.plan, authorized: true }, randomUUID());
+    await f.scaffold.drain();
+    expect(second.resource.id).not.toBe(first.resource.id);
+    expect(f.scaffold.getCreation(second.resource.id).creation.state).toBe('completed');
+    expect(f.scaffold.getCreation(first.resource.id).creation).toEqual(original.creation);
+    expect(f.storage.getOperation(first.operation_id)).toEqual(receipt);
+    expect(f.storage.getEvents({}).items.filter(item => item.entityId === first.resource.id)).toEqual(events);
+    expect(f.db.prepare('SELECT count(*) AS n FROM project_creations WHERE destination=?').get(body.plan.destination)).toEqual({ n: 2 });
+  });
+  it.each(['pending', 'running', 'unknown', 'confirmed'] as const)('keeps a destination reserved after %s authority or effect evidence', async evidence => {
+    const f = fixture(); const body = await authorized(f);
+    const accepted = f.storage.acceptCreation({ operationId: randomUUID(), body });
+    const id = accepted.operation.resource.id;
+    if (evidence !== 'pending') {
+      f.storage.recordCreationStep(id, 'directory', 'running');
+      if (evidence === 'confirmed') f.storage.recordCreationStep(id, 'directory', 'confirmed');
+      if (evidence !== 'running') f.storage.failCreation(id, 'SCAFFOLD_CREATION_FAILED');
+    }
+    expect(() => f.storage.acceptCreation({ operationId: randomUUID(), body })).toThrow(expect.objectContaining({ code: 'SCAFFOLD_DESTINATION_RESERVED' }));
+    expect(f.storage.getCreation(id).creation.state).toBe(evidence === 'unknown' || evidence === 'confirmed' ? 'partial' : evidence);
+    expect(f.db.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 1 });
     expect(f.calls).toEqual([]);
   });
   it.each(['local','remote_no_push','remote_push'] as const)('renders a Portuguese README consistent with %s', async creationMode => {
@@ -266,9 +321,26 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const receipt = saveTimeDefaults(db,{ operationId,expectedRevision: settingsETag(identity,old.revision),timeDefaults: { ...old.time_defaults,polling_interval_ms: 2000 } });
     expect(db.pragma('user_version',{ simple: true })).toBe(12); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(50);
+    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(51);
     expect(reopened.getOperation(operationId)).toEqual(receipt); expect(reopened.listProjects({}).items).toEqual([]);
     const probe = new Database(join(directory,'factory.sqlite')); try { expect(probe.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 }); expect(probe.pragma('foreign_key_check')).toEqual([]); } finally { probe.close(); }
+  });
+  it('preserves creation history and inbound step references while removing the historical destination reservation', async () => {
+    const f = fixture(); const body = await authorized(f);
+    const accepted = f.storage.acceptCreation({ operationId: randomUUID(), body });
+    const id = accepted.operation.resource.id;
+    f.storage.recordCreationStep(id, 'directory', 'running');
+    f.storage.failCreation(id, 'SCAFFOLD_CREATION_FAILED');
+    const creation = f.storage.getCreation(id);
+    const operation = f.storage.getOperation(accepted.operation.operation_id);
+    const events = f.storage.getEvents({}).items;
+    f.db.exec('CREATE UNIQUE INDEX historical_creation_destination ON project_creations(destination); DELETE FROM schema_migrations WHERE version=51; PRAGMA user_version=50');
+    applyMigrations(f.db, loadMigrations(), () => { throw new Error('MUST_NOT_RESEED'); });
+    expect(f.storage.getCreation(id)).toEqual(creation);
+    expect(f.storage.getOperation(accepted.operation.operation_id)).toEqual(operation);
+    expect(f.storage.getEvents({}).items).toEqual(events);
+    expect(f.db.pragma('foreign_key_check')).toEqual([]);
+    expect(() => f.storage.acceptCreation({ operationId: randomUUID(), body })).toThrow(expect.objectContaining({ code: 'SCAFFOLD_DESTINATION_RESERVED' }));
   });
   it('serves only the complete mode and rejects legacy creation input at the HTTP boundary', async () => {
     const f = fixture(); const configuration = loadConfiguration({ FACTORY_DATA_DIR: join(f.directory,'data'), FACTORY_LOG_LEVEL: 'silent' },f.directory);

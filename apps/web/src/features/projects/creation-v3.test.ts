@@ -154,3 +154,31 @@ it('registers a local incomplete project and renders the three independent cause
   const [, init] = metadata.mock.calls[0]!;
   expect(JSON.parse(String(init.body))).toEqual({ name: 'Existente', source: { kind: 'local', location: 'C:\\existing' }, base_branch: 'main' });
 });
+
+it('preserves the failed creation and requires a fresh reviewed authorization before retrying', async () => {
+  const failed: HttpCreationView = { ...view, creation: { ...view.creation, state: 'failed', baseline_sha: null, baseline_ref: null, diagnostic: 'SCAFFOLD_PATH_GUARD_UNAVAILABLE' },
+    confirmed_effects: [], pending_effects: [{ step: 'directory', state: 'not_started' }], next_action: 'create_new_plan' };
+  metadata.mockResolvedValue({ data: failed, etag: '"failed"' });
+  const container = document.createElement('div'); document.body.append(container);
+  const root = createRoot(container); roots.push(root);
+  const edit = vi.fn();
+  const props = { creationId: id, onCreationId, onPlanEdit: edit, onPlanReview: vi.fn(), onOpenProject: vi.fn() };
+  await act(async () => root.render(createElement(ProjectCreationDialog, props)));
+  expect(container.textContent).toContain('SCAFFOLD_PATH_GUARD_UNAVAILABLE');
+  await act(async () => button(container, 'Revisar novo plano').click());
+  expect(edit).toHaveBeenCalledOnce();
+  expect(request.mock.calls.filter(([path]) => path.endsWith('/scaffold/plans') || path.endsWith('/scaffold/creations'))).toHaveLength(0);
+  await act(async () => root.render(createElement(ProjectCreationDialog, { ...props, creationId: null })));
+  expect(container.querySelector<HTMLInputElement>('#creation-destination')!.value).toBe('project');
+  expect(container.textContent).toContain(`A criação anterior ${id} permanece no histórico`);
+  await act(async () => button(container, 'Revisar plano').click());
+  expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
+  expect(button(container, 'Criar projeto').disabled).toBe(true);
+  expect(request.mock.calls.filter(([path]) => path.endsWith('/scaffold/creations'))).toHaveLength(0);
+});
+
+it('does not offer a new attempt while the existing effects require review', async () => {
+  metadata.mockResolvedValue({ data: view, etag: '"partial"' });
+  const container = await mount(id);
+  expect(container.textContent).not.toContain('Revisar novo plano');
+});

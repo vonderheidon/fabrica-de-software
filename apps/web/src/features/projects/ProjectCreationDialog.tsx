@@ -353,8 +353,26 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     } finally { if (lifecycle.current.active && lifecycle.current.creationId === expectedCreationId) setReconciling(false); }
   }
 
+  function prepareNewPlan(): void {
+    if (!currentView || currentView.next_action !== 'create_new_plan' || uncertain || reconcileUncertain || reconciling || reconcileAccepted) return;
+    const input = currentView.creation.plan.input;
+    invalidatePlan(() => ({
+      name: input.name, templateId: input.template_id, destinationRelative: input.destination_relative,
+      baseBranch: input.base_branch, creationMode: 'remote_push', ownerId: input.remote?.owner_id ?? options?.account.id ?? '',
+      remoteName: input.remote?.name ?? suggestedPath(input.name), boardName: ('board_name' in input ? input.board_name : undefined) ?? input.name,
+      visibility: input.remote?.visibility ?? 'private',
+    }));
+    setActiveOperationId(null);
+    setOperationNotice(`A criação anterior ${currentView.creation.id} permanece no histórico. Revise um novo plano e confirme a autorização antes de criar novamente.`);
+    setDestinationEdited(true);
+    setRemoteNameEdited(true);
+    boardNameEditedRef.current = true;
+    ownerEditedRef.current = true;
+    onPlanEdit();
+  }
+
   if (creationId) return <CreationResult key={creationId} creationId={creationId} load={creation} onRefresh={() => setCreationReload((value) => value + 1)}
-    onOpenProject={onOpenProject} canReconcile={canReconcile} reconciling={reconciling || reconcileAccepted} reconcileUncertain={reconcileUncertain} reconcileNotice={reconcileNotice} onReconcile={() => void reconcile()} onConsultReconcile={() => void consultReconcile()} />;
+    onOpenProject={onOpenProject} onNewPlan={currentView?.next_action === 'create_new_plan' && !uncertain && !reconcileUncertain && !reconciling && !reconcileAccepted ? prepareNewPlan : undefined} canReconcile={canReconcile} reconciling={reconciling || reconcileAccepted} reconcileUncertain={reconcileUncertain} reconcileNotice={reconcileNotice} onReconcile={() => void reconcile()} onConsultReconcile={() => void consultReconcile()} />;
 
   if (plan) return <section className="creation-flow" aria-labelledby="creation-plan-title">
     <div className="creation-section-heading"><span className="eyebrow">Antes de criar</span><h3 id="creation-plan-title">Plano de criação</h3><p>Confira o destino, os arquivos e as ações que serão executadas ao criar.</p></div>
@@ -408,8 +426,9 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   </form>;
 }
 
-export function CreationResult({ creationId, load, onRefresh, onOpenProject, canReconcile, reconciling, reconcileUncertain, reconcileNotice, onReconcile, onConsultReconcile }: {
+export function CreationResult({ creationId, load, onRefresh, onOpenProject, onNewPlan, canReconcile, reconciling, reconcileUncertain, reconcileNotice, onReconcile, onConsultReconcile }: {
   creationId: string;
+  onNewPlan?: (() => void) | undefined;
   load: CreationLoad; onRefresh: () => void; onOpenProject: (projectId: string) => void; canReconcile: boolean; reconciling: boolean; reconcileUncertain: boolean; reconcileNotice: string; onReconcile: () => void; onConsultReconcile: () => void;
 }) {
   if (load.status === 'loading' || (load.status === 'ready' && load.view.creation.id !== creationId) || (load.status === 'error' && load.creationId !== creationId)) return <section className="creation-flow" aria-busy="true"><p role="status">Consultando a criação…</p></section>;
@@ -430,12 +449,11 @@ export function CreationResult({ creationId, load, onRefresh, onOpenProject, can
     <div className="creation-effect-list"><h4>Efeitos remotos e pendências</h4>{visibleEffects.length === 0 && <p>Nenhum efeito remoto solicitado.</p>}{visibleEffects.map((effect) => <div key={`${effect.kind}:${effect.operation_id}`}><div className="creation-effect-row"><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><span className={`pill ${effect.state === 'confirmed' ? '' : 'warn'}`}><OperatorState value={effect.state} /></span></div><small>{effect.source}</small>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state={effect.state === 'confirmed' ? 'passed' : 'blocked'} />}</div>)}</div>
     {load.view.board_operations.length > 0 && <div className="creation-effect-list"><h4>Quadro Kanban e vínculo</h4>{load.view.board_operations.map((effect) => <div key={effect.operation_id}><div className="creation-effect-row"><b>{stepLabels[effect.kind]}</b><OperatorState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state="blocked" />}</div>)}</div>}
     <CreationConditions creationId={creationId} />
-    {(creation.diagnostic || diagnostics.length > 0) && <div className="read-state" role="alert"><b>A criação precisa de atenção</b>{creation.diagnostic && ['SCAFFOLD_GIT_IDENTITY_REQUIRED', 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED', 'CREATION_REMOTE_DESCRIPTION_CHANGED'].includes(creation.diagnostic)
-      ? <OperatorDiagnosticCard code={creation.diagnostic} state="blocked" />
-      : <p>Confira as etapas pendentes e consulte os efeitos preservados. A conferência não executa etapas restantes nem repete publicações.</p>}</div>}
+    {(creation.diagnostic || diagnostics.length > 0) && <div className="read-state" role="alert"><b>A criação precisa de atenção</b>{[...new Set([creation.diagnostic, ...diagnostics].filter((code): code is string => Boolean(code)))].map(code => <div key={code}><code>{code}</code><OperatorDiagnosticCard code={code} state="blocked" /></div>)}</div>}
     {prerequisites.length > 0 && <div className="notice"><b>Antes de iniciar uma issue</b>{prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} projectId={creation.project_id} />)}</div>}
 
     {reconcileNotice && <div className="read-state" role="status">{reconcileNotice}</div>}
+    {onNewPlan && !load.error && <div className="notice"><p>O histórico desta criação será preservado. Uma nova tentativa exige consultar um novo plano e confirmar novamente as ações.</p><button type="button" onClick={onNewPlan}>Revisar novo plano</button></div>}
     <div className="form-actions dialog-actions"><button type="button" onClick={onRefresh}>Consultar criação novamente</button>{canReconcile && !reconcileUncertain && <button type="button" onClick={onReconcile} disabled={reconciling}>{reconciling ? 'Conferindo…' : 'Conferir efeitos preservados'}</button>}{reconcileUncertain && <button type="button" onClick={onConsultReconcile} disabled={reconciling}>{reconciling ? 'Consultando…' : 'Consultar conferência'}</button>}{creation.project_id && <button type="button" className="primary" onClick={() => onOpenProject(creation.project_id!)}>Abrir configuração do projeto</button>}</div>
   </section>;
 }

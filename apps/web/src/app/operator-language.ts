@@ -24,6 +24,9 @@ const codeLabels: Readonly<Record<string, string>> = {
   CRITERIA_LIST_INVALID: 'Revise a lista de critérios de aceite', CRITERION_ID_INVALID: 'Corrija a identificação dos critérios',
   CRITERION_ID_DUPLICATED: 'Use identificadores distintos para os critérios', CRITERION_TEXT_INVALID: 'Revise o texto dos critérios',
   SCAFFOLD_GIT_IDENTITY_REQUIRED: 'Configure seu nome e e-mail no Git antes de criar o projeto',
+  GIT_VERSION_UNSUPPORTED: 'Git incompatível com a proteção contra fetch implícito',
+  SCAFFOLD_GIT_CONFIG_FAILED: 'Falha ao consultar a configuração do Git',
+  GIT_UNAVAILABLE: 'Executável Git indisponível',
   CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: 'Descrição do repositório sem confirmação; consulte novamente a criação',
   CREATION_REMOTE_DESCRIPTION_CHANGED: 'Descrição alterada no GitHub; preserve o texto e confira a criação',
   ACCOUNT_UNOBSERVED: 'Conta GitHub sem vínculo', ACCOUNT_REQUIRED: 'Conta GitHub necessária', ACCOUNT_NOT_CONFIGURED: 'Conta GitHub sem vínculo',
@@ -74,6 +77,11 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
   STATUS_MAPPING_INVALID: { title: 'Mapeamento de Status inválido', cause: 'O campo ou uma das opções de Status configuradas não foi confirmado no quadro.', nextAction: 'Atualize as opções e confira os cinco valores de Status na configuração deste projeto.' },
   STATUS_MAPPING_LEGACY: { title: 'Mapeamento histórico de quatro valores', cause: 'Esta configuração ainda não contém a coluna Backlog exigida pelo quadro V3.', nextAction: 'Na configuração do projeto, selecione novamente o campo Status e mapeie os cinco valores para gravar uma nova revisão.' },
   SCAFFOLD_GIT_IDENTITY_REQUIRED: { title: 'Autoria do commit inicial ausente', cause: 'O Git deste computador não tem nome e e-mail configurados para o commit inicial.', nextAction: 'Configure seu nome e e-mail no Git e crie novamente o projeto. Nenhum arquivo foi criado.' },
+  GIT_VERSION_UNSUPPORTED: { title: 'Atualize ou selecione um Git compatível', cause: 'O executável Git não confirmou suporte a --no-lazy-fetch. Git 2.43 não oferece essa proteção contra busca implícita de objetos.', nextAction: 'Instale ou selecione Git 2.45.0 ou superior e execute nova detecção em Configuração. Não desative a proteção; esta falha não indica ausência de nome e e-mail.' },
+  SCAFFOLD_GIT_CONFIG_FAILED: { title: 'Não foi possível ler a configuração do Git', cause: 'O comando de consulta da configuração falhou; a autoria do commit inicial não foi determinada.', nextAction: 'Confira o executável e a configuração do Git. Selecione Git 2.45.0 ou superior com suporte a --no-lazy-fetch e execute nova detecção antes de tentar novamente. Não reconfigure nome e e-mail apenas por esta falha.' },
+  GIT_UNAVAILABLE: { title: 'Git indisponível para a operação', cause: 'O executável Git não pôde ser iniciado ou a consulta excedeu os limites; isso não comprova ausência de autoria.', nextAction: 'Confira o caminho e o acesso ao executável Git em Configuração e execute nova detecção antes de tentar novamente.' },
+  GIT_ENCODING_UNSUPPORTED: { title: 'Resposta do Git não pôde ser lida', cause: 'O Git retornou texto com codificação incompatível; a autoria não pôde ser determinada.', nextAction: 'Confira a configuração e a codificação do Git antes de tentar novamente.' },
+  GIT_INPUT_FAILED: { title: 'Comunicação com o Git interrompida', cause: 'O processo Git não recebeu a entrada da operação; a autoria não pôde ser determinada.', nextAction: 'Confira a disponibilidade do Git e execute nova detecção antes de tentar novamente.' },
   CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: { title: 'Descrição sem confirmação', cause: 'O repositório foi criado, mas a atualização da descrição não foi confirmada.', nextAction: 'Consulte os efeitos preservados para conferir a descrição, sem recriar o repositório.' },
   CREATION_REMOTE_DESCRIPTION_CHANGED: { title: 'Descrição alterada no GitHub', cause: 'A descrição foi editada após a criação e foi preservada.', nextAction: 'Confira a descrição no GitHub antes de prosseguir com a criação.' },
   ORIGIN_INVALID: { title: 'Origem não confirmada', cause: 'Não foi possível confirmar a pasta Git ou a URL do repositório informada.', nextAction: 'Confira o tipo e a localização da origem na configuração do projeto e consulte novamente.' },
@@ -374,6 +382,8 @@ export function isKnownOperatorEvent(eventType: string): boolean {
 }
 
 export function operatorCodeLabel(code: string): string {
+  const configExit = /^SCAFFOLD_GIT_CONFIG_FAILED_EXIT_(\d+)$/.exec(code)?.[1];
+  if (configExit) return `Falha ao consultar a configuração do Git (saída ${configExit})`;
   return codeLabels[code] ?? errorCopy[code] ?? 'Situação que precisa de atenção';
 }
 
@@ -419,6 +429,11 @@ export function operatorErrorMessage(code: string, message: string, status?: num
 }
 
 export function diagnosticCopyFor(code: string, state: string, cause?: string | null, recovery?: string | null) {
+  const configExit = /^SCAFFOLD_GIT_CONFIG_FAILED_EXIT_(\d+)$/.exec(code)?.[1];
+  if (configExit) {
+    const copy = diagnosticCopy.SCAFFOLD_GIT_CONFIG_FAILED!;
+    return { ...copy, cause: `${copy.cause} Código de saída do Git: ${configExit}.` };
+  }
   const known = diagnosticCopy[code];
   if (known) return ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'PROJECT_REQUIRED', 'REMOTE_UNCONFIRMED', 'CODE_NOT_PUBLISHED', 'STATUS_MAPPING_LEGACY', 'STATUS_MAPPING_INVALID'].includes(code) && cause && isPortugueseOperatorText(cause) ? { ...known, cause, ...(recovery && isPortugueseOperatorText(recovery) ? { nextAction: recovery } : {}) } : known;
   const status = operatorState(state);
