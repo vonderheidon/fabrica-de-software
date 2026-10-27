@@ -11,10 +11,11 @@ export function EvidenceList({ values }: { values: readonly string[] }) {
   return values.length ? <ul>{values.map((value, index) => <li key={index}>{value}</li>)}</ul> : <p className="muted">Evidência não registrada no histórico.</p>;
 }
 
-export function CorrectionHistory({ attemptId, round, deliveryId }: { attemptId: string; round: string | null; deliveryId: string | null }) {
+export function CorrectionHistory({ attemptId, round, deliveryId, sections = [] }: { attemptId: string; round: string | null; deliveryId: string | null; sections?: readonly string[] }) {
+  const available = (Object.keys(titles) as Array<Page['section']>).filter(section => sections.includes(section));
+  if (!available.length) return null;
   return <details className="attempt-axis-card card attempt-disclosure"><summary>Ciclo de correção e decisões</summary>
-    <p>Histórico da rodada e versão selecionadas. Consultar não executa correções nem resolve achados.</p>
-    {(Object.keys(titles) as Array<Page['section']>).map(section => <HistorySection key={section} {...{ attemptId, round, deliveryId, section }} />)}
+    {available.map(section => <HistorySection key={section} {...{ attemptId, round, deliveryId, section }} />)}
     {deliveryId && <CorrectionPackage deliveryId={deliveryId} />}
   </details>;
 }
@@ -42,7 +43,6 @@ function HistorySection({ attemptId, round, deliveryId, section }: { attemptId: 
   return <details className="card attempt-disclosure"><summary>{titles[section]}</summary>
     <button type="button" disabled={busy} onClick={() => void load()}>{busy ? 'Consultando…' : page ? 'Atualizar histórico' : 'Consultar histórico'}</button>
     {error && <p role="alert">{error}</p>}
-    {page?.items.length === 0 && <p>Sem registros para esta seleção. Dados ausentes de tentativas legadas não são reconstruídos.</p>}
     {page?.items.map(item => <article className="attempt-record" key={item.id}>
       {'progress' in item && <><h4>{progressLabel(item.progress)} · rodada {item.round}</h4><p>{item.justification}</p><EvidenceList values={item.evidence} /></>}
       {'response_verdict' in item && <><h4>Contestação do Implementador</h4><p>{item.justification}</p><EvidenceList values={item.evidence} /><h4>Resposta do Revisor</h4><p>{item.response_verdict === 'maintained' ? 'Achado mantido' : item.response_verdict === 'resolved' ? 'Achado resolvido' : 'Aguardando resposta'}</p><p>{item.response_justification}</p><EvidenceList values={item.response_evidence ?? []} /><p>{item.response_delivery_id === item.delivery_id ? 'Resposta na mesma versão contestada.' : item.response_delivery_id ? 'Resposta registrada em uma versão posterior, preservando a contestação original.' : 'Versão de resposta ainda não registrada.'}</p></>}

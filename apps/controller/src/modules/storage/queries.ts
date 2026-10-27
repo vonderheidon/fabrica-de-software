@@ -266,7 +266,12 @@ export function readAttemptDetail(db: Database.Database, id: string, query: Atte
      : details?.section === 'finding_assessments' ? { section: 'finding_assessments' as const, items: details.items.filter((item): item is import('#contracts').FindingAssessment => 'progress' in item && 'findingId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
      : details?.section === 'finding_disputes' ? { section: 'finding_disputes' as const, items: details.items.filter((item): item is import('#contracts').FindingDispute => 'responseReviewId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
      : details?.section === 'decisions' ? { section: 'decisions' as const, items: details.items.filter((item): item is AttemptDecisionView => 'operationId' in item && 'blockId' in item), next_cursor: details.next_cursor, has_more: details.has_more } : null;
-  return { ...a, v3Details, block: readAttemptBlock(db,id), expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound,
+  const historySections = (['target_selections', 'finding_assessments', 'finding_disputes', 'decisions'] as const).filter(section => {
+    const plan = plans[section]!;
+    return Boolean(db.prepare(`SELECT 1 FROM ${plan.from} WHERE t.attempt_id=? AND ${plan.round}=?${selectedDeliveryId ? ` AND ${plan.delivery}=?` : ''} LIMIT 1`)
+      .get(...(selectedDeliveryId ? [id, selectedRound, selectedDeliveryId] : [id, selectedRound])));
+  });
+  return { ...a, v3Details, historySections, block: readAttemptBlock(db,id), expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound,
     deliverySummary: exists ? readDeliverySummary(db,id,selectedDeliveryId!,publication) : null,
     publicationTarget: targetCapture?.publication_target ?? null, publicationTargetHash: targetCapture?.publication_target_hash ?? null,
     stageActivity: readStageActivity(db,id), publication, measurements: readMeasurements(db,id), cleanup: readResources(db,id).cleanup,

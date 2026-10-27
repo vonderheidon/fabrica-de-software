@@ -88,6 +88,7 @@ export const AttemptDetail = Type.Object({ ...AttemptStatus.properties,
   capabilities: Type.Object({ cancel: Capability, completePublication: Capability, reconcilePublication: Capability, revalidate: Capability }, closed),
   block: AttemptBlock,
   v3Details: nullable(AttemptV3DetailPage),
+  historySections: Type.Optional(Type.Array(Type.Union(['target_selections', 'finding_assessments', 'finding_disputes', 'decisions'].map(value => Type.Literal(value))), { maxItems: 4 })),
   details: nullable(DetailPage),
 }, closed);
 export type AttemptDetail = Static<typeof AttemptDetail>;

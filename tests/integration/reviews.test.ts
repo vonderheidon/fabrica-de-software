@@ -205,6 +205,12 @@ it('serves scoped paginated dispute history only on demand without mutating or d
     const calls = vi.mocked(f.execution.continuePassage).mock.calls.length; const before = f.status();
     const summary = await app.inject({ url, headers }); expect(summary.statusCode).toBe(200);
     expect(summary.json()).toMatchObject({ v3_details: null, details: null });
+    expect(summary.json().history_sections).not.toContain('finding_disputes');
+    expect(summary.json().history_sections).not.toContain('decisions');
+    const originalSummary = await app.inject({ url: url + '?delivery_id=' + f.original.deliveryId, headers });
+    expect(originalSummary.statusCode).toBe(200);
+    expect(originalSummary.json().history_sections).toContain('finding_disputes');
+    expect(originalSummary.json()).toMatchObject({ v3_details: null, details: null });
     expect(summary.body).not.toContain('New check evidence');
     const first = await app.inject({ url: url + '?section=finding_disputes&limit=1', headers });
     expect(first.statusCode).toBe(200); const page = first.json().v3_details;

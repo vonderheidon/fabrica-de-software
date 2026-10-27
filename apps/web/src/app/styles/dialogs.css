@@ -203,3 +203,5 @@
   .project-deletion-dialog h2 { font-size: 20px; }
   .project-deletion-dialog .dialog-actions > button:not(.danger-button) { padding-inline: 6px; font-size: 12px; }
 }
+.dialog .attempt-removal-confirmation { align-items: flex-start; padding: 10px 0; }
+.dialog .attempt-removal-confirmation input[type='checkbox'] { flex: 0 0 18px; width: 18px; height: 18px; margin: 2px 0 0; padding: 0; }

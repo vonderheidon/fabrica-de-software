@@ -132,7 +132,6 @@ export function AttemptListPanel({ projectId, result, issueNumber, issueTitle, d
         <div className="form-field"><label htmlFor="attempt-date-from-filter">Início</label><input id="attempt-date-from-filter" type="date" aria-invalid={invertedRange} aria-describedby={invertedRange ? 'attempt-range-error' : undefined} value={draft.dateFrom} onChange={(event) => { const dateFrom = event.currentTarget.value; setDraft((current) => ({ ...current, dateFrom })); }} /></div>
         <div className="form-field"><label htmlFor="attempt-date-to-filter">Fim</label><input id="attempt-date-to-filter" type="date" aria-invalid={invertedRange} aria-describedby={invertedRange ? 'attempt-range-error' : undefined} value={draft.dateTo} onChange={(event) => { const dateTo = event.currentTarget.value; setDraft((current) => ({ ...current, dateTo })); }} /></div>
       </div>
-      <p className="attempt-time-zone">As datas usam o fuso horário local: <code>{timeZone}</code></p>
       {invertedRange && <p id="attempt-range-error" className="attempt-search-range-error" role="alert">A data inicial deve ser anterior ou igual à data final.</p>}
       <div className="attempt-search-actions">
         <button type="button" onClick={() => { const cleared = { issueNumber: '', issueTitle: '', dateFrom: '', dateTo: '', timeZone }; setDraft(cleared); refreshHistory(); onSearchChange(cleared); }}>Limpar busca</button>

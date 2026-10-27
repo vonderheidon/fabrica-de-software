@@ -257,9 +257,9 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Consultar ambiente novamente</button></div>}
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
       <HistoricalProfile key={attemptId} attemptId={attemptId} />
-      <PublicationTargetFacts key={`${attemptId}:${effectiveDeliveryId}`} attemptId={attemptId} deliveryId={effectiveDeliveryId} target={attempt.publication_target} publication={delivery?.publication} />
+      {(attempt.publication_target || delivery?.publication.commit?.branch_ref || attempt.history_sections?.includes('target_selections')) && <PublicationTargetFacts key={`${attemptId}:${effectiveDeliveryId}`} attemptId={attemptId} deliveryId={effectiveDeliveryId} target={attempt.publication_target} publication={delivery?.publication} />}
       {attempt.block && <AttemptBlockDecision key={`${attempt.expected_account_id}:${attemptId}:${attempt.block.id}`} attempt={attempt} etag={attemptEtag} current={selectionCurrent && !attemptError} onRefresh={refreshDetail} />}
-      <CorrectionHistory key={sectionIdentity} attemptId={attemptId} round={selectedRound} deliveryId={effectiveDeliveryId} />
+      <CorrectionHistory key={sectionIdentity} attemptId={attemptId} round={selectedRound} deliveryId={effectiveDeliveryId} sections={attempt.history_sections ?? []} />
       <details className="attempt-axis-card card attempt-disclosure"><summary>Ver alterações da entrega</summary>
         {deliveryState === 'loading' && <p role="status">Consultando a versão selecionada…</p>}
         {deliveryState === 'not-captured' && <p className="muted">Esta rodada ainda não tem uma versão capturada.</p>}
@@ -326,7 +326,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
                 <h4>Plano de remoção</h4>
                 <div className="attempt-evidence-columns"><div><b>Será perdido</b><ul>{plan.value.losses.map((item) => <li key={item}>{item}</li>)}</ul></div><div><b>Será preservado</b><ul>{plan.value.preserved_references.map((item) => <li key={item}>{item}</li>)}</ul></div></div>
                 {!plan.value.capability.available && <><p className="muted">A remoção não está disponível enquanto os pré-requisitos atuais não forem confirmados.</p></>}
-                {plan.value.capability.available && !resource.removed && <><label className="check"><input type="checkbox" checked={confirmedResources[resource.id] === plan.value.plan_hash} onChange={(event) => { const checked = event.currentTarget.checked; setConfirmedResources((current) => { const next = { ...current }; if (checked) next[resource.id] = plan.value.plan_hash; else delete next[resource.id]; return next; }); }} />Confirmo a remoção deste ambiente e as perdas listadas acima.</label><button type="button" className="danger" onClick={() => void actions.requestRemoval(resource.id)} disabled={confirmedResources[resource.id] !== plan.value.plan_hash || actions.busy}>Remover ambiente</button></>}
+                {plan.value.capability.available && !resource.removed && <><label className="form-check attempt-removal-confirmation"><input type="checkbox" checked={confirmedResources[resource.id] === plan.value.plan_hash} onChange={(event) => { const checked = event.currentTarget.checked; setConfirmedResources((current) => { const next = { ...current }; if (checked) next[resource.id] = plan.value.plan_hash; else delete next[resource.id]; return next; }); }} /><span>Confirmo a remoção deste ambiente e as perdas listadas acima.</span></label><button type="button" className="danger" onClick={() => void actions.requestRemoval(resource.id)} disabled={confirmedResources[resource.id] !== plan.value.plan_hash || actions.busy}>Remover ambiente</button></>}
               </div>}
             </div>}
           </article>;
@@ -352,7 +352,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     <div className="dialog-actions">
       <p>Fechar este detalhe não altera o estado da tentativa.</p>
       <button type="button" onClick={() => setReload((value) => value + 1)}>Atualizar tentativa</button>
-      {attempt?.capabilities.revalidate.available && <button type="button" onClick={actions.revalidate} disabled={actions.busy || attemptRefreshing || !attemptEtag}>Revalidar tentativa</button>}
+      {attempt?.capabilities.revalidate.available && Boolean(attempt.suspension || attempt.diagnostic || attempt.authority?.reason || attempt.tracking === 'lost') && <button type="button" onClick={actions.revalidate} disabled={actions.busy || attemptRefreshing || !attemptEtag}>Revalidar tentativa</button>}
       <span id="attempt-decision-actions" />
       {attempt?.result && <button type="button" className="primary" onClick={() => onRetry(attempt)}>Nova tentativa</button>}
     </div>

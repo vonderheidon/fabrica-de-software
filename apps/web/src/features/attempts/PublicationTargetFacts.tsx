@@ -29,11 +29,10 @@ export function PublicationTargetFacts({ attemptId, deliveryId, target, publicat
   return <details className="attempt-axis-card card attempt-disclosure" onToggle={event => { if (event.currentTarget.open && !loaded) void load(); }}>
     <summary>Destino da versão aprovada</summary>
     <dl className="preparation-facts">
-      <div><dt>Intenção capturada</dt><dd>{target ? `${target.selection.kind === 'clone' ? 'Clonagem futura em' : 'Usar clone em'} ${target.selection.kind === 'clone' ? target.selection.destination : target.selection.path}` : 'Não informada nesta tentativa'}</dd></div>
-      <div><dt>Clone confirmado</dt><dd>{confirmed ? confirmed.local_path : loaded ? 'Sem confirmação nos registros consultados' : 'Consulta sob demanda'}</dd></div>
-      <div><dt>Destino selado</dt><dd>{publication?.commit?.branch_ref ? `Branch ${publication.commit.branch_ref.replace(/^refs\/heads\//,'')}` : 'Ainda não informado para esta versão'}</dd></div>
+      {target && <div><dt>Intenção capturada</dt><dd>{`${target.selection.kind === 'clone' ? 'Clonagem futura em' : 'Usar clone em'} ${target.selection.kind === 'clone' ? target.selection.destination : target.selection.path}`}</dd></div>}
+      {confirmed && <div><dt>Clone confirmado</dt><dd>{confirmed.local_path}</dd></div>}
+      {publication?.commit?.branch_ref && <div><dt>Destino selado</dt><dd>Branch {publication.commit.branch_ref.replace(/^refs\/heads\//,'')}</dd></div>}
     </dl>
-    {target && <p className="muted">A intenção capturada não comprova a criação ou a identidade do clone.</p>}
     {selections.some(item => ['accepted','running','unknown'].includes(item.state)) && <p role="status">A seleção do destino está pendente de confirmação. Consulte ou reconcilie a publicação antes de continuar.</p>}
     {error && <p role="alert">Não foi possível consultar o destino. <button type="button" onClick={() => void load()}>Consultar destino novamente</button></p>}
     <button type="button" onClick={() => void load()}>Atualizar destino</button>

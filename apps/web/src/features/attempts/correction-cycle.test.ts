@@ -117,11 +117,19 @@ it('allows a separate explicit decision after confirmed success on a newer block
   expect(container.textContent).toContain('3 de 5');
 });
 
+it('omits correction history without records and makes no detail requests', async () => {
+  await act(async () => root.render(createElement(CorrectionHistory, { attemptId: attempt.id, round: '1', deliveryId: null, sections: [] })));
+  expect(container.textContent).toBe('');
+  expect(request).not.toHaveBeenCalled();
+});
+
 it('loads history only on demand, paginates and excludes late data after a selection change', async () => {
   const pending = deferred<HttpAttemptDetail>();
   request.mockReturnValue(pending.promise);
-  const history = (version: string) => act(async () => root.render(createElement(CorrectionHistory, { key: version, attemptId: attempt.id, round: '2', deliveryId: version })));
+  const history = (version: string) => act(async () => root.render(createElement(CorrectionHistory, { key: version, attemptId: attempt.id, round: '2', deliveryId: version, sections: ['finding_assessments'] })));
   await history('a'); expect(request).not.toHaveBeenCalled();
+  expect(container.textContent).not.toContain('Contestações e respostas');
+  expect(container.textContent).not.toContain('Decisões registradas');
   await act(async () => button('Consultar histórico').click());
   expect(request.mock.calls[0]![0]).toContain('delivery_id=a');
   await history('b');

@@ -75,7 +75,30 @@ it('keeps publication completion separate from uncertain effects', async () => {
   unknown = 1;
   await show(a);
   expect(container.querySelector('#publication-panel-title')?.textContent).toBe('Entrega parcial');
-  expect(container.textContent).toContain('sem confirmação');
+  expect(container.querySelector('.delivery-limitations')).toBeNull();
+  expect(container.querySelector('.delivery-pending')).toBeNull();
+  expect(container.textContent).not.toContain('Código no ambiente da tentativa');
+});
+
+it('omits empty destination and correction panels and hides revalidation during normal execution', async () => {
+  await mount();
+  const previous = metadata.getMockImplementation()!;
+  metadata.mockImplementation(async (path: string, init?: RequestInit) => {
+    const value = await previous(path, init);
+    if (path.startsWith(`/api/v1/attempts/${id}`) && !path.includes('section=')) {
+      value.data.suspension = null;
+      value.data.diagnostic = null;
+      value.data.authority = null;
+      value.data.tracking = 'tracked';
+      value.data.capabilities.revalidate = { available: true };
+      value.data.history_sections = [];
+    }
+    return value;
+  });
+  await act(async () => button('Atualizar tentativa').click());
+  expect(container.textContent).not.toContain('Destino da versão aprovada');
+  expect(container.textContent).not.toContain('Ciclo de correção e decisões');
+  expect(container.textContent).not.toContain('Revalidar tentativa');
 });
 
 it('revalidates authority and resources explicitly with the current revision', async () => {
