@@ -1,45 +1,5 @@
 # Feedback para o próximo pacote - V4
 
-## Correção urgente: reencontro e reutilização de terminais após reinício
-
-Prioridade urgente registrada em 25/10/2026 para cumprir o requisito já aprovado na V3: FEEDBACK-PROXIMO-PACOTE-V3.md, seção “Reutilização dos terminais Maestri entre tentativas”, e SPEC US-10.C1/C3, RF-45, RF-47 e RF-48. Implementação e validação autorizadas posteriormente pelo usuário e realizadas em 26/10/2026, com situação e pendências registradas abaixo.
-
-### Problema observado
-
-Na verificação anterior à correção, após falha e reinício do controlador, o terminal próprio do Implementador permaneceu registrado como incerto. A consulta ao Maestri mostrou esse terminal parado, mas a fábrica iniciou outra tentativa em um terminal novo. A implementação preservava a identidade e bloqueava a ocupação incerta, porém o caminho de recuperação não recompunha a disponibilidade após o reinício. Isso impedia a reutilização prevista e acumulava terminais no canvas.
-
-### Correção requerida
-
-- Ao preparar o despacho de um papel, reencontrar seus terminais próprios registrados e conferir a identidade e a disponibilidade atuais no Maestri, inclusive quando o registro persistido estiver incerto após falha ou reinício.
-- Reconciliar os registros de terminal, sessão e ocupação com a observação física confirmada. A ausência de vínculos em memória do controlador não pode, por si só, impedir essa conferência nem motivar a criação de outro terminal.
-- Reutilizar o terminal próprio cuja disponibilidade foi confirmada, com sessão OMP nova e ambiente da nova tentativa. Criar terminal quando o correspondente estiver ausente. Se a disponibilidade continuar incerta ou houver trabalho ativo, preservar o recurso e apresentar o impedimento concreto.
-- Recuperar a identificação e a disponibilidade para trabalhos futuros sem retomar a execução interrompida, restaurar sua conversa ou autoridade, nem transferir seu contexto ou resultados à nova tentativa.
-- Preservar posse, host, instalação, identidade física e geração; não adotar terminais manuais nem interpretar ausência de atividade visual como prova suficiente de parada.
-- Integrar essa recuperação ao fluxo normal da fábrica, sem exigir edição de banco, comandos de manutenção ou uma ação manual de reconciliação como condição para cumprir o reencontro previsto na V3. Distinguir disponibilidade para reutilização da confirmação de parada exigida para limpar ambientes.
-
-### Validação e aceite
-
-- Provar no Maestri/OMP real: criação inicial, conclusão e outra tentativa reutilizando o mesmo terminal com sessão nova; falha e reinício seguidos de reencontro, conferência e reutilização do terminal próprio disponível.
-- Exercitar terminal ausente, ativo, parado, incerto e manual, além de falha de consulta e identidade divergente. Conferência inconclusiva mantém bloqueio; não cria disponibilidade fictícia nem ocupa outro recurso como substituto silencioso.
-- Conferir a consistência dos registros e das gerações após reconciliação, sem alterar resultados, evidências ou histórico das tentativas anteriores, duplicar despachos ou acumular terminais a cada reinício.
-- Distinguir testes determinísticos da prova real de integração. Compilação, identidade persistida e terminal listado no Maestri não comprovam isoladamente disponibilidade nem encerram o aceite.
-
-### Situação em 26/10/2026
-
-**Correção implementada e reutilização comprovada em ensaio real; aceite integral pendente.**
-
-- O despacho passou a reconciliar os terminais próprios registrados como incertos antes de alocar substitutos, mediante consulta nativa com o contexto do workspace. O reencontro confere identidade e disponibilidade e preserva o bloqueio quando há atividade, divergência ou consulta inconclusiva.
-- Uma nova tentativa reutiliza o terminal confirmado com outra sessão OMP e outro ambiente, incrementando a geração. A tentativa anterior permanece interrompida; o reencontro não restaura sua conversa ou autoridade nem transforma recursos antigos com parada incerta em recursos liberados para limpeza.
-- Ausência na lista de terminais conectados e lançamento sem identidade física confirmada mantêm o bloqueio, evitando substituição silenciosa e terminais duplicados.
-
-**Prova real pelo Shell #5, com acompanhamento pelo Wire:** cinco passagens OMP `openai-codex/gpt-6-luna`, esforço `high`, usando os mesmos dois terminais físicos. O ensaio concluiu uma entrega inicial, iniciou outra tentativa com processos ativos, encerrou esses processos e recriou controlador, conexões SQLite, adaptador e mapas de processos. A tentativa seguinte reencontrou o terminal do Implementador, usou sessão nova, incrementou a geração e terminou entregue, preservando a tentativa anterior como interrompida e sua parada histórica como incerta. A auditoria confirmou o encerramento dos PIDs próprios.
-
-O reinício foi exercitado pela recriação dos componentes dentro do processo de teste, sem simular queda do processo Windows inteiro. Maestri e OMP foram reais; GitHub e checks técnicos usaram portas controladas. Resultado e limites em [.cache/session-recovery-1793049045076/result.json](.cache/session-recovery-1793049045076/result.json); auditoria em [.cache/v4-terminal-implementation-20261026/closure-audit.json](.cache/v4-terminal-implementation-20261026/closure-audit.json).
-
-**Validação local da versão entregue:** 106 testes direcionados passaram, assim como build, typecheck e lint. A suíte completa teve 2.027 testes aprovados e uma falha em `apps/web/src/features/projects/project-readiness.test.ts:169`, cuja expectativa ainda exige o texto “Configuração efetiva”. O smoke compilado falhou por timeout ao aguardar o processo filho na etapa `restart-and-session-revocation`. Logs e manifesto dos 13 arquivos da implementação estão em [.cache/v4-terminal-implementation-20261026/](.cache/v4-terminal-implementation-20261026/); os hashes foram conferidos novamente nesta atualização documental.
-
-**Pendências para encerrar o item:** a API nativa disponível lista terminais conectados e não distingue terminal excluído de desconectado. Por isso, a ausência nessa lista permanece incerta e bloqueada; a recriação de um terminal registrado e comprovadamente ausente ainda não foi atendida. Permanecem também a prova de reinício do processo Windows inteiro e a resolução das falhas da suíte completa e do smoke compilado. O contrato de criar quando ausente continua preservado, sem enfraquecer a proteção contra duplicação.
-
 ## Retirada de todo o código legado e das compatibilidades anteriores ao V3
 
 Decisão registrada em 24/10/2026. Registro documental para o próximo pacote, sem iniciar implementação ou pipeline.
@@ -116,16 +76,14 @@ Remover a funcionalidade de comparação entre tentativas. O usuário informou q
 
 Este registro não altera a implementação agora nem autoriza apagar dados ou histórico das tentativas.
 
-## Seleção das branches de origem e destino
+## Remoção da prioridade configurável da fila
 
-Decisão refinada e implementação autorizada em 26/10/2026, diretamente no chat, sem iniciar pipeline.
+Decisão registrada em 27/10/2026. Registro documental para o próximo pacote, sem iniciar implementação ou pipeline.
 
-Escolher a origem local ou GitHub e a branch de partida. A tentativa fixa o commit observado nessa branch ao iniciar; commits locais sem push são permitidos e alterações sem commit ficam de fora. A identidade do repositório GitHub e os demais requisitos de issue e quadro continuam obrigatórios.
+Remover os campos “Ordem de prioridade” e “Campo de prioridade (ID)” da configuração do projeto, incluindo as orientações desses campos e o mecanismo de ordenação por campo numérico do quadro GitHub.
 
-Escolher separadamente uma branch de destino existente ou uma nova com nome informado, mantendo também a opção de nome automático. A escolha pertence à configuração capturada na tentativa e vale para a entrega inicial ou sua continuação a partir de ICR. No modo ICR, o resultado permanece no ambiente separado até a autorização dos efeitos seguintes.
+- Remover as definições de campo de prioridade e sentido crescente ou decrescente dos contratos, persistência, capturas e consumidores, além do código exclusivo dessa configuração.
+- A fila passa a usar os critérios padrão de ordenação existentes. Preservar as regras de elegibilidade e os bloqueios para novos inícios.
+- Adequar os documentos normativos e os testes afetados, comprovando a seleção dos próximos candidatos pelos critérios padrão após a retirada.
 
-A interface deve apresentar a branch de destino antes da autorização e informar o resultado da publicação. Preservar a versão aprovada e o trabalho local do usuário; alterações na base que exijam adaptação continuam sujeitas à validação e à revisão pertinentes.
-
-A integração preserva os commits da branch existente. Uma base diferente exige adaptação no ambiente da tentativa e nova validação e revisão antes de publicar. A fábrica não troca a branch aberta nem altera os arquivos do operador; uma branch de destino aberta em algum checkout deve ser liberada antes da entrega. A atualização confere o commit anterior e o push permite somente avanço normal, sem force-push. No modo PR, a base continua sendo a branch de origem e deve diferir da branch entregue.
-
-Os efeitos reais de commit, push e PR continuam dependentes da autorização da respectiva tentativa. A implementação e as provas locais não representam publicação externa nem aceite real Maestri/OMP.
+Este registro não altera a implementação agora nem autoriza apagar dados ou histórico existentes.
