@@ -8,6 +8,8 @@ Para instalar e operar, consulte o [manual local](docs/operation/README.md), que
 
 Node.js **24.x** e npm. Execute os comandos na raiz deste repositório canônico, em PowerShell. As versões diretas são exatas em `package.json`; `package-lock.json` fixa a árvore resolvida. O driver SQLite inclui binário nativo para as plataformas distribuídas pelo pacote; esta execução foi validada no Windows com Node 24.20.0.
 
+Operações Git exigem **Git 2.45 ou posterior**, com suporte a `--no-lazy-fetch`; versões anteriores são recusadas pelo detector para impedir fetch implícito. Falhas de execução/configuração são distintas de autoria ausente. Criação falha antes de qualquer efeito permite revisar e confirmar outro plano para o mesmo destino, preservando o histórico; criações com efeitos iniciados ou incertos continuam reservadas.
+
 ```powershell
 npm.cmd ci --cache .cache/npm --no-audit --no-fund
 npm.cmd run typecheck
@@ -23,6 +25,8 @@ npm.cmd run test:distribution
 ```
 
 No PowerShell que bloqueia scripts `.ps1`, use `npm.cmd` no lugar de `npm`. O cache explícito mantém a instalação dentro do workspace mesmo quando o ambiente define outro cache. Não é necessário instalar ferramentas globalmente nem executar setup de scaffold.
+
+O launcher padrão (`npm start`) habilita a política de criação por plano confirmado, sem exigir argumentos de executáveis. Revisar o plano não cria recursos; os efeitos dependem da confirmação explícita. Se Git aparecer com escolha pendente, valide e salve um executável em Configuração e reinicie o controlador para aplicar a seleção.
 
 `npm test` usa Vitest em modo não interativo, Fastify inject e SQLite temporário. O setup bloqueia conexões de rede e subprocessos; não chama providers, Maestri, terminais ou GitHub. `test:compiled` usa HTTP/SSE loopback real, porta efêmera e diretório/cwd temporários. Verifica shutdown, concorrência com outro processo Node e liberação do lock depois de término abrupto do processo criado pelo próprio teste. Nenhum dos comandos executa Git/GH.
 
@@ -478,6 +482,8 @@ O modo PR capturado autoriza o push necessário sem confirmação entre commit/p
 `github.mutateEffect` cria PR por GraphQL com repositórios head/base exatos, branch própria e base capturada. Consulta todas as páginas pertinentes antes e depois do envio. Confirma repositório, head/base, SHA, autor, marcador único, hash do corpo, título, estado aberto e URL; consulta também os refs atuais do head e da base. O corpo contém escopo, base/versão, checks/evidências, parecer, pendências não impeditivas e attemptId. Conteúdo editorial é tratado para impedir gatilhos de fechamento; não há merge, force-push ou edição de critérios. As releituras não oferecem CAS remoto: alteração concorrente após uma leitura pode produzir efeito incerto, que exige diagnóstico/reconciliação.
 
 Intenção/claim são confirmados antes de cada mutação e o recibo antes da seguinte. O adapter GitHub chama a autorização novamente após as consultas prévias; cancelamento/restart invalidam a continuidade. Timeout enviado fica unknown até leitura confirmável. `reconcilePush` e `reconcilePullRequest` consultam os fatos conhecidos sem criar recursos; ausência, duplicidade, diferenças de identidade ou leitura parcial não autorizam replay. Confirmações tardias são registradas mesmo após cancelamento e não autorizam os próximos efeitos. Commit/push/PR sem delta recebem `not_applicable/APPROVED_NO_DELTA`, sem push ou PR vazia.
+
+O recibo de PR preserva `targetOperationId` quando a publicação possui alvo local selado, tanto na confirmação inicial quanto na reconciliação. A persistência exige esse vínculo com a operação autorizada; uma PR existente não precisa ser recriada para confirmar seu recibo.
 
 Migration 015 amplia os journals e adiciona `publication_upgrades`, imutável e vinculada a tentativa/versão/operação. O resumo oferece somente modos superiores para tentativa encerrada com versão corrente aprovada; o hash vincula revisões, configuração, versão/revisão técnica e estados dos efeitos. Autorizar valida retenção/evidências, gate atual, CAS e resumo antes da transação. A autorização adicional, recibo e evento são atômicos; a captura original e efeitos confirmados permanecem intactos. `authorizations.capturedMode` e `authorizedMode` são distintos. `complete` usa o modo já autorizado, sem exigir a confirmação adicional novamente, e `publication.localState` distingue conclusão do modo de um resultado anterior entregue.
 
