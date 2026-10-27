@@ -481,6 +481,19 @@ describe('native Maestri and Windows launch', () => {
     await expect(createNative(host, 'C:\\Data', run).validate()).rejects.toThrow('CONTEXT_STALE');
     expect(run).toHaveBeenCalledTimes(1);
   });
+  it('recovers a host after missing detection and shares concurrent resolution', async () => {
+    const resolveHost = vi.fn<() => Promise<ExecutionHost | undefined>>().mockResolvedValueOnce(undefined).mockResolvedValue(host);
+    const run = vi.fn<CliRunner>(async (_exe, args) => ({ exitCode: 0,
+      stdout: args[0] === 'list' ? 'You: Anchor\nConnected agents:' : args[0] === 'recruit' ? '--command --dir' : 'omp/18.12.5\n' }));
+    const execution = createMaestriOmp({ dataDirectory: 'C:\\Data', persistence: fixtureStore().store, resolveHost }, loadRoleResources(), { runCli: run });
+    expect(await execution.preflight()).toMatchObject({ ready: false, code: 'CONTEXT_MISSING' });
+    const results = await Promise.all([execution.preflight(), execution.preflight()]);
+    expect(results.every(result => result.ready)).toBe(true);
+    expect(resolveHost).toHaveBeenCalledTimes(2);
+    await execution.preflight();
+    expect(resolveHost).toHaveBeenCalledTimes(2);
+    await execution.close();
+  });
   it('uses only supported queries and exact argv/cwd/env; validates version without provider', async () => {
     const run = vi.fn<CliRunner>(async (_exe, args) => ({ exitCode: 0, stdout: args[0] === 'list' ? 'You: Anchor\nConnected agents:' : args[0] === 'recruit' ? '--command --dir' : 'omp/19.2.0-beta.1\n' }));
     expect((await createNative(host, 'C:\\Dados ç', run).validate()).ompVersion).toBe('19.2.0-beta.1');

@@ -79,6 +79,7 @@ export interface ExecutionOptions {
   validatePassageScope?: (binding: PassageBinding) => Promise<void>;
   validateReviewerResult?: (binding: PassageBinding) => Promise<void>;
   dataDirectory: string; persistence: ExecutionPersistence; host?: ExecutionHost;
+  resolveHost?: () => Promise<ExecutionHost | undefined>;
   projectStorageRootForAttempt?: (attemptId: string, allocate?: boolean) => Promise<string>;
   /** Defaults to resources distributed next to the application. */
   roleDirectory?: string;
@@ -88,7 +89,7 @@ export interface InteractionSurface {
   open: (() => Promise<void>) | null;
 }
 export interface Execution {
-  observeManagedTerminal?: (reference: { workspaceId: string; terminalName: string; terminalId?: string }) => Promise<'stopped' | 'running' | 'missing' | 'uncertain'>;
+  observeManagedTerminal?: (reference: { workspaceId?: string; terminalName: string; terminalId?: string }) => Promise<'stopped' | 'running' | 'missing' | 'uncertain'>;
   reconcilePassageStop?: (handle: PassageHandle) => Promise<boolean>;
   /** Quiesce a live, completed reviewer before preparing its next immutable checkout. */
   preparePassageHandoff(source: PassageHandle): Promise<void>;

@@ -173,18 +173,21 @@ export function createPipeline(deps: PipelineDependencies) {
       v3Delivery };
     for (const candidate of storage.terminalRecoveryCandidates()) {
       if (!execution.observeManagedTerminal && candidate.state === 'available') continue;
-      const observation = candidate.workspaceId && candidate.terminalId && execution.observeManagedTerminal
-        ? await execution.observeManagedTerminal({ workspaceId: candidate.workspaceId, terminalId: candidate.terminalId, terminalName: candidate.terminalName }).catch(() => 'uncertain' as const)
+      const observation = execution.observeManagedTerminal
+        ? await execution.observeManagedTerminal({ ...(candidate.workspaceId ? { workspaceId: candidate.workspaceId } : {}),
+          ...(candidate.terminalId ? { terminalId: candidate.terminalId } : {}), terminalName: candidate.terminalName }).catch(() => 'uncertain' as const)
         : 'uncertain';
       if (closed) throw new OperationError(503, 'PIPELINE_CLOSED', 'The controller is shutting down.');
-      if (observation !== 'stopped') {
+      if ((observation !== 'stopped' && observation !== 'missing') || (observation === 'stopped' && (!candidate.workspaceId || !candidate.terminalId))) {
         throw new OperationError(409, 'TERMINAL_AVAILABILITY_UNCONFIRMED',
           observation === 'running' ? 'O terminal próprio ainda está em execução.' : 'Não foi possível confirmar a disponibilidade do terminal próprio.', {
             facts: { terminal_id: candidate.terminalId, terminal_name: candidate.terminalName }, affected_requirements: ['RF-45', 'RF-47', 'RF-48'],
-            recovery: 'Confira o terminal no Maestri e tente iniciar novamente após o encerramento e a confirmação de disponibilidade.',
+            recovery: observation === 'running'
+              ? `Encerre a execução do terminal ${candidate.terminalName} no Maestri e tente iniciar novamente.`
+              : `No Maestri, reconecte o terminal ${candidate.terminalName} ao terminal que executa o controlador e confirme que está parado. Se você o excluiu, tente novamente: a fábrica confirmará a ausência e criará outro. Se a consulta continuar falhando, confira a conexão do controlador com o Maestri.`,
           });
       }
-      storage.reconcileTerminalAvailability(candidate);
+      storage.reconcileTerminalAvailability(candidate, observation);
     }
     const accepted = storage.createAttempt({ command, capture, configurationETag: config.etag, preparationETag: current.etag, ...(queueCycle ? { queueCycle } : {}) });
     if (accepted.created) schedule(accepted.operation.resource.id);

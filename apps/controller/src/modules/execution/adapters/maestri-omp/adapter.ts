@@ -58,10 +58,17 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   const starts = new Map<string, { hash: string; promise: Promise<PassageRecord> }>();
   let closed = false;
   let closing: Promise<void> | undefined;
-  const native = () => {
+  let resolvingHost: Promise<void> | undefined;
+  const ensureHost = async () => {
+    if (options.host || !options.resolveHost || closed) return;
+    resolvingHost ??= options.resolveHost().then(host => { if (!closed && host) options.host = host; }).finally(() => { resolvingHost = undefined; });
+    await resolvingHost;
+  };
+  const native = async () => {
+    await ensureHost();
     if (dependencies.native) return dependencies.native;
     if (!options.host) throw new ExecutionError('CONTEXT_MISSING');
-    return createNative(options.host, options.dataDirectory);
+    return createNative(options.host, options.dataDirectory, dependencies.runCli);
   };
   const handleOf = (passageId: string): PassageHandle => ({ passageId });
   const persistState = (entry: LivePassage, state: PassageRecord['state'], code: ExecutionCode | null, event: Parameters<typeof store.record>[3]) => {
@@ -108,9 +115,10 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
   };
 
   const start = async (request: PassageRequest, signal?: AbortSignal, resumedSessionId?: string): Promise<PassageRecord> => {
+    await ensureHost();
     const host = options.host;
     if (!host) throw new ExecutionError('CONTEXT_MISSING');
-    const runtime = native();
+    const runtime = await native();
     const validation = await runtime.validate();
     const role = roles.get(request.binding.role);
     if (!role || canonical(role.reference) !== canonical(request.roleResource)) throw new ExecutionError('RESOURCE_INVALID');
@@ -335,7 +343,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       }
     },
     getCatalog: async () => {
-      try { return await native().getCatalog(); }
+      try { return await (await native()).getCatalog(); }
       catch (error) {
         const code = codeOf(error, 'CLI_UNAVAILABLE');
         return { state: 'unavailable' as const, observed_at_ms: Date.now(), diagnostics: [{ code,
@@ -386,7 +394,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
         affectedRequirements: version ? [] : ['RF-22', 'INT-01'],
       });
       let omp: string | null = null; let cause = 'CONTEXT_MISSING';
-      try { omp = (await native().validate()).ompVersion; } catch (error) { cause = codeOf(error, 'CLI_UNAVAILABLE'); }
+      try { omp = (await (await native()).validate()).ompVersion; } catch (error) { cause = codeOf(error, 'CLI_UNAVAILABLE'); }
       const tools = [observation('omp', omp, omp ? null : cause)];
       let maestri: string | null = null;
       let maestriCause = omp ? 'MAESTRI_VERSION_UNOBSERVABLE' : cause;
@@ -401,7 +409,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     },
     roleResources: () => [...roles.values()].map(r => structuredClone(r.reference)),
     preflight: async () => {
-      try { const info = await native().validate(); return { ready: true, code: null, ompVersion: info.ompVersion }; }
+      try { const info = await (await native()).validate(); return { ready: true, code: null, ompVersion: info.ompVersion }; }
       catch (error) { return { ready: false, code: codeOf(error, 'CLI_UNAVAILABLE'), ompVersion: null }; }
     },
     startPassage: (input, signal) => {

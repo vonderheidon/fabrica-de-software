@@ -18,7 +18,7 @@ export function terminalRecoveryCandidates(db: Database.Database): TerminalRecov
     ORDER BY t.updated_at_ms DESC,t.id`).all(hostname());
 }
 
-export function reconcileTerminalAvailability(db: Database.Database, candidate: TerminalRecoveryCandidate): void {
+export function reconcileTerminalAvailability(db: Database.Database, candidate: TerminalRecoveryCandidate, observation: 'stopped' | 'missing'): void {
   db.transaction(() => {
     const current = terminalRecoveryCandidates(db).find(item => item.id === candidate.id);
     if (!current || JSON.stringify(current) !== JSON.stringify(candidate)) {
@@ -26,10 +26,10 @@ export function reconcileTerminalAvailability(db: Database.Database, candidate: 
     }
     // Availability permits a new session; it grants no cleanup authority over previous writers.
     db.prepare("UPDATE terminal_occupancies SET state='released',released_at_ms=?,reason=? WHERE managed_terminal_id=? AND generation=? AND state IN ('occupied','uncertain')")
-      .run(Date.now(), 'AVAILABILITY_CONFIRMED', candidate.id, candidate.generation);
+      .run(Date.now(), observation === 'missing' ? 'TERMINAL_ABSENCE_CONFIRMED' : 'AVAILABILITY_CONFIRMED', candidate.id, candidate.generation);
     db.prepare("UPDATE attempt_sessions SET state='interrupted',updated_at_ms=? WHERE managed_terminal_id=? AND state IN ('active','reserved','uncertain')")
       .run(Date.now(), candidate.id);
     db.prepare('UPDATE managed_terminals SET state=?,observed_at_ms=?,updated_at_ms=? WHERE id=?')
-      .run('available', Date.now(), Date.now(), candidate.id);
+      .run(observation === 'missing' ? 'retired' : 'available', Date.now(), Date.now(), candidate.id);
   }).immediate();
 }

@@ -14,15 +14,20 @@ async function fixture() {
   const terminal = { id: terminalId, name: reference.terminalName, running: false };
   let response: unknown = { terminals: [terminal] };
   let status = 200; let observations = 0;
+  let lookupStatus = 404; let lookupBody = `Terminal '${reference.terminalName}' not found`;
   const invoke = (options: RequestOptions, callback: (response: IncomingMessage) => void) => {
-    expect(options).toEqual({ socketPath: pipe, path: '/list', agent: false, headers: { 'X-Terminal-ID': anchorId, 'X-Workspace-ID': workspaceId } });
+    expect(options.socketPath).toBe(pipe);
+    expect(options.headers).toEqual({ 'X-Terminal-ID': anchorId, 'X-Workspace-ID': workspaceId });
+    expect(options.agent).toBe(false);
+    expect(options.path).toMatch(/^\/(list|check\?name=factory-[0-9a-f-]+)$/);
     const call = Object.assign(new EventEmitter(), {
       destroy: (error: Error) => { call.emit('error', error); call.emit('close'); },
       end: () => queueMicrotask(() => {
         observations++;
-        const incoming = Object.assign(new EventEmitter(), { statusCode: status, resume: () => {} });
+        const lookup = options.path?.startsWith('/check?');
+        const incoming = Object.assign(new EventEmitter(), { statusCode: lookup ? lookupStatus : status, resume: () => {} });
         callback(incoming as IncomingMessage);
-        incoming.emit('data', Buffer.from(typeof response === 'string' ? response : JSON.stringify(response)));
+        incoming.emit('data', Buffer.from(lookup ? lookupBody : typeof response === 'string' ? response : JSON.stringify(response)));
         incoming.emit('end'); call.emit('close');
       }),
     });
@@ -32,16 +37,36 @@ async function fixture() {
   const host: ExecutionHost = { maestriExecutable: process.execPath, ompExecutable: process.execPath, powershellExecutable: process.execPath,
     inheritedEnvironment: { MAESTRI_PIPE: pipe, MAESTRI_TERMINAL_ID: anchorId, MAESTRI_WORKSPACE_ID: workspaceId } };
   return { host, reference, terminal, observe: () => observeStoppedTerminal(host, reference), observations: () => observations,
+    lookupReply: (code: number, body = '') => { lookupStatus = code; lookupBody = body; },
     reply: (value: unknown, code = 200) => { response = value; status = code; } };
 }
 
 describe.skipIf(process.platform !== 'win32')('terminal availability after controller restart', () => {
-  it('distinguishes running and stopped while omissions and conflicting identities stay uncertain', async () => {
+  it('confirms absence before a handshake but never adopts a terminal by name alone', async () => {
+    const f = await fixture();
+    const pending = { terminalName: f.reference.terminalName };
+    expect(await observeTerminalAvailability(f.host, pending)).toBe('uncertain');
+    f.reply({ terminals: [] });
+    expect(await observeTerminalAvailability(f.host, pending)).toBe('missing');
+    f.lookupReply(403);
+    expect(await observeTerminalAvailability(f.host, pending)).toBe('uncertain');
+  });
+  it('distinguishes a confirmed deletion from a disconnected terminal and conflicting identities', async () => {
     const f = await fixture();
     expect(await observeTerminalAvailability(f.host, f.reference)).toBe('stopped');
     f.terminal.running = true;
     expect(await observeTerminalAvailability(f.host, f.reference)).toBe('running');
     f.reply({ terminals: [] });
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('missing');
+    f.lookupReply(404, `Terminal "${f.reference.terminalName}" not found`);
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('missing');
+    f.lookupReply(403, `No connection to "${f.reference.terminalName}"`);
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('uncertain');
+    f.lookupReply(200, 'terminal contents');
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('uncertain');
+    f.lookupReply(404, 'No route');
+    expect(await observeTerminalAvailability(f.host, f.reference)).toBe('uncertain');
+    f.lookupReply(500);
     expect(await observeTerminalAvailability(f.host, f.reference)).toBe('uncertain');
     f.reply({ terminals: [{ ...f.terminal, id: randomUUID() }] });
     expect(await observeTerminalAvailability(f.host, f.reference)).toBe('uncertain');

@@ -47,13 +47,19 @@ it.each(['running', 'uncertain'] as const)('blocks a new attempt while a registe
   } finally { await f.close(); }
 });
 
-it('blocks replacement when a registered terminal is omitted from the connection list', async () => {
+it('replaces a terminal whose absence was confirmed without changing historical stop authority', async () => {
   const { f, handle, session } = await interrupted();
   try {
     Object.assign(f.execution, { observeManagedTerminal: vi.fn(async () => 'missing' as const) });
     const command = await f.prepare();
-    await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({ code: 'TERMINAL_AVAILABILITY_UNCONFIRMED' });
-    expect(f.db.prepare('SELECT state FROM managed_terminals WHERE id=?').get(session.managedTerminalId)).toEqual({ state: 'uncertain' });
+    const next = await f.pipeline.startAttempt(command.body, command.context);
+    await f.pipeline.drain();
+    const current = f.persistence.getAttemptSession({ passageId: f.storage.getAttempt(next.resource.id).passageId });
+    expect(current.managedTerminalId).not.toBe(session.managedTerminalId);
+    expect(current.terminalId).not.toBe(session.terminalId);
+    expect(current.generation).toBe(1);
+    expect(current.ompSessionId).not.toBe(session.ompSessionId);
+    expect(f.db.prepare('SELECT state FROM managed_terminals WHERE id=?').get(session.managedTerminalId)).toEqual({ state: 'retired' });
     expect(f.db.prepare("SELECT stop_state FROM resources WHERE passage_id=? AND kind='terminal'").get(handle.passageId)).toEqual({ stop_state: 'uncertain' });
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   } finally { await f.close(); }
@@ -75,7 +81,7 @@ it('blocks a launch interrupted before its physical identity handshake instead o
     const next = await f.prepare();
     await expect(f.pipeline.startAttempt(next.body, next.context)).rejects.toMatchObject({ code: 'TERMINAL_AVAILABILITY_UNCONFIRMED' });
     expect(f.db.prepare('SELECT count(*) AS n FROM managed_terminals').get()).toEqual({ n: 2 });
-    expect(f.execution.observeManagedTerminal).not.toHaveBeenCalled();
+    expect(f.execution.observeManagedTerminal).toHaveBeenCalled();
   } finally { await f.close(); }
 });
 
@@ -89,5 +95,32 @@ it('rejects a stale observation when the terminal changes during the native quer
     const command = await f.prepare();
     await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({ code: 'TERMINAL_AVAILABILITY_UNCONFIRMED' });
     expect(f.db.prepare('SELECT state FROM managed_terminals WHERE id=?').get(session.managedTerminalId)).toEqual({ state: 'uncertain' });
+  } finally { await f.close(); }
+});
+
+it('replaces an interrupted pre-handshake registration only after its name is confirmed absent', async () => {
+  const f = await attemptFixture();
+  try {
+    vi.mocked(f.execution.startPassage).mockImplementationOnce(async request => {
+      const handle = { passageId: request.binding.passageId };
+      f.persistence.reserve({ handle, binding: request.binding, requestHash: digest(request), state: 'starting',
+        roleResource: request.roleResource, terminalName: `factory-${handle.passageId}`, diagnostic: null, effectiveProfile: null, executorVersion: null });
+      return f.persistence.getPassage(handle);
+    });
+    const first = await f.prepare();
+    const accepted = await f.pipeline.startAttempt(first.body, first.context); await f.pipeline.drain();
+    const session = f.persistence.getAttemptSession({ passageId: f.storage.getAttempt(accepted.resource.id).passageId });
+    expect(session.terminalId).toBeNull();
+    f.storage.interruptAttempts();
+    f.issue.id = 'I_after_missing_launch'; f.issue.number = 19;
+    Object.assign(f.execution, { observeManagedTerminal: vi.fn(async () => 'missing' as const) });
+    const command = await f.prepare();
+    const next = await f.pipeline.startAttempt(command.body, command.context);
+    await f.pipeline.drain();
+    const current = f.persistence.getAttemptSession({ passageId: f.storage.getAttempt(next.resource.id).passageId });
+    expect(current.managedTerminalId).not.toBe(session.managedTerminalId);
+    expect(f.execution.observeManagedTerminal).toHaveBeenCalledWith({ terminalName: session.terminalName });
+    expect(f.db.prepare('SELECT state FROM managed_terminals WHERE id=?').get(session.managedTerminalId)).toEqual({ state: 'retired' });
+    expect(f.db.pragma('foreign_key_check')).toEqual([]);
   } finally { await f.close(); }
 });

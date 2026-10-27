@@ -100,7 +100,7 @@ export interface StorageDiagnostics {
 
 export interface Storage {
   terminalRecoveryCandidates(): TerminalRecoveryCandidate[];
-  reconcileTerminalAvailability(candidate: TerminalRecoveryCandidate): void;
+  reconcileTerminalAvailability(candidate: TerminalRecoveryCandidate, observation: 'stopped' | 'missing'): void;
   readonly controllerInstanceId: string;
   getShutdown(query?: ShutdownQuery): ShutdownView;
   acceptShutdown(command: ShutdownRequest): StoredOperation;
@@ -436,7 +436,7 @@ export function openStorage(options: StorageOptions): Storage {
       recoverCaptureRetry: (command) => guarded(() => connection.transaction(() => recoverCaptureRetry(connection, command))()),
       retryCapture: (command) => retryCapture(connection, command),
       terminalRecoveryCandidates: () => terminalRecoveryCandidates(connection),
-      reconcileTerminalAvailability: candidate => reconcileTerminalAvailability(connection, candidate),
+      reconcileTerminalAvailability: (candidate, observation) => reconcileTerminalAvailability(connection, candidate, observation),
       createAttempt: (input) => createAttempt(connection, input),
       recoverAttempt: (command) => guarded(() => connection.transaction(() => recoverAttempt(connection, command))()),
       getAttempt: (id) => guarded(() => connection.transaction(() => readAttempt(connection, id))()),

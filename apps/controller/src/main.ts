@@ -70,7 +70,13 @@ export async function startController(hostContext: ControllerHostContext = {}, d
         if (!review || review.passageId !== binding.passageId) throw new ExecutionError('RESOURCE_INVALID');
         const valid = await workspaces.validateReview(storage.getDelivery(binding.deliveryVersion).delivery, review.id);
         storage.recordReviewIntegrity(binding, valid);
-      }, ...(executionHost ? { host: withWindowsTerminalJobs(executionHost, configuration.dataDirectory) } : {}) });
+      }, ...(executionHost ? { host: withWindowsTerminalJobs(executionHost, configuration.dataDirectory) } : {}),
+      ...(hostContext.discoverTools ? { resolveHost: async () => {
+        const tools = await toolDetector.detect(storage.getGlobalConfiguration().view.tool_preferences, storage.getGitHubExecutablePath());
+        if (!tools.maestri.selected_path || !tools.omp.selected_path || !tools.powershell.selected_path) return undefined;
+        return withWindowsTerminalJobs({ maestriExecutable: tools.maestri.selected_path, ompExecutable: tools.omp.selected_path,
+          powershellExecutable: tools.powershell.selected_path, inheritedEnvironment: process.env }, configuration.dataDirectory);
+      } } : {}) });
     // Missing local tools and Maestri connectivity never hide configuration access.
     await validateScaffoldResources();
     const activeExecution = execution;
@@ -87,11 +93,15 @@ export async function startController(hostContext: ControllerHostContext = {}, d
           activeExecution.preflight(),
         ]);
         if (!tools) throw new ExecutionError('CONTEXT_MISSING');
+        if (!preflight.ready) throw new OperationError(503, preflight.code ?? 'MAESTRI_CONNECTION_UNAVAILABLE',
+          'Não foi possível confirmar a conexão nativa com o Maestri/OMP.', {
+            recovery: 'Confira as ferramentas em Configuração e execute nova detecção. Se o contexto continuar ausente, confira o terminal âncora no Maestri antes de tentar novamente.',
+          });
         const observedAtMs = Date.now();
         const observation = (tool: 'git' | 'gh' | 'maestri' | 'omp', item: typeof tools.git, blocked = false): ToolObservation => {
           const selected = item.selected_path ? item.candidates.find(candidate => candidate.path === item.selected_path) : undefined;
           const ready = selected !== undefined && !blocked;
-          return { tool, state: ready ? 'observed' : 'unavailable', version: selected?.version ?? null,
+          return { tool, state: ready ? 'observed' : 'unavailable', version: ready ? selected.version : null,
             cause: ready ? null : blocked ? preflight.code ?? 'MAESTRI_CONNECTION_UNAVAILABLE' : item.diagnostic ?? 'TOOL_NOT_AVAILABLE',
             affectedRequirements: ready ? [] : ['RF-01', 'RF-06'], observedAtMs };
         };
