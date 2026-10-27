@@ -3,6 +3,22 @@ import { diagnosticCopyFor, isKnownOperatorEvent, isPortugueseOperatorText, oper
 import { fieldGuidanceFor } from '../features/projects/FieldHelp.js';
 
 describe('operator language', () => {
+  it('describes every persisted Kanban creation operation and transition', () => {
+    const operations = {
+      create_board: 'Criação do quadro Kanban', configure_status: 'Configuração das colunas do Kanban',
+      link_repository: 'Vínculo do repositório ao Kanban', configure_view: 'Configuração da visualização Kanban',
+      verify_board: 'Verificação do quadro Kanban',
+    };
+    const states = { accepted: 'solicitada', running: 'em andamento', sent: 'solicitação enviada ao GitHub', confirmed: 'confirmada', failed_known: 'falhou', unknown: 'resultado sem confirmação' };
+    for (const [operation, label] of Object.entries(operations)) {
+      for (const [state, description] of Object.entries(states)) {
+        const event = `creation.board.${operation}.${state}`;
+        expect(operatorEventLabel(event)).toBe(`${label}: ${description}`);
+        expect(isKnownOperatorEvent(event)).toBe(true);
+      }
+    }
+    expect(isKnownOperatorEvent('creation.board.future.confirmed')).toBe(false);
+  });
   it('explains Git incompatibility and config failures without blaming the configured identity', () => {
     const unsupported = diagnosticCopyFor('GIT_VERSION_UNSUPPORTED', 'unavailable');
     expect(unsupported.cause).toContain('--no-lazy-fetch');

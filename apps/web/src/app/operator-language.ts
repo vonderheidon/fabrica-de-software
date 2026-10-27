@@ -127,7 +127,7 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
   GLOBAL_AUTOMATION_PAUSED: {
     title: 'Fila global pausada',
     cause: 'A automação pode estar habilitada no projeto, mas a fila global está pausada.',
-    nextAction: 'Abra a fila global e use Habilitar fila para autorizar novos inícios automáticos.',
+    nextAction: 'Abra Configuração, marque Automação global habilitada em Automação e acompanhamento e salve a configuração.',
   },
   ACCOUNT_UNOBSERVED: {
     title: 'Vincule uma conta GitHub',
@@ -359,6 +359,19 @@ const eventLabels: Readonly<Record<string, string>> = {
 export function operatorEventLabel(eventType: string): string {
   const normalized = eventType.toLocaleLowerCase('en');
   if (eventLabels[normalized]) return eventLabels[normalized]!;
+  const board = /^creation\.board\.(create_board|configure_status|link_repository|configure_view|verify_board)\.(accepted|running|sent|confirmed|failed_known|unknown)$/.exec(normalized);
+  if (board) {
+    const operations: Record<string, string> = {
+      create_board: 'Criação do quadro Kanban', configure_status: 'Configuração das colunas do Kanban',
+      link_repository: 'Vínculo do repositório ao Kanban', configure_view: 'Configuração da visualização Kanban',
+      verify_board: 'Verificação do quadro Kanban',
+    };
+    const states: Record<string, string> = {
+      accepted: 'solicitada', running: 'em andamento', sent: 'solicitação enviada ao GitHub',
+      confirmed: 'confirmada', failed_known: 'falhou', unknown: 'resultado sem confirmação',
+    };
+    return `${operations[board[1]!]}: ${states[board[2]!]}`;
+  }
   const transition = /^(workspace|verification|publication|effect)\.(\w+)$/.exec(normalized);
   if (transition && operatorState(transition[2]).known) {
     const subjects: Record<string, string> = { workspace: 'Ambiente da tentativa', verification: 'Verificação da versão', publication: 'Publicação', effect: 'Ação de entrega' };
