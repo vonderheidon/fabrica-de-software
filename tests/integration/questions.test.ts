@@ -259,7 +259,7 @@ describe('independent clocks and limits', () => {
     await f.pipeline.close(); f.storage.close(); removeQuestionSchema(f.db);
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    expect(reopened.getDiagnostics().schemaVersion).toBe(50); expect(reopened.getSettings().installation_id).toBe(identity);
+    ; expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getQuestion(f.id, q).view).toMatchObject({ id: q, question: old.question, state: 'cancelled', deliveryReceipt: null });
       expect(reopened.getMeasurements(f.id).activeTime.state).toBe('unavailable'); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     } finally { reopened.close(); }

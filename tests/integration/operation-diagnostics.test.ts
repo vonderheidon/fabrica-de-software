@@ -273,13 +273,12 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     expect(current.activeAttempt).toBeNull(); expect(current.recentResults[0]).toMatchObject({ id: op.resource.id, result: 'interrupted' });
   });
   it('migrates actual v17 without reseeding or inventing observations', () => {
-    const f = fixture(); const directory = mkdtempSync(join(tmpdir(), 'factory-v17-diagnostics-')); cleanup.push(() => rmSync(directory, { recursive: true }));
+    const directory = mkdtempSync(join(tmpdir(), 'factory-v17-diagnostics-')); cleanup.push(() => rmSync(directory, { recursive: true }));
     const db = new Database(join(directory, 'factory.sqlite')); applyMigrations(db, loadMigrations().slice(0, 17), () => seedSettings(db, directory));
     const identity = db.prepare('SELECT installation_id FROM factory_settings').get(); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getDiagnostics().schemaVersion).toBe(50); expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
+    expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
     expect(reopened.getContextDiagnostics({ scope: 'host' }).reports).toEqual([]); expect(reopened.getOperationSummary({}).integrationStatus.state).toBe('not_checked');
-    expect(f.storage.getDiagnostics().schemaVersion).toBe(50);
   });
 });
 

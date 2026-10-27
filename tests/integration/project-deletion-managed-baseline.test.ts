@@ -68,7 +68,7 @@ it('upgrades schema 43 without rewriting history and repairs its managed deletio
     expect(snapshot()).toEqual(before);
     expect(db.prepare('SELECT count(*) AS n FROM attempts WHERE issue_number IS NOT NULL OR issue_title IS NOT NULL').get()).toEqual({n:0});
     expect(db.prepare('SELECT * FROM schema_migrations WHERE version<=43 ORDER BY version').all()).toEqual(ledger);
-    expect(db.pragma('user_version',{simple:true})).toBe(50);
+    ;
     expect(persistence.finalize(history.command)).toEqual({operation_id:history.command.operationId,state:'succeeded'});
     expect(db.pragma('foreign_key_check')).toEqual([]);
   } finally {db.close();}

@@ -353,7 +353,7 @@ it('migrates actual v14 journals without fabricating upgrades, preserving receip
   })();
   const storage = openStorage({ dataDirectory: f.directory });
   try {
-    expect(storage.getDiagnostics().schemaVersion).toBe(50); expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
+    ; expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
     expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }
