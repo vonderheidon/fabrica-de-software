@@ -9,18 +9,14 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
   if (d.attemptId !== attemptId) throw new OperationError(404,'DELIVERY_NOT_FOUND','The selected version does not belong to this attempt.');
   const original = db.prepare<[string], { mode: DeliverySummaryView['original_mode'] }>(`SELECT
     json_extract(capture_json,'$.configuration.configuration.defaultDeliveryMode') AS mode FROM attempts WHERE id=?`).get(attemptId)!;
-  const review = db.prepare<[string], { id: string; passageId: string; state: 'pending' | 'approved' | 'rejected'; independence: string; identity: string; verificationId: string }>(`SELECT id,passage_id AS passageId,state,
-    independence_state AS independence,content_identity AS identity,verification_id AS verificationId FROM reviews WHERE delivery_id=?`).get(deliveryId);
+  const review = db.prepare<[string], { id: string; passageId: string; state: 'pending' | 'approved' | 'rejected'; independence: string; identity: string; implementerPassageId: string }>(`SELECT id,passage_id AS passageId,state,
+    independence_state AS independence,content_identity AS identity,implementer_passage_id AS implementerPassageId FROM reviews WHERE delivery_id=?`).get(deliveryId);
   const total = db.prepare<[string], { n: number }>('SELECT count(*) AS n FROM attempt_criteria WHERE attempt_id=?').get(attemptId)!.n;
   const reviewed = review && review.state !== 'pending' && review.independence === 'valid' && review.identity === d.contentIdentity;
   const satisfied = reviewed ? db.prepare<[string, string], { n: number }>(`SELECT count(*) AS n FROM criterion_results
     WHERE attempt_id=? AND passage_id=? AND verdict='passed'`).get(attemptId,review.passageId)!.n : 0;
-  const verification = db.prepare<[string, string], { id: string; state: string }>(`SELECT id,state FROM verification_runs
-    WHERE delivery_id=? AND content_identity=? ORDER BY run_number DESC LIMIT 1`).get(deliveryId,d.contentIdentity ?? '');
-  const checks = verification ? db.prepare<[string], { total: number; succeeded: number }>(`SELECT count(*) AS total,
-    coalesce(sum(state='passed'),0) AS succeeded FROM checks WHERE verification_id=?`).get(verification.id)! : { total:0,succeeded:0 };
   const approved = review?.state === 'approved' && review.independence === 'valid' && review.identity === d.contentIdentity &&
-    satisfied === total && verification?.id === review.verificationId && ['passed','not_applicable'].includes(verification.state);
+    total > 0 && satisfied === total && review.implementerPassageId === d.producerPassageId;
   const resolved = reviewed ? db.prepare<[string, string], { n: number }>(`SELECT count(*) AS n
     FROM finding_resolutions WHERE attempt_id=? AND review_id=? AND verdict='resolved'`).get(attemptId,review.id)!.n : 0;
   const nonblocking = review ? db.prepare<[string, number, number], { n: number }>(`SELECT count(*) AS n FROM findings f JOIN reviews r ON r.id=f.review_id
@@ -48,10 +44,8 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
     if (!pending.includes(effect.kind)) pending.push(effect.kind);
   }
   const limitations: string[] = [];
-  if (!approved) limitations.push('Esta versão ainda não tem aprovação independente válida; consulte critérios, checks e revisão.');
+  if (!approved) limitations.push('Esta versão ainda não tem aprovação independente válida; consulte critérios e revisão.');
   if (satisfied < total) limitations.push('Há critérios não comprovados; consulte os resultados da revisão desta versão.');
-  if (!verification) limitations.push('Checks não verificados para esta versão; consulte a verificação.');
-  else if (verification.state === 'not_applicable') limitations.push('Nenhum check configurado para esta versão; confira os critérios na revisão.');
   if (publication.unknownEffects) limitations.push('Há efeitos sem confirmação; consulte e reconcilie a publicação antes de continuar.');
   if (attempt.suspension && d.id === attempt.deliveryId) limitations.push('A tentativa está suspensa; consulte a condição atual e siga a ação de recuperação antes de continuar.');
   if (nonblocking) limitations.push('Há observações não bloqueantes; consulte os achados da versão.');
@@ -74,6 +68,6 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
     branch_ref:confirmedCommit ? commit.branch : null,commit_sha:confirmedCommit ? commit.sha : null,
     pull_request_url:publication.pullRequest?.state === 'confirmed' ? publication.pullRequest.receipt?.url ?? null : null,
     checkout_updated:false,pending_effects:pending,limitations,criteria_satisfied:satisfied,criteria_total:total,
-    checks_succeeded:checks.succeeded,checks_total:checks.total,resolved_findings:resolved,details_url:`/api/v1/deliveries/${deliveryId}`,
+    resolved_findings:resolved,details_url:`/api/v1/deliveries/${deliveryId}`,
   };
 }

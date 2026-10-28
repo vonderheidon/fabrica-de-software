@@ -2,7 +2,6 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
 import { CaptureError } from '../../apps/controller/src/modules/workspaces/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { createHash, randomUUID } from 'node:crypto';
 
 const fixtures: PublicationFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
@@ -12,7 +11,7 @@ function changedBase(f: PublicationFixture) {
   f.workspaces.inspectIntegrationTarget.mockImplementationOnce(async localPath => ({ localPath,baseSha:'b'.repeat(40),rootIdentity:'controlled-target' }));
 }
 
-it('creates one new version on a changed integration base and publishes only after its own checks and independent approval',async () => {
+it('creates one new version on a changed integration base and publishes only after its own independent approval',async () => {
   const f = await fixture(); await f.implement(); const original = f.status().deliveryId!;
   const saved = f.storage.getDelivery(original).delivery;
   changedBase(f); await f.approve();
@@ -26,7 +25,7 @@ it('creates one new version on a changed integration base and publishes only aft
   await f.implement(); const adapted = f.status().deliveryId!;
   expect(adapted).not.toBe(original);
   expect(f.storage.getDelivery(adapted).delivery.baseSha).toBe('b'.repeat(40));
-  expect(f.storage.getDelivery(adapted).verification?.state).toBe('not_applicable');
+  expect(f.storage.getProducerResult(adapted)?.binding.deliveryVersion).toBe(adapted);
   expect(f.workspaces.createTargetCommit).not.toHaveBeenCalled();
   await f.approve();
   expect(f.status()).toMatchObject({ round:2,result:'delivered' });
@@ -101,33 +100,6 @@ it('does not borrow prior approval when the adapted version is rejected',async (
   expect(f.status().round).toBe(3);
   await f.implement();
   expect(f.storage.getDelivery(f.status().deliveryId!).delivery.baseSha).toBe('b'.repeat(40));
-});
-
-it('reruns captured mandatory checks for the adapted content and blocks publication on their failure',async () => {
-  const f = await publicationFixture(true,'commit',true,{ checks:[{ id:'test',command:'npm test',cwd_relative:'.' }] }); fixtures.push(f);
-  let fail = false;
-  f.verification.getArtifact.mockResolvedValue({ bytes:Buffer.from('controlled evidence'),filename:'check.log' });
-  f.verification.verifyDelivery.mockImplementation(async id => {
-    const run = f.storage.beginVerification(id);
-    for (const check of run.checks) {
-      f.storage.startCheck(check.id);
-      const artifactId = randomUUID();
-      f.storage.finishCheck(check.id,{ state:fail ? 'failed' : 'passed',exitCode:fail ? 1 : 0,endedAtMs:Date.now(),durationMs:1,
-        diagnostic:fail ? 'CHECKS_FAILED' : null,executionDiagnostic:null,
-        artifact:{ id:artifactId,attemptId:f.attemptId,deliveryId:id,checkId:check.id,kind:'check_log',
-          pathRelative:`${f.attemptId}/${check.id}/${artifactId}.log`,sha256:createHash('sha256').update('controlled evidence').digest('hex'),sizeBytes:19 } });
-    }
-    f.storage.finishVerification(run.id);
-  });
-  await f.implement(); const original = f.status().deliveryId!;
-  changedBase(f); await f.approve(); fail = true; await f.implement();
-  const adapted = f.status().deliveryId!;
-  expect(f.storage.getDelivery(original).verification?.state).toBe('passed');
-  expect(f.storage.getDelivery(adapted).verification?.state).toBe('failed');
-  expect(f.storage.getCheckHistory(adapted,{}).entries[0]?.deliveryId).toBe(adapted);
-  await f.approve();
-  expect(f.storage.getReview(adapted)?.state).toBe('rejected');
-  expect(f.workspaces.createTargetCommit).not.toHaveBeenCalled();
 });
 
 it('respects a captured zero limit and preserves the approved version with no new IO',async () => {

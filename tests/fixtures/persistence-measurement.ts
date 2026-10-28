@@ -25,10 +25,9 @@ export function sizes(files: MeasuredFile[]) {
   return {
     databaseBytes: sum(p => p === 'factory.sqlite'), walBytes: sum(p => p === 'factory.sqlite-wal'),
     sharedMemoryBytes: sum(p => p === 'factory.sqlite-shm'),
-    evidenceBytes: sum(p => p.startsWith('artifacts/')),
     retainedGitDiskBytes: sum(p => p.startsWith('git/')),
     operationalWorkBytes: sum(p => p.startsWith('work/')),
-    otherAuxiliaryBytes: sum(p => !p.startsWith('work/') && !p.startsWith('git/') && !p.startsWith('artifacts/') && !p.startsWith('factory.sqlite')),
+    otherAuxiliaryBytes: sum(p => !p.startsWith('work/') && !p.startsWith('git/') && !p.startsWith('factory.sqlite')),
   };
 }
 

@@ -143,11 +143,6 @@ export const ToolOptions = Type.Object({
   observed_at_ms: timestamp,
 }, closed);
 export type ToolOptions = Static<typeof ToolOptions>;
-export const CheckDefinition = Type.Object({
-  id: text(128), command: text(4096), cwd_relative: Type.String({ minLength: 1, maxLength: 4096 }),
-  timeout_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647 })),
-}, closed);
-export type CheckDefinition = Static<typeof CheckDefinition>;
 export const LegacyStatusOptionIds = Type.Object({ ready: text(256), in_progress: text(256), in_review: text(256), delivered: text(256) }, closed);
 export const StatusOptionIds = Type.Object({ backlog: text(256), ...LegacyStatusOptionIds.properties }, closed);
 const ProjectMappingShape = Type.Object({ id: text(256), owner_id: text(256), status_field_id: text(256), status_option_ids: StatusOptionIds }, closed);
@@ -168,14 +163,14 @@ export const LegacyProjectMapping = Type.Object({ id: text(256), owner_id: text(
 export type LegacyProjectMapping = Static<typeof LegacyProjectMapping>;
 export const ReadProjectMapping = Type.Union([ProjectMapping, LegacyProjectMapping]);
 export type ReadProjectMapping = Static<typeof ReadProjectMapping>;
-export const QueueOrder = Type.Object({ priority_field_id: nullable(), priority_direction: Type.Union([Type.Literal('asc'), Type.Literal('desc')]), use_board_position: Type.Boolean() }, closed);
+export const QueueOrder = Type.Object({ use_board_position: Type.Boolean() }, closed);
 export const ProjectConfiguration = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repository_id: Type.Optional(text(256)), repository_url: Type.Optional(text(4096)) }, closed),
   base_branch: text(1024),
   delivery_branch: Type.Optional(Type.Union([Type.Null(), Type.Object({ kind: Type.Union([Type.Literal('new'), Type.Literal('existing')]), name: text(1024) }, closed)])),
   github_project: Type.Union([ReadProjectMapping, Type.Null()]),
   implementer_profile_id: Type.Union([OperationId, Type.Null()]), reviewer_profile_id: Type.Union([OperationId, Type.Null()]),
-  checks: Type.Array(CheckDefinition, { maxItems: 50 }), correction_limit: Type.Integer({ minimum: 0, maximum: 5 }),
+  correction_limit: Type.Integer({ minimum: 0, maximum: 5 }),
   default_delivery_mode: DeliveryMode, automation_enabled: Type.Boolean(), queue_order: QueueOrder,
   guidance: Type.String({ maxLength: 8192 }),
 }, closed);

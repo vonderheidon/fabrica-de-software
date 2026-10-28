@@ -60,7 +60,6 @@ export function createWorkspaces(options: WorkspaceOptions) {
     createTargetCommit: deliveryTargetWorkspace.createLocalCommit,
     reconcileTargetCommit: deliveryTargetWorkspace.reconcileLocalCommit,
     ...createRemotePublisher(options.dataDirectory,git,options.pushAuthorization,undefined,options.context ? { kind: 'confirmed_attempt' } : undefined, resolveAttemptRoot),
-    materializeCheck: sharedAttempt,
     materializeReview: sharedAttempt,
     async validateReview(delivery: import('#contracts').Delivery, reviewId: string): Promise<boolean> {
       try { await sharedAttempt(delivery, reviewId); return true; }

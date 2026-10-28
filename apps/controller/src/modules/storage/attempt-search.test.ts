@@ -126,6 +126,25 @@ describe('readAttemptPage', () => {
     expect(result.items.map(row => row.id)).not.toContain(after);
   });
 
+  it('applies combined filters before pagination for a matching row beyond the unfiltered first page', () => {
+    const db = database();
+    const range = prepareAttemptSearch({ dateFrom: '2024-11-03', dateTo: '2024-11-03', timeZone: 'America/New_York' });
+    for (let index = 0; index < 40; index += 1) {
+      attempt(db, { projectId: projectA, result: 'delivered', issueNumber: 9, issueTitle: 'Other issue', createdAtMs: range.fromMs! + 10_000 + index });
+    }
+    attempt(db, { projectId: projectA, result: 'delivered', issueNumber: 77, issueTitle: 'Release 50xx_candidate', createdAtMs: range.fromMs! + 2_000 });
+    const target = attempt(db, { projectId: projectA, result: 'delivered', issueNumber: 77, issueTitle: 'Release 50%_candidate', createdAtMs: range.fromMs! + 1_000 });
+
+    const unfiltered = readAttemptPage(db, { limit: '25' });
+    expect(unfiltered.items.map(row => row.id)).not.toContain(target);
+    const filtered = readAttemptPage(db, {
+      limit: '1', projectId: projectA, result: 'delivered', issueNumber: '77', issueTitle: '50%_',
+      dateFrom: '2024-11-03', dateTo: '2024-11-03', timeZone: 'America/New_York',
+    });
+    expect(filtered.items.map(row => row.id)).toEqual([target]);
+    expect(filtered.has_more).toBe(false);
+  });
+
   it('keeps continuation pages inside the insertion ceiling and rejects a cursor after filter changes', () => {
     const db = database();
     const original = new Set<string>();

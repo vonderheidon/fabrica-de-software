@@ -110,7 +110,6 @@ describe('durable official results', () => {
     const claim = f.storage.beginCapture(f.binding.deliveryVersion)!;
     f.storage.finishCapture(claim, { gitRef: `refs/factory/deliveries/${f.binding.deliveryVersion}`, contentIdentity: 'b'.repeat(40), commitSha: 'c'.repeat(40), hasDelta: true, warnings: [] }, null);
     const reviewer = f.roles.find(r => r.role === 'reviewer')!;
-    const verification = f.storage.beginVerification(f.binding.deliveryVersion); f.storage.finishVerification(verification.id);
     const review = f.storage.beginReview(f.binding.deliveryVersion)!; const id = review.passageId;
     f.storage.recordReviewWorkspace(f.binding.deliveryVersion, true, null);
     const binding = { ...f.binding, passageId: id, role: 'reviewer' as const }; const handle = { passageId: id };

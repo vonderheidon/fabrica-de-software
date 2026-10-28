@@ -22,7 +22,6 @@ export function DeliverySummary({ value, stale = false }: { value: DeliverySumma
     <dl className="delivery-result-facts">
       <div><dt>Modo autorizado</dt><dd>{deliveryModeLabel[value.authorized_mode]}</dd></div>
       <div><dt>Critérios comprovados</dt><dd>{value.criteria_satisfied} de {value.criteria_total}</dd></div>
-      <div><dt>Checks aprovados</dt><dd>{value.checks_succeeded} de {value.checks_total}</dd></div>
       <div><dt>Revisão independente</dt><dd>{value.review_state === 'approved' ? 'Aprovada nesta versão' : value.review_state === 'rejected' ? 'Reprovada nesta versão' : 'Não comprovada'}</dd></div>
       <div><dt>Achados resolvidos</dt><dd>{value.resolved_findings}</dd></div>
       <div><dt>Modo original</dt><dd>{deliveryModeLabel[value.original_mode]}</dd></div>

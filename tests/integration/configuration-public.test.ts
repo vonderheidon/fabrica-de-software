@@ -119,6 +119,34 @@ it('rejects camelCase aliases, forbidden null and query aliases without acceptin
   expect(durableRows(f)).toEqual(before);
 });
 
+it('rejects removed numeric queue fields at direct and nested configuration and preparation paths', async () => {
+  const f = await fixture(); const before = durableRows(f); const current = f.storage.getConfiguration(f.projectId);
+  const configurationBodies = [
+    { project_changes: { priority_field_id: 'PRIORITY' } },
+    { project_changes: { priority_direction: 'asc' } },
+    { project_changes: { correction_limit: 3, priority_field_id: 'PRIORITY', priority_direction: 'desc' } },
+    { project_changes: { queue_order: { use_board_position: true, priority_field_id: null } } },
+    { project_changes: { queue_order: { use_board_position: true, priority_direction: 'asc' } } },
+    { project_changes: { guidance: 'Keep this field invalid too', queue_order: { use_board_position: false, priority_field_id: 'PRIORITY', priority_direction: 'desc' } } },
+  ];
+  for (const payload of configurationBodies) {
+    const response = await f.app.inject({ method: 'PUT', url: `/api/v1/projects/${f.projectId}/configuration`,
+      headers: { ...f.headers, 'idempotency-key': randomUUID(), 'if-match': current.etag }, payload });
+    expect(response.statusCode, response.body).toBe(400);
+  }
+  const preparationBodies = [
+    { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {}, priority_field_id: 'PRIORITY' },
+    { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: { priority_direction: 'asc' } },
+    { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: { correction_limit: 1, queue_order: { priority_field_id: 'PRIORITY', priority_direction: 'desc' } } },
+  ];
+  for (const payload of preparationBodies) {
+    const response = await f.app.inject({ method: 'POST', url: `/api/v1/projects/${f.projectId}/preparations`,
+      headers: { ...f.headers, 'idempotency-key': randomUUID() }, payload });
+    expect(response.statusCode, response.body).toBe(400);
+  }
+  expect(durableRows(f)).toEqual(before);
+});
+
 it('shares POST GET PUT preparation DTOs including nested issues while leaving external models and operator text intact', async () => {
   const f = await fixture(); const originalIssue = structuredClone(f.issue);
   const guidance = '{"issueId":"texto literal","timeDefaults":{"pollingIntervalMs":7}}';

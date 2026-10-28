@@ -7,7 +7,7 @@ export function notificationTarget(hash: string): string | null {
 }
 export const notificationBodies = { question_pending: 'Uma tentativa aguarda sua decisão.', failure: 'Uma tentativa precisa de atenção.', completion: 'Uma tentativa foi concluída.' };
 export function isNotificationEvent(type: string): boolean {
-  return ['question-raised', 'attempt.icr-completed', 'attempt.commit-completed', 'attempt.pr-completed', 'dispatch.failed', 'workspace.failed', 'capture.failed', 'verification.failed', 'review.workspace.partial', 'attempt.failed', 'attempt.blocked', 'active-time.expired', 'question.expired', 'tracking-lost', 'publication.failed', 'publication.partial'].includes(type);
+  return ['question-raised', 'attempt.icr-completed', 'attempt.commit-completed', 'attempt.pr-completed', 'dispatch.failed', 'workspace.failed', 'capture.failed', 'review.workspace.partial', 'attempt.failed', 'attempt.blocked', 'active-time.expired', 'question.expired', 'tracking-lost', 'publication.failed', 'publication.partial'].includes(type);
 }
 // Deriving a non-secret identity avoids first-use races between tabs.
 export async function notificationConsumer(installation: string, origin: string): Promise<string> {

@@ -37,11 +37,12 @@ interface ProjectDeletionCommand {
 interface ProjectDeletionHistoryWithCommand extends ProjectDeletionHistoryBase { command: ProjectDeletionCommand }
 
 /** Complete relational history, with real constraints/triggers enabled throughout. */
-export function projectDeletionHistory(db: Database.Database, beforeAuthorization?: () => void, automationEnabled?: boolean): ProjectDeletionHistoryWithCommand;
+export function projectDeletionHistory(db: Database.Database, beforeAuthorization?: () => void, automationEnabled?: boolean, includePendingDeletion?: true,
+  fixtureDirectory?: string, managedSelected?: boolean, includeReviews?: boolean): ProjectDeletionHistoryWithCommand;
 export function projectDeletionHistory(db: Database.Database, beforeAuthorization: () => void, automationEnabled: boolean,
-  includePendingDeletion: false, fixtureDirectory?: string, managedSelected?: boolean): ProjectDeletionHistoryBase;
+  includePendingDeletion: false, fixtureDirectory?: string, managedSelected?: boolean, includeReviews?: boolean): ProjectDeletionHistoryBase;
 export function projectDeletionHistory(db: Database.Database, beforeAuthorization: () => void = () => {}, automationEnabled = false,
-  includePendingDeletion = true, fixtureDirectory = tmpdir(), managedSelected = false): ProjectDeletionHistoryBase & { command?: ProjectDeletionCommand } {
+  includePendingDeletion = true, fixtureDirectory = tmpdir(), managedSelected = false, includeReviews = true): ProjectDeletionHistoryBase & { command?: ProjectDeletionCommand } {
   const uuid = (): string => randomUUID();
   const hash = 'a'.repeat(64);
   const sha = 'b'.repeat(40);
@@ -122,7 +123,7 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       preparation_id: preparationId, preparation_revision: 1, account_id: accountId, repository_id: 'shared-repository', issue_id: issueId,
       ...(hasSearchHeaders ? { issue_number: 17, issue_title: 'Historical issue' } : {}),
       capture_json: JSON.stringify({ formatVersion: 1, issue: { number: 17, title: 'Historical issue' }, configuration: { implementerProfile: { id: profileId } } }),
-      phase: 'finished', result: 'delivered', source: 'manual', created_at_ms: 0, updated_at_ms: 0 });
+      phase: 'implementing', result: null, source: 'manual', created_at_ms: 0, updated_at_ms: 0 });
     const attemptSessions = new Map<'implementer' | 'reviewer', string>();
     const sessionGenerations = new Map<'implementer' | 'reviewer', number>();
     if (managedTerminalSchema) for (const role of ['implementer', 'reviewer'] as const) {
@@ -146,6 +147,8 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
     let deliveryId = ''; let passageId = ''; let reviewId = '';
     for (const round of [1, 2]) {
       deliveryId = uuid(); passageId = uuid(); const reviewerId = uuid();
+      const reviewerAssessments = priorFinding ? [{ findingId: priorFinding, progress: 'not_assessable', evidence: [],
+        justification: 'The fixture has no independent evidence of progress for this version.' }] : [];
       insert('rounds', { attempt_id: attemptId, round_number: round, delivery_version: deliveryId, created_at_ms: 0 });
       for (const [id, role] of [[passageId, 'implementer'], [reviewerId, 'reviewer']] as const) {
         insert('passages', { id, attempt_id: attemptId, round_number: round, delivery_version: deliveryId, role,
@@ -155,7 +158,10 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
         if (managedTerminalSchema) insert('terminal_occupancies', { id: uuid(), managed_terminal_id: managedTerminals.get(role)!.id,
           attempt_session_id: attemptSessions.get(role)!, attempt_id: attemptId, passage_id: id, generation: sessionGenerations.get(role)!,
           state: 'released', claimed_at_ms: 0, released_at_ms: 0, reason: 'fixture-history' });
-        insert('passage_results', { passage_id: id, attempt_id: attemptId, result_hash: hash, receipt_id: uuid(), summary_json: '{}', accepted_at_ms: 0 });
+        insert('passage_results', { passage_id: id, attempt_id: attemptId, result_hash: hash, receipt_id: uuid(), summary_json: role === 'implementer' ? '{"formatVersion":1,"summary":"Observed fixture behavior","writesStopped":true,"checks":[]}' : JSON.stringify({
+          formatVersion: 1, summary: 'Fixture review', verdict: 'rejected', assessments: reviewerAssessments,
+          commandRepetitions: [], findings: [], resolutions: [], disputeResponses: [],
+        }), accepted_at_ms: 0 });
         insert('criterion_results', { passage_id: id, attempt_id: attemptId, criterion_id: 'ac-1', verdict: 'passed', evidence_json: '["proof"]' });
         insert('passage_events', { passage_id: id, event_type: 'fixture', created_at_ms: 0 });
         insert('passage_measurements', { passage_id: id, checkpoint_ms: 0, mode: 'stopped', observed: 0 });
@@ -166,24 +172,25 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       const captureOperation = operation('delivery', deliveryId, 'capture.retry');
       insert('capture_runs', { id: uuid(), delivery_id: deliveryId, operation_id: captureOperation, state: 'captured', started_at_ms: 0, ended_at_ms: 0 });
       // Warnings are sealed after capture, so use a second pending delivery below.
-      const verificationId = uuid(); const checkId = uuid();
-      insert('verification_runs', { id: verificationId, delivery_id: deliveryId, attempt_id: attemptId, content_identity: sha,
-        run_number: 1, state: 'passed', started_at_ms: 0, ended_at_ms: 0 });
-      insert('checks', { id: checkId, verification_id: verificationId, delivery_id: deliveryId, attempt_id: attemptId,
-        content_identity: sha, check_definition_id: 'test', run_number: 1, command: 'fixture', cwd_relative: '.', timeout_ms: 1,
-        state: 'passed', exit_code: 0, started_at_ms: 0, ended_at_ms: 0 });
-       const artifactId = uuid();
-       insert('artifacts', { id: artifactId, attempt_id: attemptId, delivery_id: deliveryId, check_id: checkId,
-         kind: 'check_log', path_relative: `${attemptId}/${checkId}/${artifactId}.log`, sha256: hash, size_bytes: 1, created_at_ms: 0 });
-      reviewId = uuid();
-      insert('reviews', { id: reviewId, delivery_id: deliveryId, attempt_id: attemptId, passage_id: reviewerId, verification_id: verificationId,
-        content_identity: sha, state: 'pending', independence_state: 'valid', workspace_state: 'ready', created_at_ms: 0 });
-      if (priorFinding) insert('finding_resolutions', { finding_id: priorFinding, review_id: reviewId, attempt_id: attemptId, verdict: 'resolved', evidence_json: '["proof"]' });
-      const findingId = uuid();
-      insert('findings', { id: findingId, review_id: reviewId, attempt_id: attemptId, finding_key: 'finding', criterion_ids_json: '["ac-1"]',
-        category: 'correctness', problem: 'Fixture', evidence_json: '["proof"]', expected_result: 'Correct', blocking: 1 });
-      db.prepare("UPDATE reviews SET state='rejected',completed_at_ms=0 WHERE id=?").run(reviewId);
-      priorFinding = findingId; priorProducer = passageId;
+      const producerBoundReviews = Number(db.pragma('user_version', { simple: true })) >= 52 && db.prepare<[], { name: string }>("PRAGMA table_info('reviews')").all()
+        .some(column => column.name === 'implementer_passage_id');
+      if (includeReviews && producerBoundReviews) {
+        reviewId = uuid();
+        insert('reviews', { id: reviewId, delivery_id: deliveryId, attempt_id: attemptId, passage_id: reviewerId,
+          implementer_passage_id: passageId,
+          content_identity: sha, state: 'pending', independence_state: 'pending', workspace_state: 'ready', created_at_ms: 0 });
+        db.prepare("UPDATE reviews SET independence_state='valid' WHERE id=?").run(reviewId);
+        if (priorFinding) {
+          insert('finding_resolutions', { finding_id: priorFinding, review_id: reviewId, attempt_id: attemptId, verdict: 'resolved', evidence_json: '["proof"]' });
+          insert('finding_assessments', { id: uuid(), attempt_id: attemptId, finding_id: priorFinding, review_id: reviewId,
+            progress: 'not_assessable', evidence_json: '[]', justification: reviewerAssessments[0]!.justification, created_at_ms: 0 });
+        }
+        const findingId = uuid();
+        insert('findings', { id: findingId, review_id: reviewId, attempt_id: attemptId, finding_key: 'finding', criterion_ids_json: '["ac-1"]',
+          category: 'correctness', problem: 'Fixture', evidence_json: '["proof"]', expected_result: 'Correct', blocking: 1 });
+        db.prepare("UPDATE reviews SET state='rejected',completed_at_ms=0 WHERE id=?").run(reviewId);
+        priorFinding = findingId; priorProducer = passageId;
+      }
     }
     // Third delivery exercises warning ownership with no captured-content mutation.
     const warningDelivery = uuid(); const warningPassage = uuid();
@@ -239,6 +246,7 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       context_id: creationId, project_id: projectId, creation_id: creationId, context_stamp: hash, checks_json: '["git"]',
       state: 'succeeded', created_at_ms: 0, completed_at_ms: 0 });
     event('diagnostic', diagnosticId, diagnosticId);
+    db.prepare("UPDATE attempts SET phase='finished',result='delivered' WHERE id=?").run(attemptId);
     return { projectId, projectRevisionId, attemptId, deliveryId, passageId, reviewId, creationId, questionId, resourceId };
   }
   const selected = history(undefined,managedSelected); const other = history();

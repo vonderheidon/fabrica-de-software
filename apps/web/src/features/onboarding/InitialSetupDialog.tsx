@@ -47,6 +47,7 @@ export function InitialSetupDialog({
   });
   const [activeStep, setActiveStep] = useState<SetupStep>('tools');
   const [toolsReviewed, setToolsReviewed] = useState(false);
+  const [githubSelectionTouched, setGithubSelectionTouched] = useState(false);
   const [stepInitialized, setStepInitialized] = useState(false);
   const [rootPath, setRootPath] = useState('');
   const rootTouchedRef = useRef(false);
@@ -77,7 +78,7 @@ export function InitialSetupDialog({
   const completed = view?.completed_at_ms !== null && view?.completed_at_ms !== undefined;
   const profileCounts = settings?.profile_counts ?? { all: 0, implementer: 0, reviewer: 0 };
   const missingProfileType: ProfileType | null = profileCounts.implementer === 0 ? 'implementer' : profileCounts.reviewer === 0 ? 'reviewer' : null;
-  const hasUnsavedGitHub = Boolean(settings && setup.selectedAccount && setup.selectedAccount.id !== settings.settings.account_id);
+  const hasUnsavedGitHub = Boolean(githubSelectionTouched && settings && setup.selectedAccount && setup.selectedAccount.id !== settings.settings.account_id);
   const candidateRoot = selection.candidates.projects_root;
   const candidateGh = selection.candidates.gh_executable;
   const savedGhPath = setup.executableOperation.status === 'confirmed' ? setup.executableOperation.savedPath : undefined;
@@ -151,6 +152,7 @@ export function InitialSetupDialog({
     selectionRef.current.clearCandidate('projects_root');
     selectionRef.current.clearCandidate('gh_executable');
     setupRef.current.resetSelection();
+    setGithubSelectionTouched(false);
     profileDirtyRef.current = false;
     setProfileDirty(false);
     setProfileSaving(false);
@@ -204,6 +206,7 @@ export function InitialSetupDialog({
     selection.clearCandidate('projects_root');
     selection.clearCandidate('gh_executable');
     setup.resetSelection();
+    setGithubSelectionTouched(false);
     profileDirtyRef.current = false;
     setProfileDirty(false);
     setProfileFormOpen(false);
@@ -295,7 +298,7 @@ export function InitialSetupDialog({
         <ToolsSetupPanel compactHeading onboarding={onboarding} resetKey={toolsResetKey} disabled={profileSaving || setup.accountOperation.status === 'saving' || setup.accountOperation.status === 'uncertain' || setup.executableOperation.status === 'saving' || setup.executableOperation.status === 'uncertain' || selection.state.status === 'selecting'} onDraftStateChange={(dirty, active) => { setToolsDirty(dirty); setToolsSaving(active); }} />
       </div>
       {activeStep === 'github' && <>
-        <GitHubSetupPanel compactHeading settings={settings} settingsEtag={snapshot.etag} setup={setup} selection={selection} disabled={commandBlocked} />
+        <GitHubSetupPanel compactHeading settings={settings} settingsEtag={snapshot.etag} setup={{ ...setup, setSelectedLogin: login => { setGithubSelectionTouched(true); setup.setSelectedLogin(login); } }} selection={selection} disabled={commandBlocked} />
         {!canAdvanceGitHub && setup.verification.status !== 'ready' && <p className="muted" role="status">Verifique o status para consultar a conta ativa. A etapa não avança com uma identidade apenas digitada.</p>}
         {!canAdvanceGitHub && setup.verification.status === 'ready' && <p className="notice compact-notice" role="status">Vincule a conta elegível que está ativa no GitHub CLI antes de avançar.</p>}
       </>}

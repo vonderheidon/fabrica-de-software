@@ -29,7 +29,7 @@ export function publicationSnapshot(db: Database.Database, attemptId: string, de
   const selected = deliveryId ?? status.deliveryId;
   const delivery = selected ? readDelivery(db, selected) : null;
   if (delivery && delivery.attemptId !== attemptId) throw new OperationError(404, 'DELIVERY_NOT_FOUND', 'The delivery does not belong to this attempt.');
-  const review = delivery ? db.prepare<[string], { state: 'pending' | 'approved' | 'rejected'; independence_state: string; content_identity: string; passage_id: string; verification_id: string }>('SELECT state,independence_state,content_identity,passage_id,verification_id FROM reviews WHERE delivery_id=?').get(delivery.id) ?? null : null;
+  const review = delivery ? db.prepare<[string], { state: 'pending' | 'approved' | 'rejected'; independence_state: string; content_identity: string; passage_id: string; implementer_passage_id: string }>('SELECT state,independence_state,content_identity,passage_id,implementer_passage_id FROM reviews WHERE delivery_id=?').get(delivery.id) ?? null : null;
   const effects = effectsFor(db, attemptId);
   const authority = db.prepare<[string], { reason: string | null; expected_status_id: string | null; observed_status_id: string | null; observed_at_ms: number }>('SELECT reason,expected_status_id,observed_status_id,observed_at_ms FROM attempt_authority WHERE attempt_id=?').get(attemptId) ?? null;
   const stamp = digest([status.id,status.revision,configurationETag(configuration),delivery?.id,delivery?.revision,effects.map(e => [e.operationId,e.revision])]);
@@ -40,15 +40,14 @@ function publicationBlockReason(db: Database.Database, attemptId: string, delive
   const a = readAttempt(db, attemptId); const d = readDelivery(db, deliveryId);
   if (deletionOperation(db, a.projectId)) return 'PROJECT_DELETION_PENDING';
   if (d.attemptId !== attemptId) throw new OperationError(404, 'DELIVERY_NOT_FOUND', 'The delivery does not belong to this attempt.');
-  const r = db.prepare<[string], { state: string; independence_state: string; content_identity: string; passage_id: string; verification_id: string }>(
-    'SELECT state,independence_state,content_identity,passage_id,verification_id FROM reviews WHERE delivery_id=?').get(deliveryId);
+  const r = db.prepare<[string], { state: string; independence_state: string; content_identity: string; passage_id: string; implementer_passage_id: string }>(
+    'SELECT state,independence_state,content_identity,passage_id,implementer_passage_id FROM reviews WHERE delivery_id=?').get(deliveryId);
   const mode = authorizedMode(db,attemptId);
   const interrupted = a.result === 'interrupted' && explicit;
   const producer = d ? db.prepare<[string], { writes_stopped: number }>("SELECT json_extract(summary_json,'$.writesStopped') AS writes_stopped FROM passage_results WHERE passage_id=?").get(d.producerPassageId) : null;
   const reviewer = r ? db.prepare('SELECT passage_id FROM passage_results WHERE passage_id=?').get(r.passage_id) : null;
-  const verification = r ? db.prepare<[string, string, string], { state: string }>('SELECT state FROM verification_runs WHERE id=? AND delivery_id=? AND content_identity=?').get(r.verification_id, deliveryId, d?.contentIdentity ?? '') : null;
   if (!d || d.captureState !== 'captured' || d.id !== a.deliveryId || !r || r.state !== 'approved' || r.independence_state !== 'valid' ||
-    r.content_identity !== d.contentIdentity || !producer?.writes_stopped || !reviewer || !verification || !['passed','not_applicable'].includes(verification.state) ||
+    r.content_identity !== d.contentIdentity || !producer?.writes_stopped || !reviewer || r.implementer_passage_id !== d.producerPassageId ||
     !['icr','commit','pr'].includes(mode) ||
     (a.result !== null && a.result !== 'delivered' && !interrupted) ||
     (a.tracking !== 'tracked' && !interrupted && a.result !== 'delivered') ||
@@ -60,8 +59,7 @@ function publicationBlockReason(db: Database.Database, attemptId: string, delive
   }
   const lostResources = a.result === 'delivered' && db.prepare("SELECT id FROM resources WHERE attempt_id=? AND kind='terminal' AND diagnostic='TRACKING_LOST' AND stop_state<>'confirmed'").get(attemptId);
   if ((interrupted || lostResources) && (db.prepare("SELECT id FROM resources WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed'").get(attemptId) ||
-    db.prepare("SELECT id FROM capture_runs WHERE delivery_id=? AND state='running'").get(deliveryId) ||
-    db.prepare("SELECT id FROM verification_runs WHERE attempt_id=? AND state='running'").get(attemptId))) {
+    db.prepare("SELECT id FROM capture_runs WHERE delivery_id=? AND state='running'").get(deliveryId))) {
     return 'RESOURCES_NOT_RECONCILED';
   }
   if (mode === 'icr' && !db.prepare("SELECT id FROM resources WHERE attempt_id=? AND kind='implementation' AND owned=1 AND removed=0 AND launch_state='ready'").get(attemptId)) return 'ICR_ENVIRONMENT_UNAVAILABLE';

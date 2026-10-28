@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, EffectView, type EffectReceipt } from '#contracts';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
-import { createCheckMaterializer } from './materialize.js';
+import { createPublicationMaterializer } from './materialize.js';
 import type { GitReader } from './git.js';
 import type { AttemptRootResolver } from './project-storage.js';
 
@@ -17,7 +17,7 @@ export interface LocalCommitResult {
 export function createLocalPublisher(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath,
   resolveAttemptRoot?: AttemptRootResolver) {
   const isolated: GitReader | undefined = git ? (cwd, args, input) => git(cwd, args, { ...input, isolatedConfig: true }) : undefined;
-  const materialize = createCheckMaterializer(dataDirectory, isolated, canonicalize, 'publication', resolveAttemptRoot);
+  const materialize = createPublicationMaterializer(dataDirectory, isolated, canonicalize, resolveAttemptRoot);
   async function context(delivery: Delivery, effect: EffectView) {
     const identity = effect.expectedIdentity;
     if (!Value.Check(Delivery, delivery) || !Value.Check(EffectView, effect) || effect.kind !== 'local_commit' ||

@@ -1,4 +1,4 @@
-import { readCheckDefinitions, readStatusOptionIds, readQueueOrderJson } from './configuration-json.js';
+import { readStatusOptionIds, readQueueOrderJson } from './configuration-json.js';
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -176,7 +176,7 @@ export function readConfiguration(db: Database.Database, projectId: string): Con
     ...(r.delivery_branch_json == null ? {} : { delivery_branch: JSON.parse(String(r.delivery_branch_json)) as unknown }),
     github_project: r.github_project_id === null ? null : { id: r.github_project_id, owner_id: r.github_project_owner_id, status_field_id: r.status_field_id, status_option_ids: readStatusOptionIds(JSON.parse(String(r.status_options_json)) as unknown) },
     implementer_profile_id: r.implementer_profile_id, reviewer_profile_id: r.reviewer_profile_id,
-    checks: readCheckDefinitions(JSON.parse(String(r.checks_json)) as unknown), correction_limit: r.correction_limit, default_delivery_mode: r.default_delivery_mode,
+    correction_limit: r.correction_limit, default_delivery_mode: r.default_delivery_mode,
     automation_enabled: r.automation_enabled === 1, queue_order: readQueueOrderJson(JSON.parse(String(r.queue_order_json)) as unknown), guidance: r.guidance,
   };
   if (!Value.Check(ProjectRevision, configuration)) throw new StorageError('PROJECT_DATA_INVALID');

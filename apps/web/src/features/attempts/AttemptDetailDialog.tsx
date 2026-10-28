@@ -1,4 +1,5 @@
 import { AttemptConditions } from './AttemptConditions.js';
+import { formatDuration } from './duration.js';
 import { AttemptBlockDecision } from './AttemptBlockDecision.js';
 import { CorrectionHistory, EvidenceList } from './CorrectionHistory.js';
 import { HistoricalProfile } from './HistoricalProfile.js';
@@ -7,8 +8,8 @@ import { CustomSelect } from '../../app/CustomSelect.js';
 import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptSelection } from './execution-requests.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { HttpArtifact as Artifact, HttpAttemptDetail as AttemptDetail, HttpAttemptResource as AttemptResource, HttpDeliveryDiff as DeliveryDiff, HttpDetailItem as DetailItem, HttpDetailPage as DetailPage, HttpDetailSection as DetailSection, HttpQuestion as Question } from '#contracts';
-import { HttpError, requestJsonWithMetadata, requestText } from '../../api/http.js';
+import type { HttpAttemptDetail as AttemptDetail, HttpAttemptResource as AttemptResource, HttpDeliveryDiff as DeliveryDiff, HttpDetailItem as DetailItem, HttpDetailPage as DetailPage, HttpDetailSection as DetailSection, HttpProducerResult as ProducerResult, HttpQuestion as Question } from '#contracts';
+import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 import { QuestionDecisionCard } from './QuestionDecisionCard.js';
 import { useAttempt } from './useAttempt.js';
 import { AttemptStageSummary } from './AttemptStageSummary.js';
@@ -20,15 +21,14 @@ import { formatMinuteValue } from '../projects/time-minutes.js';
 import { OperatorState, UnknownState } from '../../app/OperatorSupport.js';
 import { operatorCodeLabel, operatorErrorMessage, operatorFactLabel, operatorState, operatorVisibleFactValue } from '../../app/operator-language.js';
 
-const sections: readonly DetailSection[] = ['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources'];
+const sections: readonly DetailSection[] = ['rounds', 'passages', 'criteria', 'reviews', 'findings', 'questions', 'effects', 'resources'];
 const labels: Record<DetailSection, string> = {
-  rounds: 'Rodadas e versões', passages: 'Passagens', criteria: 'Critérios e evidências', checks: 'Checks e logs',
+  rounds: 'Rodadas e versões', passages: 'Passagens', criteria: 'Critérios e evidências',
   reviews: 'Pareceres', findings: 'Achados e resoluções', questions: 'Perguntas', effects: 'Efeitos remotos', resources: 'Recursos e limpeza', profiles: 'Perfis capturados',
   finding_assessments: 'Progresso', finding_disputes: 'Contestações', decisions: 'Decisões',
 };
 type SectionErrorDetails = { code: string; requestId: string | null; facts: Readonly<Record<string, string | number | boolean | null>> | null; affectedRequirements: readonly string[] } | null;
 type SectionState = { page: DetailPage | null; error: string | null; errorDetails: SectionErrorDetails; loading: boolean };
-type EvidenceState = { loading: boolean; text: string | null; error: string | null; errorDetails: SectionErrorDetails };
 type DiffState = { loading: boolean; value: DeliveryDiff | null; error: string | null; errorDetails: SectionErrorDetails };
 type DetailProps = {
   attemptId: string;
@@ -62,10 +62,10 @@ function evidenceText(value: unknown): string | null {
   return null;
 }
 function formatMeasured(value: AttemptDetail["measurements"]["active_time"]): string {
-  return value.state === 'measured' ? `${value.value} ${value.unit}` : `${operatorState(value.state).label} · ${operatorCodeLabel(value.reason)}`;
+  return value.state === 'measured' ? value.unit === 'ms' ? formatDuration(value.value) : `${value.value} ${value.unit}` : `${operatorState(value.state).label} · ${operatorCodeLabel(value.reason)}`;
 }
 function formatLimit(value: AttemptDetail["measurements"]["active_limit"]): string {
-  return value.state === 'configured' ? `${value.value} ${value.unit}` : 'Não configurado';
+  return value.state === 'configured' ? value.unit === 'ms' ? formatDuration(value.value) : `${value.value} ${value.unit}` : 'Não configurado';
 }
 function formatActiveLimit(value: AttemptDetail["measurements"]["active_limit"]): string {
   if (value.state !== 'configured') return formatLimit(value);
@@ -76,7 +76,6 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
   const [storedSectionStates, setSectionStates] = useState<Record<DetailSection, SectionState>>(emptySections);
   const [reload, setReload] = useState(0);
   const [storedDiff, setDiff] = useState<DiffState>({ loading: false, value: null, error: null, errorDetails: null });
-  const [storedEvidence, setEvidence] = useState<Record<string, EvidenceState>>({});
 
   const selectedQuery = useMemo(() => {
     const query = new URLSearchParams();
@@ -100,9 +99,8 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
   const visible = sectionIdentityRef.current === sectionIdentity;
   const sectionStates = visible ? storedSectionStates : emptySections();
   const diff = visible ? storedDiff : { loading: false, value: null, error: null, errorDetails: null };
-  const evidence = visible ? storedEvidence : {};
   useEffect(() => { selectionRef.current = selection; return () => { if (selectionRef.current === selection) selectionRef.current = { identity: '' }; }; }, [selection]);
-  useEffect(() => { setDiff({ loading: false, value: null, error: null, errorDetails: null }); setEvidence({}); }, [effectiveDeliveryId]);
+  useEffect(() => { setDiff({ loading: false, value: null, error: null, errorDetails: null }); }, [effectiveDeliveryId]);
 
   useEffect(() => {
     const onEvent = (event: Event): void => {
@@ -190,21 +188,6 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       : reason instanceof HttpError ? reason.message : 'Não foi possível carregar o diff da versão.', errorDetails: sectionErrorDetails(reason) })); });
   }
 
-  async function loadEvidence(artifact: Artifact): Promise<void> {
-    setEvidence((current) => ({ ...current, [artifact.id]: { loading: true, text: current[artifact.id]?.text ?? null, error: null, errorDetails: null } }));
-    try {
-      const text = await requestText(`/api/v1/artifacts/${encodeURIComponent(artifact.id)}`);
-      if (!isCurrentSelection()) return;
-      setEvidence((current) => ({ ...current, [artifact.id]: { loading: false, text, error: null, errorDetails: null } }));
-    } catch (reason: unknown) {
-      if (!isCurrentSelection()) return;
-      const message = reason instanceof HttpError && reason.code === 'ARTIFACT_INTEGRITY_FAILED' ? 'A integridade desta evidência falhou; o conteúdo foi recusado.'
-        : reason instanceof HttpError && reason.code === 'ARTIFACT_MISSING' ? 'A evidência não está disponível.'
-          : reason instanceof HttpError ? reason.message : 'Não foi possível carregar a evidência.';
-      setEvidence((current) => ({ ...current, [artifact.id]: { loading: false, text: null, error: message, errorDetails: sectionErrorDetails(reason) } }));
-    }
-  }
-
   const roundItems = sectionStateFor(sectionStates, 'rounds').page?.items ?? [];
   const passageItems = sectionStateFor(sectionStates, 'passages').page?.items ?? [];
   const selectedRoundValue = selectedRound ?? String(attempt?.selected_round ?? 1);
@@ -217,7 +200,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attemptError && <div className="queue-error" role="alert"><h3>Falha ao consultar esta tentativa</h3><p>{attemptError}</p><p><strong>Próxima ação:</strong> consulte novamente antes de agir sobre os dados anteriores.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar novamente</button></div>}
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
-      <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError) || attemptRefreshing} />
+      <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError) || attemptRefreshing} blocked={!attempt.result && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED'} />
       <div className="attempt-detail-heading"><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
       {delivery && <PublicationDialog key={delivery.delivery.id}
         projectId={attempt.project_id}
@@ -244,7 +227,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         </CustomSelect>
       </div></div>
 
-      <details className="attempt-axis-card card attempt-disclosure" open={!attempt.result || Boolean(attempt.suspension || attempt.diagnostic || attempt.authority?.reason)}><summary>Estado da tentativa</summary><dl className="preparation-facts"><div><dt>{attempt.result ? 'Resultado final' : 'Etapa atual'}</dt><dd><OperatorState value={attempt.result ?? attempt.phase} /></dd></div>{attempt.suspension && <div><dt>Suspensão</dt><dd>{operatorCodeLabel(attempt.suspension)}</dd></div>}</dl>
+      <details className="attempt-axis-card card attempt-disclosure" open={!attempt.result || Boolean(attempt.suspension || attempt.diagnostic || attempt.authority?.reason)}><summary>Estado da tentativa</summary><dl className="preparation-facts"><div><dt>{attempt.result ? 'Resultado final' : 'Etapa atual'}</dt><dd><OperatorState value={attempt.result ?? (attempt.diagnostic === 'IMPLEMENTATION_BLOCKED' ? 'blocked' : attempt.phase)} /></dd></div>{attempt.suspension && <div><dt>Suspensão</dt><dd>{operatorCodeLabel(attempt.diagnostic === 'IMPLEMENTATION_BLOCKED' ? attempt.diagnostic : attempt.suspension)}</dd></div>}</dl>
         <AttemptConditions attempt={attempt} />
 
         {!attempt.result && <div className="attempt-recovery-actions">
@@ -264,7 +247,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         {deliveryState === 'loading' && <p role="status">Consultando a versão selecionada…</p>}
         {deliveryState === 'not-captured' && <p className="muted">Esta rodada ainda não tem uma versão capturada.</p>}
         {deliveryState === 'error' && <div className="queue-error" role="alert"><p>{deliveryError}</p><p><strong>Próxima ação:</strong> atualize a tentativa e consulte novamente a versão selecionada.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar versão novamente</button></div>}
-        {delivery && <><dl className="preparation-facts"><div><dt>Captura</dt><dd><OperatorState value={delivery.delivery.capture_state} /></dd></div><div><dt>Integridade da verificação</dt><dd>{delivery.verification ? <OperatorState value={delivery.verification.state} /> : 'Checks não executados'}</dd></div></dl>
+        {delivery && <><dl className="preparation-facts"><div><dt>Captura</dt><dd><OperatorState value={delivery.delivery.capture_state} /></dd></div></dl>
           {delivery.delivery.diagnostic && <div className="queue-error" role="alert"><b>{operatorCodeLabel(delivery.delivery.diagnostic)}</b><p>Confira o estado desta versão antes de repetir uma ação.</p></div>}
           {delivery.delivery.capture_state === 'failed' && captureRetryEligible && <div className="attempt-recovery-actions"><p>Falha técnica elegível. O retry reutiliza somente o resultado e a passagem já registrados.</p><button type="button" onClick={() => actions.retryCaptureFor(delivery.delivery.producer_passage_id)} disabled={!attemptEtag || actions.busy}>Repetir captura</button></div>}
           {delivery.delivery.capture_state === 'failed' && !captureRetryEligible && <p className="muted" role="status">A captura falhou, mas não há confirmação atual de todos os requisitos para repetir. Atualize a tentativa e a versão.</p>}
@@ -287,7 +270,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           {section === 'criteria' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'Critérios indisponíveis: esta versão ainda não foi capturada.' : 'Nenhum critério foi retornado para esta versão.'}</p>}
           {sectionState.page && sectionState.page.items.length > 0 && <div className="attempt-record-list">{sectionState.page.items.map((item, index) => section === 'questions'
             ? <QuestionDecisionCard key={String(asRecord(item).id ?? index)} attemptId={attemptId} summary={item as { id: string; state: Question["state"] }} />
-            : renderRecord(section, item, index, evidence, loadEvidence))}</div>}
+            : renderRecord(section, item, index, actions.producerResult))}</div>}
           {sectionState.page?.has_more && <div className="attempt-section-pagination"><span>Mais registros nesta seção</span><button type="button" onClick={() => loadMore(section)} disabled={sectionState.loading}>{sectionState.loading ? 'Carregando…' : 'Carregar continuação'}</button></div>}
         </details>;
       })}</section></details>
@@ -359,7 +342,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
   </section>;
 }
 
-function renderRecord(section: DetailSection, item: DetailItem, index: number, evidence: Record<string, EvidenceState>, loadEvidence: (artifact: Artifact) => Promise<void>) {
+function renderRecord(section: DetailSection, item: DetailItem, index: number, producerResult: ProducerResult) {
   const record = asRecord(item);
   if (section === 'findings' && 'problem' in item && 'resolutions' in item) return <article className="attempt-record" key={item.id}>
     <h4>{item.problem}</h4><dl className="preparation-facts"><div><dt>Prioridade</dt><dd>{item.priority ? ({ critical: 'Crítica', high: 'Alta', medium: 'Média', low: 'Baixa' })[item.priority] : 'Não registrada no legado'}</dd></div><div><dt>Bloqueante</dt><dd>{item.blocking ? 'Sim' : 'Não'}</dd></div><div><dt>Critérios</dt><dd>{item.criterion_ids.join(', ')}</dd></div></dl>
@@ -370,25 +353,27 @@ function renderRecord(section: DetailSection, item: DetailItem, index: number, e
   const recordId = typeof record.id === 'string' ? record.id : typeof record.delivery_id === 'string' ? record.delivery_id : null;
   const round = typeof record.round === 'number' ? record.round : index + 1;
   const role = record.role === 'implementer' ? 'Implementador' : record.role === 'reviewer' ? 'Revisor' : null;
-  if (section === 'passages') return <article className="attempt-record" key={recordId ?? index}><h4>Passagem · {role ?? 'papel registrado'}</h4><PassageFacts passage={item as import('./PassageFacts.js').PassageFactsProps['passage']} /></article>;
+  if (section === 'passages') {
+    const checks = producerResult && role === 'Implementador' && producerResult.binding.passage_id === record.id && producerResult.binding.delivery_version === record.delivery_id
+      ? producerResult.result.checks : [];
+    return <article className="attempt-record" key={recordId ?? index}><h4>Passagem · {role ?? 'papel registrado'}</h4><PassageFacts passage={item as import('./PassageFacts.js').PassageFactsProps['passage']} />
+      {checks.map((check) => <div key={check.id}><code>{check.id}</code><p>{check.outcome}</p><p>{check.evidence}</p></div>)}
+    </article>;
+  }
   const heading = section === 'rounds' ? `Rodada ${round}`
     : section === 'criteria' ? 'Critério de aceite'
-      : section === 'checks' ? `Check ${index + 1}`
         : section === 'findings' ? 'Achado da revisão'
           : section === 'passages' ? `Passagem · ${role ?? 'papel registrado'}`
             : section === 'reviews' ? 'Parecer do Revisor'
               : labels[section];
-  const visibleKeys = ['round', 'role', 'state', 'result', 'status', 'verdict', 'declared_verdict', 'blocking', 'category', 'exit_code', 'duration_ms', 'passed', 'kind'];
-  const artifacts = Array.isArray(record.artifacts) ? record.artifacts as Artifact[] : [];
+  const visibleKeys = ['round', 'role', 'state', 'result', 'status', 'verdict', 'declared_verdict', 'blocking', 'category', 'kind'];
   const textFields = ['text', 'problem', 'evidence', 'expected', 'resolution', 'description', 'comment'];
   return <article className="attempt-record" key={`${section}:${recordId ?? 'record'}:${index}`}><h4>{heading}</h4><dl>{visibleKeys.filter((key) => record[key] !== null && record[key] !== undefined).map((key) => <div key={key}><dt>{operatorFactLabel(key)}</dt><dd>{operatorVisibleFactValue(key, record[key])}</dd></div>)}</dl>
-    {section === 'checks' && <><p>{record.state === 'failed' ? 'Check reprovado. Investigue a evidência antes de atribuir uma falha ao produto.' : record.state === 'error' ? 'Erro técnico de execução. Não comprova defeito no produto.' : record.state === 'passed' ? 'Check aprovado nesta versão.' : 'Não verificado nesta versão.'}</p>{typeof record.repeat_reason === 'string' && <details><summary>Motivo da repetição</summary><p>{record.repeat_reason}</p></details>}</>}
     {visibleKeys.filter((key) => ['state', 'status', 'phase', 'result', 'tracking', 'verdict', 'declared_verdict', 'capture_state', 'active_limit_state'].includes(key) && typeof record[key] === 'string' && !operatorState(record[key] as string).known).map((key) => <UnknownState key={key} value={String(record[key])} />)}
 
     {typeof record.text === 'string' && <p>{record.text}</p>}
     {textFields.filter((key) => key !== 'text' && typeof record[key] === 'string').map((key) => <div key={key}><b>{operatorFactLabel(key)}</b><p>{String(record[key])}</p></div>)}
     {section === 'criteria' && <div className="attempt-evidence-columns">{(['producer', 'reviewer'] as const).map((evidenceRole) => { const text = evidenceText(record[evidenceRole]); return text ? <div key={evidenceRole}><b>{evidenceRole === 'producer' ? 'Evidência do Implementador' : 'Evidência do Revisor'}</b><p>{text}</p></div> : null; })}</div>}
-    {artifacts.map((artifact) => { const value = evidence[artifact.id]; return <div className="attempt-artifact" key={artifact.id}><p><b>{section === 'checks' ? 'Saída do check' : 'Arquivo de evidência'}</b></p><button type="button" onClick={() => void loadEvidence(artifact)} disabled={value?.loading}>{value?.loading ? 'Carregando evidência…' : value?.text !== null && value?.text !== undefined ? 'Recarregar evidência' : 'Abrir evidência'}</button>{value?.error && <div className="error" role="alert"><p>{value.error}</p></div>}{value?.text !== null && value?.text !== undefined && <pre className="attempt-artifact-content">{value.text}</pre>}</div>; })}
   </article>;
 }
 

@@ -103,16 +103,13 @@ export function createClient(rootReader: GraphQLReader) {
     if (!header.data) return { ...header, data: null };
     const fields = await collect(reader, queries.fieldsQuery, { id }, (data) => child(data, 'node', 'fields'), (node) => {
       if (node.__typename === 'ProjectV2SingleSelectField') return { kind: 'select' as const, field: checked(StatusField, { id: node.id, name: node.name, options: node.options }) };
-      if (node.__typename === 'ProjectV2Field' && node.dataType === 'NUMBER') return { kind: 'number' as const,
-        field: checked(GitHubProjectDetails.properties.numberFields.items, { id: node.id, name: node.name }) };
       if (!['ProjectV2Field', 'ProjectV2IterationField', 'ProjectV2MultiSelectField'].includes(String(node.__typename))) throw new Error('RESPONSE_INVALID');
       return null;
     });
     const notes = [...header.diagnostics, ...fields.diagnostics].map((entry) => entry.code);
     return result(header.state === 'complete' && fields.state === 'complete' ? 'complete' : 'partial',
       checked(GitHubProjectDetails, { project: header.data,
-        singleSelectFields: (fields.data ?? []).flatMap((entry) => entry?.kind === 'select' ? [entry.field] : []),
-        numberFields: (fields.data ?? []).flatMap((entry) => entry?.kind === 'number' ? [entry.field] : []) }), notes, fields.retryAtMs);
+        singleSelectFields: (fields.data ?? []).flatMap((entry) => entry?.kind === 'select' ? [entry.field] : []) }), notes, fields.retryAtMs);
   }
   async function validateProjectSelection(selection: ProjectSelection): Promise<GitHubQueryResult<GitHubProjectDetails>> {
     if (!Value.Check(GitHubProjectSelection, selection)) return invalid();
@@ -190,15 +187,11 @@ export function createClient(rootReader: GraphQLReader) {
         }
       }
       const fields = await collect(reader, queries.valuesQuery, { id: membership.itemId }, (data) => child(data, 'node', 'fieldValues'), (node) => {
-        if (node.__typename === 'ProjectV2ItemFieldNumberValue') return { kind: 'number' as const,
-          field: checked(IssueMembership.properties.numberValues.items, { fieldId: object(node.field).id, value: node.number }) };
         if (node.__typename !== 'ProjectV2ItemFieldSingleSelectValue') return null;
         return { kind: 'select' as const, field: checked(IssueMembership.properties.statusValues.items, { fieldId: object(node.field).id, optionId: node.optionId, name: node.name }) };
       }, (node) => ['ProjectV2ItemFieldSingleSelectValue', 'ProjectV2ItemFieldNumberValue'].includes(String(node.__typename)) ? string(node.id) : null, firstPages.get(membership.itemId));
       parts.push(fields);
-      populated.push({ ...membership,
-        statusValues: (fields.data ?? []).flatMap((entry) => entry?.kind === 'select' ? [entry.field] : []),
-        numberValues: (fields.data ?? []).flatMap((entry) => entry?.kind === 'number' ? [entry.field] : []) });
+      populated.push({ ...membership, statusValues: (fields.data ?? []).flatMap((entry) => entry?.kind === 'select' ? [entry.field] : []) });
     }
     const bodies = [String(issue.body), ...(comments.data ?? []).map((comment) => comment.body)];
     const references = [...new Set(bodies.flatMap((body) => body.match(/https?:\/\/[^\s<>\)\]]+|(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#[1-9][0-9]*/g) ?? []))].filter((ref) => ref.length <= 4096);

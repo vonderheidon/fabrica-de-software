@@ -22,7 +22,7 @@ const issue: HttpQueueItem = {
   project_id: 'abcdef12-1234-4123-8123-123456789012', project_name: 'Projeto', item_id: 'item', kind: 'issue',
   issue_id: 'issue', number: 1, title: 'Issue pronta', url: null, assignees: [], status: 'Ready', ready: true,
   ready_eligible: true, eligible: false, reasons: ['AUTOMATION_DISABLED'], consumption: 'available', attempt_id: null,
-  order: { position: 1, criterion: 'issue-number', value: null },
+  order: { position: 1, criterion: 'issue-number' },
 };
 
 describe('dashboard upcoming candidates', () => {

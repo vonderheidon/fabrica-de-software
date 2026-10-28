@@ -10,8 +10,6 @@ import { installPublicationRoutes } from './publication.js';
 import { createQueries } from '../../modules/queries/index.js';
 import { HttpAttemptDetail as AttemptDetail, HttpAttemptDetailQuery as AttemptDetailQuery, HttpAttemptListQuery as AttemptListQuery, HttpAttemptPage as AttemptPage } from '#contracts';
 import { HttpMakeAttemptDecision as MakeAttemptDecision } from '#contracts';
-import { HttpAttemptComparison, HttpAttemptComparisonQuery } from '#contracts';
-import { fromHttpAttemptComparisonQuery, toHttpAttemptComparison } from '../execution-views.js';
 
 export function installAttemptRoutes(instance: FastifyInstance, pipeline: Pipeline, storage: Storage): void {
   installRecoveryRoutes(instance, pipeline, storage);
@@ -19,8 +17,6 @@ export function installAttemptRoutes(instance: FastifyInstance, pipeline: Pipeli
   const queries = createQueries(storage);
   const app = instance.withTypeProvider<TypeBoxTypeProvider>();
   const errors = { '4xx': ErrorResponse, '5xx': ErrorResponse };
-  app.get('/api/v1/attempt-comparisons', { schema: { querystring: HttpAttemptComparisonQuery, response: { 200: HttpAttemptComparison, ...errors } } }, async request =>
-    toHttpAttemptComparison(queries.compareAttempts(fromHttpAttemptComparisonQuery(request.query))));
   app.get('/api/v1/attempts/:attemptId/measurements', { schema: { params: AttemptParams, querystring: EmptyQuery, response: { 200: AttemptMeasurements, ...errors } } }, async request => toHttpAttemptMeasurements(storage.getMeasurements(request.params.attemptId)));
   app.get('/api/v1/attempts/:attemptId/questions/:questionId', { schema: { params: QuestionParams, querystring: EmptyQuery, response: { 200: Question, ...errors } } }, async (request, reply) => {
     const question = storage.getQuestion(request.params.attemptId, request.params.questionId);

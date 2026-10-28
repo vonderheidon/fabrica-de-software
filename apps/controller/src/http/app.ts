@@ -25,7 +25,6 @@ import { createExecution, ExecutionError } from '../modules/execution/index.js';
 import { installAttemptRoutes } from './routes/attempts.js';
 import { installQueueRoutes } from './routes/queue.js';
 import { installDeliveryRoutes } from './routes/deliveries.js';
-import { createVerification } from '../modules/verification/index.js';
 import type { ToolObservation } from '#contracts';
 import { createScaffold, type ScaffoldDependencies } from '../modules/projects/index.js';
 import { installScaffoldRoutes } from './routes/scaffold.js';
@@ -112,15 +111,14 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   storage.interruptAttempts();
   const execution = providedPipeline ? null : createExecution({ dataDirectory: configuration.dataDirectory, persistence: storage.executionPersistence(),
     validatePassageScope: async binding => { if (!await pipeline.revalidateScope(binding)) throw new ExecutionError('RESULT_INVALID'); } });
-  const verificationWorkspaces = createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory, projectStorage: storage });
+  const attemptWorkspaces = createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory, projectStorage: storage });
   storage.interruptCreations();
-  const scaffold = createScaffold({ storage, github: scaffoldDependencies?.github ?? defaultGitHub, workspaces: scaffoldDependencies?.workspaces ?? verificationWorkspaces,
+  const scaffold = createScaffold({ storage, github: scaffoldDependencies?.github ?? defaultGitHub, workspaces: scaffoldDependencies?.workspaces ?? attemptWorkspaces,
     logFailure: code => app.log.error({ code }, 'Scaffold creation stopped') });
   installScaffoldRoutes(app,scaffold,storage);
-  const verification = createVerification({ storage, workspaces: verificationWorkspaces, dataDirectory: configuration.dataDirectory, logFailure: code => app.log.error({ code }, 'Verification failed') });
   const pipeline = providedPipeline ?? createPipeline({ storage, preparations, execution: execution!,
-    workspaces: verificationWorkspaces, verification, github: preparationDependencies?.github ?? defaultGitHub, queue: { observe: projects.getQueue },
-    publication: { github: defaultGitHub, workspaces: verificationWorkspaces, verification },
+    workspaces: attemptWorkspaces, github: preparationDependencies?.github ?? defaultGitHub, queue: { observe: projects.getQueue },
+    publication: { github: defaultGitHub, workspaces: attemptWorkspaces },
     observeTools: async () => {
       const now = Date.now();
       const tools: ToolObservation[] = [{ tool: 'node', state: 'observed', version: process.versions.node, cause: null, affectedRequirements: [], observedAtMs: now },

@@ -18,7 +18,7 @@ function delivery(): HttpDeliveryDetail {
     delivery_summary:{ attempt_id:id,delivery_id:version,original_mode:'icr',authorized_mode:'icr',review_state:'approved',outcome:'icr_approved',
       content_identity:'b'.repeat(40),approved_ref:'refs/factory/deliveries/'+version,code_location:'C:/work/attempt',local_repository:null,
       branch_ref:null,commit_sha:null,pull_request_url:null,checkout_updated:false,pending_effects:[],limitations:[],criteria_satisfied:2,criteria_total:2,
-      checks_succeeded:1,checks_total:1,resolved_findings:1,details_url:'/api/v1/deliveries/'+version } } as unknown as HttpDeliveryDetail;
+       resolved_findings:1,details_url:'/api/v1/deliveries/'+version } } as unknown as HttpDeliveryDetail;
 }
 let root: ReturnType<typeof createRoot> | null = null;
 let container: HTMLDivElement;
@@ -36,6 +36,10 @@ it('authorizes on one click, blocks a synchronous duplicate and presents 202 as 
   reads(); let release!: (value: unknown) => void;
   send.mockImplementation((_path: string, init: RequestInit) => new Promise(resolve => { release = () => resolve({ data:{ operation_id:(init.headers as Record<string,string>)['Idempotency-Key'] } }); }));
   await mount(); expect(container.querySelectorAll('input[type=checkbox]')).toHaveLength(0);
+  expect(container.textContent).toContain('Critérios comprovados');
+  expect(container.textContent).toContain('Revisão independente');
+  expect(container.textContent).toContain('Referência fixa aprovada');
+  expect(container.textContent).not.toContain('Checks aprovados');
   await act(async () => { button('Integrar e criar commit').click(); button('Integrar e criar commit').click(); });
   expect(send).toHaveBeenCalledOnce();
   expect(container.textContent).toContain('Enviando solicitação');

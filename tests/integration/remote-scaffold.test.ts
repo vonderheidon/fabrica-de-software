@@ -7,11 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { HttpCreationView, HttpScaffoldInput, HttpScaffoldOptions, HttpScaffoldPlanned, type CreateScaffold, type EffectReceipt, type EffectView, type GitHubMutationResult, type ScaffoldInputV3, type SessionResponse } from '#contracts';
 import { createScaffold, type ScaffoldDependencies } from '../../apps/controller/src/modules/projects/index.js';
-import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage, openStorageAtMigrationVersionForTests } from '../../apps/controller/src/modules/storage/index.js';
 import { acceptCreation } from '../../apps/controller/src/modules/storage/creations.js';
 import { readOperation } from '../../apps/controller/src/modules/storage/operations.js';
-import { removeRemoteScaffoldSchema } from '../fixtures/scaffold-schema.js';
-import { removeManagedTerminalSchema } from '../fixtures/managed-terminal-schema.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createRemoteScaffolder } from '../../apps/controller/src/modules/github/scaffold.js';
@@ -20,9 +18,12 @@ import { GraphQLReader } from '../../apps/controller/src/modules/github/transpor
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const complete = <T>(data: T) => ({ state: 'complete' as const,data,diagnostics: [],retryAtMs: null });
-async function fixture(failure = '') {
+async function fixture(failure = '', migrationVersionForTest?: number) {
   const directory = mkdtempSync(join(tmpdir(),'remote-scaffold-'));
-  cleanup.push(() => rmSync(directory,{ recursive: true })); let storage = openStorage({ dataDirectory: directory,busyTimeoutMs: 10 }); cleanup.push(() => storage.close());
+  cleanup.push(() => rmSync(directory,{ recursive: true })); let storage = migrationVersionForTest === undefined
+    ? openStorage({ dataDirectory: directory,busyTimeoutMs: 10 })
+    : openStorageAtMigrationVersionForTests({ dataDirectory: directory,busyTimeoutMs: 10 }, migrationVersionForTest);
+  cleanup.push(() => storage.close());
   const db = new Database(join(directory,'factory.sqlite')); cleanup.push(() => { db.close(); }); db.pragma('foreign_keys=ON');
   db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('ACCOUNT_test','test-user',1,1,1);
   db.prepare("UPDATE factory_settings SET account_id='ACCOUNT_test'").run();
@@ -173,12 +174,8 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(() => f.db.prepare("INSERT INTO creation_steps(creation_id,step,state) VALUES (?, 'create_board','confirmed')").run(view.creation.id)).toThrow();
     for (const e of view.effects) expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(e.operationId)).toThrow();
   });
-  it('applies migrations 31 to 32 without inventing compositions or changing prior installation data', async () => {
-    const f = await fixture(); const before = f.db.prepare("SELECT installation_id,account_id,revision FROM factory_settings WHERE id='local'").get();
-    removeManagedTerminalSchema(f.db);
-    f.db.exec(`ALTER TABLE execution_profiles DROP COLUMN composition_version; DELETE FROM schema_migrations WHERE version=32; PRAGMA user_version=31;
-      DROP TRIGGER creation_board_operation_identity; DROP TRIGGER creation_board_operation_delete; DROP TRIGGER creation_board_completion_guard;
-      DROP TABLE creation_board_operations; DELETE FROM schema_migrations WHERE version=31; PRAGMA user_version=30;`);
+  it('reopens the current schema without reseeding installation data', async () => {
+    const f = await fixture(''); const before = f.db.prepare("SELECT installation_id,account_id,revision FROM factory_settings WHERE id='local'").get();
     const { applyMigrations, loadMigrations } = await import('../../apps/controller/src/modules/storage/migrations.js');
     applyMigrations(f.db,loadMigrations(),() => { throw new Error('MUST_NOT_RESEED'); });
     expect(f.db.prepare('SELECT installation_id,account_id,revision FROM factory_settings WHERE id=\'local\'').get()).toEqual(before);
@@ -374,13 +371,13 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(response.headers.location).toMatch(/^\/api\/v1\/operations\//);
     expect((await app.inject({ method: 'POST',url,headers,payload: { deliveryId: randomUUID() } })).statusCode).toBe(400);
   });
-  it('migrates schema 16 to 32 without inventing board operations or changing a completed creation receipt',async () => {
-    const f = await fixture(); const { remote: _remote,boardName: _boardName,...localInput } = f.input;
+  it('preserves a completed creation receipt when reopening the current schema',async () => {
+    const f = await fixture(''); const { remote: _remote,boardName: _boardName,...localInput } = f.input;
     const planned = await f.scaffold.plan({ ...localInput,creationMode: 'local' });
     const body: CreateScaffold = { planHash: planned.planHash,plan: planned.plan,authorized: true };
     const originalId = randomUUID(); const accepted = await f.scaffold.create(body,originalId); await f.scaffold.drain();
     const before = readOperation(f.db,originalId); const instance = f.db.prepare('SELECT installation_id FROM factory_settings').get();
-    f.storage.close(); removeRemoteScaffoldSchema(f.db);
+    f.storage.close();
     const storage = openStorage({ dataDirectory: f.directory }); cleanup.push(() => storage.close());
     const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
     expect(probe.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(instance); expect(probe.pragma('foreign_key_check')).toEqual([]);

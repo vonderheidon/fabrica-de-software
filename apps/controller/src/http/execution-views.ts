@@ -1,7 +1,7 @@
 import type { Static } from '@sinclair/typebox';
 import { AttemptDecisionView, HttpAttemptDecisionView, MakeAttemptDecision, HttpMakeAttemptDecision } from '#contracts';
 import { Value } from '@sinclair/typebox/value';
-import { PassageBinding, HttpPassageBinding, ExecutionQuestion, HttpExecutionQuestion, CriterionOutcome, HttpCriterionOutcome, ImplementerResult, HttpImplementerResult, ReviewerResult, HttpReviewerResult, StartAttempt, HttpStartAttempt, AttemptStatus, HttpAttemptStatus, ScopeChange, HttpScopeChange, Question, HttpQuestion, AnswerQuestion, HttpAnswerQuestion, PassageMeasurements, HttpPassageMeasurements, AttemptMeasurements, HttpAttemptMeasurements, AttemptResource, HttpAttemptResource, AttemptResources, HttpAttemptResources, RemovalPlan, HttpRemovalPlan, RemoveResource, HttpRemoveResource, FolderSurface, HttpFolderSurface, PassageInteraction, HttpPassageInteraction, CaptureWarning, HttpCaptureWarning, Delivery, HttpDelivery, DeliveryView, HttpDeliveryView, CaptureRetry, HttpCaptureRetry, DiffEntry, HttpDiffEntry, DeliveryDiff, HttpDeliveryDiff, Artifact, HttpArtifact, CheckRun, HttpCheckRun, VerificationSummary, HttpVerificationSummary, CheckHistory, HttpCheckHistory, Finding, HttpFinding, Review, HttpReview, RoundHistory, HttpRoundHistory, ProducerResult, HttpProducerResult, EffectIdentity, HttpEffectIdentity, EffectReceipt, HttpEffectReceipt, EffectView, HttpEffectView, CompletePublication, HttpCompletePublication, ReconcilePublication, HttpReconcilePublication, AuthorizeUpgrade, HttpAuthorizeUpgrade, ModeUpgradeSummary, HttpModeUpgradeSummary, PublicationSummary, HttpPublicationSummary, AttemptListQuery, HttpAttemptListQuery, AttemptSummary, HttpAttemptSummary, AttemptPage, HttpAttemptPage, AttemptDetailQuery, HttpAttemptDetailQuery, PassageSummary, HttpPassageSummary, ReviewSummary, HttpReviewSummary, QuestionSummary, HttpQuestionSummary, FindingDetail, HttpFindingDetail, DetailItem, HttpDetailItem, DetailPage, HttpDetailPage, HttpHistoricalEffectiveProfile, AttemptDetail, HttpAttemptDetail, DeliveryDetail, HttpDeliveryDetail, HttpDeliveryDetailQuery, DeliveryDetailQuery, AttemptComparisonQuery, HttpAttemptComparisonQuery, AttemptComparison, HttpAttemptComparison } from '#contracts';
+import { PassageBinding, HttpPassageBinding, ExecutionQuestion, HttpExecutionQuestion, CriterionOutcome, HttpCriterionOutcome, ImplementerResult, HttpImplementerResult, ReviewerResult, HttpReviewerResult, StartAttempt, HttpStartAttempt, AttemptStatus, HttpAttemptStatus, ScopeChange, HttpScopeChange, Question, HttpQuestion, AnswerQuestion, HttpAnswerQuestion, PassageMeasurements, HttpPassageMeasurements, AttemptMeasurements, HttpAttemptMeasurements, AttemptResource, HttpAttemptResource, AttemptResources, HttpAttemptResources, RemovalPlan, HttpRemovalPlan, RemoveResource, HttpRemoveResource, FolderSurface, HttpFolderSurface, PassageInteraction, HttpPassageInteraction, CaptureWarning, HttpCaptureWarning, Delivery, HttpDelivery, DeliveryView, HttpDeliveryView, CaptureRetry, HttpCaptureRetry, DiffEntry, HttpDiffEntry, DeliveryDiff, HttpDeliveryDiff, Finding, HttpFinding, Review, HttpReview, RoundHistory, HttpRoundHistory, ProducerResult, HttpProducerResult, EffectIdentity, HttpEffectIdentity, EffectReceipt, HttpEffectReceipt, EffectView, HttpEffectView, CompletePublication, HttpCompletePublication, ReconcilePublication, HttpReconcilePublication, AuthorizeUpgrade, HttpAuthorizeUpgrade, ModeUpgradeSummary, HttpModeUpgradeSummary, PublicationSummary, HttpPublicationSummary, AttemptListQuery, HttpAttemptListQuery, AttemptSummary, HttpAttemptSummary, AttemptPage, HttpAttemptPage, AttemptDetailQuery, HttpAttemptDetailQuery, PassageSummary, HttpPassageSummary, ReviewSummary, HttpReviewSummary, QuestionSummary, HttpQuestionSummary, FindingDetail, HttpFindingDetail, DetailItem, HttpDetailItem, DetailPage, HttpDetailPage, HttpHistoricalEffectiveProfile, AttemptDetail, HttpAttemptDetail, DeliveryDetail, HttpDeliveryDetail, HttpDeliveryDetailQuery, DeliveryDetailQuery } from '#contracts';
 
 // Field-by-field HTTP projection. Never rename private documents, facts or operator content.
 function invalidView(): never { throw new Error('Invalid execution view.'); }
@@ -87,7 +87,7 @@ export function toHttpDelivery(value: Static<typeof Delivery>): Static<typeof Ht
 }
 
 export function toHttpDeliveryView(value: Static<typeof DeliveryView>): Static<typeof HttpDeliveryView> {
-  return { delivery: toHttpDelivery(value.delivery), verification: value.verification === null ? null : toHttpVerificationSummary(value.verification), event_cursor: value.eventCursor };
+  return { delivery: toHttpDelivery(value.delivery), event_cursor: value.eventCursor };
 }
 
 export function toHttpCaptureRetry(value: Static<typeof CaptureRetry>): Static<typeof HttpCaptureRetry> {
@@ -102,28 +102,12 @@ export function toHttpDeliveryDiff(value: Static<typeof DeliveryDiff>): Static<t
   return { delivery_id: value.deliveryId, base_sha: value.baseSha, content_identity: value.contentIdentity, entries: value.entries.map(entry1 => (toHttpDiffEntry(entry1))), next_cursor: value.nextCursor, has_more: value.hasMore };
 }
 
-export function toHttpArtifact(value: Static<typeof Artifact>): Static<typeof HttpArtifact> {
-  return { id: value.id, attempt_id: value.attemptId, delivery_id: value.deliveryId, check_id: value.checkId, kind: value.kind, path_relative: value.pathRelative, sha256: value.sha256, size_bytes: value.sizeBytes };
-}
-
-export function toHttpCheckRun(value: Static<typeof CheckRun>): Static<typeof HttpCheckRun> {
-  return { repeat_reason: value.repeatReason ?? null, id: value.id, verification_id: value.verificationId, delivery_id: value.deliveryId, content_identity: value.contentIdentity, check_definition_id: value.checkDefinitionId, run_number: value.runNumber, command: value.command, cwd_relative: value.cwdRelative, timeout_ms: value.timeoutMs, state: value.state, exit_code: value.exitCode, started_at_ms: value.startedAtMs, ended_at_ms: value.endedAtMs, duration_ms: value.durationMs, diagnostic: value.diagnostic, execution_diagnostic: value.executionDiagnostic, artifacts: value.artifacts.map(entry1 => (toHttpArtifact(entry1))) };
-}
-
-export function toHttpVerificationSummary(value: Static<typeof VerificationSummary>): Static<typeof HttpVerificationSummary> {
-  return { id: value.id, delivery_id: value.deliveryId, content_identity: value.contentIdentity, run_number: value.runNumber, state: value.state, diagnostic: value.diagnostic, started_at_ms: value.startedAtMs, ended_at_ms: value.endedAtMs, check_count: value.checkCount };
-}
-
-export function toHttpCheckHistory(value: Static<typeof CheckHistory>): Static<typeof HttpCheckHistory> {
-  return { entries: value.entries.map(entry1 => (toHttpCheckRun(entry1))), next_cursor: value.nextCursor, has_more: value.hasMore };
-}
-
 export function toHttpFinding(value: Static<typeof Finding>): Static<typeof HttpFinding> {
   return { priority: value.priority, origin_finding_id: value.originFindingId, delivery_id: value.deliveryId, content_identity: value.contentIdentity, key: value.key, criterion_ids: value.criterionIds, category: value.category, problem: value.problem, evidence: value.evidence, expected_result: value.expectedResult, blocking: value.blocking, id: value.id, review_id: value.reviewId, attempt_id: value.attemptId };
 }
 
 export function toHttpReview(value: Static<typeof Review>): Static<typeof HttpReview> {
-  return { dispute_details_url: `/api/v1/attempts/${value.attemptId}?section=finding_disputes`, command_repetitions: value.commandRepetitions ?? [], id: value.id, delivery_id: value.deliveryId, attempt_id: value.attemptId, passage_id: value.passageId, verification_id: value.verificationId, content_identity: value.contentIdentity, state: value.state, declared_verdict: value.declaredVerdict, reason: value.reason, independence_state: value.independenceState, diagnostic: value.diagnostic, created_at_ms: value.createdAtMs, completed_at_ms: value.completedAtMs, criteria: value.criteria.map(entry1 => (toHttpCriterionOutcome(entry1))), findings: value.findings.map(entry1 => (toHttpFinding(entry1))), resolutions: value.resolutions.map(entry1 => ({ finding_id: entry1.findingId, verdict: entry1.verdict, evidence: entry1.evidence })) };
+  return { dispute_details_url: `/api/v1/attempts/${value.attemptId}?section=finding_disputes`, command_repetitions: value.commandRepetitions ?? [], id: value.id, delivery_id: value.deliveryId, attempt_id: value.attemptId, passage_id: value.passageId, implementer_passage_id: value.implementerPassageId, content_identity: value.contentIdentity, state: value.state, declared_verdict: value.declaredVerdict, reason: value.reason, independence_state: value.independenceState, diagnostic: value.diagnostic, created_at_ms: value.createdAtMs, completed_at_ms: value.completedAtMs, criteria: value.criteria.map(entry1 => (toHttpCriterionOutcome(entry1))), findings: value.findings.map(entry1 => (toHttpFinding(entry1))), resolutions: value.resolutions.map(entry1 => ({ finding_id: entry1.findingId, verdict: entry1.verdict, evidence: entry1.evidence })) };
 }
 
 export function toHttpRoundHistory(value: Static<typeof RoundHistory>): Static<typeof HttpRoundHistory> {
@@ -177,7 +161,7 @@ export function toHttpAttemptListQuery(value: Static<typeof AttemptListQuery>): 
 }
 
 export function toHttpAttemptSummary(value: Static<typeof AttemptSummary>): Static<typeof HttpAttemptSummary> {
-  return { id: value.id, project_id: value.projectId, issue_id: value.issueId, issue_number: value.issueNumber, ...(value.issueTitle === undefined ? {} : { issue_title: value.issueTitle }), phase: value.phase, result: value.result, suspension: value.suspension, revision: value.revision, created_at_ms: value.createdAtMs, updated_at_ms: value.updatedAtMs };
+  return { id: value.id, project_id: value.projectId, issue_id: value.issueId, issue_number: value.issueNumber, ...(value.issueTitle === undefined ? {} : { issue_title: value.issueTitle }), ...(value.diagnostic === undefined ? {} : { diagnostic: value.diagnostic }), phase: value.phase, result: value.result, suspension: value.suspension, revision: value.revision, created_at_ms: value.createdAtMs, updated_at_ms: value.updatedAtMs };
 }
 
 export function toHttpAttemptPage(value: Static<typeof AttemptPage>): Static<typeof HttpAttemptPage> {
@@ -195,7 +179,7 @@ export function toHttpPassageSummary(value: Static<typeof PassageSummary>): Stat
 }
 
 export function toHttpReviewSummary(value: Static<typeof ReviewSummary>): Static<typeof HttpReviewSummary> {
-  return { id: value.id, delivery_id: value.deliveryId, attempt_id: value.attemptId, passage_id: value.passageId, verification_id: value.verificationId, content_identity: value.contentIdentity, state: value.state, declared_verdict: value.declaredVerdict, reason: value.reason, independence_state: value.independenceState, diagnostic: value.diagnostic, created_at_ms: value.createdAtMs, completed_at_ms: value.completedAtMs };
+  return { id: value.id, delivery_id: value.deliveryId, attempt_id: value.attemptId, passage_id: value.passageId, implementer_passage_id: value.implementerPassageId, content_identity: value.contentIdentity, state: value.state, declared_verdict: value.declaredVerdict, reason: value.reason, independence_state: value.independenceState, diagnostic: value.diagnostic, created_at_ms: value.createdAtMs, completed_at_ms: value.completedAtMs };
 }
 
 export function toHttpQuestionSummary(value: Static<typeof QuestionSummary>): Static<typeof HttpQuestionSummary> {
@@ -226,7 +210,7 @@ export function toHttpDetailItem(value: Static<typeof DetailItem>): Static<typeo
   if ('responseReviewId' in value) return toHttpFindingDispute(value);
   if ('progress' in value && 'findingId' in value) return toHttpFindingAssessment(value);
   if ('operationId' in value && 'blockId' in value) return toHttpAttemptDecisionView(value);
-  return Value.Check(DetailItem.anyOf[0], value) ? { round: value.round, delivery_id: value.deliveryId, producer_passage_id: value.producerPassageId, producer_receipt_id: value.producerReceiptId, review_id: value.reviewId, review_state: value.reviewState, content_identity: value.contentIdentity } : Value.Check(DetailItem.anyOf[1], value) ? toHttpPassageSummary(value) : Value.Check(DetailItem.anyOf[2], value) ? value : Value.Check(DetailItem.anyOf[3], value) ? toHttpCheckRun(value) : Value.Check(DetailItem.anyOf[4], value) ? toHttpReviewSummary(value) : Value.Check(DetailItem.anyOf[5], value) ? toHttpFindingDetail(value) : Value.Check(DetailItem.anyOf[6], value) ? toHttpQuestionSummary(value) : Value.Check(DetailItem.anyOf[7], value) ? toHttpEffectView(value) : Value.Check(DetailItem.anyOf[8], value) ? toHttpAttemptResource(value) : Value.Check(DetailItem.anyOf[9], value) && Value.Check(HttpHistoricalEffectiveProfile, {
+  return Value.Check(DetailItem.anyOf[0], value) ? { round: value.round, delivery_id: value.deliveryId, producer_passage_id: value.producerPassageId, producer_receipt_id: value.producerReceiptId, review_id: value.reviewId, review_state: value.reviewState, content_identity: value.contentIdentity } : Value.Check(DetailItem.anyOf[1], value) ? toHttpPassageSummary(value) : Value.Check(DetailItem.anyOf[2], value) ? value : Value.Check(DetailItem.anyOf[3], value) ? toHttpReviewSummary(value) : Value.Check(DetailItem.anyOf[4], value) ? toHttpFindingDetail(value) : Value.Check(DetailItem.anyOf[5], value) ? toHttpQuestionSummary(value) : Value.Check(DetailItem.anyOf[6], value) ? toHttpEffectView(value) : Value.Check(DetailItem.anyOf[7], value) ? toHttpAttemptResource(value) : Value.Check(DetailItem.anyOf[8], value) && Value.Check(HttpHistoricalEffectiveProfile, {
     role: value.role, profile_id: value.profileId, profile_revision: value.profileRevision, executor: value.executor, provider: value.provider,
     model: value.model, effort: value.effort, guidance: value.guidance, composition_version: value.compositionVersion,
     context_summary: value.contextSummary, technical_contract_summary: value.technicalContractSummary, credentials_redacted: value.credentialsRedacted,
@@ -250,7 +234,7 @@ export function toHttpAttemptDetail(value: Static<typeof AttemptDetail>): Static
 }
 
 export function toHttpDeliveryDetail(value: Static<typeof DeliveryDetail>): Static<typeof HttpDeliveryDetail> {
-  return { delivery_summary: value.deliverySummary, delivery: toHttpDelivery(value.delivery), verification: value.verification === null ? null : toHttpVerificationSummary(value.verification), event_cursor: value.eventCursor, issue: value.issue, attempt: toHttpAttemptStatus(value.attempt), measurements: toHttpAttemptMeasurements(value.measurements), cleanup: value.cleanup, authorizations: { captured_mode: value.authorizations.capturedMode, authorized_mode: value.authorizations.authorizedMode, requires_current_gate: value.authorizations.requiresCurrentGate }, review: value.review === null ? null : toHttpReviewSummary(value.review), publication: toHttpPublicationSummary(value.publication), capabilities: { diff: value.capabilities.diff, complete_publication: value.capabilities.completePublication, reconcile_publication: value.capabilities.reconcilePublication }, details: value.details === null ? null : toHttpDetailPage(value.details) };
+  return { delivery_summary: value.deliverySummary, delivery: toHttpDelivery(value.delivery), event_cursor: value.eventCursor, issue: value.issue, attempt: toHttpAttemptStatus(value.attempt), measurements: toHttpAttemptMeasurements(value.measurements), cleanup: value.cleanup, authorizations: { captured_mode: value.authorizations.capturedMode, authorized_mode: value.authorizations.authorizedMode, requires_current_gate: value.authorizations.requiresCurrentGate }, review: value.review === null ? null : toHttpReviewSummary(value.review), publication: toHttpPublicationSummary(value.publication), capabilities: { diff: value.capabilities.diff, complete_publication: value.capabilities.completePublication, reconcile_publication: value.capabilities.reconcilePublication }, details: value.details === null ? null : toHttpDetailPage(value.details) };
 }
 
 export function fromHttpStartAttempt(value: Static<typeof HttpStartAttempt>): Static<typeof StartAttempt> {
@@ -304,26 +288,4 @@ export function fromHttpAttemptDetailQuery(value: Static<typeof HttpAttemptDetai
 
 export function fromHttpDeliveryDetailQuery(value: Static<typeof HttpDeliveryDetailQuery>): Static<typeof DeliveryDetailQuery> {
   return value;
-}
-
-export function fromHttpAttemptComparisonQuery(value: Static<typeof HttpAttemptComparisonQuery>): Static<typeof AttemptComparisonQuery> {
-  return { leftAttemptId: value.left_attempt_id, rightAttemptId: value.right_attempt_id };
-}
-
-export function toHttpAttemptComparison(value: Static<typeof AttemptComparison>): Static<typeof HttpAttemptComparison> {
-  const side = (item: Static<typeof AttemptComparison>['left']): Static<typeof HttpAttemptComparison>['left'] => ({
-    attempt_id: item.attemptId, started_at_ms: item.startedAtMs, result: item.result, failure_reason: item.failureReason,
-    round: item.round, delivery_id: item.deliveryId, content_identity: item.contentIdentity,
-    project_revision_id: item.projectRevisionId, preparation_revision: item.preparationRevision,
-    configuration_state: item.configurationState, details_url: item.detailsUrl,
-  });
-  const historicalValue = (item: Static<typeof AttemptComparison>['differences'][number]['left']): Static<typeof HttpAttemptComparison>['differences'][number]['left'] => ({
-    state: item.state, value: item.value, reason: item.reason,
-  });
-  return {
-    project_id: value.projectId, repository_id: value.repositoryId, issue_id: value.issueId, issue_number: value.issueNumber,
-    left: side(value.left), right: side(value.right),
-    differences: value.differences.map(item => ({ field: item.field, left: historicalValue(item.left), right: historicalValue(item.right) })),
-    limitations: value.limitations,
-  };
 }

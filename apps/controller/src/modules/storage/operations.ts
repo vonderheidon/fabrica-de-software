@@ -47,10 +47,7 @@ export function settingsETag(installationId: string, revision: number): string {
 function accountHasUncertainCleanup(db: Database.Database, accountId: string): boolean {
   return Boolean(db.prepare<[string], { found: number }>(`SELECT 1 AS found FROM attempts a
     WHERE a.account_id = ? AND a.result IS NOT NULL AND (
-      EXISTS (SELECT 1 FROM resources r WHERE r.attempt_id = a.id AND r.stop_state = 'uncertain') OR
-      EXISTS (SELECT 1 FROM checks c WHERE c.attempt_id = a.id AND (
-        c.diagnostic = 'VERIFICATION_INTERRUPTED' OR c.diagnostic LIKE '%STOP_UNCONFIRMED%' OR c.execution_diagnostic LIKE '%STOP_UNCONFIRMED%'
-      ))
+      EXISTS (SELECT 1 FROM resources r WHERE r.attempt_id = a.id AND r.stop_state = 'uncertain')
     ) LIMIT 1`).get(accountId));
 }
 

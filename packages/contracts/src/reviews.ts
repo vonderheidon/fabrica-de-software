@@ -14,7 +14,7 @@ export type Finding = Static<typeof Finding>;
 export const Review = Type.Object({
   commandRepetitions: Type.Optional(Type.Array(ReviewCommandRepetition, { maxItems: 100 })),
   id: OperationId, deliveryId: OperationId, attemptId: OperationId, passageId: OperationId,
-  verificationId: OperationId, contentIdentity: Type.String(),
+  implementerPassageId: OperationId, contentIdentity: Type.String(),
   state: Type.Union(['pending', 'approved', 'rejected'].map(v => Type.Literal(v))),
   declaredVerdict: Type.Union([Type.Null(), Type.Literal('approved'), Type.Literal('rejected')]),
   reason: Type.Union([Type.Null(), Type.String()]),

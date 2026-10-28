@@ -30,13 +30,24 @@ export function recordAssessments(db: Database.Database, reviewId: string, resul
     if (supplied.length) throw new ExecutionError('RESULT_INVALID');
     return;
   }
+  if (supplied.length !== roots.length) throw new ExecutionError('RESULT_INVALID');
   for (const findingId of roots) {
-    const item = supplied.find(x => x.findingId === findingId) ?? { progress: 'not_assessable', evidence: [], justification: 'A revisão não forneceu avaliação verificável de progresso para esta origem.' };
-    // Structural metadata binding only: this transaction does not read or rehash artifact bytes.
-    if (['proven', 'partial'].includes(item.progress) && !item.evidence.some(reference => db.prepare(`
-      SELECT 1 FROM artifacts a JOIN checks c ON c.id=a.check_id JOIN reviews r ON r.id=?
-      WHERE ?='artifact:'||a.id AND a.attempt_id=r.attempt_id AND a.delivery_id=r.delivery_id AND a.size_bytes>0
-        AND c.verification_id=r.verification_id AND c.content_identity=r.content_identity AND c.state='passed'`).get(reviewId, reference))) throw new ExecutionError('RESULT_INVALID');
+    const item = supplied.find(x => x.findingId === findingId);
+    if (!item) throw new ExecutionError('RESULT_INVALID');
+    if (item.evidence.some(e => {
+      const value = e.trim();
+      return value.length === 0 || value.toLowerCase().startsWith('artifact:') ||
+        (value.length !== 40 && value.length !== 64 ? false : /^[a-f0-9]+$/i.test(value));
+    })) throw new ExecutionError('RESULT_INVALID');
+    if (['proven', 'partial'].includes(item.progress)) {
+      const finding = db.prepare<[string], { criterion_ids_json: string }>('SELECT criterion_ids_json FROM findings WHERE id=?').get(findingId);
+      const criterionIds: unknown = finding ? JSON.parse(finding.criterion_ids_json) : null;
+      if (!Array.isArray(criterionIds) || !item.evidence.length || !item.evidence.every(e =>
+        e.trim().length > 0 && !/^(?:[a-f0-9]{40}|[a-f0-9]{64}|artifact:[^\s]+)$/i.test(e.trim()) &&
+        result.criteria.some(c => (criterionIds.length === 0 || criterionIds.includes(c.criterionId)) && c.evidence.includes(e)))) {
+        throw new ExecutionError('RESULT_INVALID');
+      }
+    }
     db.prepare(`INSERT INTO finding_assessments(id,attempt_id,finding_id,review_id,progress,evidence_json,justification,created_at_ms) VALUES (?,?,?,?,?,?,?,?)`)
       .run(randomUUID(), review.attempt_id, findingId, reviewId, item.progress, JSON.stringify(item.evidence), item.justification, Date.now());
   }

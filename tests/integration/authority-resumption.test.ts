@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { publicationFixture } from '../fixtures/publication.js';
 
-for (const point of ['verification', 'review', 'review-stage', 'review-launch'] as const) for (const invalidations of [1, 2]) {
+for (const point of ['review-stage', 'review-launch'] as const) for (const invalidations of [1, 2]) {
   it(`resumes ${point} after ${invalidations} stale observations without duplicate work`, async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
     const f = await publicationFixture();
@@ -9,9 +9,7 @@ for (const point of ['verification', 'review', 'review-stage', 'review-launch'] 
       let rejected = 0;
       const record = f.storage.recordAuthority.bind(f.storage);
       vi.spyOn(f.storage, 'recordAuthority').mockImplementation((id, stamp, observation) => {
-        const atPoint = point === 'verification'
-          || (point === 'review' && f.status().phase !== 'reviewing' && vi.mocked(f.verification.verifyDelivery).mock.calls.length > 0)
-          || (point === 'review-stage' && f.status().phase === 'reviewing' && vi.mocked(f.workspaces.materializeReview).mock.calls.length === 0)
+        const atPoint = (point === 'review-stage' && f.status().phase === 'reviewing' && vi.mocked(f.workspaces.materializeReview).mock.calls.length === 0)
           || (point === 'review-launch' && vi.mocked(f.workspaces.materializeReview).mock.calls.length > 0);
         if (rejected < invalidations && atPoint) {
           rejected++;
@@ -31,7 +29,6 @@ for (const point of ['verification', 'review', 'review-stage', 'review-launch'] 
       expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
       expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
       expect(f.workspaces.materializeReview).toHaveBeenCalledTimes(1);
-      expect(f.verification.verifyDelivery).toHaveBeenCalledTimes(1);
       expect(f.storage.getEffects(f.attemptId).filter(effect => effect.kind === 'project_status' && effect.state === 'confirmed')).toHaveLength(2);
       expect(f.logFailure).not.toHaveBeenCalledWith('AUTHORITY_OBSERVATION_STALE');
     } finally { await f.close(); vi.restoreAllMocks(); vi.useRealTimers(); }

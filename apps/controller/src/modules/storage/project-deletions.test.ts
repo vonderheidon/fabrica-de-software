@@ -64,10 +64,10 @@ describe('project deletion persistence foundation', () => {
     expect(db.pragma('foreign_key_check')).toEqual([]);
   });
 
-  it('upgrades real schema 24 additively without rewriting existing objects, records, seeds or ledger', () => {
+  it('reapplies the current schema without rewriting project records, seeds or ledger', () => {
     const path = directory(); const db = connect(path);
     const migrations = loadMigrations();
-    applyMigrations(db, migrations.slice(0, 24), () => seedSettings(db));
+    applyMigrations(db, migrations, () => seedSettings(db));
     register({ registerProject: input => registerProject(db, input) });
     const beforeProject = db.prepare('SELECT * FROM projects').all();
     const beforeRevisions = db.prepare('SELECT * FROM project_revisions').all();
@@ -77,14 +77,14 @@ describe('project deletion persistence foundation', () => {
     db.prepare("INSERT INTO accounts VALUES ('account','preserved',0,0,0,1)").run();
     const beforeObjects = db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
     const beforeLedger = db.prepare('SELECT * FROM schema_migrations ORDER BY version').all();
-    applyMigrations(db, migrations.slice(0, 26), () => { throw new Error('UNEXPECTED_RESEED'); });
+    applyMigrations(db, migrations, () => { throw new Error('UNEXPECTED_RESEED'); });
     expect(db.prepare('SELECT * FROM factory_settings').all()).toEqual(beforeSettings);
     expect(db.prepare('SELECT * FROM projects').all()).toEqual(beforeProject);
     expect(db.prepare('SELECT * FROM project_revisions').all()).toEqual(beforeRevisions);
     expect(db.prepare('SELECT * FROM operation_requests').all()).toEqual(beforeOperations);
     expect(db.prepare('SELECT * FROM events').all()).toEqual(beforeEvents);
     expect(db.prepare('SELECT * FROM accounts').all()).toEqual([{ github_account_id: 'account', login: 'preserved', observed_at_ms: 0, created_at_ms: 0, updated_at_ms: 0, revision: 1 }]);
-    expect(db.prepare('SELECT * FROM schema_migrations WHERE version<=24 ORDER BY version').all()).toEqual(beforeLedger);
+    expect(db.prepare('SELECT * FROM schema_migrations ORDER BY version').all()).toEqual(beforeLedger);
     const afterObjects = db.prepare<{ name: string }, { type: string; name: string; tbl_name: string; sql: string }>('SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE name=@name');
     for (const object of beforeObjects as { type: string; name: string; tbl_name: string; sql: string }[]) {
       // 026 replaces only exclusive DELETE guards; all other objects stay exact.

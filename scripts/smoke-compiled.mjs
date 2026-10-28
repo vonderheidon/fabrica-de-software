@@ -60,6 +60,20 @@ async function waitForExit(processHandle) {
 function startChild(environment) {
   return fork(main, [directory], { cwd: directory, env: { ...process.env, ...environment }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
 }
+async function waitForChildReady(childProcess, origin) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (childProcess.exitCode !== null || childProcess.signalCode !== null) throw new Error('Child exited before readiness');
+    try {
+      const response = await fetch(origin + '/api/v1/health');
+      const ready = response.status === 200;
+      await response.arrayBuffer();
+      if (ready) return;
+    } catch { /* The listener is still starting. */ }
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error('Child readiness timed out');
+}
 try {
   Object.assign(process.env, changes);
   process.chdir(directory);
@@ -250,16 +264,7 @@ try {
   completeSmokeStep();
   markSmokeStep('restart-and-session-revocation');
   child = startChild({ FACTORY_LOG_LEVEL: 'info' });
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Child readiness timed out')), 5000);
-    let output = '';
-    child.stdout?.on('data', (data) => {
-      output += data.toString();
-      if (output.includes('Controller ready')) { clearTimeout(timer); resolve(); }
-    });
-    child.once('error', (error) => { clearTimeout(timer); reject(error); });
-    child.once('exit', () => { clearTimeout(timer); reject(new Error('Child exited before readiness')); });
-  });
+  await waitForChildReady(child, origin);
   const exited = waitForExit(child);
   assert(child.kill('SIGKILL'));
   await exited;

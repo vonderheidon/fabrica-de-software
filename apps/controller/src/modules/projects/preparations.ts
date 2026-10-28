@@ -82,7 +82,7 @@ function effective(view: ConfigurationView, choices: PreparationChoices): { conf
     return structuredClone(profileSnapshot(found));
   }
   const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...project } = view.configuration;
-  const config = { ...project, base_branch: overrides.base_branch ?? project.base_branch, checks: overrides.checks ?? project.checks,
+  const config = { ...project, base_branch: overrides.base_branch ?? project.base_branch,
     correction_limit: overrides.correction_limit ?? project.correction_limit, default_delivery_mode: choices.delivery_mode };
   validateProjectConfiguration(config);
   return { reasons, configuration: {
@@ -93,7 +93,7 @@ function effective(view: ConfigurationView, choices: PreparationChoices): { conf
     guidance: [project.guidance, choices.guidance].filter(Boolean).join('\n'),
     origins: { base_branch: overrides.base_branch !== undefined ? 'preparation' : 'project',
       implementer_profile: overrides.implementer_profile ? 'preparation' : 'project', reviewer_profile: overrides.reviewer_profile ? 'preparation' : 'project',
-      checks: overrides.checks !== undefined ? 'preparation' : 'project', correction_limit: overrides.correction_limit !== undefined ? 'preparation' : 'project',
+      correction_limit: overrides.correction_limit !== undefined ? 'preparation' : 'project',
       time_defaults: overrides.time_defaults ? 'preparation' : 'global',
       artifact_policy: overrides.artifact_policy ? 'preparation' : 'global', guidance: choices.guidance ? 'preparation' : 'project', delivery_mode: 'preparation' },
   } };

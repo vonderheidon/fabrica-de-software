@@ -6,7 +6,6 @@ import type { ControllerEventNotice } from '../../app/useControllerEvents.js';
 import { setAttemptProjectFilter } from './execution-requests.js';
 import { ProjectPicker } from '../projects/ProjectPicker.js';
 import { operatorCodeLabel, operatorState } from '../../app/operator-language.js';
-import { AttemptComparisonDialog } from './AttemptComparisonDialog.js';
 import { useAppliedObservation } from '../../app/applied-observations.js';
 
 type Props = {
@@ -44,8 +43,6 @@ export function AttemptListPanel({ projectId, result, issueNumber, issueTitle, d
   const [reload, setReload] = useState(0);
   const [state, setState] = useState<ListState>({ page: null, error: null, requestId: null, loading: true });
   const [draft, setDraft] = useState<AttemptSearchFilters>({ issueNumber, issueTitle, dateFrom, dateTo, timeZone });
-  const [selected, setSelected] = useState<AttemptPage['items']>([]);
-  const [comparing, setComparing] = useState(false);
   useAppliedObservation(true, state.loading, Boolean(state.error), state);
   const cursor = cursorStack[pageIndex] ?? null;
   const invertedRange = Boolean(draft.dateFrom && draft.dateTo && draft.dateFrom > draft.dateTo);
@@ -141,8 +138,6 @@ export function AttemptListPanel({ projectId, result, issueNumber, issueTitle, d
     </form>
 
     {state.error && <div className="queue-error" role="alert"><h2>Falha ao consultar o histórico</h2><p>{state.error}</p>{page && <p>Dados da consulta anterior. Atualize para conferir a situação atual.</p>}<button type="button" onClick={() => setReload((current) => current + 1)} disabled={state.loading}>Tentar novamente</button></div>}
-    <section className="card" aria-label="Seleção para comparação"><p>Selecione duas tentativas da mesma issue e projeto. A conta e o repositório serão conferidos ao abrir.</p><p role="status">{selected.length} de 2 selecionadas</p>{selected.map(item => <button type="button" key={item.id} onClick={() => setSelected(current => current.filter(value => value.id !== item.id))}>Remover {item.id}</button>)}<button type="button" disabled={selected.length !== 2} onClick={() => setComparing(true)}>Comparar tentativas</button></section>
-    {comparing && selected[0] && selected[1] && <AttemptComparisonDialog leftId={selected[0].id} rightId={selected[1].id} onClose={() => setComparing(false)} />}
     {!page && state.loading && <section className="card read-state" role="status"><p>Consultando histórico de tentativas…</p></section>}
     {page && page.items.length === 0 && <section className="card empty" role="status"><h2>{projectId || result || hasSearchFilters ? 'Nenhuma tentativa corresponde aos filtros' : 'Nenhuma tentativa registrada'}</h2><p>{projectId || result || hasSearchFilters ? 'Ajuste os filtros para consultar outras tentativas.' : 'Prepare uma issue a partir de um projeto configurado.'}</p></section>}
     {page && page.items.length > 0 && <section className="card attempt-history-card">
@@ -150,9 +145,9 @@ export function AttemptListPanel({ projectId, result, issueNumber, issueTitle, d
       {state.loading && <p className="queue-page-status" role="status">Atualizando histórico…</p>}
       <div className="table-wrap"><table className="attempt-history-table"><thead><tr><th scope="col">Issue</th><th scope="col">Situação</th><th scope="col">Última atualização</th><th scope="col">Ações</th></tr></thead><tbody>{page.items.map((attempt) => <tr key={attempt.id}>
         <td><span className="attempt-issue-title"><b>{attempt.issue_number === null ? 'Issue sem número histórico' : `Issue #${attempt.issue_number}`}</b>{attempt.issue_title ? ` - ${attempt.issue_title}` : ''}</span></td>
-        <td data-label="Situação"><span className={`pill result-${attempt.result ?? 'running'}`}>{operatorState(attempt.result ?? 'running').label}</span><small className="attempt-phase">{operatorState(attempt.phase).label}{attempt.suspension ? ` · ${operatorCodeLabel(attempt.suspension)}` : ''}</small></td>
+        <td data-label="Situação"><span className={`pill result-${attempt.result ?? (attempt.diagnostic === 'IMPLEMENTATION_BLOCKED' ? 'blocked' : 'running')}`}>{attempt.result === null && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED' ? 'Bloqueada' : operatorState(attempt.result ?? 'running').label}</span><small className="attempt-phase">{attempt.diagnostic === 'IMPLEMENTATION_BLOCKED' ? operatorCodeLabel(attempt.diagnostic) : `${operatorState(attempt.phase).label}${attempt.suspension ? ` · ${operatorCodeLabel(attempt.suspension)}` : ''}`}</small></td>
         <td data-label="Última atualização"><time dateTime={new Date(attempt.updated_at_ms).toISOString()}>{new Date(attempt.updated_at_ms).toLocaleDateString('pt-BR')}<small className="attempt-time">{new Date(attempt.updated_at_ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</small></time></td>
-        <td data-label="Ações"><div className="attempt-row-actions"><button type="button" data-attempt-trigger={attempt.id} onClick={() => onDetail(attempt.id, attempt.project_id)}>Consultar</button><button type="button" aria-pressed={selected.some(item => item.id === attempt.id)} disabled={state.loading || Boolean(state.error) || (!selected.some(item => item.id === attempt.id) && (selected.length === 2 || Boolean(selected[0] && (selected[0].project_id !== attempt.project_id || selected[0].issue_id !== attempt.issue_id))))} onClick={() => setSelected(current => current.some(item => item.id === attempt.id) ? current.filter(item => item.id !== attempt.id) : [...current, attempt])}>Selecionar para comparar</button>{attempt.result && <button type="button" className="attempt-retry" onClick={() => onPrepareRetry(attempt.id, attempt.project_id)}>Nova tentativa</button>}</div></td>
+        <td data-label="Ações"><div className="attempt-row-actions"><button type="button" data-attempt-trigger={attempt.id} onClick={() => onDetail(attempt.id, attempt.project_id)}>Consultar</button>{attempt.result && <button type="button" className="attempt-retry" onClick={() => onPrepareRetry(attempt.id, attempt.project_id)}>Nova tentativa</button>}</div></td>
       </tr>)}</tbody></table></div>
       <div className="attempt-pagination" aria-label="Paginação do histórico"><button type="button" onClick={previousPage} disabled={visiblePageIndex === 0 || state.loading}>Anterior</button><span>Página {visiblePageIndex + 1}{!page.has_more && ' · Fim do histórico'}</span><button type="button" onClick={nextPage} disabled={!page.has_more || !page.next_cursor || state.loading || state.error !== null}>Próxima</button></div>
     </section>}

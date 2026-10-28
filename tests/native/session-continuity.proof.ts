@@ -31,7 +31,7 @@ function recordEvidence(evidence: string, db: Database.Database, attemptId: stri
   expect(existsSync(join(directory, 'work', attemptId, 'reviews'))).toBe(false);
   expect(readFileSync(join(directory, 'work', attemptId, 'implementation', 'value.txt'), 'utf8').trim()).toBe('3');
   writeFileSync(join(evidence, 'result.json'), JSON.stringify({ ok: true, profile: 'openai-codex/gpt-6-luna/high', sessions, passages, singleCheckout: true,
-    limits: ['GitHub authority and configured checks are controlled fixture ports; Git clone/capture/diff/integrity, OMP, Maestri, SQLite, shared cwd and Windows process jobs are real.'], dataDirectory: directory }, null, 2));
+    limits: ['GitHub authority is a controlled fixture port; Git clone/capture/diff/integrity, OMP, Maestri, SQLite, shared cwd and Windows process jobs are real.'], dataDirectory: directory }, null, 2));
 }
 
 it('continues both real OMP conversations over three versions with native process termination', async () => {
@@ -109,7 +109,6 @@ it('continues both real OMP conversations over three versions with native proces
     materializeReview: shared,
     getDeliveryDiff: createDeliveryDiff(f.directory, git),
   });
-  f.dependencies.verification = { verifyDelivery: async id => { const plan = f.storage.beginVerification(id); f.storage.finishVerification(plan.id); }, getArtifact: async () => { throw new Error('UNUSED'); } };
   const watchdog = setTimeout(() => { void f.pipeline.close(); }, Math.max(0, deadline - Date.now()));
   let attemptId: string | undefined;
   try {

@@ -81,23 +81,51 @@ function readPath(source: Record<string, unknown>, path: readonly string[]): unk
   }
   return value;
 }
+const currentProjectDraftFields = new Set([
+  'source', 'base_branch', 'delivery_branch', 'github_project', 'implementer_profile_id',
+  'reviewer_profile_id', 'correction_limit', 'default_delivery_mode', 'automation_enabled',
+  'queue_order', 'guidance',
+]);
+const currentGlobalDraftFields = new Set(['projects_root', 'automation_enabled', 'time_defaults', 'artifact_policy']);
+
+function isCurrentEditorPath(path: string): boolean {
+  const [section, field, child] = path.split('.');
+  if (section === 'project') {
+    return field !== undefined && currentProjectDraftFields.has(field) &&
+      (field !== 'queue_order' || child === undefined || child === 'use_board_position');
+  }
+  return section === 'global' && field !== undefined && currentGlobalDraftFields.has(field);
+}
+function applyProjectDraftValue(target: ProjectConfiguration, path: readonly string[], value: unknown): void {
+  if (path[0] === 'queue_order') {
+    if (path.length === 1) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && typeof (value as { use_board_position?: unknown }).use_board_position === 'boolean') {
+        target.queue_order = { use_board_position: (value as { use_board_position: boolean }).use_board_position };
+      }
+      return;
+    }
+    if (path[1] !== 'use_board_position') return;
+  }
+  setPath(target as unknown as Record<string, unknown>, path, value);
+}
 function rebaseDraft(latest: EditorDraft, saved: EditorDraft): EditorDraft {
   const merged = structuredClone(latest) as EditorDraft;
   for (const path of saved.dirty) {
-    if (path === 'profiles') continue;
+    if (path === 'profiles' || !isCurrentEditorPath(path)) continue;
     const parts = path.split('.');
     const root = parts.shift();
     const source = root === 'global' ? saved.global : root === 'project' ? saved.project : null;
     const target = root === 'global' ? merged.global : root === 'project' ? merged.project : null;
     if (!source || !target) continue;
     const value = readPath(source as unknown as Record<string, unknown>, parts);
-    setPath(target as unknown as Record<string, unknown>, parts, value);
+    if (root === 'project' && target === merged.project) applyProjectDraftValue(target as ProjectConfiguration, parts, value);
+    else setPath(target as unknown as Record<string, unknown>, parts, value);
   }
   merged.profiles = structuredClone(latest.profiles);
   merged.baselineGlobal = structuredClone(latest.baselineGlobal);
   merged.baselineProfiles = structuredClone(latest.profiles);
   merged.baselineProject = latest.project ? structuredClone(latest.project) : null;
-  merged.dirty = saved.dirty.filter((path) => path !== 'profiles');
+  merged.dirty = saved.dirty.filter((path) => path === 'profiles' || isCurrentEditorPath(path));
   return merged;
 }
 
@@ -126,11 +154,13 @@ function persistEditedFields(identity: string, draft: EditorDraft): void {
 function restoreEditedFields(latest: EditorDraft, saved: PersistedEditorDraft): EditorDraft {
   const restored = structuredClone(latest) as EditorDraft;
   for (const [path, value] of Object.entries(saved.values)) {
+    if (!isCurrentEditorPath(path)) continue;
     const [root, ...parts] = path.split('.');
     const target = root === 'global' ? restored.global : root === 'project' ? restored.project : null;
-    if (target) setPath(target as unknown as Record<string, unknown>, parts, value);
+    if (root === 'project' && target) applyProjectDraftValue(target as ProjectConfiguration, parts, value);
+    else if (target) setPath(target as unknown as Record<string, unknown>, parts, value);
   }
-  restored.dirty = saved.dirty.filter((path) => path !== 'profiles');
+  restored.dirty = saved.dirty.filter((path) => path === 'profiles' || isCurrentEditorPath(path));
   if (saved.pendingCommand) restored.pendingCommand = saved.pendingCommand;
   return restored;
 }
@@ -454,7 +484,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
     }
     const projectChanges: ProjectChanges = {};
     if (!revalidateProjectsRoot && projectId && isConfigurationView(baseline) && draft.project) {
-      for (const key of ['source', 'base_branch', 'delivery_branch', 'implementer_profile_id', 'reviewer_profile_id', 'checks', 'correction_limit', 'default_delivery_mode', 'automation_enabled', 'queue_order', 'guidance'] as const) {
+      for (const key of ['source', 'base_branch', 'delivery_branch', 'implementer_profile_id', 'reviewer_profile_id', 'correction_limit', 'default_delivery_mode', 'automation_enabled', 'queue_order', 'guidance'] as const) {
         if (!same(baseline.configuration[key], draft.project[key])) Object.assign(projectChanges, { [key]: draft.project[key] });
       }
       const nextMapping = draft.project.github_project;
@@ -661,8 +691,6 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         <SelectField searchable={false} label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: deliveryModeLabel.icr }, { value: 'commit', label: deliveryModeLabel.commit }, { value: 'pr', label: deliveryModeLabel.pr }]} />
         <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
         {draft.project.automation_enabled && !draft.global.automation_enabled && <p className="notice" role="status">Automação deste projeto habilitada. Fila global pausada. <a href="#principal/fila">Abrir fila global para habilitar novos inícios</a>.</p>}
-        <SelectField searchable={false} label="Ordem de prioridade" value={draft.project.queue_order.priority_direction} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, priority_direction: value as 'asc' | 'desc' } }))} options={[{ value: 'asc', label: 'Crescente' }, { value: 'desc', label: 'Decrescente' }]} />
-        <TextField label="Campo de prioridade (ID)" value={draft.project.queue_order.priority_field_id ?? ''} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, priority_field_id: value || null } }))} />
         <Checkbox label="Usar posição do quadro" checked={draft.project.queue_order.use_board_position} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, use_board_position: value } }))} />
         <div className="form-field field-full"><label htmlFor="project-guidance">Orientações do projeto</label><textarea id="project-guidance" value={draft.project.guidance} aria-describedby="project-guidance-help" onChange={(event) => { const guidance = event.currentTarget.value; updateProject((current) => ({ ...current, guidance })); }} /><FieldHelp id="project-guidance-help" label="Orientações do projeto" /></div>
       </div>
@@ -674,9 +702,6 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       </div>}
       <ProjectMappingEditor configuration={draft.project} options={currentOptions} optionsError={currentOptionsError} onChange={updateProject} onLoadMore={() => void loadMoreOptions()} />
       <ProjectConditions diagnostic={projectDiagnostic} section="mapping" projectId={projectId} />
-      <div className="checks-editor"><div className="line panel-title"><div><span className="eyebrow">Validação</span><h3>Checks</h3></div><button type="button" onClick={() => updateProject((current) => ({ ...current, checks: [...current.checks, { id: crypto.randomUUID(), command: '', cwd_relative: '.' }] }))} disabled={draft.project.checks.length >= 50}>Adicionar check</button></div>
-        {draft.project.checks.map((check, index) => <fieldset className="check-card" key={check.id}><legend>Check {index + 1}</legend><div className="form-grid"><TextField label={`Comando do check ${index + 1}`} value={check.command} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, command: value } : item) }))} /><TextField label={`cwd relativo do check ${index + 1}`} value={check.cwd_relative} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, cwd_relative: value } : item) }))} help="Deve permanecer relativo ao ambiente da tentativa." /><NumberField label={`Timeout do check ${index + 1}`} value={check.timeout_ms ?? 60000} min={1} onChange={(value) => updateProject((current) => ({ ...current, checks: current.checks.map((item) => item.id === check.id ? { ...item, timeout_ms: value } : item) }))} unit="ms" /></div><button type="button" className="danger-button" onClick={() => updateProject((current) => ({ ...current, checks: current.checks.filter((item) => item.id !== check.id) }))}>Remover check</button></fieldset>)}
-      </div>
       {draft.project.source.kind === 'local' && !draft.project.source.repository_id && <div className="notice"><b>Origem local sem remoto confirmado</b><p>O projeto pode ser consultado e configurado. Confirme o repositório GitHub antes de iniciar uma issue. Só o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.</p></div>}
       </fieldset>
       <ProjectConditions diagnostic={projectDiagnostic} section="global" projectId={projectId} />
@@ -726,9 +751,17 @@ function ProjectMappingEditor({ configuration, options, optionsError, onChange, 
   const selectedProject = options?.projects.items.find((project) => project.id === chosenProject);
   const staleProject = Boolean(chosenProject && !selectedProject);
   const selectedField = options?.status_fields.find((field) => field.id === chosenField);
+  const fixedField = options?.status_fields.find((field) => field.name === 'Status');
   const staleField = Boolean(chosenField && !selectedField);
   const optionNames = useMemo(() => new Map((selectedField?.options ?? []).map((option) => [option.id, option.name])), [selectedField]);
   const statusRoles = ['backlog', 'ready', 'in_progress', 'in_review', 'delivered'] as const;
+
+  useEffect(() => {
+    if (!mapping || chosenField || !fixedField) return;
+    onChange(current => current.github_project?.id === mapping.id && !current.github_project.status_field_id
+      ? { ...current, github_project: { ...current.github_project, status_field_id: fixedField.id } }
+      : current);
+  }, [mapping, chosenField, fixedField, onChange]);
 
   function updateMapping(next: NonNullable<ProjectConfiguration['github_project']> | null): void { onChange((current) => ({ ...current, github_project: next })); }
   function updateStatusOption(role: keyof ProjectMapping['status_option_ids'], optionId: string): void {
@@ -751,10 +784,9 @@ function ProjectMappingEditor({ configuration, options, optionsError, onChange, 
         updateMapping({ id, owner_id: project?.owner.id ?? '', status_field_id: '', status_option_ids: { backlog: '', ready: '', in_progress: '', in_review: '', delivered: '' } });
       }} options={(options?.projects.items ?? []).map((project) => ({ value: project.id, label: `${project.title} · ${project.owner.login}${project.closed ? ' · encerrado' : ''}` }))} disabled={options?.completeness === 'unavailable'} />
       {staleProject && <div className="notice field-full"><b>Project salvo não aparece nas opções atuais</b><p>O quadro pode estar inacessível ou a consulta estar incompleta. Atualize as opções e escolha novamente se necessário.</p></div>}
-      {mapping && <><div className="field-full"></div>
-        <SelectField label="Campo Status" value={chosenField} onChange={(id) => updateMapping({ id: mapping.id, owner_id: mapping.owner_id, status_field_id: id,
-          status_option_ids: { backlog: '', ready: '', in_progress: '', in_review: '', delivered: '' } })} options={(options?.status_fields ?? []).map((field) => ({ value: field.id, label: field.name }))} disabled={!chosenProject || !options?.status_fields.length} />
-        {staleField && <div className="notice field-full"><b>Campo Status salvo não aparece nas opções atuais</b><p>Atualize as opções e selecione o campo consultado antes de salvar.</p></div>}
+      {mapping && <>
+        <p className="field-full muted">Campo: <strong>{selectedField?.name ?? fixedField?.name ?? 'Status'}</strong></p>
+        {staleField && <div className="notice field-full"><b>Campo Status salvo não aparece nas opções atuais</b><p>Atualize as opções do quadro antes de salvar.</p></div>}
         {statusRoles.map((role) => {
           const id = role === 'backlog' ? ('backlog' in mapping.status_option_ids ? mapping.status_option_ids.backlog : '') : mapping.status_option_ids[role];
           const roleLabel = ({ backlog: 'Backlog', ready: 'Ready', in_progress: 'Em andamento', in_review: 'Em revisão', delivered: 'Entregue' } as const)[role];

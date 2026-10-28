@@ -26,6 +26,9 @@ export function extractReport(output, marker) {
   return /** @type {Record<string, unknown>} */ (report);
 }
 
+/** @param {unknown} value @returns {value is Record<string, unknown>} */
+function isRecord(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+
 /** A passing measurement alone must never be promoted to physical recovery proof.
  * @param {Record<string, unknown>} recovery
  */
@@ -59,6 +62,36 @@ export function assertPhysicalRecovery(recovery) {
       Number.isSafeInteger(stop.closeObservedAtMs) && Number.isSafeInteger(stop.receiptRecordedAtMs) &&
       stop.receiptRecordedAtMs >= stop.closeObservedAtMs && stop.receiptRecordedAtMs <= exits[0].closedAtMs;
   })) throw new Error('PROOF_PHYSICAL_RECOVERY_MISSING');
+  const persistence = isRecord(recovery.persistence) ? recovery.persistence : null;
+  const clean = persistence && isRecord(persistence.cleanInitialization) ? persistence.cleanInitialization : null;
+  const cleanCounts = clean && isRecord(clean.counts) ? clean.counts : null;
+  const integrityValue = persistence?.integrityChecks;
+  const integrity = Array.isArray(integrityValue) ? /** @type {unknown[]} */ (integrityValue) : [];
+  const referencesValue = persistence?.referenceSnapshots;
+  const referenceValues = Array.isArray(referencesValue) ? /** @type {unknown[]} */ (referencesValue) : [];
+  const referenceRows = referenceValues.map(item => isRecord(item) ? item : null);
+  const baseline = referenceRows[0];
+  const baselineReceiptIds = baseline && Array.isArray(baseline.operationReceiptIds)
+    ? /** @type {unknown[]} */ (baseline.operationReceiptIds) : [];
+  const referencesValid = referenceRows.length === 3 && baseline !== null && baseline !== undefined && baselineReceiptIds.length > 0 &&
+    baselineReceiptIds.every(id => typeof id === 'string') && referenceRows.every(item => {
+      if (!item || item.sha256 !== baseline.sha256 || !Array.isArray(item.roundNumbers) || item.roundNumbers.join(',') !== '1,2' ||
+        !Array.isArray(item.deliveryIds) || item.deliveryIds.length !== 2 || !Array.isArray(item.passageResultReceiptIds) || item.passageResultReceiptIds.length !== 4 ||
+        !Array.isArray(item.operationReceiptIds) || !isRecord(item.counts)) return false;
+      const receiptIds = /** @type {unknown[]} */ (item.operationReceiptIds);
+      if (!baselineReceiptIds.every(id => receiptIds.includes(id))) return false;
+      const counts = item.counts;
+      return typeof counts.projectRevisions === 'number' && counts.projectRevisions >= 1 && counts.preparations === 1 && counts.attempts === 1 && counts.rounds === 2 && counts.deliveries === 2 &&
+        counts.passageResults === 4 && counts.reviews === 2 && typeof counts.findings === 'number' && counts.findings >= 1 &&
+        typeof counts.findingResolutions === 'number' && counts.findingResolutions >= 1;
+    });
+  if (!clean || !cleanCounts || clean.openedByNormalStoragePath !== true || clean.directoryCreatedExclusive !== true || clean.schemaVersion !== 53 ||
+    clean.integrityCheck !== 'ok' || !Array.isArray(clean.foreignKeyViolations) || clean.foreignKeyViolations.length !== 0 ||
+    clean.accountId !== null || cleanCounts.accounts !== 0 || cleanCounts.profiles !== 0 || cleanCounts.projects !== 0 || cleanCounts.preparations !== 0 || cleanCounts.attempts !== 0 ||
+    integrity.length !== 3 || integrity.some(item => !isRecord(item) || item.schemaVersion !== 53 || item.integrityCheck !== 'ok' ||
+      item.foreignKeyViolations !== 0 || !Array.isArray(item.retiredTables) || item.retiredTables.length !== 0) || !referencesValid) {
+    throw new Error('PROOF_PERSISTENCE_REFERENCES_MISSING');
+  }
 }
 
 /** No shell, arbitrary commands, GH, credentials in output, or provider invocation.
@@ -100,7 +133,7 @@ const runTests = args => runNode([join(root, 'node_modules/vitest/vitest.mjs'), 
 
 async function main() {
   if (process.argv.length !== 2) throw new Error('PROOF_ARGUMENTS_UNSUPPORTED');
-  // Keep test files aligned with test:persistence and test:maintenance-native.
+  // Reuse only the existing native reports that belong to this persistence proof.
   // Verbose test names can contain multiline, deliberately invalid report examples.
   // Dot output keeps those labels out of the observation stream; duplicates still fail closed.
   phase = 'measurements';
@@ -113,7 +146,8 @@ async function main() {
   await runNode([join(root, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.json']);
   await runNode([join(root, 'scripts/copy-resources.mjs')]);
   phase = 'native_process_proofs';
-  const nativeOutput = await runTests(['run', '--config', 'vitest.maintenance.config.ts', '--reporter=dot', '--no-color']);
+  const nativeOutput = await runTests(['run', '--config', 'vitest.maintenance.config.ts', 'tests/native/maintenance.proof.ts',
+    'tests/native/persistence-recovery.proof.ts', '--reporter=dot', '--no-color']);
   phase = 'native_reports';
   const native = extractReport(nativeOutput, 'AC28_NATIVE_REPORT');
   const processRecovery = extractReport(nativeOutput, 'AC29_RECOVERY_REPORT');
@@ -122,7 +156,7 @@ async function main() {
   phase = 'source_inventory';
   const sources = await Promise.all(['scripts/check-boundaries.mjs', 'scripts/persistence-proof.mjs', 'tests/acceptance/persistence-maintenance.test.ts',
     'tests/fixtures/persistence-measurement.ts', 'tests/fixtures/retained-git.ts', 'tests/fixtures/attempt.ts', 'tests/fixtures/publication.ts',
-    'tests/native/maintenance.proof.ts', 'tests/native/persistence-recovery.proof.ts', 'tests/native/persistence-controller.mjs',
+    'tests/native/maintenance.proof.ts', 'tests/native/persistence-recovery.proof.ts', 'tests/native/persistence-controller.mjs', 'tests/native/persistence-references.mjs',
     'tests/native/persistence-probe.mjs', 'tests/acceptance/execution-composition.test.ts', 'vitest.maintenance.config.ts', 'package.json', 'package-lock.json'].map(async file => {
     const bytes = await readFile(join(root, file));
     return { path: file, sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
@@ -143,9 +177,10 @@ async function main() {
   await writeFile(join(directory, 'report.md'), '# Prova de persistência e manutenção modular\n\n' +
     'Validações locais e recuperação após encerramento físico concluídas.\n\n' +
     'O JSON contém massa 0/16/64 MiB, tamanhos, payloads, latências, identidade ref/tree/base, diagnósticos e hashes dos arquivos selecionados.\n\n' +
-    'A medição de caches usa Git em memória e close/reopen. A prova complementar usa três controladores compilados em PIDs distintos, ' +
+    'A prova inicializa SQLite vazio pelo openStorage normal, valida o schema 53, integrity_check e foreign_key_check, e registra a referência dos dados. ' +
+    'Ela conserva duas rodadas (uma rejeitada e a seguinte aprovada), capturas, resultados, recibos, pareceres e evidências estruturadas em três controladores compilados em PIDs distintos, ' +
     'dois processos Node com saída observada, SIGKILL dos controladores e Git CLI somente leitura em objetos válidos no disco. ' +
-    'Após a remoção elegível, outro controlador recupera a mesma ref/tree/base, aprovação, diff e evidência. ' +
+    'Hashes de referência e contagens são comparados após cada reinício; após a remoção elegível do ambiente temporário, outro controlador recupera as refs/tree/base, aprovação, diff e evidência. ' +
     'O JSON registra tamanhos, hashes, PIDs, recibos e diagnósticos para corrupção/ausência. ' +
     'Captura e resultados de aprovação são fixtures; não há SLA, prova nativa Maestri/OMP/provider, publicação ou mutação Git.\n', { flag: 'wx' });
   console.log(JSON.stringify({ status: report.status, report: relative(root, join(directory, 'report.json')).replaceAll('\\', '/') }));

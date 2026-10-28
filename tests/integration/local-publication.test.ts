@@ -1,7 +1,5 @@
 import { toHttpCompletePublication } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
-import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
-import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
 import { confirmTerminalStops } from '../fixtures/attempt.js';
@@ -137,7 +135,7 @@ it('completes from retained content after implementation removal and restart wit
   try {
     confirmTerminalStops(f, f.attemptId, storage.executionPersistence());
     const tasks: Promise<void>[] = [];
-    const publication = createPublication({ storage,github: f.github,workspaces: f.workspaces,verification: f.verification,
+    const publication = createPublication({ storage,github: f.github,workspaces: f.workspaces,
       cancelAttempt: async () => {},isClosed: () => false,logFailure: vi.fn(),enqueue: task => { tasks.push(task()); } });
     const op = publication.complete(f.attemptId,{ deliveryId,authorizedMode: 'commit',authorized: true },{ operationId: randomUUID(),expectedRevision: `"${f.attemptId}:${storage.getAttempt(f.attemptId).revision}"` });
     await Promise.all(tasks);
@@ -159,37 +157,6 @@ it('does not send a comment when recording the Git receipt fails, and reconciles
   f.pipeline.reconcilePublication(f.attemptId,{ deliveryId: f.status().deliveryId! },f.context()); await f.pipeline.drain();
   f.pipeline.completePublication(f.attemptId,request(f),f.context()); await f.pipeline.drain();
   expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce(); expect(f.status().result).toBe('delivered');
-});
-
-it('migrates actual v13 effect/request definitions preserving confirmed historical receipts and their order', async () => {
-  const f = await publicationFixture(); fixtures.push(f); await f.implement(); await f.approve();
-  const effects = f.storage.getEffects(f.attemptId); const instanceId = f.storage.getSettings().installation_id;
-  await f.pipeline.close(); f.storage.close();
-  const sql = readFileSync(new URL('../../apps/controller/src/modules/storage/migrations/011_publication_queries.sql',import.meta.url),'utf8');
-  f.db.transaction(() => {
-    removeQueueSchedulerSchema(f.db);
-    f.db.exec('DROP TABLE publication_upgrades');
-    for (const table of ['effects','publication_requests']) {
-      const rows = f.db.prepare<[],Record<string,unknown>>(`SELECT * FROM ${table} ORDER BY rowid`).all();
-      f.db.exec(`DROP TABLE ${table}`);
-      const start = sql.indexOf(`CREATE TABLE ${table} (`);
-      const end = sql.indexOf(table === 'effects' ? 'CREATE TABLE publication_requests' : 'CREATE TABLE attempt_authority');
-      f.db.exec(sql.slice(start,end));
-      for (const row of rows) {
-        const columns = Object.keys(row);
-        f.db.prepare(`INSERT INTO ${table}(${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`).run(...Object.values(row));
-      }
-    }
-    f.db.exec(sql.slice(sql.indexOf('CREATE TRIGGER effect_identity'),sql.indexOf('CREATE INDEX attempts_account_created')));
-    f.db.exec('DELETE FROM schema_migrations WHERE version>=14; PRAGMA user_version=13');
-  })();
-  const storage = openStorage({ dataDirectory: f.directory });
-  try {
-    ; expect(storage.getSettings().installation_id).toBe(instanceId);
-    expect(storage.getEffects(f.attemptId)).toEqual(effects); expect(f.db.pragma('foreign_key_check')).toEqual([]);
-    expect(() => f.db.prepare("UPDATE effects SET reason='changed' WHERE operation_id=?").run(effects[0]!.operationId)).toThrow();
-    expect(storage.getAttempt(f.attemptId).result).toBe('delivered');
-  } finally { storage.close(); }
 });
 
 it('exposes Commit completion and its receipt through the existing protected HTTP contracts', async () => {

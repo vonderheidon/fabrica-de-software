@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it } from 'vitest';
 import { captureFixture, delivery } from '../../../../../tests/fixtures/capture.js';
-import { createCheckMaterializer } from './materialize.js';
+import { createPublicationMaterializer } from './materialize.js';
 import type { GitReader } from './git.js';
 
 const directories: string[] = [];
@@ -26,12 +26,13 @@ it('materializes only the retained commit in an exclusively reserved checkout, i
     if (args.includes('status')) return { exitCode: 0, stdout: '' };
     return f.run(cwd, args, options);
   };
-  const materialize = createCheckMaterializer(root, git, async p => p); const id = randomUUID(); const path = await materialize(d, id);
+  const materialize = createPublicationMaterializer(root, git, async p => p); const id = randomUUID(); const path = await materialize(d, id);
+  expect(path).toContain(join('publication', id, 'checkout'));
   expect((await readFile(join(path, 'tracked.txt'), 'utf8'))).toBe('changed tracked bytes\n');
   expect(calls.every(c => c.cwd !== f.implementation)).toBe(true);
   expect(calls.find(c => c.args.includes('clone'))?.args).toEqual(expect.arrayContaining(['--no-local', '--no-hardlinks', '--no-checkout', resolve(root, 'git', `${d.attemptId}.git`)]));
   expect(calls.find(c => c.args.includes('fetch'))?.args).toContain(d.gitRef);
-  await expect(materialize(d, id)).rejects.toMatchObject({ code: 'CHECK_MATERIALIZATION_FAILED' });
+  await expect(materialize(d, id)).rejects.toMatchObject({ code: 'PUBLICATION_GIT_FAILED' });
   f.refs.set(d.gitRef!, 'f'.repeat(40));
   await expect(materialize(d, randomUUID())).rejects.toMatchObject({ code: 'DELIVERY_INTEGRITY_FAILED' });
 });

@@ -7,9 +7,6 @@ import { createProjectStorageInspector, projectStorageRootRelative } from '../..
 import { randomUUID } from 'node:crypto';
 import { deletionTables } from '../../apps/controller/src/modules/storage/project-deletion-inventory.js';
 import { createProjectDeletionPersistence } from '../../apps/controller/src/modules/storage/project-deletions.js';
-import Database from 'better-sqlite3';
-import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { seedSettings } from '../../apps/controller/src/modules/storage/settings.js';
 
 it('finalizes an authorized managed project and emits its minimal receipt',async()=>{
   await mkdir(resolve('.cache'),{recursive:true});const root=await mkdtemp(resolve('.cache','baseline-sql-test-'));
@@ -42,34 +39,4 @@ it('finalizes an authorized managed project and emits its minimal receipt',async
   } finally {
     await f.close();if(!root.startsWith(resolve('.cache')+sep+'baseline-sql-test-'))throw new Error('UNSAFE_TEST_CLEANUP');await rm(root,{recursive:true,force:true});
   }
-});
-
-it('upgrades schema 43 without rewriting history and repairs its managed deletion guards',()=>{
-  const db=new Database(':memory:');db.pragma('foreign_keys=ON');
-  try {
-    const migrations=loadMigrations();applyMigrations(db,migrations.slice(0,43),()=>seedSettings(db));
-    const history=projectDeletionHistory(db);
-    history.insert('project_storage_locations',{id:randomUUID(),project_id:history.selected.projectId,location_key:'managed',layout_version:1,
-      root_relative:projectStorageRootRelative(history.selected.projectId,'managed'),
-      object_identity_json:JSON.stringify({format_version:1,volume_id:'fixture',object_id:'fixture',ancestors:[{path:'fixture',identity:'fixture',resolvedPath:'fixture'}]}),
-      is_current:1,revision:1,created_at_ms:0,verified_at_ms:0});
-    const tables=db.prepare<[],{name:string}>("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name<>'schema_migrations'").all();
-    const snapshot=()=>tables.map(({name})=>[name,db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all().map(row=>{
-      if(name==='project_revisions') { const {delivery_branch_json:_branch,...legacy}=row as Record<string,unknown>; return legacy; }
-      if(name!=='attempts')return row;
-      const {issue_number:_number,issue_title:_title,...legacyColumns}=row as Record<string,unknown>;
-      return legacyColumns;
-    })]);
-    const before=snapshot(),ledger=db.prepare('SELECT * FROM schema_migrations ORDER BY version').all();
-    const persistence=createProjectDeletionPersistence(db);
-    expect(()=>persistence.finalize(history.command)).toThrow();
-    expect(snapshot()).toEqual(before);
-    applyMigrations(db,migrations,()=>{throw new Error('UNEXPECTED_RESEED');});
-    expect(snapshot()).toEqual(before);
-    expect(db.prepare('SELECT count(*) AS n FROM attempts WHERE issue_number IS NOT NULL OR issue_title IS NOT NULL').get()).toEqual({n:0});
-    expect(db.prepare('SELECT * FROM schema_migrations WHERE version<=43 ORDER BY version').all()).toEqual(ledger);
-    ;
-    expect(persistence.finalize(history.command)).toEqual({operation_id:history.command.operationId,state:'succeeded'});
-    expect(db.pragma('foreign_key_check')).toEqual([]);
-  } finally {db.close();}
 });

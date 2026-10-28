@@ -8,9 +8,9 @@ import { AttemptStageSummary } from './AttemptStageSummary.js';
 let root: ReturnType<typeof createRoot> | undefined;
 let host: HTMLDivElement;
 const activity: StageActivity = { stage: 'implementing', started_at_ms: 1000, elapsed_ms: 60_000, last_activity_at_ms: 1000, observed_at_ms: 61_000, deadline_at_ms: null, remaining_ms: null, tracking_state: 'tracked', availability: 'known', reason: null };
-async function render(value: StageActivity | null = activity, stale = false) {
+async function render(value: StageActivity | null = activity, stale = false, blocked = false) {
   if (!root) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); }
-  await act(async () => root!.render(createElement(AttemptStageSummary, { activity: value, stale })));
+  await act(async () => root!.render(createElement(AttemptStageSummary, { activity: value, stale, blocked })));
 }
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('updates only the visual elapsed clock without changing observed activity or announcing every tick', async () => {
@@ -32,4 +32,10 @@ it('keeps absence explicit and distinguishes waiting, lost tracking and a config
   expect(host.textContent).toContain('Acompanhamento perdido'); expect(host.textContent).toContain('não comprova parada física');
   await render({ ...activity, availability: 'unavailable', elapsed_ms: null, started_at_ms: null, last_activity_at_ms: null });
   expect(host.textContent?.match(/Indisponível/g)).toHaveLength(2); expect(host.textContent).not.toContain('%');
+});
+it('shows a prerequisite block instead of asking for a nonexistent operator decision', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  await render({ ...activity, stage: 'waiting_decision' }, false, true);
+  expect(host.querySelector('h3')?.textContent).toBe('Bloqueada por pré-requisito');
+  expect(host.textContent).not.toContain('Aguardando decisão');
 });

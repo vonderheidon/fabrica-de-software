@@ -58,9 +58,9 @@ function observeContentIO(directory: string) {
     assertNoContentIO() {
       const accessed = readers.some(reader => reader.mock.calls.some(args => {
         const path = String(args[0]).replaceAll('\\', '/').toLowerCase();
-        return ['work', 'git', 'artifacts'].some(part => path === `${root}/${part}` || path.startsWith(`${root}/${part}/`));
+        return ['work', 'git'].some(part => path === `${root}/${part}` || path.startsWith(`${root}/${part}/`));
       }));
-      expect(accessed, 'project list, event history and deletion polling must not read work/Git/artifact content').toBe(false);
+      expect(accessed, 'project list, event history and deletion polling must not read work/Git content').toBe(false);
     },
     clear() { for (const reader of readers) reader.mockClear(); },
     assertInstrumented() { expect(readers[5]).toHaveBeenCalled(); },
@@ -166,7 +166,7 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
       expect(targetRelative === '' || (!isAbsolute(targetRelative) && !targetRelative.startsWith(`..${sep}`) && targetRelative !== '..'),
         'native removal targets must stay inside this explicit test fixture').toBe(true);
     }
-    await Promise.all(['work', 'git', 'artifacts', 'execution-bootstrap', 'fixture']
+    await Promise.all(['work', 'git', 'execution-bootstrap', 'fixture']
       .map(name => mkdir(join(dataDirectory, name), { recursive: true })));
     await Promise.all(input.targets.map((target, index) => createFileTree(target.path, `selected:${target.key}:${index}`)));
     const otherPassages = f.db.prepare<[string], { id: string }>(
@@ -175,7 +175,6 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
     const otherRoots = [
       join(dataDirectory, 'work', history.other.attemptId),
       join(dataDirectory, 'git', `${history.other.attemptId}.git`),
-      join(dataDirectory, 'artifacts', history.other.attemptId),
       ...otherPassages.map(({ id }) => join(dataDirectory, 'execution-bootstrap', id)),
     ];
     await Promise.all(otherRoots.map((root, index) => createFileTree(root, `other-registration:${index}`)));
@@ -267,9 +266,6 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
       const files = await inventory(dataDirectory);
       const cacheFile = files.find(file => file.path === relative(dataDirectory, cachePath).replaceAll('\\', '/'));
       expect(cacheFile?.sizeBytes ?? 0).toBe(cacheBytes);
-      for (const file of files.filter(entry => entry.path.startsWith('artifacts/'))) {
-        assertNoContent(await readFile(join(dataDirectory, file.path)), [cacheMarker]);
-      }
       const databaseAudit = auditDatabase(f.db, [cacheMarker]);
       const targetRows = f.db.prepare<[string], { count: number }>(
         'SELECT count(*) AS count FROM project_deletion_targets WHERE operation_id=?',
@@ -279,7 +275,6 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
         databaseBytes: files.find(file => file.path === 'factory.sqlite')?.sizeBytes ?? 0,
         walBytes: files.find(file => file.path === 'factory.sqlite-wal')?.sizeBytes ?? 0,
         sharedMemoryBytes: files.find(file => file.path === 'factory.sqlite-shm')?.sizeBytes ?? 0,
-        artifactBytes: files.filter(file => file.path.startsWith('artifacts/')).reduce((sum, file) => sum + file.sizeBytes, 0),
         workBytes: files.filter(file => file.path.startsWith('work/')).reduce((sum, file) => sum + file.sizeBytes, 0),
         projectDeletionTargetRows: targetRows,
         databaseAudit,
@@ -296,7 +291,7 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
       level: 'real_sqlite_filesystem_fastify_inject_windows_reference_controlled', stages,
       comparison: { sameFixtureAndQueries: true, payloadsIdentical: true, contentIoDuringQueries: false,
         databaseRowsAndEventsStable: true, perFileInventoryPersisted: false },
-      limitations: ['Synthetic cache markers were checked only against SQLite and official artifacts; this is not a universal content scanner.',
+      limitations: ['Synthetic cache markers were checked only against SQLite and structured result data; this is not a universal content scanner.',
         'Native removal operates only inside the explicitly created attemptFixture directory.',
         'No latency SLA or real Git/GitHub/Maestri/OMP integration is claimed.'] }));
 

@@ -15,7 +15,7 @@ const pendingState = Type.Union([
 
 export const DeletionTarget = Type.Object({
   target_key: text(128),
-  target_kind: Type.Union([Type.Literal('original_directory'), Type.Literal('exclusive_workspace'), Type.Literal('exclusive_artifact')]),
+  target_kind: Type.Union([Type.Literal('original_directory'), Type.Literal('exclusive_workspace')]),
   path: text(4096),
   state: Type.Union([Type.Literal('pending'), Type.Literal('removing'), Type.Literal('removed'), Type.Literal('blocked')]),
 }, closed);

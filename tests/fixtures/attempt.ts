@@ -5,18 +5,35 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
 import type { DeliveryMode, GitHubProjectDetails, GitHubQueryResult, IssueContext, OriginInspection, PreparedWorkspace, StartAttempt, ToolObservation } from '#contracts';
-import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage, openStorageAtMigrationVersionForTests } from '../../apps/controller/src/modules/storage/index.js';
 import { createPreparations, type PreparationDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { createPipeline, type PipelineDependencies } from '../../apps/controller/src/modules/pipeline/index.js';
 import type { Execution, PassageRequest } from '../../apps/controller/src/modules/execution/index.js';
 import { digest, loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
 
 export const complete = <T>(data: T): GitHubQueryResult<T> => ({ state: 'complete', data, diagnostics: [], retryAtMs: null });
-export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high', directoryName?: 'factory') {
+export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high', directoryName?: 'factory', migrationVersionForTest?: number, recordInitialStorage = false) {
   const directory = directoryName ? join(temporaryRoot,directoryName) : mkdtempSync(join(temporaryRoot, 'factory-attempt-'));
   if (directoryName) mkdirSync(directory);
-  const storage = openStorage({ dataDirectory: directory, busyTimeoutMs: 10 });
+  const storageOptions = { dataDirectory: directory, busyTimeoutMs: 10 };
+  const storage = migrationVersionForTest === undefined ? openStorage(storageOptions)
+    : openStorageAtMigrationVersionForTests(storageOptions, migrationVersionForTest);
   const db = new Database(join(directory, 'factory.sqlite')); db.pragma('foreign_keys = ON');
+  const cleanInitialization = recordInitialStorage ? {
+    schemaVersion: storage.getDiagnostics().schemaVersion,
+    integrityCheck: db.pragma('integrity_check', { simple: true }),
+    foreignKeyViolations: db.pragma('foreign_key_check'),
+    counts: {
+      accounts: (db.prepare('SELECT count(*) AS n FROM accounts').get() as { n: number }).n,
+      profiles: (db.prepare('SELECT count(*) AS n FROM execution_profiles').get() as { n: number }).n,
+      projects: (db.prepare('SELECT count(*) AS n FROM projects').get() as { n: number }).n,
+      preparations: (db.prepare('SELECT count(*) AS n FROM preparations').get() as { n: number }).n,
+      attempts: (db.prepare('SELECT count(*) AS n FROM attempts').get() as { n: number }).n,
+    },
+    accountId: storage.getSettings().account_id,
+    directoryCreatedExclusive: true,
+    openedByNormalStoragePath: true,
+  } : undefined;
   // Explicit test observation only; no production account seed or invented host authority.
   db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('ACCOUNT_test', 'test-user', 1, 1, 1);
   db.prepare("UPDATE factory_settings SET account_id='ACCOUNT_test'").run();
@@ -116,7 +133,7 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
     const body: StartAttempt = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true };
     return { body, context: { operationId: randomUUID(), expectedRevision: saved.etag }, saved };
   }
-  return { directory, storage, db, profile, reviewerProfile, projectId, issue, project, observation, github, workspaces, preparations, persistence, roles, execution, tools, pipeline, dependencies, observeTools, logFailure, register, prepare,
+  return { directory, storage, db, cleanInitialization, profile, reviewerProfile, projectId, issue, project, observation, github, workspaces, preparations, persistence, roles, execution, tools, pipeline, dependencies, observeTools, logFailure, register, prepare,
     async close() { try { await pipeline.close(); } finally { storage.close(); db.close(); rmSync(directory, { recursive: true, force: true }); } } };
 }
 export type AttemptFixture = Awaited<ReturnType<typeof attemptFixture>>;

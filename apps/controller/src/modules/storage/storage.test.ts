@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage, StorageError, type Storage } from './index.js';
 import { applicationId, applyMigrations, loadMigrations, type Migration } from './migrations.js';
+import { seedSettings } from './settings.js';
 
 const directories: string[] = [];
 const stores: Storage[] = [];
@@ -44,13 +45,79 @@ describe('initial storage', () => {
     expect(settings.created_at_ms).toBe(settings.updated_at_ms);
     inspect(path, (db) => {
       const tables = db.prepare("SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
-      expect(tables).toEqual(['accounts', 'artifacts', 'attempt_authority', 'attempt_blocks', 'attempt_criteria', 'attempt_decisions', 'attempt_sessions', 'attempt_stage_intervals', 'attempts', 'cancellation_requests', 'capture_runs', 'capture_warnings', 'checks', 'controller_authority', 'creation_board_operations', 'creation_reconciliations', 'creation_steps', 'criterion_results', 'deliveries', 'delivery_targets', 'diagnostic_runs', 'effects', 'events', 'execution_profiles', 'execution_questions', 'factory_settings', 'finding_assessments', 'finding_disputes', 'finding_resolutions', 'findings', 'managed_terminals', 'native_open_requests', 'notification_dispatches', 'operation_requests', 'passage_events', 'passage_measurements', 'passage_results', 'passages', 'preparation_revisions', 'preparations', 'project_creations', 'project_deletion_receipts', 'project_deletion_targets', 'project_deletions', 'project_revisions', 'project_storage_locations', 'project_storage_transitions', 'projects', 'publication_requests', 'publication_target_selections', 'publication_upgrades', 'queue_consumptions', 'queue_cycles', 'resource_removals', 'resources', 'reviews', 'rounds', 'schema_migrations', 'terminal_occupancies', 'verification_runs'].map((name) => ({ name, strict: 1 })));
+      expect(tables).toEqual(['accounts', 'attempt_authority', 'attempt_blocks', 'attempt_criteria', 'attempt_decisions', 'attempt_sessions', 'attempt_stage_intervals', 'attempts', 'cancellation_requests', 'capture_runs', 'capture_warnings', 'controller_authority', 'creation_board_operations', 'creation_reconciliations', 'creation_steps', 'criterion_results', 'deliveries', 'delivery_targets', 'diagnostic_runs', 'effects', 'events', 'execution_profiles', 'execution_questions', 'factory_settings', 'finding_assessments', 'finding_disputes', 'finding_resolutions', 'findings', 'managed_terminals', 'native_open_requests', 'notification_dispatches', 'operation_requests', 'passage_events', 'passage_measurements', 'passage_results', 'passages', 'preparation_revisions', 'preparations', 'project_creations', 'project_deletion_receipts', 'project_deletion_targets', 'project_deletions', 'project_revisions', 'project_storage_locations', 'project_storage_transitions', 'projects', 'publication_requests', 'publication_target_selections', 'publication_upgrades', 'queue_consumptions', 'queue_cycles', 'resource_removals', 'resources', 'reviews', 'rounds', 'schema_migrations', 'terminal_occupancies'].map((name) => ({ name, strict: 1 })));
+      expect(db.prepare('SELECT max(version) AS version FROM schema_migrations').get()).toEqual({ version: 53 });
       expect(db.prepare('SELECT * FROM accounts').all()).toEqual([]);
       expect(db.pragma('application_id', { simple: true })).toBe(applicationId);
       expect(db.prepare('SELECT version, name, checksum FROM schema_migrations').all()).toEqual(loadMigrations().map(({ version, name, checksum }) => ({ version, name, checksum })));
+      const deletionTargets = db.prepare("SELECT sql FROM sqlite_schema WHERE type='table' AND name='project_deletion_targets'").get() as { sql: string };
+      expect(deletionTargets.sql).not.toContain('exclusive_artifact');
+      const projectRevisionColumns = db.prepare<[], { name: string }>("PRAGMA table_info('project_revisions')").all().map(column => column.name);
+      expect(projectRevisionColumns).not.toContain('checks_json');
+      const manualReaders = db.prepare<[], { name: string; sql: string }>("SELECT name,sql FROM sqlite_schema WHERE type='trigger'").all();
+      expect(manualReaders.filter(trigger => /\b(?:FROM|JOIN)\s+(?:verification_runs|checks|artifacts)\b/i.test(trigger.sql))).toEqual([]);
     });
     store.close();
     expect(open(path).getSettings()).toEqual(settings);
+  });
+
+  it('refuses to migrate verification data and leaves the old schema intact', () => {
+    const path = directory();
+    const db = new Database(join(path, 'factory.sqlite'));
+    const migrations = loadMigrations();
+    try {
+      applyMigrations(db, migrations.filter(migration => migration.version <= 52), () => seedSettings(db));
+      db.pragma('foreign_keys = OFF');
+      db.prepare(`INSERT INTO verification_runs(id,delivery_id,attempt_id,content_identity,run_number,state,started_at_ms,ended_at_ms)
+        VALUES ('legacy-run','legacy-delivery','legacy-attempt','tree',1,'passed',1,1)`).run();
+      const schemaBefore = db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
+
+      expect(() => applyMigrations(db, migrations, () => seedSettings(db))).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
+
+      expect(db.pragma('user_version', { simple: true })).toBe(52);
+      expect(db.prepare("SELECT id FROM verification_runs WHERE id='legacy-run'").get()).toEqual({ id: 'legacy-run' });
+      expect(db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all()).toEqual(schemaBefore);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('refuses a populated retired schema during the read-only startup probe without changing database bytes', () => {
+    const path = directory();
+    const filename = join(path, 'factory.sqlite');
+    const db = new Database(filename);
+    try {
+      const migrations = loadMigrations();
+      applyMigrations(db, migrations.filter(migration => migration.version <= 52), () => seedSettings(db));
+      db.pragma('foreign_keys = OFF');
+      db.prepare(`INSERT INTO verification_runs(id,delivery_id,attempt_id,content_identity,run_number,state,started_at_ms,ended_at_ms)
+        VALUES ('legacy-run','legacy-delivery','legacy-attempt','tree',1,'passed',1,1)`).run();
+    } finally { db.close(); }
+    const before = readFileSync(filename);
+
+    expect(() => openStorage({ dataDirectory: path })).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
+
+    expect(readFileSync(filename)).toEqual(before);
+  });
+
+  it('refuses to retain an accepted exclusive artifact deletion path', () => {
+    const path = directory();
+    const db = new Database(join(path, 'factory.sqlite'));
+    try {
+      const migrations = loadMigrations();
+      applyMigrations(db, migrations.filter(migration => migration.version <= 52), () => seedSettings(db));
+      db.pragma('foreign_keys = OFF');
+      db.prepare(`INSERT INTO project_deletion_targets(operation_id,target_key,target_kind,authorized_path,normalized_path,resolved_path,
+        object_kind,identity_json,owner_kind,owner_id,state) VALUES ('old-operation','artifact','exclusive_artifact','C:/old.log','c:/old.log',
+        'C:/old.log','file','{}','attempt','old-attempt','pending')`).run();
+
+      expect(() => applyMigrations(db, migrations, () => seedSettings(db))).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
+
+      expect(db.pragma('user_version', { simple: true })).toBe(52);
+      expect(db.prepare("SELECT target_kind FROM project_deletion_targets WHERE target_key='artifact'").get()).toEqual({ target_kind: 'exclusive_artifact' });
+    } finally {
+      db.close();
+    }
   });
 
   it('enforces singleton, STRICT columns, JSON, booleans and foreign keys in SQLite', () => {

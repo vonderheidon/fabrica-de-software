@@ -13,12 +13,12 @@ it('projects private historical common fields without changing documents or oper
   const settings = f.storage.getSettings();
   const current = f.storage.getConfiguration(f.projectId);
   const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
-  const checks = [{ id: 'utf8-check', command: 'verify baseBranch', cwd_relative: 'pasta com acentos', timeout_ms: 3 }];
+  const projectGuidance = 'orientação do projeto com acentos';
   f.storage.saveConfiguration({ projectId: f.projectId, operationId: randomUUID(), expectedRevision: current.etag,
-    body: { project_changes: { checks } }, configuration: { ...configuration, checks }, globalChanges: {} });
+    body: { project_changes: { guidance: projectGuidance, correction_limit: 3 } }, configuration: { ...configuration, guidance: projectGuidance, correction_limit: 3 }, globalChanges: {} });
   const guidance = '{"operationId":"operator content","pollingIntervalMs":7,"formatVersion":99}';
   const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance,
-    overrides: { checks, implementer_profile: { kind: 'reference', id: f.profile.id, revision: f.profile.revision }, time_defaults: settings.time_defaults, artifact_policy: settings.artifact_policy } }, { operationId: randomUUID(), expectedRevision: undefined });
+    overrides: { correction_limit: 4, implementer_profile: { kind: 'reference', id: f.profile.id, revision: f.profile.revision }, time_defaults: settings.time_defaults, artifact_policy: settings.artifact_policy } }, { operationId: randomUUID(), expectedRevision: undefined });
   const updated = await f.preparations.updatePreparation(saved.view.preparation.id, { changes: { guidance: guidance + ' atualizado' } }, { operationId: randomUUID(), expectedRevision: saved.etag });
   const preparation = updated.view.preparation;
   const operation = await f.pipeline.startAttempt({ preparationId: preparation.id, preparationRevision: preparation.revision,
@@ -33,20 +33,20 @@ it('projects private historical common fields without changing documents or oper
   expect(privateCapture.configuration.timeDefaults.pollingIntervalMs).toBe(15_000);
   expect(privateCapture.configuration.artifactPolicy.automaticDeletion).toBe(false);
   expect(raw).not.toContain('polling_interval_ms');
-  expect(raw).not.toContain('cwd_relative');
+  expect(raw).not.toContain('checks');
   expect(JSON.parse(raw)).toMatchObject({ configuration: {
     projectRevisionId: preparation.project_revision_id, settingsRevision: settings.revision,
-    configuration: { baseBranch: 'main', checks: [{ id: 'utf8-check', command: 'verify baseBranch', cwdRelative: 'pasta com acentos', timeoutMs: 3 }],
+    configuration: { baseBranch: 'main', guidance: projectGuidance, correctionLimit: 4,
       githubProject: { ownerId: 'OWNER_test', statusFieldId: 'FIELD_test', statusOptionIds: { inProgress: 'PROGRESS', inReview: 'REVIEW' } } },
     implementerProfile: { createdAtMs: f.profile.created_at_ms, updatedAtMs: f.profile.updated_at_ms },
-    origins: { implementerProfile: 'preparation', timeDefaults: 'preparation' },
+    origins: { implementerProfile: 'preparation', correctionLimit: 'preparation', timeDefaults: 'preparation' },
   }, criteria: [{ occurrenceIndex: 1 }, { occurrenceIndex: 2 }] });
   const rawChoices = f.db.prepare<[string], { choices_json: string }>('SELECT choices_json FROM preparation_revisions WHERE preparation_id = ? ORDER BY revision').all(preparation.id);
   expect(rawChoices).toHaveLength(2);
   expect(JSON.parse(rawChoices[0]!.choices_json)).toEqual({ formatVersion: 1, choices: {
     issueId: f.issue.id, deliveryMode: 'icr', publication_target: null, guidance, overrides: {
-      checks: [{ id: 'utf8-check', command: 'verify baseBranch', cwdRelative: 'pasta com acentos', timeoutMs: 3 }],
       implementerProfile: { kind: 'reference', id: f.profile.id, revision: f.profile.revision },
+      correctionLimit: 4,
       timeDefaults: { formatVersion: 1, pollingIntervalMs: 15_000, passageActiveTimeMs: 1_800_000, questionTtl: { state: 'not_configured' } },
       artifactPolicy: { formatVersion: 1, automaticDeletion: false },
     },
@@ -67,7 +67,7 @@ it('projects private historical common fields without changing documents or oper
     expect(reopened.getPreparation(preparation.id).view.overrides).toEqual(preparation.overrides);
     expect(reopened.getPreparation(preparation.id).view.guidance).toBe(guidance + ' atualizado');
     expect(reopened.getOperation(operation.operation_id)?.receipt).toEqual(operation.receipt);
-    expect(reopened.getConfiguration(f.projectId).view.configuration.checks).toEqual(checks);
+    expect(reopened.getConfiguration(f.projectId).view.configuration).toMatchObject({ guidance: projectGuidance, correction_limit: 3 });
     expect(history()).toEqual(before);
   } finally { reopened.close(); }
 });

@@ -28,7 +28,13 @@ async function start(f: AttemptFixture) {
 
 describe('manual attempt composition and HTTP', () => {
   it('commits capture, criteria, round, passage and resource intentions before any clone or process', async () => {
-    const f = await fixture(); const command = await f.prepare();
+    const f = await fixture();
+    const savedConfiguration = f.storage.getConfiguration(f.projectId);
+    const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _createdAt, ...configuration } = savedConfiguration.view.configuration;
+    f.storage.saveConfiguration({ operationId: randomUUID(), projectId: f.projectId, expectedRevision: savedConfiguration.etag,
+      body: { project_changes: { queue_order: { use_board_position: false } } },
+      configuration: { ...configuration, queue_order: { use_board_position: false } }, globalChanges: {} });
+    const command = await f.prepare();
     f.workspaces.prepareAttempt.mockImplementationOnce(async input => {
       const a = f.storage.getAttempt(input.attemptId);
       expect(f.storage.getOperation(command.context.operationId)?.receipt).toBeDefined();
@@ -49,7 +55,15 @@ describe('manual attempt composition and HTTP', () => {
     const capture = f.storage.getAttemptCapture(operation.resource.id);
     expect(Value.Check(AttemptCapture, capture)).toBe(true);
     expect(capture.criteria.map(c => c.id)).toEqual(['ac-1', 'ac-2']);
-    expect(capture.configuration.origins).toMatchObject({ checks: 'project', time_defaults: 'global', delivery_mode: 'preparation' });
+    expect(capture.summaryHash).toBe(command.body.authorizedSummaryHash);
+    expect(capture.preparationRevision).toBe(f.storage.getPreparation(command.body.preparationId).view.revision);
+    expect(capture.configuration.configuration).not.toHaveProperty('checks');
+    expect(capture.configuration.configuration.queue_order).toEqual({ use_board_position: false });
+    expect(JSON.stringify(capture.configuration)).not.toMatch(/priority_field_id|priority_direction/);
+    expect(capture.configuration.origins).toMatchObject({ time_defaults: 'global', delivery_mode: 'preparation' });
+    expect(capture.configuration.origins).not.toHaveProperty('checks');
+    const captureDocument = f.db.prepare<[string], { capture_json: string }>('SELECT capture_json FROM attempts WHERE id=?').get(operation.resource.id)!;
+    expect(captureDocument.capture_json).not.toContain('"checks"');
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
   it('persists role sessions before occupancy and reuses only a released physical terminal with a new OMP session', async () => {

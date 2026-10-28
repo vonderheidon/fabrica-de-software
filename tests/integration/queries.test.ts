@@ -1,11 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { AttemptDetail, DeliveryDetail, DetailPage, type DetailSection } from '#contracts';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
-import { confirmTerminalStops } from '../fixtures/attempt.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 
 const fixtures: PublicationFixture[] = [];
@@ -20,7 +19,7 @@ it('consults a planned round before capture without inventing a delivery or revi
   expect(Value.Check(AttemptDetail,detail)).toBe(true);
   expect(detail).toMatchObject({ selectedDeliveryId: null,selectedRound: 1,
     publication: { reviewState: null,localState: 'pending',completeCapability: { available: false,reason_code: 'DELIVERY_NOT_CAPTURED' } } });
-  for (const section of ['rounds','passages','criteria','checks','reviews','findings','questions','effects','resources'] as const) {
+  for (const section of ['rounds','passages','criteria','reviews','findings','questions','effects','resources'] as const) {
     const selected = f.storage.getAttemptDetail(f.attemptId,{ roundId: '1',section,limit: '1' });
     expect(Value.Check(AttemptDetail,selected)).toBe(true);
     expect(selected.selectedDeliveryId).not.toBeNull();
@@ -33,7 +32,7 @@ it('consults a planned round before capture without inventing a delivery or revi
 it('returns independently paged sections with version-specific evidence, no GET effects and explicit continuation', async () => {
   const f = await fixture(); await f.implement(); await f.approve(); const deliveryId = f.status().deliveryId!;
   const before = f.db.prepare('SELECT max(seq) AS n FROM events').get(); const calls = f.mutateEffect.mock.calls.length;
-  const sections: DetailSection[] = ['rounds','passages','criteria','checks','reviews','findings','questions','effects','resources'];
+  const sections: DetailSection[] = ['rounds','passages','criteria','reviews','findings','questions','effects','resources'];
   for (const section of sections) {
     const first = f.storage.getAttemptDetail(f.attemptId,{ deliveryId,section,limit: '1' });
     expect(Value.Check(AttemptDetail,first)).toBe(true); expect(Value.Check(DetailPage,first.details)).toBe(true);
@@ -109,39 +108,17 @@ it('keeps list cursors stable with equal timestamps and new inserts and rejects 
   expect(JSON.stringify(first)).not.toContain('criteria'); expect(JSON.stringify(first)).not.toContain('capture_json');
 });
 
-it('reads real check definitions and artifact metadata without accessing log bytes', async () => {
+it('keeps producer validation evidence bound to the captured version', async () => {
   const f = await fixture(false);
-  // Configure a new attempt before its capture, preserving the first attempt's captured configuration.
-  f.storage.interruptAttempts();
-  confirmTerminalStops(f, f.attemptId);
-  expect(f.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
-  const config = f.storage.getConfiguration(f.projectId);
-  const { id: _id,project_id: _projectId,revision: _revision,created_at_ms: _created,...configuration } = config.view.configuration;
-  const checks = [{ id: 'test',command: 'node --version',cwd_relative: '.' }];
-  const bytes = Buffer.from('proof'); f.verification.getArtifact.mockResolvedValue({ bytes, filename: 'proof.log' });
-  f.storage.saveConfiguration({ operationId: randomUUID(),expectedRevision: config.etag,projectId: f.projectId,body: { project_changes: { checks } },configuration: { ...configuration,checks },globalChanges: {} });
-  f.issue.id = 'ISSUE_CHECK'; f.issue.number = 20;
-  const p = await f.prepare(); const op = await f.pipeline.startAttempt(p.body,p.context); await f.pipeline.drain(); const attemptId = op.resource.id;
-  // The controlled verifier completes SQL metadata only. Filesystem artifacts have separate integration coverage.
-  f.verification.verifyDelivery.mockImplementationOnce(async deliveryId => {
-    const plan = f.storage.beginVerification(deliveryId);
-    for (const check of plan.checks) {
-      f.storage.startCheck(check.id);
-      const artifactId = randomUUID();
-      f.storage.finishCheck(check.id,{ state: 'passed',exitCode: 0,endedAtMs: Date.now(),durationMs: 0,diagnostic: null,executionDiagnostic: null,artifact: {
-        id: artifactId,attemptId,deliveryId,checkId: check.id,kind: 'check_log',pathRelative: `${attemptId}/${check.id}/${artifactId}.log`,sha256: createHash('sha256').update(bytes).digest('hex'),sizeBytes: 5,
-      } });
-    }
-    f.storage.finishVerification(plan.id);
-  });
-  const status = f.storage.getAttempt(attemptId); const passage = f.persistence.getPassage({ passageId: status.passageId });
+  const attemptId = f.attemptId; const status = f.storage.getAttempt(attemptId); const passage = f.persistence.getPassage({ passageId: status.passageId });
+  const checks = [{ id: 'npm.cmd run typecheck', outcome: 'passed', evidence: 'TypeScript reported no diagnostics for the captured workspace' }];
   const result = { formatVersion: 1 as const,summary: 'Controlled implementation',writesStopped: true as const,
-    criteria: ['ac-1','ac-2'].map(criterionId => ({ criterionId,verdict: 'passed' as const,evidence: ['Observed'] })),checks: [] };
+    criteria: ['ac-1','ac-2'].map(criterionId => ({ criterionId,verdict: 'passed' as const,evidence: ['Observed'] })),checks };
   f.persistence.acceptResult({ binding: passage.binding,result,sha256: digest(result) }); await f.pipeline.drain();
-  f.verification.getArtifact.mockClear();
-  expect(f.storage.getAttemptDetail(attemptId,{ section: 'checks' }).details?.items).toMatchObject([{ state: 'passed',exitCode: 0,artifacts: [{ sizeBytes: 5 }] }]);
-  expect(f.verification.getArtifact).not.toHaveBeenCalled();
-  expect(f.storage.getAttemptCapture(f.attemptId).configuration.configuration.checks).toEqual([]);
+  const deliveryId = f.storage.getAttempt(attemptId).deliveryId!;
+  expect(f.storage.getProducerResult(deliveryId)).toMatchObject({ binding: { deliveryVersion: deliveryId }, result: { checks } });
+  expect(JSON.stringify(f.storage.getDeliveryDetail(deliveryId, {}))).not.toContain('check_log');
+  expect(() => f.storage.getAttemptDetail(attemptId,{ section: 'checks' })).toThrow(expect.objectContaining({ code: 'QUERY_CURSOR_INVALID' }));
 });
 
 it('keeps summary payloads and persisted bytes independent of a large ignored cache', async () => {
@@ -151,6 +128,6 @@ it('keeps summary payloads and persisted bytes independent of a large ignored ca
   const before = payload(); const bytes = sizes();
   const cache = join(f.directory,'work',f.attemptId,'implementation','node_modules','cache'); mkdirSync(cache,{ recursive: true }); writeFileSync(join(cache,'ignored.bin'),Buffer.alloc(16_777_216,93));
   expect(payload()).toBe(before); expect(sizes()).toEqual(bytes);
-  expect(f.verifyRetainedDelivery).toHaveBeenCalledOnce(); expect(f.verification.getArtifact).not.toHaveBeenCalled();
+  expect(f.verifyRetainedDelivery).toHaveBeenCalledOnce();
   expect(f.workspaces.captureDelivery).toHaveBeenCalledOnce();
 });

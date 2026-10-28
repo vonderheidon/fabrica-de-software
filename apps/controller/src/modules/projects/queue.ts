@@ -59,8 +59,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     let complete = identity.state === 'complete' && Boolean(identity.data);
     let safeProjects = 0;
     const blockedProjects: string[] = [];
-    const sortValues = new Map<QueueItem, { priority: number | null; board: number | null; direction: 'asc' | 'desc' }>();
-    let priorityAvailable = false;
+    const sortValues = new Map<QueueItem, { board: number | null; useBoardPosition: boolean }>();
     let boardAvailable = false;
 
     for (const projectSummary of allProjects) {
@@ -134,15 +133,13 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         projectComplete = false;
         diagnostics.push({ code: 'PROJECT_MAPPING_INVALID', message: `${projectSummary.name}: o quadro, proprietário ou mapeamento de Status diverge da configuração.`, recovery: 'Abra a configuração deste projeto e confirme o quadro e os valores de Status.' });
       }
-      const priorityField = configuration.queue_order.priority_field_id;
-      const numericPriority = Boolean(priorityField && details?.numberFields?.some((field) => field.id === priorityField));
-      const useBoard = configuration.queue_order.use_board_position && (items.data ?? []).every((item) => item.position !== undefined);
-      priorityAvailable ||= numericPriority;
-      boardAvailable ||= useBoard;
-      if (priorityField && !numericPriority) diagnostics.push({ code: 'PRIORITY_VALUE_UNAVAILABLE', message: 'O campo de prioridade numérica não está disponível neste Project.', recovery: 'Confira o ID do campo; será usada posição documentada ou número/ID.' });
-      if (configuration.queue_order.use_board_position && !useBoard) diagnostics.push({ code: 'BOARD_POSITION_UNAVAILABLE', message: 'A leitura não fornece posição documentada dos itens.', recovery: 'A ordem usa número crescente e ID.' });
+      const projectItems = items.data ?? [];
+      const useBoardPosition = configuration.queue_order.use_board_position && items.state === 'complete' && items.data !== null &&
+        projectItems.every((item) => typeof item.position === 'number');
+      boardAvailable ||= useBoardPosition;
+      if (configuration.queue_order.use_board_position && !useBoardPosition) diagnostics.push({ code: 'BOARD_POSITION_UNAVAILABLE', message: 'A leitura não fornece posição documentada dos itens.', recovery: 'A ordem usa número crescente e ID.' });
       if (activeAttempt) diagnostics.push({ code: 'QUEUE_OCCUPIED', message: 'Já existe uma tentativa ativa. Os demais candidatos permanecem visíveis e não serão descartados.', recovery: 'A fila pode consumir o próximo candidato quando a tentativa terminar.' });
-      const issueItems = (items.data ?? []).filter(item => item.kind === 'issue' && item.contentId);
+      const issueItems = projectItems.filter(item => item.kind === 'issue' && item.contentId);
       const issues = new Map<string, Awaited<ReturnType<QueueGitHub['getIssueContextById']>>>();
       let nextIssue = 0;
       await Promise.all(Array.from({ length: Math.min(3, issueItems.length) }, async () => {
@@ -151,7 +148,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
           issues.set(item.id, await github.getIssueContextById(item.contentId!, { purpose: 'queue' }));
         }
       }));
-      for (const item of items.data ?? []) {
+      for (const item of projectItems) {
         const projectLabel = projectSummary.name;
         const cycle = item.contentId && settings.view.settings.account_id ? storage.getQueueCycle(settings.view.settings.account_id, projectSummary.id, item.contentId) : null;
         const prior = cycle?.consumedAttemptId ? { id: cycle.consumedAttemptId, active: storage.getAttempt(cycle.consumedAttemptId).result === null }
@@ -166,7 +163,6 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         let assignees: QueueItem['assignees'] = [];
         let status: string | null = null;
         let ready = false;
-        let priority: number | null = null;
 
         if (kind !== 'issue') {
           reasons = [kind === 'draft' ? 'DRAFT_ITEM' : kind === 'pull_request' ? 'PULL_REQUEST' : 'READ_INCOMPLETE'];
@@ -201,7 +197,6 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
             const statusValue = membership?.statusValues.find((entry) => entry.fieldId === configuration.github_project?.status_field_id);
             status = statusValue?.name ?? null;
             ready = statusValue?.optionId === configuration.github_project?.status_option_ids.ready;
-            priority = numericPriority ? membership?.numberValues?.find((entry) => entry.fieldId === priorityField)?.value ?? null : null;
           }
         } else {
           projectComplete = false;
@@ -224,11 +219,9 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         const row: QueueItem = { projectId: projectSummary.id, projectName: projectLabel, itemId: item.id, kind, issueId, number, title, url, assignees,
           status, ready, readyEligible, eligible, reasons: [...new Set(reasons)], consumption: prior ? prior.active ? 'active' : 'consumed' : projectComplete ? 'available' : 'unknown',
           attemptId: prior?.id ?? null, order: { position: 1,
-            criterion: numericPriority ? `Prioridade numérica ${configuration.queue_order.priority_direction}; ${useBoard ? 'posição do Project' : 'número/ID'}`
-              : useBoard ? 'Posição documentada do Project; número/ID' : 'Fallback: número crescente; ID',
-            value: priority === null ? null : String(priority) } };
+            criterion: useBoardPosition ? 'Posição do quadro; número crescente e ID' : 'Número crescente e ID' } };
         rows.push(row);
-        sortValues.set(row, { priority, board: useBoard ? item.position ?? null : null, direction: configuration.queue_order.priority_direction });
+        sortValues.set(row, { board: useBoardPosition ? item.position ?? null : null, useBoardPosition });
       }
       if (projectComplete) {
         safeProjects++;
@@ -273,17 +266,16 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
       diagnostics.push(...lastIdentity.diagnostics);
       diagnostics.push({ code: 'QUEUE_OBSERVATION_CHANGED', message: 'Configuração ou conta mudou durante a consulta.', recovery: 'Consulte novamente o resumo atual.' });
     }
-    const order = { criterion: priorityAvailable ? 'numeric-priority' : boardAvailable ? 'project-position' : 'issue-number',
-      description: 'Projetos por ID; em cada projeto, prioridade numérica na direção configurada (ausentes por último), posição documentada quando disponível, número crescente e ID. Sem posição disponível, fallback por número/ID.' };
+    const order = { criterion: boardAvailable ? 'project-position' : 'issue-number',
+      description: 'Projetos por ID; posição do quadro; número crescente e ID.' };
     const compareId = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+    const compareNumber = (a: number | null, b: number | null): number => a === null ? (b === null ? 0 : 1) : b === null ? -1 : a - b;
     rows.sort((a, b) => {
       const projectOrder = compareId(a.projectId, b.projectId);
       if (projectOrder) return projectOrder;
       const av = sortValues.get(a)!; const bv = sortValues.get(b)!;
-      const priorityOrder = av.priority === null ? (bv.priority === null ? 0 : 1) : bv.priority === null ? -1
-        : (av.priority - bv.priority) * (av.direction === 'asc' ? 1 : -1);
-      return priorityOrder || (av.board !== null && bv.board !== null ? av.board - bv.board : 0) ||
-        (a.number ?? Number.MAX_SAFE_INTEGER) - (b.number ?? Number.MAX_SAFE_INTEGER) || compareId(a.issueId ?? a.itemId, b.issueId ?? b.itemId);
+      const boardOrder = av.useBoardPosition && bv.useBoardPosition && av.board !== null && bv.board !== null ? av.board - bv.board : 0;
+      return boardOrder || compareNumber(a.number, b.number) || compareId(a.issueId ?? a.itemId, b.issueId ?? b.itemId);
     });
     rows.forEach((row, index) => { row.order.position = index + 1; });
     const sharedValid = !configurationChanged && !accountChanged && identity.state === 'complete' && Boolean(identity.data) && settings.view.settings.account_id !== null && settings.view.settings.account_id === identity.data?.id;

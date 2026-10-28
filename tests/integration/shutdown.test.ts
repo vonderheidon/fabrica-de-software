@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { ShutdownView, OperationView } from '#contracts';
-import { openStorage, shutdownETag } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage, openStorageAtMigrationVersionForTests, shutdownETag } from '../../apps/controller/src/modules/storage/index.js';
 import { assertStartsAllowed } from '../../apps/controller/src/modules/storage/shutdown.js';
 import { createShutdownCoordinator } from '../../apps/controller/src/modules/shutdown/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -18,9 +18,11 @@ import { publicationFixture } from '../fixtures/publication.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { vi.useRealTimers(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-function setup() {
+function setup(migrationVersionForTest?: number) {
   const directory = mkdtempSync(join(tmpdir(), 'factory-shutdown-'));
-  let storage = openStorage({ dataDirectory: directory });
+  const storageOptions = { dataDirectory: directory };
+  let storage = migrationVersionForTest === undefined ? openStorage(storageOptions)
+    : openStorageAtMigrationVersionForTests(storageOptions, migrationVersionForTest);
   const db = new Database(join(directory, 'factory.sqlite'));
   db.pragma('foreign_keys=ON');
   cleanups.push(() => { storage.close(); db.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -372,7 +374,7 @@ it('revalidates final commitment if resume wins after the worker read its view',
 });
 
 it('upgrades schema 48 without rewriting accepted receipts and offers resume in the restored instance', () => {
-  const f = setup(), pause = command(f); f.storage.acceptShutdown(pause);
+  const f = setup(52), pause = command(f); f.storage.acceptShutdown(pause);
   const before = f.db.prepare('SELECT receipt_json FROM operation_requests WHERE operation_id=?').get(pause.operationId);
   f.db.exec('DROP TRIGGER shutdown_start_barrier; DROP TRIGGER shutdown_final_barrier; DROP TRIGGER shutdown_receipt_immutable; DROP INDEX shutdown_control_order;');
   f.db.exec(readFileSync(new URL('../../apps/controller/src/modules/storage/migrations/048_shutdown_barriers.sql', import.meta.url), 'utf8'));

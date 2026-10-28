@@ -86,9 +86,6 @@ export function assertDeletionQuiescent(db: Database.Database, projectId: string
       ((kind='terminal' AND stop_state<>'confirmed' AND (owned=1 OR launch_state<>'planned')) OR launch_state='starting')`,
     `SELECT 1 FROM passages WHERE attempt_id IN (${attempts}) AND state='starting'`,
     `SELECT 1 FROM capture_runs WHERE delivery_id IN (SELECT id FROM deliveries WHERE attempt_id IN (${attempts})) AND state='running'`,
-    `SELECT 1 FROM verification_runs WHERE attempt_id IN (${attempts}) AND state='running'`,
-    `SELECT 1 FROM checks WHERE attempt_id IN (${attempts}) AND
-      (state IN ('pending','running') OR diagnostic LIKE '%STOP_UNCONFIRMED%' OR execution_diagnostic LIKE '%STOP_UNCONFIRMED%' OR diagnostic='VERIFICATION_INTERRUPTED')`,
     `SELECT 1 FROM publication_target_selections WHERE attempt_id IN (${attempts}) AND state IN ('accepted','running','unknown')`,
     `SELECT 1 FROM publication_requests WHERE attempt_id IN (${attempts}) AND state IN ('accepted','running','unknown')`,
     `SELECT 1 FROM effects WHERE (attempt_id IN (${attempts}) OR creation_id IN (SELECT id FROM project_creations WHERE project_id=?))

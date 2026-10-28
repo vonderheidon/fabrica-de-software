@@ -15,7 +15,7 @@ export type Finding = Static<typeof Finding>;
 export const Review = Type.Object({
     dispute_details_url: Type.String({ minLength: 1, maxLength: 512 }),
     id: OperationId, delivery_id: OperationId, attempt_id: OperationId, passage_id: OperationId,
-    verification_id: OperationId, content_identity: Type.String(),
+    implementer_passage_id: OperationId, content_identity: Type.String(),
     state: Type.Union(['pending', 'approved', 'rejected'].map(v => Type.Literal(v))),
     declared_verdict: Type.Union([Type.Null(), Type.Literal('approved'), Type.Literal('rejected')]),
     reason: Type.Union([Type.Null(), Type.String()]),

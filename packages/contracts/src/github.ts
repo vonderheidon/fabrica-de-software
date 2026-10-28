@@ -35,9 +35,7 @@ export const StatusField = Type.Object({
   id: GitHubId, name: text(1024), options: Type.Array(Type.Object({ id: GitHubId, name: text(1024) }, closed)),
 }, closed);
 export type StatusField = Static<typeof StatusField>;
-export const GitHubProjectDetails = Type.Object({ project: GitHubProject, singleSelectFields: Type.Array(StatusField),
-  numberFields: Type.Optional(Type.Array(Type.Object({ id: GitHubId, name: text(1024) }, closed))),
-}, closed);
+export const GitHubProjectDetails = Type.Object({ project: GitHubProject, singleSelectFields: Type.Array(StatusField) }, closed);
 export type GitHubProjectDetails = Static<typeof GitHubProjectDetails>;
 export const GitHubDiagnostic = Type.Object({
   code: Type.Union(([
@@ -78,7 +76,6 @@ export type IssueBlocker = Static<typeof IssueBlocker>;
 export const IssueMembership = Type.Object({
   itemId: GitHubId, projectId: GitHubId, archived: Type.Boolean(),
   statusValues: Type.Array(Type.Object({ fieldId: GitHubId, optionId: Type.Union([GitHubId, Type.Null()]), name: Type.Union([text(), Type.Null()]) }, closed)),
-  numberValues: Type.Optional(Type.Array(Type.Object({ fieldId: GitHubId, value: Type.Union([Type.Number(), Type.Null()]) }, closed))),
 }, closed);
 export type IssueMembership = Static<typeof IssueMembership>;
 export const IssueContext = Type.Object({
@@ -98,10 +95,9 @@ const ConfigurationRepository = Type.Object({
 }, closed);
 const ConfigurationComment = Type.Object({ ...Type.Omit(IssueComment, ['updatedAt']).properties, updated_at: IssueComment.properties.updatedAt }, closed);
 const ConfigurationMembership = Type.Object({
-  ...Type.Omit(IssueMembership, ['itemId', 'projectId', 'statusValues', 'numberValues']).properties,
+  ...Type.Omit(IssueMembership, ['itemId', 'projectId', 'statusValues']).properties,
   item_id: GitHubId, project_id: GitHubId,
   status_values: Type.Array(Type.Object({ field_id: GitHubId, option_id: Type.Union([GitHubId, Type.Null()]), name: Type.Union([text(), Type.Null()]) }, closed)),
-  number_values: Type.Optional(Type.Array(Type.Object({ field_id: GitHubId, value: Type.Union([Type.Number(), Type.Null()]) }, closed))),
 }, closed);
 export const ConfigurationIssueContext = Type.Object({
   ...Type.Omit(IssueContext, ['repository', 'comments', 'memberships']).properties,

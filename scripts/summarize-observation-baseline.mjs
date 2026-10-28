@@ -91,12 +91,12 @@ for (const cache of [0, 16_777_216, 67_108_864]) for (const surface of audits[0]
   const rows = audits.map(audit => audit.stages.find(stage => stage.generatedCacheBytes === cache).measurements.find(row => row.surface === surface));
   lines.push(`| ${cache} | ${surface} | 5 × 20 | ${stats(rows.map(row => row.medianMs))} | ${Math.min(...rows.map(row => row.payloadMinBytes))}–${Math.max(...rows.map(row => row.payloadMaxBytes))} |`);
 }
-lines.push('', '| Cache (bytes) | DB | WAL | SHM | Artefatos | Git de fixture | Trabalho operacional | Auxiliares |', '|---:|---:|---:|---:|---:|---:|---:|---:|');
+lines.push('', '| Cache (bytes) | DB | WAL | SHM | Git de fixture | Trabalho operacional | Auxiliares |', '|---:|---:|---:|---:|---:|---:|---:|');
 for (const stage of audits[0].stages) {
   const s = stage.sizes;
-  lines.push(`| ${stage.generatedCacheBytes} | ${s.databaseBytes} | ${s.walBytes} | ${s.sharedMemoryBytes} | ${s.evidenceBytes} | ${s.retainedGitDiskBytes} | ${s.operationalWorkBytes} | ${s.otherAuxiliaryBytes} |`);
+  lines.push(`| ${stage.generatedCacheBytes} | ${s.databaseBytes} | ${s.walBytes} | ${s.sharedMemoryBytes} | ${s.retainedGitDiskBytes} | ${s.operationalWorkBytes} | ${s.otherAuxiliaryBytes} |`);
 }
-lines.push('', 'Tabela de tamanhos: primeira repetição; as cinco confirmam invariância na fase de leitura por data_version/eventos/auditoria e igualdade de payload por superfície dentro de cada banco. O único crescimento proporcional é o próprio arquivo ignorado operacional. Instrumentação fs com controle positivo prova ausência de leitura/enumeração de work/git/artifacts pelos resumos; auditoria SQLite e inspeção de auxiliares não encontram marcadores de conteúdo. A inspeção da fixture fora da janela lê arquivos para auditoria e não é custo da consulta.', '',
+lines.push('', 'Tabela de tamanhos: primeira repetição; as cinco confirmam invariância na fase de leitura por data_version/eventos/auditoria e igualdade de payload por superfície dentro de cada banco. O único crescimento proporcional é o próprio arquivo ignorado operacional. Instrumentação fs com controle positivo prova ausência de leitura/enumeração de work/git pelos resumos; auditoria SQLite e inspeção de auxiliares não encontram marcadores de conteúdo. A inspeção da fixture fora da janela lê arquivos para auditoria e não é custo da consulta.', '',
   'Referência, árvore e base Git aprovadas permanecem identificáveis após close/reopen e remoção elegível controlada; não são snapshots de checkout ou índice. O Git e o executor dessa prova são controlados; não constitui recuperação de processo físico ou prova de Git externo. Alterações posteriores de WAL por operações legítimas não são crescimento atribuído a cache.', '',
   '## Ranking e primeira fatia', '',
   '| Prioridade | Candidato | Evidência e frequência | Decisão |', '|---:|---|---|---|',

@@ -53,15 +53,14 @@ function transitionRow(db: Database.Database, operationId: string): TransitionRo
 }
 
 function assertQuiescent(db: Database.Database, projectId: string): void {
-  const blockers = db.prepare<[string,string,string,string,string,string,string], { blocked: number }>(`SELECT
+  const blockers = db.prepare<[string,string,string,string,string,string], { blocked: number }>(`SELECT
     EXISTS(SELECT 1 FROM attempts WHERE project_id=? AND result IS NULL) OR
-    EXISTS(SELECT 1 FROM checks c JOIN attempts a ON a.id=c.attempt_id WHERE a.project_id=? AND c.state IN ('pending','running')) OR
     EXISTS(SELECT 1 FROM resources r JOIN attempts a ON a.id=r.attempt_id WHERE a.project_id=? AND r.kind='terminal' AND r.stop_state IN ('active','uncertain')) OR
     EXISTS(SELECT 1 FROM effects e JOIN attempts a ON a.id=e.attempt_id WHERE a.project_id=? AND e.state IN ('running','unknown')) OR
     EXISTS(SELECT 1 FROM publication_requests p JOIN attempts a ON a.id=p.attempt_id WHERE a.project_id=? AND p.state IN ('accepted','running')) OR
     EXISTS(SELECT 1 FROM publication_target_selections t JOIN attempts a ON a.id=t.attempt_id WHERE a.project_id=? AND t.state IN ('accepted','running','unknown')) OR
     EXISTS(SELECT 1 FROM project_deletions d WHERE d.project_id=? AND NOT EXISTS(SELECT 1 FROM project_deletion_receipts x WHERE x.operation_id=d.operation_id)) AS blocked`)
-    .get(projectId, projectId, projectId, projectId, projectId, projectId, projectId);
+    .get(projectId, projectId, projectId, projectId, projectId, projectId);
   if (blockers?.blocked) throw new OperationError(409, 'PROJECT_STORAGE_BUSY', 'A tentativa, efeito ou exclusão ainda depende destes diretórios.', {
     affected_requirements: ['RF-67','RF-68'], recovery: 'Conclua ou reconcilie a atividade e consulte novamente o plano de transição.' });
 }

@@ -41,7 +41,7 @@ const codeLabels: Readonly<Record<string, string>> = {
   ASSIGNEE_MISMATCH: 'Responsável da issue divergente', DELIVERY_INTEGRITY_FAILED: 'Integridade da versão não confirmada',
   CAPTURE_CONTINUITY_REVOKED: 'Continuidade da captura revogada', CAPTURE_REF_CONFLICT: 'Referência da captura divergente',
   HUMAN_DECISION: 'Aguardando decisão do operador', QUESTION_EXPIRED: 'Pergunta expirada',
-  CAPTURE_FAILED: 'Captura da versão falhou', CHECKS_NOT_CONFIGURED: 'Nenhum check configurado',
+  CAPTURE_FAILED: 'Captura da versão falhou',
   EXECUTOR_COST_NOT_OBSERVED: 'Custo não fornecido pelo executor', NATIVE_OPEN_UNAVAILABLE: 'Abertura nativa indisponível',
   DECLARED_NEW_FILE_IGNORED: 'Arquivo novo ignorado', KNOWN_SECRET_EXCLUDED: 'Arquivo excluído pela regra de segurança',
   RESULT_INVALID: 'Resultado precisa de correção', RESULT_CONFLICT: 'Resultado conflita com um resultado anterior',
@@ -300,7 +300,7 @@ const factLabels: Readonly<Record<string, string>> = {
   id: 'Identificador técnico', round: 'Rodada', role: 'Papel', verdict: 'Parecer', declared_verdict: 'Parecer declarado',
   blocking: 'Impeditivo', category: 'Categoria', exit_code: 'Código de saída', duration_ms: 'Duração em milissegundos',
   passed: 'Aprovado', kind: 'Tipo de recurso', started_at_ms: 'Início', completed_at_ms: 'Conclusão', finished_at_ms: 'Término',
-  check_definition_id: 'Check configurado', producer_passage_id: 'Passagem do Implementador', delivery_id: 'Versão',
+  producer_passage_id: 'Passagem do Implementador', delivery_id: 'Versão',
   criterion_id: 'Critério', finding_id: 'Achado', old_path: 'Caminho anterior', new_path: 'Caminho atual',
   content_identity: 'Identidade do conteúdo', base_sha: 'Referência da base', sha256: 'Verificação SHA-256',
   pendencias_de_medicao: 'Pendências de medição', requisitos_afetados: 'Requisitos associados', authorized_summary_hash: 'Hash do resumo autorizado',
@@ -332,7 +332,6 @@ const eventLabels: Readonly<Record<string, string>> = {
   'dispatch.failed': 'Falha ao iniciar o agente', 'active-time.expired': 'Prazo de execução esgotado',
   'capture.running': 'Captura da versão iniciada', 'capture.captured': 'Versão capturada',
   'capture.failed': 'Falha ao capturar a versão', 'capture.retry.accepted': 'Nova captura solicitada',
-  'verification.started': 'Verificação da versão iniciada', 'check.completed': 'Check concluído',
   'review.planned': 'Revisão planejada', 'review.workspace.ready': 'Ambiente da revisão pronto',
   'review.workspace.partial': 'Preparação do ambiente da revisão incompleta', 'correction.planned': 'Rodada de correção planejada',
   'diagnostic.interrupted': 'Verificação local interrompida',
@@ -372,9 +371,9 @@ export function operatorEventLabel(eventType: string): string {
     };
     return `${operations[board[1]!]}: ${states[board[2]!]}`;
   }
-  const transition = /^(workspace|verification|publication|effect)\.(\w+)$/.exec(normalized);
+  const transition = /^(workspace|publication|effect)\.(\w+)$/.exec(normalized);
   if (transition && operatorState(transition[2]).known) {
-    const subjects: Record<string, string> = { workspace: 'Ambiente da tentativa', verification: 'Verificação da versão', publication: 'Publicação', effect: 'Ação de entrega' };
+    const subjects: Record<string, string> = { workspace: 'Ambiente da tentativa', publication: 'Publicação', effect: 'Ação de entrega' };
     return `${subjects[transition[1]!]}: ${operatorState(transition[2]).label}`;
   }
   const recovery = /^(resource\.remove|folder\.open|interaction\.open)\.(accepted|confirmed|failed|unknown)$/.exec(normalized);

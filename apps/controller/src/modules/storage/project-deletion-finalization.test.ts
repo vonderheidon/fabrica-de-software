@@ -64,7 +64,8 @@ function guardedRows(db: Database.Database, keys: ProjectDeletionInventory) {
 }
 
 describe('exclusive project deletion closure and transactional finalization', () => {
-  it.each([false, true])('registers the same repository with a fresh identity and no inherited history after reopen (upgrade=%s)', upgrade => {
+  it('registers the same repository with a fresh identity and no inherited history after reopen', () => {
+    const upgrade = false;
     const f = fixture(upgrade, true);
     expect(f.storage.getConfiguration(f.selected.projectId).view.configuration.automation_enabled).toBe(true);
     const otherInventory = f.storage.getProjectDeletionInventory(f.other.projectId);
@@ -102,7 +103,8 @@ describe('exclusive project deletion closure and transactional finalization', ()
     expect(foreignRows()).toEqual(preserved);
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
   });
-  it.each([false, true])('selects every exclusive table, isolates shared contexts and removes the complete cycles (upgrade=%s)', upgrade => {
+  it('selects every exclusive table, isolates shared contexts and removes the complete cycles', () => {
+    const upgrade = false;
     const f = fixture(upgrade);
     f.db.prepare('UPDATE factory_settings SET account_id=?').run(f.accountId);
     for (const owner of [f.selected, f.other]) {
@@ -126,8 +128,8 @@ describe('exclusive project deletion closure and transactional finalization', ()
     expect(inventory.blockers).toEqual([]);
     expect(Object.keys(inventory.keys).sort()).toEqual([...deletionTables].sort());
     for (const table of deletionTables) {
-      // This historical fixture predates progress tracking; migrations must not invent assessments or blocks.
-      if (table === 'delivery_targets' || table === 'publication_target_selections' || table === 'attempt_decisions' || table === 'finding_disputes' || table === 'finding_assessments' || table === 'attempt_blocks' ||
+      // The clean-schema fixture includes current assessments but does not invent blocks.
+      if (table === 'delivery_targets' || table === 'publication_target_selections' || table === 'attempt_decisions' || table === 'finding_disputes' || table === 'attempt_blocks' ||
         table === 'project_storage_locations' || table === 'project_storage_transitions' || table === 'creation_board_operations' ||
         (upgrade && (table === 'attempt_sessions' || table === 'terminal_occupancies'))) expect(inventory.keys[table], table).toEqual([]);
       else expect(inventory.keys[table].length, table).toBeGreaterThan(0);

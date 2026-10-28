@@ -34,9 +34,9 @@ it('records durable transitions with exact event, round and content identities a
   const before = readStageActivity(f.db, f.id);
   expect(Value.Check(StageActivity, before)).toBe(true); expect(before.stage).toBe('implementing'); expect(before.availability).toBe('known');
   expect(before.last_activity_at_ms).not.toBeNull(); expect(before.deadline_at_ms).not.toBeNull();
-  f.db.transaction(() => { f.db.prepare("UPDATE attempts SET phase='verifying',revision=revision+1 WHERE id=?").run(f.id); attemptEvent(f.db, f.id, 'verification.started'); })();
+  f.db.transaction(() => { f.db.prepare("UPDATE attempts SET phase='reviewing',revision=revision+1 WHERE id=?").run(f.id); attemptEvent(f.db, f.id, 'review.planned'); })();
   const now = readStageActivity(f.db, f.id);
-  expect(now.stage).toBe('verifying'); expect(now.deadline_at_ms).toBeNull();
+  expect(now.stage).toBe('reviewing'); expect(now.deadline_at_ms).toBeNull();
   const intervals = f.db.prepare('SELECT i.*,e.attempt_id AS event_attempt,e.occurred_at_ms AS event_time,r.delivery_version AS round_delivery FROM attempt_stage_intervals i JOIN events e ON e.seq=i.source_event_seq JOIN rounds r ON r.attempt_id=i.attempt_id AND r.round_number=i.round_number WHERE i.attempt_id=? ORDER BY i.source_event_seq').all(f.id) as Array<Record<string, unknown>>;
   expect(intervals.length).toBeGreaterThanOrEqual(2);
   expect(intervals.filter(row => row.ended_at_ms === null)).toHaveLength(1);

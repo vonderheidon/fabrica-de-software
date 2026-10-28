@@ -66,6 +66,13 @@ beforeEach(() => {
   });
   metadata.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.endsWith('/selections')) return { data: selection };
+    if (url.endsWith('/github-options')) return { data: {
+      executable: { state: 'observed', path: 'C:\\tools\\gh.exe', version: '1', diagnostics: [] },
+      linked_account: settings.settings.account_id ? { id: settings.settings.account_id, login: 'operator' } : null,
+      observed_account: { id: 'account', login: 'operator' },
+      accounts: [{ id: 'account', login: 'operator', active: true, valid: true, eligible: true }],
+      diagnostics: [], retry_at_ms: null,
+    } };
     if (url.includes('/operations/')) return { data: { operation_id: url.split('/').at(-1), state: 'succeeded', receipt: { revision: 2, event_cursor: '2' } } };
     if (url !== '/api/v1/settings') throw new Error('Unavailable observation');
     if (init?.method !== 'PUT') return { data: structuredClone(settings), etag: '"settings-1"' };
@@ -111,6 +118,10 @@ it('preserves draft and saved path on cancellation, unavailable picker and faile
   wizard = true;
   settings.tool_preferences.git.preferred_path = 'C:\\old\\git.exe';
   await mount(); await choose();
+  await click('Continuar para o GitHub');
+  expect(container.textContent).toContain('Há alterações ainda não salvas');
+  await click('Continuar configurando');
+  expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe(path);
   selection = { state: 'cancelled', kind: 'git_executable' };
   await click('Selecionar executável de Git');
   expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe(path);
@@ -128,6 +139,7 @@ it('shows tools only in their own step and returns without repeating them in Git
   wizard = true; await mount();
   expect(container.querySelectorAll('.onboarding-step')).toHaveLength(4);
   expect(container.querySelector('.onboarding-tools-step')?.hasAttribute('hidden')).toBe(false);
+  expect(container.textContent).not.toContain('Salve ou descarte');
   await click('Continuar para o GitHub');
   expect(container.querySelector('#onboarding-step-title')?.textContent).toBe('Conectar GitHub');
   expect(container.querySelector('.onboarding-tools-step')?.hasAttribute('hidden')).toBe(true);

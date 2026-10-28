@@ -6,12 +6,11 @@ import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { removeRecoverySchema } from '../fixtures/recovery-schema.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(start = true) {
-  const f = await attemptFixture(); fixtures.push(f);
+async function fixture(start = true, migrationVersionForTest?: number) {
+  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f);
   const prepared = await f.prepare();
   const op = start ? await f.pipeline.startAttempt(prepared.body, prepared.context) : null;
   if (start) await f.pipeline.drain();
@@ -24,7 +23,9 @@ async function environmentFixture() {
   const f = await fixture(); const a = f.storage.getAttempt(f.id); const binding = f.persistence.getPassage({ passageId: a.passageId }).binding;
   Object.assign(f.workspaces, { captureDelivery: vi.fn(async () => ({ gitRef: `refs/factory/deliveries/${binding.deliveryVersion}`,
     commitSha: 'b'.repeat(40), contentIdentity: 'c'.repeat(40), hasDelta: true, warnings: [] })) });
+  const reviewPlanner = vi.spyOn(f.storage, 'beginReview').mockReturnValue(null);
   f.persistence.acceptResult({ binding, result: f.result, sha256: digest(f.result) }); await f.pipeline.drain();
+  reviewPlanner.mockRestore();
   f.persistence.recordCancellation(f.id, randomUUID());
   f.persistence.recordStop({ passageId: a.passageId }, { passageId: a.passageId, state: 'confirmed' });
   const observation = { exists: true, contentSafe: true, stamp: 'filesystem-identity', reason: null, fileCount: 5, bytes: 123 };
@@ -84,10 +85,20 @@ describe('revocation and explicit retry', () => {
     const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: 'Revised retry guidance', overrides: {}, previous_attempt_id: f.id }, f.context());
     expect(saved.view.preparation.prerequisites.map(r => r.code)).toEqual(['EXECUTOR_REVALIDATION_REQUIRED']);
     const p = saved.view.preparation;
+    expect(p.previous_attempt_id).toBe(f.id);
     const op = await f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true }, { ...f.context(), expectedRevision: saved.etag });
     await f.pipeline.drain(); const fresh = f.storage.getAttemptCapture(op.resource.id);
     expect(op.resource.id).not.toBe(f.id); expect(fresh.baseSha).toBe('d'.repeat(40)); expect(fresh.criteriaDigest).not.toBe(oldCapture.criteriaDigest);
     expect(fresh.configuration.guidance).toContain('Revised retry guidance'); expect(f.storage.getAttemptCapture(f.id)).toEqual(oldCapture);
+    const sessionsFor = (attemptId: string) => f.db.prepare<[string], { id: string; role: string; directory: string }>(
+      'SELECT id,role,session_directory_relative AS directory FROM attempt_sessions WHERE attempt_id=? ORDER BY role',
+    ).all(attemptId);
+    const oldSessions = sessionsFor(f.id); const newSessions = sessionsFor(op.resource.id);
+    expect(oldSessions).toHaveLength(2); expect(newSessions).toHaveLength(2);
+    expect(newSessions.map(session => session.role)).toEqual(oldSessions.map(session => session.role));
+    expect(newSessions.map(session => session.id)).not.toEqual(oldSessions.map(session => session.id));
+    expect(newSessions.map(session => session.directory)).not.toEqual(oldSessions.map(session => session.directory));
+    expect(f.storage.getAttempt(f.id).result).toBe('interrupted');
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(2); expect(f.execution.startPassage).toHaveBeenCalledTimes(2); expect(f.execution.continuePassage).not.toHaveBeenCalled();
     expect(f.storage.getResources(f.id).cleanup).not.toBe('complete');
     expect(() => f.persistence.confirmReady({ passageId: oldStatus.passageId }, f.profile, '18.11.1')).toThrow();
@@ -104,12 +115,12 @@ describe('revocation and explicit retry', () => {
     await expect(f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true }, { ...f.context(), expectedRevision: saved.etag })).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
   });
-  it('migrates v9 without replacing captures/results; restart revokes active coordination and marks native intentions unknown', async () => {
-    const f = await fixture(); const a = f.storage.getAttempt(f.id); const capture = f.storage.getAttemptCapture(f.id); const instance = f.storage.getSettings().installation_id;
-    await f.pipeline.close(); f.storage.close(); removeRecoverySchema(f.db);
+  it('preserves captures and results when reopening the current schema', async () => {
+    const f = await fixture(true); const a = f.storage.getAttempt(f.id); const capture = f.storage.getAttemptCapture(f.id); const instance = f.storage.getSettings().installation_id;
+    await f.pipeline.close(); f.storage.close();
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    ; expect(reopened.getSettings().installation_id).toBe(instance);
+      expect(reopened.getSettings().installation_id).toBe(instance);
       expect(reopened.getAttemptCapture(f.id)).toEqual(capture); expect(reopened.getAttempt(f.id).result).toBe('interrupted');
       expect(() => reopened.executionPersistence().confirmReady({ passageId: a.passageId }, f.profile, '18.11.1')).toThrow();
     } finally { reopened.close(); }

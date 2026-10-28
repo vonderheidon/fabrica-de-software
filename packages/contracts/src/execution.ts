@@ -40,7 +40,7 @@ export const ImplementerResult = Type.Object({
 }, closed);
 export type ImplementerResult = Static<typeof ImplementerResult>;
 export const ReviewCommandRepetition = Type.Object({
-  command: text(4096), check_id: Type.Union([OperationId, Type.Null()]),
+  command: text(4096),
   prior_evidence: Type.Array(text(4096), { maxItems: 20 }), reason: text(8192),
 }, closed);
 export const ReviewerResult = Type.Object({

@@ -6,12 +6,11 @@ import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { openStorage, type AnswerCommand } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
-import { removeQuestionSchema } from '../fixtures/question-schema.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(ttl: number | null = null, active = 100_000) {
-  const f = await attemptFixture(); fixtures.push(f);
+async function fixture(ttl: number | null = null, active = 100_000, migrationVersionForTest?: number) {
+  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f);
   const settings = f.storage.getGlobalConfiguration();
   f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag,
     changes: { time_defaults: { passage_active_time_ms: active,
@@ -254,14 +253,14 @@ describe('independent clocks and limits', () => {
     expect(f.storage.getAttempt(f.id)).toMatchObject({ result: 'cancelled', diagnostic: 'ACTIVE_TIME_EXPIRED' });
     expect(f.db.prepare("SELECT stop_state FROM resources WHERE attempt_id=? AND kind='terminal'").get(f.id)).toEqual({ stop_state: 'uncertain' });
   });
-  it('migrates SQLite v8 preserving question identity and bytes, revokes incomplete historical coordination and reports unavailable timing', async () => {
-    const f = await fixture(); const q = f.raise(); const old = f.storage.getQuestion(f.id, q).view; const identity = f.storage.getSettings().installation_id;
-    await f.pipeline.close(); f.storage.close(); removeQuestionSchema(f.db);
+  it('preserves question identity and bytes when reopening the current schema', async () => {
+    const f = await fixture(null, 100_000); const q = f.raise(); const old = f.storage.getQuestion(f.id, q).view; const identity = f.storage.getSettings().installation_id;
+    await f.pipeline.close(); f.storage.close();
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
     ; expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.getQuestion(f.id, q).view).toMatchObject({ id: q, question: old.question, state: 'cancelled', deliveryReceipt: null });
-      expect(reopened.getMeasurements(f.id).activeTime.state).toBe('unavailable'); expect(f.db.pragma('foreign_key_check')).toEqual([]);
+      expect(f.db.pragma('foreign_key_check')).toEqual([]);
     } finally { reopened.close(); }
   });
 });

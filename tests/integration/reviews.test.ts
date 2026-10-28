@@ -1,30 +1,24 @@
 import { toHttpRoundHistory, toHttpProducerResult } from '../../apps/controller/src/http/execution-views.js';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { ImplementerResult, ReviewerResult } from '#contracts';
+import { ReviewerResult, type ImplementerResult, type ReviewerResult as ReviewerResultType } from '#contracts';
+import { Value } from '@sinclair/typebox/value';
 import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { removeReviewSchema } from '../fixtures/review-schema.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
-import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { removeAttemptDecisionSchema, removeFindingDisputesSchema, removeSessionContinuitySchema } from '../fixtures/managed-terminal-schema.js';
 import { blockCorrection } from '../../apps/controller/src/modules/storage/progress.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(limit = 2, checks: { id: string; command: string; cwd_relative: string }[] = [], beforeStart?: (fixture: AttemptFixture) => Promise<void>) {
+async function fixture(limit = 2, beforeStart?: (fixture: AttemptFixture) => Promise<void>) {
   const f = await attemptFixture(); fixtures.push(f);
   const config = f.storage.getConfiguration(f.projectId);
   const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _createdAtMs, ...configuration } = config.view.configuration;
-  if (limit !== configuration.correction_limit || checks.length) f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: config.etag, projectId: f.projectId,
-    body: { project_changes: { correction_limit: limit, checks } }, globalChanges: {}, configuration: { ...configuration, correction_limit: limit, checks } });
-  const verify = vi.fn(async (id: string) => {
-    const plan = f.storage.beginVerification(id); f.storage.finishVerification(plan.id);
-  });
-  f.dependencies.verification = { verifyDelivery: verify, getArtifact: vi.fn(async () => { throw new Error('Not exercised'); }) };
+  if (limit !== configuration.correction_limit) f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: config.etag, projectId: f.projectId,
+    body: { project_changes: { correction_limit: limit } }, globalChanges: {}, configuration: { ...configuration, correction_limit: limit } });
   const materializeReview = vi.fn(async (d: { attemptId: string }, _id: string) => join(f.directory, 'work', d.attemptId, 'implementation'));
   const captureDelivery = vi.fn(async (input: { deliveryId: string }) => ({ gitRef: `refs/factory/deliveries/${input.deliveryId}`,
     contentIdentity: digest(input).slice(0, 40), commitSha: digest({ commit: input }).slice(0, 40), hasDelta: true, warnings: [] }));
@@ -35,10 +29,11 @@ async function fixture(limit = 2, checks: { id: string; command: string; cwd_rel
   const attemptId = op.resource.id;
   const status = () => f.storage.getAttempt(attemptId);
   const producer = () => f.persistence.getPassage({ passageId: status().passageId });
-  function implement(additionalChangesJustification: string | null = null, responseType: 'corrected' | 'disputed' = 'corrected') {
+  function implement(additionalChangesJustification: string | null = null, responseType: 'corrected' | 'disputed' = 'corrected',
+    checks: ImplementerResult['checks'] = [{ id: 'npm.cmd run typecheck', outcome: 'passed', evidence: 'Observed integration result' }]) {
     const passage = producer(); const previous = f.storage.getOpenFindings(attemptId, passage.binding.round);
     const result: ImplementerResult = { formatVersion: 1, summary: 'Implemented captured scope', writesStopped: true, additionalChangesJustification,
-      criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Observed integration result'] })), checks: [],
+      criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Observed integration result'] })), checks,
       ...(passage.binding.round > 1 ? { findingResponses: previous.map(x => ({ findingId: x.id, responseType, response: responseType === 'disputed' ? 'The captured criterion requires this behavior.' : 'Corrected behavior', evidence: ['New check evidence'] })) } : {}) };
     return f.persistence.acceptResult({ binding: passage.binding, result, sha256: digest(result) });
   }
@@ -50,6 +45,7 @@ async function fixture(limit = 2, checks: { id: string; command: string; cwd_rel
     const { review, passage } = reviewer();
     const prior = f.storage.getOpenFindings(attemptId, passage.binding.round);
     return { formatVersion: 1, summary: approved ? 'Independent review passed' : 'Endpoint returns the wrong value', verdict: approved ? 'approved' : 'rejected',
+      assessments: prior.map(finding => ({ findingId: finding.id, progress: 'not_assessable', evidence: [], justification: 'No independent evidence is available to assess progress on this finding.' })),
       criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: approved ? 'passed' : 'failed', evidence: ['Observed exact captured version ' + review.contentIdentity] })),
       findings: approved ? [] : [{ key: 'response-value', criterionIds: ['ac-1'], category: 'correctness', problem: 'Response value is incorrect', evidence: ['GET returned 2 instead of 3'], expectedResult: 'GET returns 3', priority: 'high', blocking: true }],
       resolutions: prior.map(x => ({ findingKey: x.id, verdict: approved ? 'resolved' : 'unresolved', evidence: ['Independently checked response on new tree'] })) };
@@ -58,7 +54,7 @@ async function fixture(limit = 2, checks: { id: string; command: string; cwd_rel
     const { passage } = reviewer(); f.storage.recordReviewIntegrity(passage.binding, valid);
     return f.persistence.acceptResult({ binding: passage.binding, result: value, sha256: digest(value) });
   }
-  return { ...f, verify, materializeReview, captureDelivery, attemptId, status, producer, implement, reviewer, result, accept };
+  return { ...f, materializeReview, captureDelivery, attemptId, status, producer, implement, reviewer, result, accept };
 }
 
 async function disputedFixture(limit = 5, count = 1) {
@@ -187,6 +183,7 @@ it.each([1, 5])('blocks maintained disputes before another correction, retaining
 it('refuses to seal dispute responses from an invalid independent review', async () => {
   const f = await disputedFixture(); f.implement(null, 'disputed'); await f.pipeline.drain();
   const dispute = f.storage.getPendingFindingDisputes(f.attemptId, 2)[0]!; const value = f.result(false);
+  value.assessments = [];
   expect(() => f.accept({ ...value, disputeResponses: [{ disputeId: dispute.id, verdict: 'maintained', justification: 'Claimed review.', evidence: ['Claim'] }] }, false)).toThrow('RESULT_INVALID');
   f.accept(value, false);
   expect(f.storage.getPendingFindingDisputes(f.attemptId, 2)).toEqual([dispute]);
@@ -231,43 +228,32 @@ it('serves scoped paginated dispute history only on demand without mutating or d
 });
 
 it('records justified command repetitions without accepting evidence from a different version', async () => {
-  const f = await fixture(); f.implement(); await f.pipeline.drain();
-  const value = f.result();
-  value.commandRepetitions = [{ command: 'node visual-check.js', check_id: null, prior_evidence: ['Current screenshot was insufficient for keyboard navigation'], reason: 'Inspect focus after opening the dialog.' }];
+  const f = await fixture(); f.implement(null, 'corrected', [{ id: 'npm build version one', outcome: 'passed', evidence: 'Build evidence from version one' }]); await f.pipeline.drain();
+  f.accept(f.result(false)); await f.pipeline.drain();
+  f.implement(null, 'corrected', [{ id: 'npm build version two', outcome: 'passed', evidence: 'Build evidence from version two' }]); await f.pipeline.drain();
+  const value: ReviewerResultType = f.result();
+  value.commandRepetitions = [{ command: 'npm.cmd test -- tests/integration/reviews.test.ts', prior_evidence: ['Build evidence from version one'], reason: 'Retest the corrected review path.' }];
+  expect(Value.Check(ReviewerResult, { ...value, commandRepetitions: [{ ...value.commandRepetitions[0]!, check_id: randomUUID() }] })).toBe(false);
+  expect(() => f.accept(value)).toThrow('RESULT_INVALID');
+  value.commandRepetitions[0]!.prior_evidence = ['Build evidence from version two'];
   expect(() => f.accept({ ...value, commandRepetitions: [{ ...value.commandRepetitions![0]!, reason: ' ' }] })).toThrow('RESULT_INVALID');
-  expect(() => f.accept({ ...value, commandRepetitions: [{ ...value.commandRepetitions![0]!, check_id: randomUUID() }] })).toThrow('RESULT_INVALID');
+  expect(() => f.accept({ ...value, commandRepetitions: [{ ...value.commandRepetitions![0]!, prior_evidence: [randomUUID()] }] })).toThrow('RESULT_INVALID');
   const receipt = f.accept(value);
   expect(f.reviewer().review.commandRepetitions).toEqual(value.commandRepetitions);
   expect(f.persistence.acceptResult({ binding: receipt.binding, result: value, sha256: digest(value) })).toEqual(receipt);
 });
 
-it('runs configured checks on every corrected version and scopes repeated-command references to that version', async () => {
-  const f = await fixture(2, [{ id: 'test', command: 'node test.js', cwd_relative: '.' }]);
-  f.verify.mockImplementation(async deliveryId => {
-    const run = f.storage.beginVerification(deliveryId);
-    for (const check of run.checks) {
-      const id = randomUUID(); f.storage.startCheck(check.id);
-      f.storage.finishCheck(check.id, { state: 'passed', exitCode: 0, endedAtMs: Date.now(), durationMs: 2, diagnostic: null, executionDiagnostic: null,
-        artifact: { id, attemptId: f.attemptId, deliveryId, checkId: check.id, kind: 'check_log', pathRelative: `${f.attemptId}/${check.id}/${id}.log`, sha256: createHash('sha256').update('').digest('hex'), sizeBytes: 0 } });
-    }
-    f.storage.finishVerification(run.id);
-  });
-  f.dependencies.verification!.getArtifact = vi.fn(async () => ({ bytes: Buffer.alloc(0), filename: 'check.log' }));
-  f.implement(); await f.pipeline.drain(); const first = f.reviewer().review;
-  const firstChecks = f.storage.getCheckHistory(first.deliveryId, {}).entries;
-  const firstTask = JSON.parse(vi.mocked(f.execution.startPassage).mock.calls.find(c => c[0].binding.role === 'reviewer')![0].task);
-  expect(firstTask.reviewScope.mode).toBe('complete');
+it('supplies only the current producer checks on each corrected version', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain(); const first = f.reviewer().review;
+  const task = JSON.parse(vi.mocked(f.execution.startPassage).mock.calls[1]![0].task);
+  expect(task.producerResult).toMatchObject({ result: { checks: f.storage.getProducerResult(first.deliveryId)!.result.checks } });
+  expect(task.reviewScope.mode).toBe('complete');
   f.accept(f.result(false)); await f.pipeline.drain(); f.implement(); await f.pipeline.drain();
-  const current = f.reviewer().review; const currentChecks = f.storage.getCheckHistory(current.deliveryId, {}).entries;
-  expect(currentChecks).toHaveLength(1); expect(currentChecks[0]).toMatchObject({ deliveryId: current.deliveryId, repeatReason: null, runNumber: 1 });
-  expect(f.storage.getCheckHistory(first.deliveryId, {}).entries).toEqual(firstChecks);
+  const next = f.reviewer().review;
   const request = vi.mocked(f.execution.continuePassage).mock.calls.find(c => c[1].binding.role === 'reviewer')![1];
   expect(JSON.parse(request.task).reviewScope.mode).toBe('focused');
-  const value = f.result();
-  const repetition = { command: 'node test.js', check_id: firstChecks[0]!.id, prior_evidence: ['Prior check output'], reason: 'Inspect behavior under a different environment.' };
-  expect(() => f.accept({ ...value, commandRepetitions: [repetition] })).toThrow('RESULT_INVALID');
-  f.accept({ ...value, commandRepetitions: [{ ...repetition, check_id: currentChecks[0]!.id }] });
-  expect(f.reviewer().review.state).toBe('approved');
+  expect(next.implementerPassageId).not.toBe(first.implementerPassageId);
+  expect(JSON.parse(request.task).producerResult).toEqual(f.storage.getProducerResult(next.deliveryId));
 });
 
 it('blocks direct SQL approval when current criterion coverage or earlier blockers are omitted', async () => {
@@ -276,7 +262,7 @@ it('blocks direct SQL approval when current criterion coverage or earlier blocke
   expect(() => f.db.prepare("UPDATE reviews SET state='approved' WHERE id=?").run(first.review.id)).toThrow('REVIEW_APPROVAL_INVALID');
   f.accept(f.result(false)); await f.pipeline.drain(); f.implement(); await f.pipeline.drain();
   const current = f.reviewer(); f.storage.recordReviewIntegrity(current.passage.binding, true);
-  expect(() => f.db.prepare("UPDATE reviews SET state='approved' WHERE id=?").run(current.review.id)).toThrow('REVIEW_APPROVAL_INVALID');
+  expect(() => f.db.prepare("UPDATE reviews SET state='approved' WHERE id=?").run(current.review.id)).toThrow('ASSESSMENT_EVIDENCE_INVALID');
   for (const value of [
     { ...f.result(), criteria: [f.result().criteria[0]!] },
     { ...f.result(), criteria: f.result().criteria.map(c => ({ ...c, verdict: 'not_verified' as const })) },
@@ -322,48 +308,16 @@ it('accepts only a compatible earlier root finding from this attempt, never a pr
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
 });
 
-it.each([false, true])('delivers bounded verified logs, rejecting corrupted bytes=%s before dispatch', async corrupted => {
-  const f = await fixture(2, [{ id: 'test', command: 'node test.js', cwd_relative: '.' }]);
-  const bytes = Buffer.from('check assertion failed\n'.repeat(2000));
-  f.dependencies.verification!.getArtifact = vi.fn(async () => ({ bytes: corrupted ? Buffer.from('altered') : bytes, filename: 'check.log' }));
-  f.verify.mockImplementation(async deliveryId => {
-    const run = f.storage.beginVerification(deliveryId);
-    for (const check of run.checks) {
-      const artifactId = randomUUID();
-      f.storage.startCheck(check.id);
-      f.storage.finishCheck(check.id, { state: 'failed', exitCode: 1, endedAtMs: Date.now(), durationMs: 1, diagnostic: null, executionDiagnostic: null,
-        artifact: { id: artifactId, attemptId: f.attemptId, deliveryId, checkId: check.id, kind: 'check_log',
-          pathRelative: `${f.attemptId}/${check.id}/${artifactId}.log`, sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') } });
-    }
-    f.storage.finishVerification(run.id);
-  });
-  f.implement(); await f.pipeline.drain();
-  if (corrupted) {
-    expect(f.execution.startPassage).toHaveBeenCalledTimes(1);
-    expect(f.dependencies.logFailure).toHaveBeenCalledWith('ARTIFACT_INTEGRITY_FAILED');
-    return;
-  }
-  const task = JSON.parse(vi.mocked(f.execution.startPassage).mock.calls[1]![0].task);
-  expect(task.checks[0]).toMatchObject({ state: 'failed', classification: 'check_failed', logs: [{ truncated: true, artifact: { sizeBytes: bytes.length } }] });
-  expect(Buffer.byteLength(task.checks[0].logs[0].text)).toBe(16_384);
-  f.accept(f.result(false)); await f.pipeline.drain();
-  const correction = JSON.parse(vi.mocked(f.execution.continuePassage).mock.calls.at(-1)![1].task);
-  expect(correction.checks).toEqual(task.checks);
-  expect(f.storage.getCheckHistory(task.delivery.id, { limit: '100' }).entries[0]).not.toHaveProperty('logs');
-});
-
-it('migrates a legacy finding without inventing priority or changing its accepted result hash', async () => {
-  const f = await fixture(); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
-  const before = f.db.prepare('SELECT passage_id,result_hash,summary_json FROM passage_results ORDER BY passage_id').all();
-  removeFindingDisputesSchema(f.db);
-  f.db.exec(`DROP TABLE finding_assessments; DROP TABLE attempt_blocks; DELETE FROM schema_migrations WHERE version=37; DROP TRIGGER review_complete_approval_guard; DROP TRIGGER check_repeat_reason_required; DROP TRIGGER check_repeat_reason_immutable;
-    ALTER TABLE checks DROP COLUMN repeat_reason; DELETE FROM schema_migrations WHERE version=36;
-    DROP TRIGGER finding_origin_binding;
-    ALTER TABLE findings DROP COLUMN origin_finding_id; ALTER TABLE findings DROP COLUMN priority;
-    DELETE FROM schema_migrations WHERE version=35; PRAGMA user_version=34;`);
-  applyMigrations(f.db, loadMigrations(), () => { throw new Error('MUST_NOT_RESEED'); });
-  expect(f.storage.getOpenFindings(f.attemptId, 2)[0]).toMatchObject({ priority: null, originFindingId: null });
-  expect(f.db.prepare('SELECT passage_id,result_hash,summary_json FROM passage_results ORDER BY passage_id').all()).toEqual(before);
+it('starts independent review for producer gaps and isolated technical failures without manual verification', async () => {
+  const f = await fixture(); const p = f.producer();
+  const result: ImplementerResult = { formatVersion: 1, summary: 'Partial implementation', writesStopped: true,
+    criteria: ['ac-1','ac-2'].map(criterionId => ({ criterionId, verdict: 'not_verified', evidence: ['Browser unavailable; independent review required'] })),
+    checks: [{ id: 'browser', outcome: 'technical_error', evidence: 'Browser could not start' }] };
+  f.persistence.acceptResult({ binding:p.binding,result,sha256:digest(result) }); await f.pipeline.drain();
+  const review = f.reviewer().review;
+  expect(review).toMatchObject({ state: 'pending', implementerPassageId: p.binding.passageId });
+  expect(review).not.toHaveProperty('verificationId');
+  expect(f.storage.getProducerResult(review.deliveryId)?.result.checks).toEqual(result.checks);
 });
 
 it('requires an explicit nullable justification in corrections before issuing a receipt', async () => {
@@ -379,23 +333,25 @@ it('requires an explicit nullable justification in corrections before issuing a 
   expect(f.persistence.acceptResult({ binding, result, sha256: digest(result) })).toEqual(accepted);
 });
 
-it('keeps a technical check execution failure separate from findings and automatic corrections', async () => {
-  const f = await fixture(2, [{ id: 'test', command: 'node test.js', cwd_relative: '.' }]);
-  f.verify.mockImplementation(async deliveryId => {
-    const run = f.storage.beginVerification(deliveryId); f.storage.finishVerification(run.id, 'CHECK_RUNNER_FAILED');
-  });
-  f.implement(); await f.pipeline.drain();
-  expect(f.status()).toMatchObject({ suspension: 'VERIFICATION_FAILED' });
+it('passes a producer technical validation failure to review without executing saved commands', async () => {
+  const f = await fixture(2);
+  const passage = f.producer();
+  const result: ImplementerResult = { formatVersion: 1, summary: 'Validation could not run', writesStopped: true,
+    criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: 'not_verified', evidence: ['The environment did not provide the required runtime'] })),
+    checks: [{ id: 'node test.js', outcome: 'technical_error: command unavailable', evidence: 'The shell returned command-not-found before the test started' }] };
+  f.persistence.acceptResult({ binding: passage.binding, result, sha256: digest(result) }); await f.pipeline.drain();
+  expect(f.status()).toMatchObject({ suspension: null, phase: 'reviewing' });
   expect(f.storage.getOpenFindings(f.attemptId, 2)).toEqual([]);
-  expect(f.execution.startPassage).toHaveBeenCalledTimes(1); expect(f.execution.continuePassage).not.toHaveBeenCalled();
-  expect(f.storage.getReview(f.status().deliveryId!)).toBeNull();
+  expect(f.execution.startPassage).toHaveBeenCalledTimes(2); expect(f.execution.continuePassage).not.toHaveBeenCalled();
+  expect(f.storage.getReview(f.status().deliveryId!)?.state).toBe('pending');
+  expect(f.storage.getProducerResult(f.status().deliveryId!)?.result.checks).toEqual(result.checks);
+  expect(JSON.parse(vi.mocked(f.execution.startPassage).mock.calls[0]![0].task)).not.toHaveProperty('checks');
 });
 
-it('dispatches review after durable capture/checks, with exact profile/tree and no implementer conversation', async () => {
+it('dispatches review after durable capture and producer result, with exact profile/tree and no implementer conversation', async () => {
   const f = await fixture(); expect(f.materializeReview).not.toHaveBeenCalled();
   f.implement(); await f.pipeline.drain();
   const { review, passage } = f.reviewer(); const delivery = f.storage.getDelivery(review.deliveryId);
-  expect(f.verify).toHaveBeenCalledExactlyOnceWith(delivery.delivery.id, expect.any(AbortSignal));
   const calls = vi.mocked(f.execution.startPassage).mock.calls; expect(calls).toHaveLength(2);
   const request = calls[1]![0]; const task = JSON.parse(request.task) as Record<string, unknown>;
   expect(request.binding.role).toBe('reviewer'); expect(request.cwd).toBe(calls[0]![0].cwd);
@@ -404,7 +360,7 @@ it('dispatches review after durable capture/checks, with exact profile/tree and 
   expect(task).toHaveProperty('producerResult');
   expect(task.evidenceDirectory).toBe(`.factory-evidence/${review.id}/`);
   expect(task.delivery).toEqual(delivery.delivery); expect(passage.effectiveProfile?.model).toBe(f.profile.model);
-  expect(review.contentIdentity).toBe(delivery.verification?.contentIdentity);
+  expect(review.contentIdentity).toBe(delivery.delivery.contentIdentity);
   const accepted = f.accept(f.result()); await f.pipeline.drain();
   expect(f.storage.getReview(review.deliveryId)).toMatchObject({ state: 'approved', independenceState: 'valid' });
   expect(f.status()).toMatchObject({ phase: 'publishing', result: null, round: 1 });
@@ -433,7 +389,7 @@ it.each([0, 1, 2, 3, 4, 5])('exhausts correctionLimit=%i only after reviewing th
   expect(f.execution.continuePassage).toHaveBeenCalledTimes(2 * used);
   expect(f.execution.startPassage).toHaveBeenCalledTimes(2); // One initial launch per role.
   expect(f.execution.preparePassageHandoff).toHaveBeenCalledTimes(1 + 2 * used);
-  expect(f.verify).toHaveBeenCalledTimes(1 + used); expect(f.captureDelivery).toHaveBeenCalledTimes(1 + used);
+  expect(f.captureDelivery).toHaveBeenCalledTimes(1 + used);
   for (const id of reviews) expect(f.storage.getReview(id)?.state).toBe('rejected');
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
 });
@@ -497,19 +453,7 @@ it('does not materialize the next reviewer checkout while the prior reviewer can
   expect(f.status().diagnostic).toBe('CAPTURE_HANDOFF_FAILED');
 });
 
-it('migrates schema 33 without rewriting session identities, captures or accepted results', async () => {
-  const f = await fixture(); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
-  const existing = ['attempt_sessions','managed_terminals','terminal_occupancies','passages','passage_results','reviews','attempts'];
-  const before = existing.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
-  removeSessionContinuitySchema(f.db);
-  expect(f.db.pragma('user_version', { simple: true })).toBe(33);
-  const ledger = f.db.prepare('SELECT * FROM schema_migrations ORDER BY version').all();
-  applyMigrations(f.db, loadMigrations(), () => { throw new Error('NO_RESEED'); });
-  ;
-  expect(existing.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
-  expect(f.db.prepare('SELECT * FROM schema_migrations WHERE version<=33 ORDER BY version').all()).toEqual(ledger);
-  expect(f.db.pragma('foreign_key_check')).toEqual([]);
-});
+
 
 it('refuses cross-role, foreign-attempt and lost-session continuation identities', async () => {
   const f = await fixture(); f.implement(); await f.pipeline.drain();
@@ -602,17 +546,7 @@ it('projects the immutable block and paged assessment history over authenticated
   } finally { await app.close(); }
 });
 
-it('migrates v36 additively without fabricating progress or changing accepted history', async () => {
-  const f = await fixture(); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
-  const tables = ['attempts', 'reviews', 'findings', 'passage_results'];
-  const before = tables.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
-  removeFindingDisputesSchema(f.db);
-  f.db.exec('DROP TABLE finding_assessments; DROP TABLE attempt_blocks; DELETE FROM schema_migrations WHERE version=37; PRAGMA user_version=36');
-  applyMigrations(f.db, loadMigrations(), () => { throw new Error('NO_RESEED'); });
-  expect(tables.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
-  expect(f.db.prepare('SELECT * FROM finding_assessments').all()).toEqual([]);
-  expect(f.storage.getAttemptBlock(f.attemptId)).toBeNull(); expect(f.db.pragma('foreign_key_check')).toEqual([]);
-});
+
 
 it('preserves historical results/findings/resolutions and rejects inserts into sealed reviews', async () => {
   const f = await fixture(); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
@@ -643,18 +577,7 @@ it('keeps rejected review and durable receipt across reopen without replaying re
   } finally { reopened.close(); }
 });
 
-it('migrates real SQLite v7 without reseeding, changing captured refs or fabricating reviews', async () => {
-  const f = await fixture(); delete f.dependencies.verification;
-  f.implement(); await f.pipeline.drain(); const d = f.status().deliveryId!;
-  const old = f.storage.getDelivery(d); const identity = f.storage.getSettings().installation_id;
-  await f.pipeline.close(); f.storage.close(); removeReviewSchema(f.db);
-  const reopened = openStorage({ dataDirectory: f.directory });
-  try {
-    ; expect(reopened.getSettings().installation_id).toBe(identity);
-    expect(reopened.getDelivery(d)).toMatchObject({ delivery: old.delivery, verification: old.verification }); expect(reopened.getReview(d)).toBeNull();
-    expect(f.db.pragma('foreign_key_check')).toEqual([]);
-  } finally { reopened.close(); }
-});
+
 
 it('exposes scoped lightweight round history and on-demand review/producer details over protected HTTP', async () => {
   const f = await fixture(0); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
@@ -679,14 +602,12 @@ it('exposes scoped lightweight round history and on-demand review/producer detai
   } finally { await app.close(); }
 });
 
-it('does not allocate review intent after a technical check error or an unfinished check', async () => {
-  const f = await fixture(); delete f.dependencies.verification; f.implement(); await f.pipeline.drain(); const d = f.status().deliveryId!;
-  expect(() => f.storage.beginReview(d)).toThrow(expect.objectContaining({ code: 'REVIEW_NOT_ALLOWED' }));
-  const run = f.storage.beginVerification(d);
-  expect(() => f.storage.beginReview(d)).toThrow(expect.objectContaining({ code: 'REVIEW_NOT_ALLOWED' }));
-  f.storage.finishVerification(run.id, 'CHECK_STOP_UNCONFIRMED');
-  expect(() => f.storage.beginReview(d)).toThrow(expect.objectContaining({ code: 'REVIEW_NOT_ALLOWED' }));
-  expect(f.storage.getReview(d)).toBeNull(); expect(f.execution.startPassage).toHaveBeenCalledOnce();
+it('does not allocate a second review or resource on repeated planning', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain(); const d=f.status().deliveryId!;
+  const before=f.db.prepare('SELECT count(*) AS n FROM resources').get();
+  expect(f.storage.beginReview(d)).toBeNull();
+  expect(f.db.prepare('SELECT count(*) AS n FROM resources').get()).toEqual(before);
+  expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
 });
 
 it('preserves cancellation while a review workspace materialization returns late', async () => {
@@ -698,8 +619,9 @@ it('preserves cancellation while a review workspace materialization returns late
 });
 
 it('rolls back review intent under SQLite busy before any reviewer materialization', async () => {
-  const f = await fixture(); delete f.dependencies.verification; f.implement(); await f.pipeline.drain(); const d = f.status().deliveryId!;
-  const run = f.storage.beginVerification(d); f.storage.finishVerification(run.id);
+  const f = await fixture(2, async base => { vi.spyOn(base.storage,'beginReview').mockReturnValue(null); });
+  f.implement(); await f.pipeline.drain(); const d = f.status().deliveryId!;
+  vi.mocked(f.storage.beginReview).mockRestore();
   f.db.exec('BEGIN IMMEDIATE');
   try { expect(() => f.storage.beginReview(d)).toThrow(expect.objectContaining({ code: 'CONFIGURATION_STORAGE_FAILED' })); }
   finally { f.db.exec('ROLLBACK'); }
@@ -736,12 +658,13 @@ it('permits an explicit nonblocking pending finding while independently resolvin
   expect(f.status().phase).toBe('publishing'); expect(f.storage.getOpenFindings(f.attemptId, 3)).toMatchObject([{ blocking: false }]);
 });
 
-it.each(['none', 'not_assessable', 'omitted'] as const)('blocks before recruitment after two completed corrections with %s progress despite new findings', async progress => {
+it.each(['none', 'not_assessable'] as const)('blocks before recruitment after two completed corrections with %s progress despite new findings', async progress => {
   const f = await fixture(5); let root = '';
   for (let round = 1; round <= 3; round++) {
     f.implement(); await f.pipeline.drain();
     const value = f.result(false);
-    if (round > 1 && progress !== 'omitted') value.assessments = [{ findingId: root, progress, evidence: [], justification: 'No independently verified improvement.' }];
+    if (round > 1) value.assessments = value.assessments!.map(assessment => assessment.findingId === root
+      ? { findingId: root, progress, evidence: [], justification: 'No independent improvement evidence is available.' } : assessment);
     f.accept(value); await f.pipeline.drain();
     if (round === 1) root = f.storage.getOpenFindings(f.attemptId, 2)[0]!.id;
   }
@@ -760,29 +683,51 @@ it.each(['none', 'not_assessable', 'omitted'] as const)('blocks before recruitme
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
 });
 
-it.each(['partial', 'proven'] as const)('resets recurrence only with %s progress backed by a current verified artifact', async progress => {
-  const f = await fixture(5, [{ id: 'test', command: 'node check.js', cwd_relative: '.' }]);
-  f.dependencies.verification!.getArtifact = vi.fn(async () => ({ bytes: Buffer.from('verified'), filename: 'check.log' }));
-  f.verify.mockImplementation(async deliveryId => {
-    const run = f.storage.beginVerification(deliveryId);
-    for (const check of run.checks) {
-      const id = randomUUID(); f.storage.startCheck(check.id);
-      f.storage.finishCheck(check.id, { state: 'passed', exitCode: 0, endedAtMs: Date.now(), durationMs: 1, diagnostic: null, executionDiagnostic: null,
-        artifact: { id, attemptId: f.attemptId, deliveryId, checkId: check.id, kind: 'check_log', pathRelative: `${f.attemptId}/${check.id}/${id}.log`, sizeBytes: 8, sha256: createHash('sha256').update('verified').digest('hex') } });
-    }
-    f.storage.finishVerification(run.id);
-  });
-  let root = ''; let oldArtifact = '';
+it('rejects an omitted evaluation for a prior finding without persisting a synthetic assessment', async () => {
+  const f = await fixture(5); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
+  const root = f.storage.getOpenFindings(f.attemptId, 2)[0]!;
+  f.implement(); await f.pipeline.drain();
+  const { passage, review } = f.reviewer(); const missing = f.result(false); missing.assessments = [];
+  expect(() => f.accept(missing)).toThrow('RESULT_INVALID');
+  expect(f.persistence.getResult(passage.handle)).toBeNull();
+  expect(f.storage.getReview(review.deliveryId)?.state).toBe('pending');
+  expect(f.db.prepare('SELECT * FROM finding_assessments WHERE finding_id=?').all(root.id)).toEqual([]);
+  const explicit = { ...missing, assessments: [{ findingId: root.id, progress: 'not_assessable' as const, evidence: [], justification: 'A technical impediment prevented an independent assessment.' }] };
+  f.accept(explicit); await f.pipeline.drain();
+  expect(f.db.prepare('SELECT progress,justification FROM finding_assessments WHERE finding_id=?').get(root.id))
+    .toEqual({ progress: 'not_assessable', justification: 'A technical impediment prevented an independent assessment.' });
+});
+
+it('refuses to seal an independent review when an earlier finding has no matching assessment row', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
+  f.implement(); await f.pipeline.drain();
+  const { passage, review } = f.reviewer(); f.storage.recordReviewIntegrity(passage.binding, true);
+  const missing = f.result(false); missing.assessments = [];
+  const { criteria, ...summary } = missing;
+  f.db.prepare('INSERT INTO passage_results(passage_id,attempt_id,result_hash,receipt_id,summary_json,accepted_at_ms) VALUES (?,?,?,?,?,0)')
+    .run(passage.binding.passageId, f.attemptId, digest(missing), randomUUID(), JSON.stringify(summary));
+  for (const criterion of criteria) {
+    f.db.prepare('INSERT INTO criterion_results(passage_id,attempt_id,criterion_id,verdict,evidence_json) VALUES (?,?,?,?,?)')
+      .run(passage.binding.passageId, f.attemptId, criterion.criterionId, criterion.verdict, JSON.stringify(criterion.evidence));
+  }
+  expect(() => f.db.prepare("UPDATE reviews SET state='rejected',completed_at_ms=1 WHERE id=?").run(review.id))
+    .toThrow('ASSESSMENT_EVIDENCE_INVALID');
+  expect(f.storage.getReview(review.deliveryId)?.state).toBe('pending');
+  expect(f.db.prepare('SELECT * FROM finding_assessments WHERE review_id=?').all(review.id)).toEqual([]);
+});
+
+it.each(['partial', 'proven'] as const)('resets recurrence only with %s progress backed by the exact independent current assessment', async progress => {
+  const f = await fixture(5);
+  let root = ''; let oldEvidence = '';
   for (let round = 1; round <= 5; round++) {
-    f.implement(); await f.pipeline.drain(); const current = f.reviewer().review;
-    const artifact = f.storage.getCheckHistory(current.deliveryId, {}).entries[0]!.artifacts[0]!.id;
+    f.implement(); await f.pipeline.drain();
     const value = f.result(false);
     if (round > 1) {
-      const assessment = { findingId: root, progress: round === 3 ? progress : 'none' as const, evidence: round === 3 ? [`artifact:${artifact}`] : [], justification: 'Independent current check evidence.' };
+      const assessment = { findingId: root, progress: round === 3 ? progress : 'none' as const, evidence: round === 3 ? [value.criteria[0]!.evidence[0]!] : [], justification: 'Independent current check evidence.' };
       if (round === 3) {
-        for (const evidence of [[], ['Edited the implementation'], [`artifact:${oldArtifact}`], [`artifact:${randomUUID()}`]]) expect(() => f.accept({ ...value, assessments: [{ ...assessment, evidence }] })).toThrow('RESULT_INVALID');
+        for (const evidence of [[], ['Edited the implementation'], [oldEvidence], [`artifact:${randomUUID()}`]]) expect(() => f.accept({ ...value, assessments: [{ ...assessment, evidence }] })).toThrow('RESULT_INVALID');
       }
-      value.assessments = [assessment];
+      value.assessments = value.assessments!.map(existing => existing.findingId === root ? assessment : existing);
       if (round === 3) {
         // Resolve later unrelated roots; the same canonical blocker remains open.
         value.resolutions = value.resolutions.map(x => ({ ...x, verdict: x.findingKey === root ? 'unresolved' : 'resolved' }));
@@ -790,7 +735,7 @@ it.each(['partial', 'proven'] as const)('resets recurrence only with %s progress
     }
     f.accept(value); await f.pipeline.drain();
     if (round === 1) root = f.storage.getOpenFindings(f.attemptId, 2)[0]!.id;
-    oldArtifact = artifact;
+    oldEvidence = value.criteria[0]!.evidence[0]!;
     if (round === 3) expect(f.storage.getAttemptDetail(f.attemptId, {}).block).toBeNull();
   }
   expect(f.storage.getAttemptDetail(f.attemptId, {}).block).toMatchObject({ reason: 'no_progress', finding_ids: expect.arrayContaining([root]), corrections_used: 4 });
@@ -803,6 +748,7 @@ it('rejects foreign, duplicate and noncanonical assessments atomically and keeps
   const assessment = { findingId: root.id, progress: 'none' as const, evidence: [], justification: 'No progress.' };
   for (const assessments of [[{ ...assessment, findingId: randomUUID() }], [assessment, assessment]]) expect(() => f.accept({ ...value, assessments })).toThrow('RESULT_INVALID');
   expect(f.db.prepare('SELECT * FROM finding_assessments').all()).toEqual([]);
+  expect(() => f.accept({ ...value, assessments: [{ ...assessment, evidence: [`artifact:${randomUUID()}`] }] })).toThrow('RESULT_INVALID');
   expect(f.storage.beginCorrection(f.status().deliveryId!)).toBeNull();
   expect(f.storage.getAttemptDetail(f.attemptId, {}).block).toBeNull();
   const linked = { ...value, findings: [{ ...value.findings[0]!, originFindingId: root.id }], assessments: [assessment] };
@@ -816,7 +762,7 @@ it('rejects foreign, duplicate and noncanonical assessments atomically and keeps
 
 it('serves V02 through the authenticated decision route with Idempotency-Key and attempt If-Match', async () => {
   let app: ReturnType<typeof createApp> | null = null; let browserOrigin = '';
-  const f = await fixture(4, [], async initial => {
+  const f = await fixture(4, async initial => {
     const config = loadConfiguration({ FACTORY_DATA_DIR: initial.directory, FACTORY_LOG_LEVEL: 'silent' }, initial.directory);
     browserOrigin = config.browserOrigin;
     app = createApp(config, initial.storage, undefined, undefined, undefined, initial.pipeline);
@@ -916,17 +862,6 @@ it('prepares a role-matched successor without ending or starting the blocked att
   expect((await f.preparations.getPreparation(successorId)).view.preparation.previous_attempt_id).toBe(f.attemptId);
 });
 
-it('migrates v38 decisions additively without rewriting blocked attempts or accepted review history', async () => {
-  const f = await noProgressBlockedFixture(4);
-  const tables = ['attempts', 'attempt_blocks', 'reviews', 'findings', 'finding_assessments', 'finding_disputes', 'passages', 'passage_results'];
-  const before = tables.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
-  removeAttemptDecisionSchema(f.db);
-  applyMigrations(f.db, loadMigrations(), () => { throw new Error('NO_RESEED'); });
-  expect(tables.map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())).toEqual(before);
-  expect(f.db.prepare('SELECT * FROM attempt_decisions').all()).toEqual([]);
-  expect(f.db.pragma('foreign_key_check')).toEqual([]);
-  ;
-});
 
 it('blocks human decisions with a stale ETag and rejects guidance after the captured correction limit', async () => {
   const f = await fixture(0); f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
@@ -939,4 +874,104 @@ it('blocks human decisions with a stale ETag and rejects guidance after the capt
   await expect(f.pipeline.makeAttemptDecision(f.attemptId, guidance, { operationId: randomUUID(), expectedRevision: `"${status.id}:${status.revision}"` }))
     .rejects.toMatchObject({ code: 'CORRECTION_LIMIT_REACHED' });
   expect(f.db.prepare('SELECT * FROM attempt_decisions').all()).toEqual([]);
+});
+
+
+it('requires the exact durable producer in internal and HTTP review identities', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain();
+  const first = f.reviewer();
+  expect(first.review.implementerPassageId).toBe(f.storage.getDelivery(first.review.deliveryId).delivery.producerPassageId);
+  const { toHttpReview } = await import('../../apps/controller/src/http/execution-views.js');
+  expect(toHttpReview(first.review)).toMatchObject({ implementer_passage_id: first.review.implementerPassageId });
+  expect(toHttpReview(first.review)).not.toHaveProperty('verification_id');
+  f.accept(f.result(false)); await f.pipeline.drain(); f.implement(); await f.pipeline.drain();
+  const second = f.reviewer().review;
+  const sql = f.db.prepare("INSERT INTO reviews(id,delivery_id,attempt_id,passage_id,implementer_passage_id,content_identity,state,independence_state,workspace_state,created_at_ms) VALUES (?,?,?,?,?,?,'pending','pending','planned',0)");
+  const values = [randomUUID(),second.deliveryId,second.attemptId,second.passageId,second.implementerPassageId,second.contentIdentity];
+  for (const [index,value] of [[4,first.review.implementerPassageId],[4,first.review.passageId],[1,first.review.deliveryId],[5,first.review.contentIdentity]] as const) {
+    const invalid = [...values]; invalid[index]=value;
+    expect(() => sql.run(...invalid)).toThrow('REVIEW_BINDING_INVALID');
+  }
+  for (const value of [first.review.implementerPassageId,first.review.passageId]) {
+    expect(() => f.db.prepare('UPDATE reviews SET implementer_passage_id=? WHERE id=?').run(value,second.id)).toThrow('IMMUTABLE_RECORD');
+  }
+  expect(f.db.prepare('SELECT count(*) AS n FROM reviews').get()).toEqual({ n:2 });
+  expect(f.db.pragma('foreign_key_check')).toEqual([]);
+});
+
+it('refuses schema upgrade when persisted reviews would require conversion and leaves their rows untouched', async () => {
+  const f = await fixture(); f.implement(); await f.pipeline.drain();
+  const reviews = f.db.prepare('SELECT id,delivery_id,attempt_id,passage_id,implementer_passage_id,content_identity,state FROM reviews ORDER BY id').all();
+  const resources = f.db.prepare('SELECT id,attempt_id,passage_id,kind,reference FROM resources ORDER BY id').all();
+  await f.pipeline.close(); f.storage.close();
+  f.db.exec('DELETE FROM schema_migrations WHERE version>=52; PRAGMA user_version=51;');
+  expect(() => openStorage({ dataDirectory: f.directory })).toThrow();
+  expect(f.db.pragma('user_version', { simple: true })).toBe(51);
+  expect(f.db.prepare('SELECT id,delivery_id,attempt_id,passage_id,implementer_passage_id,content_identity,state FROM reviews ORDER BY id').all()).toEqual(reviews);
+  expect(f.db.prepare('SELECT id,attempt_id,passage_id,kind,reference FROM resources ORDER BY id').all()).toEqual(resources);
+});
+
+it.each(['uncaptured','revoked','finished'] as const)('rejects structural review planning without allocating resources: %s', async condition => {
+  const f = await fixture(2, async base => { vi.spyOn(base.storage,'beginReview').mockReturnValue(null); });
+  if (condition==='uncaptured') f.captureDelivery.mockRejectedValueOnce(new Error('Capture unavailable'));
+  f.implement(); await f.pipeline.drain();
+  vi.mocked(f.storage.beginReview).mockRestore();
+  if(condition==='revoked') f.db.prepare("UPDATE passages SET state='interrupted' WHERE id=?").run(f.producer().binding.passageId);
+  if(condition==='finished') f.persistence.recordCancellation(f.attemptId,randomUUID());
+  const resources=f.db.prepare('SELECT count(*) AS n FROM resources').get();
+  const passages=f.db.prepare('SELECT count(*) AS n FROM passages').get();
+  expect(()=>f.storage.beginReview(f.status().deliveryId!)).toThrow(expect.objectContaining({code:'REVIEW_NOT_ALLOWED'}));
+  expect(f.db.prepare('SELECT count(*) AS n FROM resources').get()).toEqual(resources);
+  expect(f.db.prepare('SELECT count(*) AS n FROM passages').get()).toEqual(passages);
+});
+
+it('approves complete independent evidence without a manual verification or producer check list', async () => {
+  const f=await fixture(); const p=f.producer();
+  const value: ImplementerResult={formatVersion:1,summary:'Await independent evaluation',writesStopped:true,checks:[],
+    criteria:['ac-1','ac-2'].map(criterionId=>({criterionId,verdict:'not_verified',evidence:['Independent evaluation required']}))};
+  f.persistence.acceptResult({binding:p.binding,result:value,sha256:digest(value)}); await f.pipeline.drain();
+  for(const evidence of [[],[' '],['a'.repeat(40)],['artifact:'+randomUUID()]]) {
+    const invalid=f.result(); invalid.criteria[0]!.evidence=evidence;
+    expect(()=>f.accept(invalid)).toThrow('RESULT_INVALID');
+    expect(f.persistence.getResult(f.reviewer().passage.handle)).toBeNull();
+  }
+  f.accept(f.result());
+  expect(f.reviewer().review.state).toBe('approved');
+  expect(f.db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('verification_runs','checks','artifacts')").all()).toEqual([]);
+});
+
+
+it.each(['partial','proven','none','not_assessable'] as const)('guards %s assessment against the exact accepted reviewer payload while still pending', async progress => {
+  const f=await disputedFixture(); f.implement(); await f.pipeline.drain();
+  const {review,passage}=f.reviewer(); const root=f.original.findings[0]!;
+  f.storage.recordReviewIntegrity(passage.binding,true);
+  const value=f.result(false); const evidence=['proven','partial'].includes(progress) ? value.criteria[0]!.evidence : [];
+  const assessment={findingId:root.id,progress,justification:'Independent observation of the current criterion',evidence};
+  value.assessments=[assessment];
+  const {criteria,...summary}=value;
+  f.db.prepare('INSERT INTO passage_results(passage_id,attempt_id,result_hash,receipt_id,summary_json,accepted_at_ms) VALUES (?,?,?,?,?,0)')
+    .run(passage.binding.passageId,f.attemptId,digest(value),randomUUID(),JSON.stringify(summary));
+  for(const c of criteria) f.db.prepare('INSERT INTO criterion_results(passage_id,attempt_id,criterion_id,verdict,evidence_json) VALUES (?,?,?,?,?)')
+    .run(passage.binding.passageId,f.attemptId,c.criterionId,c.verdict,JSON.stringify(c.evidence));
+  const insert=f.db.prepare('INSERT INTO finding_assessments(id,attempt_id,finding_id,review_id,progress,evidence_json,justification,created_at_ms) VALUES (?,?,?,?,?,?,?,0)');
+  const args=[randomUUID(),f.attemptId,root.id,review.id,progress,JSON.stringify(evidence),assessment.justification];
+  const invalidRows: Array<readonly [number, string]> = [
+    [5, JSON.stringify(['unrelated evidence'])],
+    [5, JSON.stringify([`artifact:${randomUUID()}`])],
+    [5, JSON.stringify(['a'.repeat(40)])],
+    [6, 'Different justification'],
+    [4, progress === 'partial' ? 'proven' : 'partial'],
+  ];
+  if (['proven','partial'].includes(progress)) invalidRows.push([5, '[]']);
+  for(const [index,replacement] of invalidRows){
+    const invalid=[...args];invalid[index]=replacement;
+    expect(()=>insert.run(...invalid)).toThrow('ASSESSMENT_EVIDENCE_INVALID');
+    expect(f.db.prepare('SELECT * FROM finding_assessments').all()).toEqual([]);
+  }
+  insert.run(...args);
+  expect(f.storage.getReview(review.deliveryId)?.state).toBe('pending');
+  expect(f.db.prepare('SELECT progress,evidence_json,justification FROM finding_assessments').get())
+    .toEqual({progress,evidence_json:JSON.stringify(evidence),justification:assessment.justification});
+  expect(()=>f.db.exec("UPDATE finding_assessments SET progress='none'")).toThrow('IMMUTABLE_RECORD');
+  expect(f.db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('verification_runs','checks','artifacts')").all()).toEqual([]);
 });

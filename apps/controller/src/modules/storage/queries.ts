@@ -9,7 +9,6 @@ import { readMeasurements } from './measurements.js';
 import { readStageActivity } from './stage-activity.js';
 import { readResources } from './recovery.js';
 import { publicationSummary } from './publication.js';
-import { readArtifact } from './verification.js';
 import { readEffect } from './effects.js';
 import { OperationError } from './operations.js';
 import { StorageError } from './errors.js';
@@ -92,7 +91,7 @@ export function readAttemptPage(db: Database.Database, query: AttemptListQuery):
 
   const pageKey = "printf('%020d',a.created_at_ms)||':'||a.id";
   const buildStatement = (after: boolean) => db.prepare<AttemptPageBindings, AttemptPageRow>(`SELECT a.id,a.project_id AS projectId,a.issue_id AS issueId,
-    a.issue_number AS issueNumber,a.issue_title AS issueTitle,a.phase,a.result,a.suspension,a.revision,
+    a.issue_number AS issueNumber,a.issue_title AS issueTitle,a.phase,a.result,a.suspension,a.diagnostic,a.revision,
     a.created_at_ms AS createdAtMs,a.updated_at_ms AS updatedAtMs,${pageKey} AS pageKey
     FROM attempts a WHERE ${[...clauses, ...(after ? ['(a.created_at_ms<@afterAt OR (a.created_at_ms=@afterAt AND a.id<@afterId))'] : [])].join(' AND ')}
     ORDER BY a.created_at_ms DESC,a.id DESC LIMIT @batch`);
@@ -172,10 +171,8 @@ const plans: Record<DetailSection, SectionPlan> = {
       (SELECT json_extract(j.value,'$.explicit') FROM attempts a,json_each(a.capture_json,'$.criteria') j WHERE a.id=t.attempt_id AND json_extract(j.value,'$.id')=t.criterion_id) AS explicit,
       (SELECT json_object('verdict',c.verdict,'evidence',json(c.evidence_json)) FROM criterion_results c JOIN passages p ON p.id=c.passage_id WHERE c.attempt_id=t.attempt_id AND c.criterion_id=t.criterion_id AND p.delivery_version=@delivery AND p.role='implementer') AS producer_json,
       (SELECT json_object('verdict',c.verdict,'evidence',json(c.evidence_json)) FROM criterion_results c JOIN passages p ON p.id=c.passage_id WHERE c.attempt_id=t.attempt_id AND c.criterion_id=t.criterion_id AND p.delivery_version=@delivery AND p.role='reviewer') AS reviewer_json` },
-  checks: { from: 'checks t JOIN deliveries d ON d.id=t.delivery_id', key: "printf('%010d',t.run_number)||':'||t.id", delivery: 't.delivery_id', round: 'd.round_number',
-    select: 't.id,t.verification_id AS verificationId,t.delivery_id AS deliveryId,t.content_identity AS contentIdentity,t.check_definition_id AS checkDefinitionId,t.run_number AS runNumber,t.command,t.cwd_relative AS cwdRelative,t.timeout_ms AS timeoutMs,t.state,t.exit_code AS exitCode,t.started_at_ms AS startedAtMs,t.ended_at_ms AS endedAtMs,t.duration_ms AS durationMs,t.diagnostic,t.execution_diagnostic AS executionDiagnostic' },
   reviews: { from: 'reviews t JOIN deliveries d ON d.id=t.delivery_id', key: "printf('%020d',t.created_at_ms)||':'||t.id", delivery: 't.delivery_id', round: 'd.round_number',
-    select: `t.id,t.delivery_id AS deliveryId,t.attempt_id AS attemptId,t.passage_id AS passageId,t.verification_id AS verificationId,t.content_identity AS contentIdentity,t.state,t.reason,t.independence_state AS independenceState,t.diagnostic,t.created_at_ms AS createdAtMs,t.completed_at_ms AS completedAtMs,(SELECT json_extract(z.summary_json,'$.verdict') FROM passage_results z WHERE z.passage_id=t.passage_id) AS declaredVerdict` },
+    select: `t.id,t.delivery_id AS deliveryId,t.attempt_id AS attemptId,t.passage_id AS passageId,t.implementer_passage_id AS implementerPassageId,t.content_identity AS contentIdentity,t.state,t.reason,t.independence_state AS independenceState,t.diagnostic,t.created_at_ms AS createdAtMs,t.completed_at_ms AS completedAtMs,(SELECT json_extract(z.summary_json,'$.verdict') FROM passage_results z WHERE z.passage_id=t.passage_id) AS declaredVerdict` },
   findings: { from: 'findings t JOIN reviews r ON r.id=t.review_id JOIN deliveries d ON d.id=r.delivery_id', key: "printf('%02d',d.round_number)||':'||t.id", delivery: 'r.delivery_id', round: 'd.round_number',
     select: `t.id,t.review_id AS reviewId,t.attempt_id AS attemptId,t.finding_key AS key,t.criterion_ids_json,t.category,t.problem,t.evidence_json,t.expected_result AS expectedResult,t.blocking,t.priority,t.origin_finding_id AS originFindingId,r.delivery_id AS deliveryId,r.content_identity AS contentIdentity,
       (SELECT json_group_array(json_object('reviewId',x.review_id,'deliveryId',xr.delivery_id,'verdict',x.verdict,'evidence',json(x.evidence_json))) FROM finding_resolutions x JOIN reviews xr ON xr.id=x.review_id WHERE x.finding_id=t.id) AS resolutions_json` },
@@ -238,7 +235,6 @@ export function readDetailPage(db: Database.Database, attemptId: string, query: 
     }
     if (query.section === 'questions') { const { receipt_json, ...q } = row; value = { ...q, deliveryReceipt: typeof receipt_json === 'string' ? JSON.parse(receipt_json) as unknown : null }; }
     if (query.section === 'resources') value = { ...row, owned: row.owned === 1, removed: row.removed === 1 };
-    if (query.section === 'checks') value = { ...row, artifacts: db.prepare<[string], { id: string }>('SELECT id FROM artifacts WHERE check_id=?').all(String(row.id)).map(v => readArtifact(db,v.id)) };
     if (!Value.Check(DetailItem,value)) throw new StorageError('OPERATION_DATA_INVALID'); return value;
   });
   const last = selectedRows.at(-1); const hasMore = rows.length > limit;

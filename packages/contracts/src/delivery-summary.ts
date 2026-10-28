@@ -13,7 +13,7 @@ export const DeliverySummaryView = Type.Object({
   code_location: nullable(text(32768)), local_repository: nullable(text(32768)), branch_ref: nullable(text(1024)),
   commit_sha: nullable(GitObjectId), pull_request_url: nullable(text(4096)), checkout_updated: Type.Literal(false),
   pending_effects: Type.Array(text(128), { maxItems: 10 }), limitations: Type.Array(text(2048), { maxItems: 10 }),
-  criteria_satisfied: count, criteria_total: count, checks_succeeded: count, checks_total: count,
+   criteria_satisfied: count, criteria_total: count,
   resolved_findings: count, details_url: text(512),
 }, { additionalProperties: false });
 export type DeliverySummaryView = Static<typeof DeliverySummaryView>;

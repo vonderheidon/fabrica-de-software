@@ -1,5 +1,4 @@
 import { mkdtemp, mkdir, writeFile, readFile, rm, rename } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createPublicationTargetWorkspace, type TargetIdentity } from './publication-target.js';
@@ -9,7 +8,8 @@ import { complete } from '../../../../../tests/fixtures/attempt.js';
 const directories: string[] = [];
 afterEach(async () => { for (const path of directories.splice(0)) await rm(path,{ recursive: true,force: true }); });
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(),'factory-target-')); directories.push(directory);
+  const temporaryRoot = join(process.cwd(),'.cache'); await mkdir(temporaryRoot,{ recursive: true });
+  const directory = await mkdtemp(join(temporaryRoot,'factory-target-')); directories.push(directory);
   const path = join(directory,'target');
   const repository = { id: 'R_target',owner: { id: 'O_target',login: 'test-org' },name: 'repo',url: 'https://github.com/test-org/repo',defaultBranch: 'main',isArchived: false,isPrivate: true };
   const git = vi.fn<GitReader>(async (cwd,args) => {

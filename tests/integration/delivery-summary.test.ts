@@ -18,9 +18,10 @@ it.each(['icr','commit','pr'] as const)('projects confirmed %s facts on E07 and 
   const f = await fixture(mode); await f.implement(); await f.approve();
   const s = summary(f);
   expect(Value.Check(DeliverySummaryView,s)).toBe(true);
+  expect(s).not.toHaveProperty('checks_succeeded'); expect(s).not.toHaveProperty('checks_total');
   expect(s).toMatchObject({ attempt_id:f.attemptId,delivery_id:f.status().deliveryId,original_mode:mode,authorized_mode:mode,
     outcome:mode === 'icr' ? 'icr_approved' : 'complete',review_state:'approved',criteria_satisfied:2,criteria_total:2,
-    checks_succeeded:0,checks_total:0,checkout_updated:false,pending_effects:[] });
+     checkout_updated:false,pending_effects:[] });
   expect(s.approved_ref).toBe(f.storage.getDelivery(s.delivery_id).delivery.gitRef);
   expect(s.commit_sha !== null).toBe(mode !== 'icr');
   expect(s.local_repository !== null).toBe(mode !== 'icr');
@@ -31,7 +32,7 @@ it.each(['icr','commit','pr'] as const)('projects confirmed %s facts on E07 and 
   expect(Value.Check(HttpAttemptDetail,attempt)).toBe(true); expect(Value.Check(HttpDeliveryDetail,delivery)).toBe(true);
 });
 
-it('does not infer approval from the implementer and leaves missing review/check facts explicit', async () => {
+it('does not infer approval from the implementer and leaves missing review facts explicit', async () => {
   const f = await fixture();
   expect(f.storage.getAttemptDetail(f.attemptId,{}).deliverySummary).toBeNull();
   await f.implement(); const s = summary(f);

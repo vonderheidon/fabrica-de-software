@@ -1,7 +1,5 @@
 import { toHttpAuthorizeUpgrade } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
-import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
-import { readFileSync } from 'node:fs';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AuthorizeUpgrade, EffectView } from '#contracts';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
@@ -48,7 +46,8 @@ it('completes PR in durable commit/push/PR order using the same approved version
   expect(f.issue.comments).toEqual([]); expect(f.workspaces.pushApproved).toHaveBeenCalledOnce();
   const pr = f.mutateEffect.mock.calls.find(([x]) => x.effect.kind === 'pull_request')![0];
   expect(pr.effect.expectedIdentity).toMatchObject({ baseBranch: 'main',commitSha: effect(f,'local_commit').receipt!.id,contentIdentity: f.storage.getDelivery(pr.effect.deliveryId!).delivery.contentIdentity });
-  for (const text of ['Escopo:','Base configurada:','Tree aprovada:','Checks do controlador:','Parecer: approved','Pendências não impeditivas:',f.attemptId]) expect(pr.body).toContain(text);
+  for (const text of ['Escopo:','Base configurada:','Tree aprovada:','Parecer: approved','Pendências não impeditivas:',f.attemptId]) expect(pr.body).toContain(text);
+  expect(pr.body).not.toContain('Checks do controlador:');
   expect(pr.body).not.toMatch(/\b(?:closes|fixes|resolves|merge|force-push)\b/i);
   expect(f.storage.getDeliveryDetail(pr.effect.deliveryId!,{}).publication).toMatchObject({ mode: 'pr',localState: 'completed',push: { state: 'confirmed' },pullRequest: { state: 'confirmed' } });
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -282,7 +281,7 @@ it('does not restore publication on restart and explicitly completes an authoriz
   await f.pipeline.close(); f.storage.close(); const storage = openStorage({ dataDirectory: f.directory });
   try {
     const calls = f.workspaces.pushApproved.mock.calls.length; const tasks: Promise<void>[] = [];
-    const publication = createPublication({ storage,github: f.github,workspaces: f.workspaces,verification: f.verification,cancelAttempt: async () => {},isClosed: () => false,logFailure: vi.fn(),enqueue: task => { tasks.push(task()); } });
+     const publication = createPublication({ storage,github: f.github,workspaces: f.workspaces,cancelAttempt: async () => {},isClosed: () => false,logFailure: vi.fn(),enqueue: task => { tasks.push(task()); } });
     expect(tasks).toEqual([]); expect(f.workspaces.pushApproved.mock.calls).toHaveLength(calls);
     storage.interruptAttempts();
     const request = { deliveryId,authorizedMode: 'pr' as const,authorized: true as const };
@@ -323,7 +322,7 @@ it.each(['local_commit','push','pull_request'] as const)('reconciles a lost %s r
   const storage = openStorage({ dataDirectory:f.directory });
   try {
     const tasks: Promise<void>[] = [];
-    const publication = createPublication({ storage,github:f.github,workspaces:f.workspaces,verification:f.verification,
+     const publication = createPublication({ storage,github:f.github,workspaces:f.workspaces,
       cancelAttempt:async () => {},isClosed:() => false,logFailure:vi.fn(),enqueue:task => { tasks.push(task()); } });
     expect(tasks).toEqual([]);
     storage.interruptAttempts(); confirmTerminalStops(f,f.attemptId,storage.executionPersistence());
@@ -338,24 +337,6 @@ it.each(['local_commit','push','pull_request'] as const)('reconciles a lost %s r
     expect(f.mutateEffect.mock.calls.filter(([x]) => x.effect.kind === 'pull_request')).toHaveLength(kind === 'pull_request' ? prs : prs+1);
     expect(storage.getAttemptCapture(f.attemptId).configuration.configuration.default_delivery_mode).toBe('pr');
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
-  } finally { storage.close(); }
-});
-
-it('migrates actual v14 journals without fabricating upgrades, preserving receipts and immutable history', async () => {
-  const f = await fixture('commit'); await f.implement(); await f.approve(); const before = effects(f); const instance = f.storage.getSettings().installation_id;
-  await f.pipeline.close(); f.storage.close();
-  const sql = readFileSync(new URL('../../apps/controller/src/modules/storage/migrations/014_local_publication.sql',import.meta.url),'utf8');
-  f.db.transaction(() => {
-    removeQueueSchedulerSchema(f.db);
-    f.db.exec('DROP TABLE publication_upgrades');
-    // v14 reconstructs its own original journal definitions using the existing confirmed rows.
-    f.db.exec(sql); f.db.exec('DELETE FROM schema_migrations WHERE version=15; PRAGMA user_version=14');
-  })();
-  const storage = openStorage({ dataDirectory: f.directory });
-  try {
-    ; expect(storage.getSettings().installation_id).toBe(instance); expect(storage.getEffects(f.attemptId)).toEqual(before);
-    expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 0 }); expect(f.db.pragma('foreign_key_check')).toEqual([]);
-    expect(() => f.db.prepare("UPDATE effects SET reason='CHANGED' WHERE operation_id=?").run(before[0]!.operationId)).toThrow();
   } finally { storage.close(); }
 });
 

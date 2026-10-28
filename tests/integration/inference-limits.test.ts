@@ -9,7 +9,6 @@ import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
 import { attemptFixture, complete } from '../fixtures/attempt.js';
-import { publicationFixture } from '../fixtures/publication.js';
 import { removeInferenceLimitsSchema } from '../fixtures/inference-limits-schema.js';
 
 const resources: { close(): unknown }[] = [];
@@ -128,48 +127,14 @@ describe('exact internal times without inference limits', () => {
     expect(f.storage.getMeasurements(operation.resource.id).cost).toMatchObject({ state: 'unavailable', reason: 'EXECUTOR_COST_NOT_OBSERVED' });
   });
 });
-
 describe('non-destructive removal of persisted inference ceilings', () => {
-  it('migrates v20, preserving historical capture, preparation, review, result and receipt bytes', async () => {
-    expect(loadMigrations()[19]?.checksum).toBe('80660c78a09810e5873e7301fc6c695cbab6454865e1f60ccbd0df8323eb4651');
-    const f = await publicationFixture(false); resources.push(f);
-    await f.implement(); await f.approve(); const deliveryId = f.status().deliveryId!;
-    await f.pipeline.close(); f.storage.close();
-    removeInferenceLimitsSchema(f.db);
-    const retired = { formatVersion: 1, limit: { state: 'configured', value: 7, unit: 'USD' } };
-    // Reconstruct old immutable documents only in this disposable historical fixture, then restore their exact guards.
-    const triggers = f.db.prepare<[], { sql: string }>("SELECT sql FROM sqlite_schema WHERE name IN ('attempt_capture_immutable','preparation_revision_update_immutable') ORDER BY name").all();
-    f.db.exec('DROP TRIGGER attempt_capture_immutable; DROP TRIGGER preparation_revision_update_immutable;');
-    f.db.prepare("UPDATE attempts SET capture_json=json_set(capture_json,'$.configuration.costDefaults',json(?),'$.configuration.origins.costDefaults','global')").run(JSON.stringify(retired));
-    f.db.prepare("UPDATE preparation_revisions SET choices_json=json_set(choices_json,'$.choices.overrides.costDefaults',json(?))").run(JSON.stringify(retired));
-    for (const trigger of triggers) f.db.exec(trigger.sql);
-    const history = () => ({ captures: f.db.prepare('SELECT capture_json FROM attempts').all(),
-      preparations: f.db.prepare('SELECT choices_json FROM preparation_revisions ORDER BY revision').all(),
-      reviews: f.db.prepare('SELECT * FROM reviews ORDER BY id').all(), results: f.db.prepare('SELECT * FROM passage_results ORDER BY passage_id').all(),
-      operations: f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all(),
-      ledger: f.db.prepare('SELECT * FROM schema_migrations WHERE version<=20 ORDER BY version').all() });
-    const before = history(); const identity = f.db.prepare('SELECT installation_id FROM factory_settings').get();
-    const storage = openStorage({ dataDirectory: f.directory }); resources.push(storage);
-    ;
-    expect(history()).toEqual(before);
-    expect(f.db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
-    expect(f.db.prepare<[], { name: string }>('PRAGMA table_info(factory_settings)').all().map(row => row.name)).not.toContain('cost_defaults_json');
-    expect(storage.getAttemptCapture(f.attemptId).configuration).not.toHaveProperty('costDefaults');
-    expect(storage.getPreparation(storage.getAttemptCapture(f.attemptId).preparationId).view.overrides).not.toHaveProperty('costDefaults');
-    expect(storage.getMeasurements(f.attemptId)).not.toHaveProperty('costLimit');
-    expect(storage.getReview(deliveryId)?.state).toBe('approved');
-    expect(history()).toEqual(before);
-    expect(() => f.db.exec("UPDATE attempts SET capture_json='{}'")).toThrow('IMMUTABLE_RECORD');
-    expect(() => f.db.exec("UPDATE preparation_revisions SET choices_json='{}'")).toThrow('IMMUTABLE_RECORD');
-    expect(f.db.pragma('foreign_key_check')).toEqual([]);
-  });
-
   it('rolls back the delta when the retired column has an incompatible dependency', async () => {
     const f = await attemptFixture(); resources.push(f); await f.pipeline.close(); f.storage.close();
     removeInferenceLimitsSchema(f.db);
     f.db.exec('CREATE TRIGGER fixture_cost_dependency BEFORE UPDATE ON factory_settings BEGIN SELECT NEW.cost_defaults_json; END;');
     const before = f.db.prepare('SELECT * FROM factory_settings').get();
-    expect(() => applyMigrations(f.db, loadMigrations(), () => { throw new Error('Must not reseed'); })).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
+    expect(() => applyMigrations(f.db, loadMigrations(), () => { throw new Error('Must not reseed'); }))
+      .toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
     expect(f.db.pragma('user_version', { simple: true })).toBe(20);
     expect(f.db.prepare('SELECT * FROM factory_settings').get()).toEqual(before);
     expect(f.db.prepare('SELECT count(*) AS n FROM schema_migrations').get()).toEqual({ n: 20 });

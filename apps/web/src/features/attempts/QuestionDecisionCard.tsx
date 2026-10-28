@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { formatDuration } from './duration.js';
 import type { HttpQuestion as Question } from '#contracts';
 import { useDecision } from './useDecision.js';
 import { UnknownState } from '../../app/OperatorSupport.js';
@@ -14,13 +15,6 @@ const stateLabels: Record<QuestionSummary["state"], string> = {
 const operationStateLabels: Record<NonNullable<ReturnType<typeof useDecision>['operation']>["state"], string> = {
   accepted: 'Aceita', running: 'Em processamento', succeeded: 'Resposta registrada', failed: 'Falhou', unknown: 'Incerta',
 };
-
-function formatDuration(value: number): string {
-  if (value < 60_000) return `${value} ms`;
-  const minutes = Math.floor(value / 60_000);
-  const seconds = Math.floor((value % 60_000) / 1_000);
-  return `${minutes} min ${seconds} s`;
-}
 
 export function QuestionDecisionCard({ attemptId, summary }: Props) {
   const decision = useDecision(attemptId, summary.id);

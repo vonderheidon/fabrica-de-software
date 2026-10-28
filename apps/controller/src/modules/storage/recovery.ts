@@ -34,10 +34,8 @@ export function readResources(db: Database.Database, attemptId: string) {
     .map(r => ({ ...r, owned: r.owned === 1, removed: r.removed === 1 }));
   if (entries.some(r => !Value.Check(AttemptResource, r))) throw new StorageError('OPERATION_DATA_INVALID');
   const terminals = entries.filter(r => r.kind === 'terminal');
-  const checks = db.prepare<[string], { state: string; diagnostic: string | null; execution_diagnostic: string | null }>('SELECT state,diagnostic,execution_diagnostic FROM checks WHERE attempt_id=?').all(attemptId);
-  const uncertain = checks.some(r => r.diagnostic === 'VERIFICATION_INTERRUPTED' || r.diagnostic?.includes('STOP_UNCONFIRMED') || r.execution_diagnostic?.includes('STOP_UNCONFIRMED'));
-  const cleanup = uncertain || terminals.some(r => r.stopState === 'uncertain') ? 'uncertain' as const :
-    terminals.every(r => r.stopState === 'confirmed') && !entries.some(r => r.launchState === 'starting') && !checks.some(r => ['pending', 'running'].includes(r.state)) ? 'complete' as const : 'pending' as const;
+  const cleanup = terminals.some(r => r.stopState === 'uncertain') ? 'uncertain' as const :
+    terminals.every(r => r.stopState === 'confirmed') && !entries.some(r => r.launchState === 'starting') ? 'complete' as const : 'pending' as const;
   return { entries, cleanup, eventCursor: eventCursor(db) };
 }
 export function resourceSnapshot(db: Database.Database, attemptId: string, resourceId: string): ResourceSnapshot {
@@ -45,14 +43,11 @@ export function resourceSnapshot(db: Database.Database, attemptId: string, resou
   const attempt = readAttempt(db, attemptId); const resources = readResources(db, attemptId);
   const resource = resources.entries.find(r => r.id === resourceId);
   if (!resource) throw new OperationError(404, 'RESOURCE_NOT_FOUND', 'Resource not found in this attempt.');
-  const runs = db.prepare<[string], { state: string; diagnostic: string | null; execution_diagnostic: string | null }>('SELECT state,diagnostic,execution_diagnostic FROM checks WHERE attempt_id=?').all(attemptId);
   const captures = db.prepare<[string], { state: string }>('SELECT c.state FROM capture_runs c JOIN deliveries d ON d.id=c.delivery_id WHERE d.attempt_id=?').all(attemptId);
   const deliveries = db.prepare<[string], { id: string }>('SELECT id FROM deliveries WHERE attempt_id=? ORDER BY round_number').all(attemptId).map(r => readDelivery(db, r.id));
   const { eventCursor: _cursor, ...attemptState } = attempt;
-  const stamp = digest({ attempt: attemptState, entries: resources.entries, runs, captures, deliveries });
-  const stopped = Boolean(attempt.result) && resources.cleanup === 'complete' && !runs.some(r =>
-    ['pending', 'running'].includes(r.state) || r.execution_diagnostic?.includes('STOP_UNCONFIRMED') || r.diagnostic?.includes('STOP_UNCONFIRMED') ||
-    r.diagnostic === 'VERIFICATION_INTERRUPTED') && !captures.some(r => r.state === 'running');
+  const stamp = digest({ attempt: attemptState, entries: resources.entries, captures, deliveries });
+  const stopped = Boolean(attempt.result) && resources.cleanup === 'complete' && !captures.some(r => r.state === 'running');
   const removalPending = Boolean(db.prepare("SELECT operation_id FROM resource_removals WHERE resource_id=? AND state IN ('accepted','unknown')").get(resourceId));
   return { resource, etag: `"${digest([resource.id, resource.revision])}"`, stamp, stopped, removalPending, deliveries, eventCursor: resources.eventCursor };
 }

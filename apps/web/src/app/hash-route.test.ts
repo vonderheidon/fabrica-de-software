@@ -50,3 +50,9 @@ it('round-trips all historical attempt search filters in the URL', () => {
   expect(route.error).toBeNull();
   expect(Object.fromEntries(route.params)).toEqual(Object.fromEntries(params));
 });
+
+it('rejects comparison-only URL parameters instead of opening a fallback view', () => {
+  const route = parseHash('#principal/tentativas?leftAttemptId=attempt-a&rightAttemptId=attempt-b');
+  expect(route.error).toContain('parâmetros inválidos');
+  expect(route.tab).toBe('tentativas');
+});

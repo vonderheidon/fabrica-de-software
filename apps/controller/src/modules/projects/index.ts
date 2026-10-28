@@ -120,12 +120,6 @@ export function validateProjectConfiguration(configuration: ProjectConfiguration
   if (!Value.Check(ProjectConfiguration, configuration)) fail(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');
   if (configuration.delivery_branch && !validBranch(configuration.delivery_branch.name)) fail(400,'DELIVERY_BRANCH_INVALID','Informe um nome válido para a branch de destino.');
   if (configuration.default_delivery_mode === 'pr' && configuration.delivery_branch?.name === configuration.base_branch) fail(400,'PR_BRANCH_EQUALS_BASE','A branch entregue e a base do PR precisam ser diferentes.');
-  const ids = configuration.checks.map((c) => c.id);
-  if (new Set(ids).size !== ids.length) fail(400, 'CHECK_DUPLICATED', 'Checks require distinct IDs.');
-  for (const check of configuration.checks) {
-    const cwd = check.cwd_relative;
-    if (isAbsolute(cwd) || win32.isAbsolute(cwd) || /[:\x00-\x1f\x7f]/.test(cwd) || cwd.split(/[\\/]/).includes('..')) fail(400, 'CHECK_CWD_INVALID', 'Check cwd must stay relative to the attempt environment.');
-  }
 }
 export function createProjects({ storage, github, githubSetup, execution, workspaces, directoryBase, selectProjectsDirectory, selectGitHubExecutable,
   selectExecutable, toolDetector = createToolDetector() }: ProjectDependencies) {

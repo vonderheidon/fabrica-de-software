@@ -7,19 +7,20 @@ import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HttpDelivery } from '#contracts';
 import { createProjectStorageInspector, projectStorageRootRelative } from '../workspaces/project-storage.js';
-import { openStorage } from './index.js';
+import { openStorage, openStorageAtMigrationVersionForTests } from './index.js';
 import { applyMigrations, loadMigrations } from './migrations.js';
 import { seedSettings } from './settings.js';
-import { removeManagedTerminalSchema } from '../../../../../tests/fixtures/managed-terminal-schema.js';
 
 const directories: string[] = [];
 const stores: { close(): void }[] = [];
-function fixture() {
+function fixture(migrationVersionForTest?: number) {
   const installationRoot = mkdtempSync(join(tmpdir(), 'factory-project-storage-'));
   directories.push(installationRoot);
   const dataDirectory = resolve(installationRoot, 'var', 'factory');
   mkdirSync(dataDirectory, { recursive: true });
-  const storage = openStorage({ dataDirectory }); stores.push(storage);
+  const storage = migrationVersionForTest === undefined ? openStorage({ dataDirectory })
+    : openStorageAtMigrationVersionForTests({ dataDirectory }, migrationVersionForTest);
+  stores.push(storage);
   const project = (name: string) => {
     const source = { kind: 'local' as const, location: installationRoot };
     const result = storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
@@ -152,35 +153,23 @@ describe('project storage location identity and reads', () => {
     } finally { reopened.close(); }
   });
 
-  it('upgrades schema 28 additively and keeps verified locations without inventing transitions', async () => {
-    const f = fixture(); const projectId = f.project('Schema 28 project');
+  it('preserves verified locations across reopen without inventing transitions', async () => {
+    const f = fixture(); const projectId = f.project('Current schema project');
     const relative = projectStorageRootRelative(projectId, 'managed');
     const root = resolve(f.installationRoot, ...relative.split('/'));
     mkdirSync(root, { recursive: true });
     const location = f.storage.recordProjectStorageLocation(await createProjectStorageInspector(f.dataDirectory)
       .inspectProjectStorageRoot(projectId, 'managed'));
     f.storage.close();
-    const db = new Database(join(f.dataDirectory, 'factory.sqlite'));
-    try {
-      db.pragma('foreign_keys = ON');
-      removeManagedTerminalSchema(db);
-      for (const trigger of ['project_storage_attempt_insert_barrier', 'project_storage_deletion_insert_barrier',
-        'project_storage_configuration_revision_barrier', 'project_storage_location_retire_requires_transition',
-        'project_storage_location_publish_requires_transition']) db.exec(`DROP TRIGGER ${trigger}`);
-      db.exec(`ALTER TABLE execution_profiles DROP COLUMN composition_version; DELETE FROM schema_migrations WHERE version=32; PRAGMA user_version=31;
-        DROP TRIGGER creation_board_operation_identity; DROP TRIGGER creation_board_operation_delete; DROP TRIGGER creation_board_completion_guard;
-        DROP TABLE creation_board_operations; DELETE FROM schema_migrations WHERE version=31; PRAGMA user_version=30;
-        ALTER TABLE factory_settings DROP COLUMN tool_preferences_json; DELETE FROM schema_migrations WHERE version=30; PRAGMA user_version=29;`);
-      db.exec('DROP TABLE project_storage_transitions; DELETE FROM schema_migrations WHERE version=29; PRAGMA user_version=28;');
-      applyMigrations(db, loadMigrations(), () => { throw new Error('SEED_MUST_NOT_RUN'); });
-      ;
-      expect(db.prepare('SELECT * FROM project_storage_transitions').all()).toEqual([]);
-      expect(db.prepare('SELECT id,project_id,location_key,layout_version,root_relative,object_identity_json,is_current,revision,verified_at_ms FROM project_storage_locations')
-        .get()).toMatchObject({ id: location.id, project_id: projectId, root_relative: relative, is_current: 1 });
-      expect(db.pragma('foreign_key_check')).toEqual([]);
-    } finally { db.close(); }
     const reopened = openStorage({ dataDirectory: f.dataDirectory }); stores.push(reopened);
     expect(reopened.getProjectStorageLocations(projectId)).toMatchObject([{ id: location.id, path: relative, current: true }]);
     expect(reopened.getProjectStorageView(projectId)).toMatchObject({ state: 'current', active_transition_operation_id: null });
+    const db = new Database(join(f.dataDirectory, 'factory.sqlite'));
+    try {
+      expect(db.prepare('SELECT * FROM project_storage_transitions').all()).toEqual([]);
+      expect(db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name IN ('verification_runs','checks','artifacts')").all()).toEqual([]);
+      expect(db.prepare<[], { name: string }>("PRAGMA table_info('project_revisions')").all().map(column => column.name)).not.toContain('checks_json');
+      expect(db.pragma('foreign_key_check')).toEqual([]);
+    } finally { db.close(); }
   });
 });

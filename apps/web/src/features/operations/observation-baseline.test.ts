@@ -33,7 +33,7 @@ function queue(title = 'Synthetic candidate', complete = true): HttpQueueObserva
     polling: { interval_ms: 15_000, backoff_max_ms: 60_000, retry_at_ms: null, next_poll_at_ms: Date.now() + 15_000 },
     page: { ...page, items: [{ project_id: projectA, project_name: 'Synthetic A', item_id: 'item-a', kind: 'issue', issue_id: 'issue-a',
       number: 1, title, url: null, assignees: [], status: 'Ready', ready: true, ready_eligible: true, eligible: true, reasons: [],
-      consumption: 'available', attempt_id: null, order: { position: 1, criterion: 'issue-number', value: null } }] } };
+      consumption: 'available', attempt_id: null, order: { position: 1, criterion: 'issue-number' } }] } };
 }
 function attempt(number = 1, projectId = projectA): HttpAttemptSummary {
   return { id: attemptA, project_id: projectId, issue_id: `issue-${number}`, issue_number: number, phase: 'completed', result: 'delivered',

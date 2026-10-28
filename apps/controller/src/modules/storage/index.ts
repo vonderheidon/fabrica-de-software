@@ -16,8 +16,7 @@ import { claimCreationBoardOperation, finishCreationBoardOperation, getCreationB
 import type { CreationBoardOperation, CreationStep } from '#contracts';
 export type { CreationCommand } from './creations.js';
 import { readAttemptPage, readAttemptDetail, readDeliveryDetail } from './queries.js';
-import { readAttemptComparison } from './attempt-comparison.js';
-import type { AttemptComparisonQuery, AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery } from '#contracts';
+import type { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery } from '#contracts';
 import { recordEffectIntent, readEffect, claimEffect, finishEffect, assertEffectAuthorized, type EffectIntent } from './effects.js';
 import { acceptPublication, recoverPublication, finishPublicationRequest, publicationSnapshot, recordAuthority, finalizeICR, publicationSummary, effectsFor, assertPublicationEligible, type PublicationCommand, type AuthorityObservation } from './publication.js';
 export type { EffectIntent, EffectOrigin } from './effects.js';
@@ -35,9 +34,6 @@ import { Value } from '@sinclair/typebox/value';
 export type { CorrectionPlan } from './reviews.js';
 import { resolve } from 'node:path';
 import Database from 'better-sqlite3';
-import { beginVerification, startCheck, finishCheck, finishVerification, readArtifact, readCheckHistory, type VerificationPlan, type CheckCompletion } from './verification.js';
-import type { Artifact, CheckHistory, CheckHistoryQuery } from '#contracts';
-export type { VerificationPlan, CheckCompletion } from './verification.js';
 import type { CatalogQuery, ConfigurationView, EventPage, EventQuery, FactorySettings, ProjectDetail, ProjectPage, SettingsView } from '#contracts';
 import { StorageError } from './errors.js';
 import { applyMigrations, inspectHistory, loadMigrations } from './migrations.js';
@@ -163,7 +159,6 @@ export interface Storage {
   markCreationBoardOperationSent(operationId: string, revision: number): CreationBoardOperation;
   finishCreationBoardOperation(operationId: string, revision: number, state: 'confirmed' | 'failed_known' | 'unknown', receipt: NonNullable<CreationBoardOperation['receipt']> | null, reason: string | null): CreationBoardOperation;
   listAttempts(query: AttemptListQuery): ReturnType<typeof readAttemptPage>;
-  getAttemptComparison(query: AttemptComparisonQuery): ReturnType<typeof readAttemptComparison>;
   getAttemptBlock(id: string): ReturnType<typeof readAttemptBlock>;
   recoverAttemptDecision(command: AttemptDecisionCommand): StoredOperation | null;
   acceptAttemptDecision(command: AttemptDecisionCommand, successor?: SuccessorPreparationInput): ReturnType<typeof acceptAttemptDecision>;
@@ -210,12 +205,6 @@ export interface Storage {
   beginCorrection(deliveryId: string): CorrectionPlan | null;
   beginIntegration(deliveryId: string, operationId: string, target: IntegrationPlan): CorrectionPlan | null;
   getIntegrationTarget(deliveryId: string): IntegrationPlan | null;
-  beginVerification(deliveryId: string, repeatReason?: string): VerificationPlan;
-  startCheck(checkId: string): void;
-  finishCheck(checkId: string, completion: CheckCompletion): void;
-  finishVerification(id: string, diagnostic?: string | null): void;
-  getArtifact(id: string): Artifact;
-  getCheckHistory(deliveryId: string, query: CheckHistoryQuery): CheckHistory;
   onResultAccepted(listener: (binding: PassageBinding) => void): () => void;
   getDelivery(id: string): DeliveryView;
   beginCapture(id: string): CaptureClaim | null;
@@ -268,13 +257,24 @@ export interface StorageOptions {
 }
 
 export function openStorage(options: StorageOptions): Storage {
+  return openStorageWithMigrations(options, loadMigrations());
+}
+
+/** Builds a database at a historical migration boundary for forward-migration tests. */
+export function openStorageAtMigrationVersionForTests(options: StorageOptions, version: number): Storage {
+  const migrations = loadMigrations();
+  const latest = migrations.at(-1)?.version ?? 0;
+  if (!Number.isSafeInteger(version) || version < 1 || version >= latest) throw new StorageError('STORAGE_CONFIGURATION_INVALID');
+  return openStorageWithMigrations(options, migrations.filter((migration) => migration.version <= version));
+}
+
+function openStorageWithMigrations(options: StorageOptions, migrations: readonly ReturnType<typeof loadMigrations>[number][]): Storage {
   const timeout = options.busyTimeoutMs ?? 5000;
   if (!options.dataDirectory.trim() || !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 60_000) {
     throw new StorageError('STORAGE_CONFIGURATION_INVALID');
   }
   const directory = resolve(options.dataDirectory);
   const filename = resolve(directory, 'factory.sqlite');
-  const migrations = loadMigrations();
   let db: Database.Database | undefined;
   try {
     // Incompatible existing files are inspected without changing their journal or content.
@@ -346,7 +346,6 @@ export function openStorage(options: StorageOptions): Storage {
       captureLocalHost: () => guarded(() => captureLocalHost(connection)),
       recordToolPreferenceValidation: paths => guarded(() => recordToolPreferenceValidation(connection, paths)),
       listAttempts: query => guarded(() => connection.transaction(() => readAttemptPage(connection, query))()),
-      getAttemptComparison: query => guarded(() => connection.transaction(() => readAttemptComparison(connection, query))()),
       getAttemptBlock: id => guarded(() => connection.transaction(() => { readAttempt(connection, id); return readAttemptBlock(connection, id); })()),
       assertTargetSelection: id => assertTargetSelection(connection,id),
       sealDeliveryTarget: plan => sealDeliveryTarget(connection,plan),
@@ -423,12 +422,6 @@ export function openStorage(options: StorageOptions): Storage {
       beginCorrection: id => beginCorrection(connection, id),
       beginIntegration: (id,operationId,target) => beginIntegration(connection,id,operationId,target),
       getIntegrationTarget: id => integrationTarget(connection,id),
-      beginVerification: (id, reason) => beginVerification(connection, id, reason),
-      startCheck: id => startCheck(connection, id),
-      finishCheck: (id, completion) => finishCheck(connection, id, completion),
-      finishVerification: (id, diagnostic) => finishVerification(connection, id, diagnostic),
-      getArtifact: id => guarded(() => connection.transaction(() => readArtifact(connection, id))()),
-      getCheckHistory: (id, query) => guarded(() => connection.transaction(() => readCheckHistory(connection, id, query))()),
       onResultAccepted: (listener) => { resultListeners.add(listener); return () => { resultListeners.delete(listener); }; },
       getDelivery: (id) => guarded(() => connection.transaction(() => deliveryView(connection, id))()),
       beginCapture: (id) => beginCapture(connection, id),

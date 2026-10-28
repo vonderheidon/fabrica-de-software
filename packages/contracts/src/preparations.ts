@@ -15,7 +15,7 @@ const profileChoice = Type.Union([
 export const PreparationOverrides = Type.Partial(Type.Object({
   base_branch: ProjectConfiguration.properties.base_branch,
   implementer_profile: profileChoice, reviewer_profile: profileChoice,
-  checks: ProjectConfiguration.properties.checks, correction_limit: ProjectConfiguration.properties.correction_limit,
+  correction_limit: ProjectConfiguration.properties.correction_limit,
   time_defaults: TimeDefaults, artifact_policy: ArtifactPolicy,
 }, closed));
 export type PreparationOverrides = Static<typeof PreparationOverrides>;
@@ -60,7 +60,7 @@ export const CriteriaPreview = Type.Object({
 export type CriteriaPreview = Static<typeof CriteriaPreview>;
 const origin = Type.Union([Type.Literal('project'), Type.Literal('global'), Type.Literal('preparation')]);
 export const ChoiceOrigins = Type.Object({
-  base_branch: origin, implementer_profile: origin, reviewer_profile: origin, checks: origin, correction_limit: origin,
+  base_branch: origin, implementer_profile: origin, reviewer_profile: origin, correction_limit: origin,
   time_defaults: origin, artifact_policy: origin, guidance: origin, delivery_mode: origin,
 }, closed);
 export const EffectiveConfiguration = Type.Object({

@@ -8,7 +8,7 @@ import { ProjectConfigurationForm } from './ProjectForm.js';
 import { ConditionNotices, conditionSection } from './ProjectReadiness.js';
 import { IssueOptionsNotice } from '../preparations/IssueOptionsNotice.js';
 import { PreparationDialog } from '../preparations/PreparationDialog.js';
-import { clearDraft, configurationDraftIdentity } from '../../app/drafts.js';
+import { clearDraft, configurationDraftIdentity, getDraft, setDraft, type DraftValue } from '../../app/drafts.js';
 import { HttpError } from '../../api/http.js';
 
 const { request, metadata } = vi.hoisted(() => ({ request: vi.fn(), metadata: vi.fn() }));
@@ -18,8 +18,10 @@ const prerequisite = (code: string): Prerequisite => ({ code, message: `Condiç�
 const projectId = 'ed0ae84a-3f5b-47c3-bfc5-d6e135880356';
 let sequence = 0;
 let savedConfiguration: ConfigurationView;
-async function mount(locked = false, legacy = false) {
-  clearDraft(configurationDraftIdentity(null, projectId), 'project-configuration');
+async function mount(locked = false, legacy = false, savedDraft?: DraftValue) {
+  const identity = configurationDraftIdentity(null, projectId);
+  clearDraft(identity, 'project-configuration');
+  if (savedDraft !== undefined) setDraft(identity, 'project-configuration', savedDraft);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const settings: SettingsView = {
     settings: { id: 'local', installation_id: `project-test-${++sequence}`, account_id: null, designated_host: null,
@@ -37,9 +39,9 @@ async function mount(locked = false, legacy = false) {
     configuration_lock: locked ? { attempt_id: 'active-attempt' } : null,
     configuration: { id: 'revision', project_id: projectId, revision: 1, created_at_ms: 1,
       source: { kind: 'local', location: 'C:\\source' }, base_branch: 'main', github_project: legacy ? { id: 'board', owner_id: 'owner', status_field_id: 'status', status_option_ids: { ready: 'ready', in_progress: 'progress', in_review: 'review', delivered: 'done' } } : null,
-      implementer_profile_id: null, reviewer_profile_id: null, checks: [{ id: 'check', command: 'npm test', cwd_relative: '.', timeout_ms: 1000 }],
+      implementer_profile_id: null, reviewer_profile_id: null,
       correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
-      queue_order: { priority_field_id: null, priority_direction: 'asc', use_board_position: true }, guidance: '' },
+      queue_order: { use_board_position: true }, guidance: '' },
   };
   savedConfiguration = configuration;
   const diagnostics: HttpDiagnosticsView = { context: { scope: 'project', id: projectId }, supported_checks: ['configuration'], event_cursor: '1', reports: [],
@@ -80,15 +82,44 @@ it('locates project conditions and keeps one configuration action without verifi
   expect(request.mock.calls.some(([path]) => path === `/api/v1/operations/${operationId}`)).toBe(true);
   expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
 });
-it('preserves check edits, DOM and focused refresh without a save', async () => {
+it('omits manual check controls and preserves project edits, DOM and focused refresh without a save', async () => {
   const container = await mount();
-  const field = [...container.querySelectorAll('input')].find((item) => item.value === 'npm test')!;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'npm run verify'); field.dispatchEvent(new Event('input', { bubbles: true })); });
+  const field = [...container.querySelectorAll('input')].find((item) => item.value.startsWith('C:'))!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'C:\\source-updated'); field.dispatchEvent(new Event('input', { bubbles: true })); });
   const refresh = container.querySelector<HTMLButtonElement>('[aria-label="Atualizar leitura do projeto"]')!; refresh.focus();
   await act(async () => refresh.click());
-  expect(field.isConnected).toBe(true); expect(field.value).toBe('npm run verify'); expect(document.activeElement).toBe(refresh);
+  expect(field.isConnected).toBe(true); expect(field.value).toBe('C:\\source-updated'); expect(document.activeElement).toBe(refresh);
   expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
-  expect(container.textContent).toContain('cwd relativo do check 1'); expect(container.textContent).toContain('Timeout do check 1');
+  expect(container.textContent).not.toContain('Adicionar check');
+  expect(container.textContent).not.toContain('cwd relativo do check');
+  expect(container.textContent?.toLowerCase()).not.toContain('prioridade');
+  expect(container.querySelectorAll('.checks-editor, .check-card')).toHaveLength(0);
+  expect([...container.querySelectorAll('label')].map((item) => item.textContent)).not.toEqual(expect.arrayContaining([
+    expect.stringContaining('Comando do check'), expect.stringContaining('Timeout do check'),
+  ]));
+});
+it('restores current project edits and ignores unsupported draft paths', async () => {
+  const container = await mount(false, false, {
+    dirty: ['project.guidance', 'project.queue_order', 'project.unlisted_extension'],
+    values: {
+      'project.guidance': 'Orientação preservada',
+      'project.queue_order': { use_board_position: false },
+      'project.unlisted_extension': 'unsupported draft value',
+    },
+  });
+  expect(container.querySelector<HTMLTextAreaElement>('#project-guidance')?.value).toBe('Orientação preservada');
+  const position = [...container.querySelectorAll('label')].find((item) => item.textContent?.includes('Usar posição do quadro'))?.querySelector<HTMLInputElement>('input');
+  expect(position?.checked).toBe(false);
+  const restored = JSON.stringify(getDraft(configurationDraftIdentity(null, projectId), 'project-configuration'));
+  expect(restored).not.toContain('unlisted_extension');
+  expect(container.textContent?.toLowerCase()).not.toContain('prioridade');
+  expect(container.querySelectorAll('.checks-editor, .check-card')).toHaveLength(0);
+  await act(async () => button(container, 'Salvar configuração').click());
+  const put = metadata.mock.calls.find(([, init]) => init?.method === 'PUT');
+  expect(put).toBeDefined();
+  const payload = JSON.parse(String(put?.[1]?.body)) as { project_changes: Record<string, unknown> };
+  expect(payload.project_changes.queue_order).toEqual({ use_board_position: false });
+  expect(JSON.stringify(payload)).not.toMatch(/priority_field_id|priority_direction/);
 });
 it('keeps editing locked while the read-only verification remains available', async () => {
   const container = await mount(true);
@@ -150,7 +181,7 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
     effective_configuration: { configuration, project_revision_id: 'revision', settings_revision: 1,
       implementer_profile: null, reviewer_profile: null, time_defaults: savedConfiguration.settings.time_defaults,
       artifact_policy: savedConfiguration.settings.artifact_policy, guidance: '',
-      origins: { base_branch: 'project', implementer_profile: 'project', reviewer_profile: 'project', checks: 'project', correction_limit: 'project', time_defaults: 'global', artifact_policy: 'global', guidance: 'project', delivery_mode: 'preparation' } },
+       origins: { base_branch: 'project', implementer_profile: 'project', reviewer_profile: 'project', correction_limit: 'project', time_defaults: 'global', artifact_policy: 'global', guidance: 'project', delivery_mode: 'preparation' } },
     criteria_preview: { executable: false, objective: '', criteria: [], digest: 'a'.repeat(64), reasons: ['CRITERIA_LIST_INVALID'] },
     effects_preview: [], issue: null, base_sha: null, summary_hash: 'b'.repeat(64), diagnostics: [], retry_at_ms: null, publication_target: null,
   };
@@ -176,6 +207,9 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
   expect(container.textContent).not.toContain('Atenção necessária');
   expect(container.textContent).not.toContain('CRITERIA_LIST_INVALID');
   expect(container.textContent).toContain('Configuração global necessária para iniciar');
+  expect(container.textContent).not.toContain('Checks capturados');
+  expect(container.textContent).not.toContain('Nenhum check configurado.');
+  expect(container.querySelectorAll('.checks-editor, .check-card')).toHaveLength(0);
   expect(container.querySelector('a[href="#principal/configuracao"]')).not.toBeNull();
   expect(container.querySelector('a[href="#principal/perfis"]')).not.toBeNull();
   expect(button(container, 'Revisar e autorizar').disabled).toBe(true);
@@ -196,7 +230,7 @@ async function mountReadyStart() {
     prerequisites:[prerequisite('EXECUTOR_REVALIDATION_REQUIRED')],
     effective_configuration:{configuration,project_revision_id:'revision',settings_revision:1,implementer_profile:profile,reviewer_profile:profile,
       time_defaults:savedConfiguration.settings.time_defaults,artifact_policy:savedConfiguration.settings.artifact_policy,guidance:'',
-      origins:{base_branch:'project',implementer_profile:'project',reviewer_profile:'project',checks:'project',correction_limit:'project',time_defaults:'global',artifact_policy:'global',guidance:'project',delivery_mode:'preparation'}},
+       origins:{base_branch:'project',implementer_profile:'project',reviewer_profile:'project',correction_limit:'project',time_defaults:'global',artifact_policy:'global',guidance:'project',delivery_mode:'preparation'}},
     criteria_preview:{executable:true,objective:'Start fixture',criteria:[],digest:'a'.repeat(64),reasons:[]},effects_preview:[],
     issue:{id:'I_start',number:1,title:'Start fixture',state:'OPEN',assignees:[]} as unknown as NonNullable<Preparation['issue']>,
     base_sha:'a'.repeat(40),summary_hash:'b'.repeat(64),diagnostics:[],retry_at_ms:null,publication_target:null,

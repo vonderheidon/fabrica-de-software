@@ -35,7 +35,7 @@ export const QueueItem = Type.Object({
     reasons: Type.Array(QueueReason, { maxItems: 20 }),
     consumption: Type.Union([Type.Literal('available'), Type.Literal('consumed'), Type.Literal('active'), Type.Literal('unknown')]),
     attempt_id: Type.Union([OperationId, Type.Null()]),
-    order: Type.Object({ position: Type.Integer({ minimum: 1 }), criterion: text(256), value: Type.Union([text(1024), Type.Null()]) }, closed),
+    order: Type.Object({ position: Type.Integer({ minimum: 1 }), criterion: text(256) }, closed),
 }, closed);
 export type QueueItem = Static<typeof QueueItem>;
 export const QueueDiagnostic = Type.Object({ code: text(128), message: text(2048), recovery: text(2048) }, closed);

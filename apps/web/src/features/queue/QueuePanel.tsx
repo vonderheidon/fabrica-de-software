@@ -46,7 +46,7 @@ export function QueuePanel({ load, pageNotice, pauseNotice, pauseUncertain, onCo
         <div><dt>Conta GitHub</dt><dd>{observation?.account.login ? `@${observation.account.login}` : 'Não confirmada'}</dd></div>
         <div><dt>Entrega autorizada</dt><dd>{observation?.modes_by_project.length ? [...new Set(observation.modes_by_project.map((item) => modeLabel(item.mode)))].join(', ') : 'Nenhum modo disponível'}</dd></div>
       </dl>
-      <p className="muted queue-order-note">Ordem por prioridade, posição no quadro e número da issue.{observation?.scope.kind === 'account' && ' Um projeto bloqueado não impede os demais.'}</p>
+      <p className="muted queue-order-note">{observation?.order.description ?? 'Ordem por projeto, posição no quadro e número da issue.'}{observation?.scope.kind === 'account' && ' · Um projeto bloqueado não impede os demais.'}</p>
       {observation && !observation.account.login && <p className="muted">A consulta não confirmou a conta GitHub. Revalide a fila para conferir a identidade.</p>}
       {observation && !observation.complete && <div className="notice queue-degraded" role="status"><b>Consulta incompleta</b><p>{observation.valid ? 'Há projetos bloqueados. Os candidatos confirmados dos demais continuam disponíveis; o total global não foi confirmado.' : 'Confira as orientações por projeto abaixo e revalide a fila.'}</p></div>}
 
@@ -86,7 +86,7 @@ export function QueueEnableSummary({ observation }: { observation: QueueObservat
     <div><dt>Modos por projeto</dt><dd>{observation.modes_by_project.map((item) => modeLabel(item.mode)).join(', ') || 'Nenhum modo configurado'}</dd></div>
     <div><dt>Conta</dt><dd>{observation.account.login ? `@${observation.account.login}` : 'Conta indisponível'}</dd></div>
     <div><dt>Validade</dt><dd>{observation.valid && observation.complete ? 'Observação completa e válida' : 'Precisa revalidar antes de habilitar'}</dd></div>
-    <div><dt>Ordem</dt><dd>Prioridade configurada, posição disponível no quadro e número da issue.</dd></div>
+    <div><dt>Ordem</dt><dd>{observation.order.description}</dd></div>
   </dl>;
 }
 

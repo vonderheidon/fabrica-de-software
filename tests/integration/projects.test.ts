@@ -30,14 +30,15 @@ async function queueFixture() {
   f.db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)')
     .run('ACCOUNT_test', 'test-user', Date.now(), Date.now(), Date.now());
   f.db.prepare('UPDATE factory_settings SET account_id=?,designated_host=?,revision=revision+1').run('ACCOUNT_test', hostname());
-  function configure(changes: ConfigurationUpdate['project_changes']) {
-    const current = f.storage.getConfiguration(projectId);
+  function configureProject(targetProjectId: string, changes: ConfigurationUpdate['project_changes']) {
+    const current = f.storage.getConfiguration(targetProjectId);
     const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...fields } = current.view.configuration;
     const configuration = { ...fields, ...changes, source: changes.source ? { ...changes.source, repository_id: 'REPO_test', repository_url: 'https://github.com/test-org/repo' } : fields.source,
       queue_order: { ...fields.queue_order, ...changes.queue_order } };
-    f.storage.saveConfiguration({ operationId: randomUUID(), projectId, expectedRevision: current.etag,
+    f.storage.saveConfiguration({ operationId: randomUUID(), projectId: targetProjectId, expectedRevision: current.etag,
       body: { project_changes: changes }, configuration, globalChanges: {} });
   }
+  const configure = (changes: ConfigurationUpdate['project_changes']) => configureProject(projectId, changes);
   configure({ source: { kind: 'local', location: f.directory }, github_project: mapping, automation_enabled: true });
   const configuredSource = f.storage.getConfiguration(projectId).view.configuration.source;
   f.inspectOrigin.mockResolvedValue({ state: 'identified', source: { kind: configuredSource.kind, location: configuredSource.location },
@@ -56,7 +57,7 @@ async function queueFixture() {
   vi.mocked(f.github.listProjectItems).mockImplementation(async () => complete(structuredClone(items)));
   vi.mocked(f.github.getIssueContextById).mockImplementation(async (id) => complete(structuredClone(contexts.find((issue) => issue.id === id)!)));
   const queue = createQueue({ storage: f.storage, github: f.github, workspaces: { inspectOrigin: f.inspectOrigin } });
-  return { ...f, headers, projectId, contexts, items, queue, configure };
+  return { ...f, headers, projectId, contexts, items, queue, configure, configureProject };
 }
 
 describe('complete Ready observations without dispatch', () => {
@@ -131,31 +132,82 @@ describe('complete Ready observations without dispatch', () => {
     expect((await f.queue.observe({})).items[0]?.reasons).toContain('PROJECT_MEMBERSHIP_MISSING');
   });
 
-  it('uses numeric priority in either direction, documented position, then number/ID', async () => {
+  it('sorts positions when enabled and complete, then breaks ties by number and identity', async () => {
     const f = await queueFixture();
-    const details = { ...structuredClone(projectDetails), numberFields: [{ id: 'PRIORITY', name: 'Numeric priority' }] };
-    vi.mocked(f.github.getProject).mockImplementation(async () => complete(details));
-    f.contexts[0]!.memberships[0]!.numberValues = [{ fieldId: 'PRIORITY', value: 5 }];
-    f.contexts[1]!.memberships[0]!.numberValues = [{ fieldId: 'PRIORITY', value: 0 }];
-    f.contexts[2]!.memberships[0]!.numberValues = [{ fieldId: 'PRIORITY', value: 5 }];
-    f.items[0]!.position = 3; f.items[1]!.position = 2; f.items[2]!.position = 1;
-    f.configure({ queue_order: { priority_field_id: 'PRIORITY', priority_direction: 'asc', use_board_position: true } });
-    expect((await f.queue.observe({})).items.map((item) => item.number)).toEqual([2, 3, 1]);
-    f.configure({ queue_order: { priority_direction: 'desc' } });
-    expect((await f.queue.observe({})).items.map((item) => item.number)).toEqual([3, 1, 2]);
-    f.configure({ queue_order: { use_board_position: false } });
-    expect((await f.queue.observe({})).items.map((item) => item.number)).toEqual([1, 3, 2]);
-    f.contexts[0]!.memberships[0]!.numberValues = [];
-    expect((await f.queue.observe({})).items.map((item) => item.number)).toEqual([3, 2, 1]);
+    f.contexts[0]!.number = 7;
+    f.contexts[1]!.number = 7;
+    f.contexts[2]!.number = 3;
+    f.items[0]!.position = 2; f.items[1]!.position = 2; f.items[2]!.position = 1;
+    const observed = await f.queue.observe({});
+    expect(observed.items.map((item) => item.number)).toEqual([3, 7, 7]);
+    expect(observed.items.map((item) => item.issueId)).toEqual(['ISSUE_3', 'ISSUE_1', 'ISSUE_2']);
+    expect(observed.items.every((item) => !('value' in item.order))).toBe(true);
+    expect(observed.observation.order.criterion).toBe('project-position');
   });
 
-  it('makes unavailable priority and undocumented position fallbacks explicit', async () => {
+  it('uses number and identity when positions are absent or disabled, without a priority diagnostic', async () => {
     const f = await queueFixture(); f.items.reverse();
-    f.configure({ queue_order: { priority_field_id: 'MISSING', use_board_position: true } });
     const observed = await f.queue.observe({});
     expect(observed.items.map((item) => item.number)).toEqual([1, 2, 3]);
     expect(observed.observation.order.criterion).toBe('issue-number');
-    expect(observed.observation.diagnostics.map((entry) => entry.code)).toEqual(expect.arrayContaining(['PRIORITY_VALUE_UNAVAILABLE', 'BOARD_POSITION_UNAVAILABLE']));
+    expect(observed.observation.diagnostics.map((entry) => entry.code)).toContain('BOARD_POSITION_UNAVAILABLE');
+    expect(observed.observation.diagnostics.map((entry) => entry.code)).not.toContain('PRIORITY_VALUE_UNAVAILABLE');
+
+    f.items[0]!.position = 1; f.items[1]!.position = 2; f.items[2]!.position = 3;
+    f.configure({ queue_order: { use_board_position: false } });
+    expect((await f.queue.observe({})).items.map((item) => item.number)).toEqual([1, 2, 3]);
+    expect((await f.queue.observe({})).observation.order.criterion).toBe('issue-number');
+  });
+
+  it('orders projects by ID and falls back for the whole project when any returned item lacks a position', async () => {
+    const f = await queueFixture();
+    const secondId = (await register(f, f.headers, 'Second project')).json<ProjectDetail>().project.id;
+    const secondMapping = { ...mapping, id: 'PVT_second' };
+    f.configureProject(secondId, { source: { kind: 'local', location: f.directory }, github_project: secondMapping, automation_enabled: true });
+    const repository = structuredClone(f.contexts[0]!.repository);
+    const secondContexts: IssueContext[] = [6, 4, 5].map((number) => ({
+      ...structuredClone(f.contexts[0]!), id: `SECOND_ISSUE_${number}`, number, url: `https://github.com/test-org/repo/issues/${number}`,
+      repository: structuredClone(repository), memberships: [{ itemId: `SECOND_ITEM_${number}`, projectId: secondMapping.id, archived: false,
+        statusValues: [{ fieldId: secondMapping.status_field_id, optionId: secondMapping.status_option_ids.ready, name: 'Ready' }] }],
+    }));
+    const secondItems: ProjectItem[] = [
+      { id: 'SECOND_ITEM_6', archived: false, kind: 'issue', contentId: 'SECOND_ISSUE_6', title: 'Issue 6', url: 'https://github.com/test-org/repo/issues/6', executable: true, position: 1 },
+      { id: 'SECOND_ITEM_4', archived: false, kind: 'issue', contentId: 'SECOND_ISSUE_4', title: 'Issue 4', url: 'https://github.com/test-org/repo/issues/4', executable: true, position: 2 },
+      { id: 'SECOND_ITEM_5', archived: true, kind: 'issue', contentId: 'SECOND_ISSUE_5', title: 'Issue 5', url: 'https://github.com/test-org/repo/issues/5', executable: false },
+      { id: 'DRAFT_Z', archived: false, kind: 'draft', contentId: null, title: 'Draft Z', url: null, executable: false },
+      { id: 'DRAFT_A', archived: false, kind: 'draft', contentId: null, title: 'Draft A', url: null, executable: false },
+    ];
+    for (const item of f.items) item.position = item.id === 'ITEM_3' ? 1 : 2;
+    vi.mocked(f.github.listProjectItems).mockImplementation(async (id) => complete(structuredClone(id === secondMapping.id ? secondItems : f.items)));
+    vi.mocked(f.github.getProject).mockImplementation(async (id) => complete({ ...structuredClone(projectDetails), project: { ...projectDetails.project, id } }));
+    vi.mocked(f.github.getIssueContextById).mockImplementation(async (id) => complete(structuredClone(
+      [...f.contexts, ...secondContexts].find((issue) => issue.id === id)!,
+    )));
+
+    const observed = await f.queue.observe({ limit: '1' });
+    expect(observed.observation.page.items).toHaveLength(1);
+    expect(observed.observation.page.items[0]?.projectId).toBe([f.projectId, secondId].sort()[0]);
+    expect(observed.observation.page.items.some((item) => item.itemId === 'SECOND_ITEM_5')).toBe(false);
+    expect([...new Set(observed.items.map((item) => item.projectId))]).toEqual([f.projectId, secondId].sort());
+    expect(observed.items.filter((item) => item.projectId === f.projectId).map((item) => item.number)).toEqual([3, 1, 2]);
+    const secondRows = observed.items.filter((item) => item.projectId === secondId);
+    expect(secondRows.map((item) => item.number)).toEqual([4, 5, 6, null, null]);
+    expect(secondRows.map((item) => item.itemId)).toEqual(['SECOND_ITEM_4', 'SECOND_ITEM_5', 'SECOND_ITEM_6', 'DRAFT_A', 'DRAFT_Z']);
+    expect(secondRows.every((item) => item.order.criterion === 'Número crescente e ID')).toBe(true);
+  });
+
+  it('invalidates the existing authorization when the effective candidate sequence changes', async () => {
+    const f = await queueFixture();
+    const authorized = await f.queue.observe({});
+    f.items[0]!.position = 3; f.items[1]!.position = 2; f.items[2]!.position = 1;
+    const current = await f.queue.observe({});
+    expect(current.items.map((item) => item.number)).toEqual([3, 2, 1]);
+    expect(current.observation.summaryHash).not.toBe(authorized.observation.summaryHash);
+    await expect(f.queue.save({ enabled: true, scope: authorized.observation.scope, observationId: authorized.observation.observationId!,
+      authorizedSummaryHash: authorized.observation.summaryHash! }, { operationId: randomUUID(), expectedRevision: authorized.etag }))
+      .rejects.toMatchObject({ code: 'QUEUE_SUMMARY_CHANGED', current: { observation: { summaryHash: current.observation.summaryHash } } });
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.db.prepare('SELECT count(*) AS count FROM queue_consumptions').get()).toEqual({ count: 0 });
   });
 
   it.each(['partial', 'authentication_invalid', 'rate_limited'] as const)('does not authorize or count %s reads', async (state) => {
@@ -470,7 +522,9 @@ describe('project registration and lightweight catalog', () => {
     const body = r.json<ProjectDetail & { operation_id: string }>();
     expect(body.project.id).not.toBe(f.directory); expect(body.project.current_revision_id).toBeTruthy();
     expect(body.prerequisites.map((p) => p.code)).toEqual(expect.arrayContaining(['REMOTE_UNCONFIRMED', 'PROJECT_REQUIRED', 'PROFILES_REQUIRED', 'LOCAL_CHANGES_EXCLUDED', 'EXECUTION_REVALIDATION_REQUIRED']));
-    expect(f.storage.getConfiguration(body.project.id).view.configuration).toMatchObject({ correction_limit: 2, default_delivery_mode: 'icr', github_project: null, automation_enabled: false, checks: [] });
+    const configuration = f.storage.getConfiguration(body.project.id).view.configuration;
+    expect(configuration).toMatchObject({ correction_limit: 2, default_delivery_mode: 'icr', github_project: null, automation_enabled: false });
+    expect(configuration).not.toHaveProperty('checks');
     expect(f.db.prepare('SELECT count(*) AS n FROM project_revisions WHERE project_id = ?').get(body.project.id)).toEqual({ n: 1 });
     expect(f.storage.getOperation(body.operation_id)).toMatchObject({ state: 'succeeded', resource: { id: body.project.id } });
     expect(r.headers.location).toBe(`/api/v1/projects/${body.project.id}`);
@@ -707,15 +761,19 @@ describe('global and aggregate configuration', () => {
     const id = (await register(f, headers)).json<ProjectDetail>().project.id;
     await putSettings(f, headers, { changes: {}, profile_changes: [profile] });
     const p = f.storage.getGlobalConfiguration().view.profiles[0]!; const old = f.storage.getConfiguration(id);
-    const body: ConfigurationUpdate = { project_changes: { github_project: mapping, implementer_profile_id: p.id, reviewer_profile_id: p.id, correction_limit: 5, default_delivery_mode: 'pr', automation_enabled: true, checks: [{ id: 'check', command: 'npm.cmd test', cwd_relative: 'apps/backend', timeout_ms: 1000 }], queue_order: { priority_direction: 'desc', use_board_position: false }, guidance: 'Project instructions' }, global_changes: { time_defaults: { passage_active_time_ms: 123456 } }, profile_changes: profileCommands([{ ...profile, id: p.id, effort: 'updated-exact' }]) };
+     const body: ConfigurationUpdate = { project_changes: { github_project: mapping, implementer_profile_id: p.id, reviewer_profile_id: p.id, correction_limit: 5, default_delivery_mode: 'pr', automation_enabled: true, queue_order: { use_board_position: false }, guidance: 'Project instructions' }, global_changes: { time_defaults: { passage_active_time_ms: 123456 } }, profile_changes: profileCommands([{ ...profile, id: p.id, effort: 'updated-exact' }]) };
     const key = randomUUID(); const r = await putConfiguration(f, headers, id, body, old.etag, key); expect(r.statusCode).toBe(200); expect(Value.Check(ConfigurationSaved, r.json())).toBe(true);
-    const view = r.json<ConfigurationView>(); expect(view.configuration).toMatchObject({ revision: 2, correction_limit: 5, github_project: mapping, queue_order: { priority_field_id: null, priority_direction: 'desc', use_board_position: false } });
+    const view = r.json<ConfigurationView>(); expect(view.configuration).toMatchObject({ revision: 2, correction_limit: 5, github_project: mapping, queue_order: { use_board_position: false } });
+    expect(view.configuration.queue_order).toEqual({ use_board_position: false });
+    const queueJson = f.db.prepare('SELECT queue_order_json FROM project_revisions WHERE id = ?').get(view.configuration.id) as { queue_order_json: string };
+    expect(JSON.parse(queueJson.queue_order_json)).toEqual({ useBoardPosition: false });
     expect(view.configuration.id).not.toBe(old.view.configuration.id); expect(view.settings.designated_host).toBe(old.view.settings.designated_host); expect(view.profiles[0]?.effort).toBe('updated-exact');
     expect(f.db.prepare('SELECT correction_limit FROM project_revisions WHERE id = ?').get(old.view.configuration.id)).toEqual({ correction_limit: 2 });
     expect(f.db.prepare('SELECT count(*) AS n FROM events WHERE operation_id = ? AND project_id = ?').get(key, id)).toEqual({ n: 1 });
     expect(f.storage.getOperation(key)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
     vi.mocked(f.github.validateProjectSelection).mockRejectedValue(new Error('Must recover before remote IO'));
     await reopenController(f);
+    expect(f.storage.getConfiguration(id).view.configuration.queue_order).toEqual({ use_board_position: false });
     const currentHeaders = await session(f);
     const replay = await putConfiguration(f, currentHeaders, id, body, old.etag, key);
     expect(replay.statusCode).toBe(200); expect(replay.json()).toEqual(r.json());
@@ -760,9 +818,54 @@ describe('global and aggregate configuration', () => {
     expect((await putConfiguration(f, headers, id, { project_changes: { implementer_profile_id: randomUUID() }, global_changes: { time_defaults: { polling_interval_ms: 23000 } } })).statusCode).toBe(404);
     expect(f.storage.getConfiguration(id)).toEqual(old);
   });
-  it.each(['../outside', 'a/../../outside', 'C:\\outside', '\\outside', '/outside', 'a:stream', 'a\u0000b'])('rejects unsafe check cwd %s', async (cwdRelative) => {
+  it('rejects retired manual check definitions directly, nested and combined before writes or execution', async () => {
     const f = fixture(); const headers = await session(f); const id = (await register(f, headers)).json<ProjectDetail>().project.id;
-    const r = await putConfiguration(f, headers, id, { project_changes: { checks: [{ id: 'check', command: 'npm.cmd test', cwd_relative: cwdRelative }] } }); expect(r.statusCode).toBe(400); expect(f.storage.getConfiguration(id).view.configuration.revision).toBe(1);
+    const before = f.storage.getConfiguration(id); const globalBefore = f.storage.getGlobalConfiguration();
+    const count = (table: 'events' | 'operation_requests' | 'attempts' | 'preparations' | 'preparation_revisions') =>
+      f.db.prepare<[], { n: number }>(`SELECT count(*) AS n FROM ${table}`).get()!.n;
+    const beforeCounts = { events: count('events'), operations: count('operation_requests'), attempts: count('attempts'), preparations: count('preparations'), revisions: count('preparation_revisions') };
+    const execution = f.execution;
+    if (!execution) throw new Error('The controlled execution fixture is required.');
+    f.inspectOrigin.mockClear(); vi.mocked(f.github.validateProjectSelection).mockClear(); vi.mocked(execution.getCatalog).mockClear();
+    const definitions = [{ id: 'check', command: 'npm.cmd test', cwd_relative: '.' }];
+    const payloads: Record<string, unknown>[] = [
+      { project_changes: { checks: definitions } },
+      { project_changes: { source: { kind: 'local', location: f.directory, checks: definitions } } },
+      { project_changes: { correction_limit: 4, checks: definitions }, global_changes: { time_defaults: { polling_interval_ms: 23000 }, checks: definitions } },
+      { project_changes: { correction_limit: '4' } },
+    ];
+    for (const payload of payloads) {
+      const response = await f.app.inject({ method: 'PUT', url: `/api/v1/projects/${id}/configuration`,
+        headers: { ...headers, 'if-match': before.etag, 'idempotency-key': randomUUID() }, payload });
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ code: string }>().code).toBe('VALIDATION_FAILED');
+    }
+    expect(f.storage.getConfiguration(id)).toEqual(before);
+    expect(f.storage.getGlobalConfiguration()).toEqual(globalBefore);
+    expect({ events: count('events'), operations: count('operation_requests'), attempts: count('attempts'), preparations: count('preparations'), revisions: count('preparation_revisions') }).toEqual(beforeCounts);
+    expect(f.inspectOrigin).not.toHaveBeenCalled(); expect(f.github.validateProjectSelection).not.toHaveBeenCalled();
+    expect(execution.getCatalog).not.toHaveBeenCalled();
+  });
+  it('saves and reopens only the remaining project configuration fields', async () => {
+    const f = fixture(); const headers = await session(f); const id = (await register(f, headers)).json<ProjectDetail>().project.id;
+    const before = f.storage.getConfiguration(id);
+    const response = await putConfiguration(f, headers, id, { project_changes: { base_branch: 'release', correction_limit: 1, guidance: 'Current guidance' } }, before.etag);
+    expect(response.statusCode).toBe(200);
+    const expected = f.storage.getConfiguration(id).view.configuration;
+    expect(expected).toMatchObject({ base_branch: 'release', correction_limit: 1, guidance: 'Current guidance' });
+    expect(expected).not.toHaveProperty('checks');
+    const columns = f.db.prepare<[], { name: string }>("PRAGMA table_info('project_revisions')").all().map(column => column.name);
+    expect(columns).not.toContain('checks_json');
+    const revision = f.db.prepare<[string], Record<string, unknown>>('SELECT * FROM project_revisions WHERE id=?').get(expected.id);
+    expect(revision).not.toHaveProperty('checks_json');
+    await f.app.close(); f.storage.close();
+    const reopened = openStorage({ dataDirectory: f.directory });
+    try {
+      const restored = reopened.getConfiguration(id).view.configuration;
+      expect(restored).toEqual(expected);
+      expect(restored).not.toHaveProperty('checks');
+      expect(JSON.stringify(restored)).not.toContain('"checks"');
+    } finally { reopened.close(); }
   });
   it.each([-1, 6, 1.5])('rejects invalid correction limit %s', async (correctionLimit) => {
     const f = fixture(); const headers = await session(f); const id = (await register(f, headers)).json<ProjectDetail>().project.id;

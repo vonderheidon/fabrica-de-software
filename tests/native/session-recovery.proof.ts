@@ -101,9 +101,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     prepareAttempt: (input: Parameters<typeof prepare>[0]) => prepare({ ...input, source: { ...input.source, kind: 'local', location: seed } }),
     captureDelivery: createCapturer(f.directory, git), materializeReview: shared, getDeliveryDiff: createDeliveryDiff(f.directory, git),
     verifyRetainedDelivery: createRetainedVerifier(f.directory, git), folderCapability: createEnvironmentRecovery(f.directory, git).folderCapability };
-  const verification = { verifyDelivery: async (id: string) => { const run = f.storage.beginVerification(id); f.storage.finishVerification(run.id); },
-    getArtifact: async (_id: string): Promise<{ bytes: Buffer; filename: string }> => { throw new Error('NO_CHECK_ARTIFACT_IN_PROOF'); } };
-  const createController = () => createPipeline({ ...f.dependencies, github, workspaces, verification, publication: { github, workspaces, verification } });
+  const createController = () => createPipeline({ ...f.dependencies, github, workspaces, publication: { github, workspaces } });
   let pipeline = createController();
   const watchdog = setTimeout(() => { void pipeline.close(); }, Math.max(0, deadline - Date.now()));
   const attempts: string[] = [];
@@ -185,7 +183,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
       expect(f.db.pragma('foreign_key_check')).toEqual([]);
       writeFileSync(join(evidence, 'result.json'), JSON.stringify({ ok: true, scope: 'restart', passages, first, interrupted, next, pids,
         oldSession, nextSession, priorController, currentController: f.storage.controllerInstanceId,
-        limits: ['Controller instances, SQLite connections, adapter and native job maps recreated within the test process; not an OS process crash.', 'GitHub and technical checks are controlled ports.'], dataDirectory: f.directory }, null, 2));
+        limits: ['Controller instances, SQLite connections, adapter and native job maps recreated within the test process; not an OS process crash.', 'GitHub authority is a controlled port.'], dataDirectory: f.directory }, null, 2));
       return;
     }
     let one: { role: string; omp_session_id: string; managed_terminal_id: string }[] = [], two: typeof one = [];
@@ -244,7 +242,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
     writeFileSync(join(evidence, 'result.json'), JSON.stringify({ ok: true, scope: stopsOnly ? 'stops_only' : 'full', passages, firstSessions: one, secondSessions: two, nativeActiveNotStopped: true,
       cancellation: { attemptId: cancellation, pids: cancelPids, stopped: true }, trackingLoss: { attemptId: lost, pids: lostPids, liveAfterLoss: true, stoppedAfterExplicitCleanup: true },
-      limits: ['GitHub authority/status/comments and checks are controlled ports, never real remote writes.', 'Tracking loss is injected at the real channel callback boundary; it is not an accidental provider/network outage.', 'Active physical processes and non-available occupation are checked; this does not exercise every allocation race.'], dataDirectory: f.directory }, null, 2));
+      limits: ['GitHub authority/status/comments are controlled ports, never real remote writes.', 'Tracking loss is injected at the real channel callback boundary; it is not an accidental provider/network outage.', 'Active physical processes and non-available occupation are checked; this does not exercise every allocation race.'], dataDirectory: f.directory }, null, 2));
   } finally {
     clearTimeout(watchdog); await pipeline.close(); f.storage.close(); f.db.close();
   }

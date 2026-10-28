@@ -3,7 +3,7 @@ async (page) => {
   const origin = new URL(page.url()).origin;
   const assert = (condition, message) => { if (!condition) throw Error(message); };
   const projectId = 'abcdef12-1234-4123-8123-123456789012';
-  const candidate = { project_id: projectId, project_name: 'teste667', item_id: 'item', kind: 'issue', issue_id: 'issue', number: 1, title: 'Criar landing page estática básica para Aula IA', url: null, assignees: [{ id: 'account', login: 'vonderheidon' }], status: 'Ready', ready: true, ready_eligible: true, eligible: false, reasons: ['AUTOMATION_DISABLED'], consumption: 'available', attempt_id: null, order: { position: 1, criterion: 'number', value: null } };
+  const candidate = { project_id: projectId, project_name: 'teste667', item_id: 'item', kind: 'issue', issue_id: 'issue', number: 1, title: 'Criar landing page estática básica para Aula IA', url: null, assignees: [{ id: 'account', login: 'vonderheidon' }], status: 'Ready', ready: true, ready_eligible: true, eligible: false, reasons: ['AUTOMATION_DISABLED'], consumption: 'available', attempt_id: null, order: { position: 1, criterion: 'issue-number' } };
   let items = [candidate];
   const writes = [];
   const handler = async route => {

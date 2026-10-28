@@ -1,7 +1,6 @@
 // HTTP DTOs only. Private captures and native executor protocols retain their versioned representation.
 import { Type, type Static } from "@sinclair/typebox";
 import { OperationId } from "../base.js";
-import { VerificationSummary } from "./verification.js";
 const closed = { additionalProperties: false } as const;
 export const GitObjectId = Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' });
 export const CaptureWarning = Type.Object({
@@ -22,7 +21,7 @@ export const Delivery = Type.Object({
     warnings: Type.Array(CaptureWarning, { maxItems: 1000 }),
 }, closed);
 export type Delivery = Static<typeof Delivery>;
-export const DeliveryView = Type.Object({ delivery: Delivery, verification: Type.Union([Type.Null(), VerificationSummary]), event_cursor: Type.String() }, closed);
+export const DeliveryView = Type.Object({ delivery: Delivery, event_cursor: Type.String() }, closed);
 export type DeliveryView = Static<typeof DeliveryView>;
 export const CaptureRetry = Type.Object({ producer_passage_id: OperationId }, closed);
 export type CaptureRetry = Static<typeof CaptureRetry>;

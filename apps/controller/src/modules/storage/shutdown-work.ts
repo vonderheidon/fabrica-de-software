@@ -15,10 +15,6 @@ export function shutdownWork(db: Database.Database): ShutdownWork[] {
     UNION SELECT 'execution',m.id,NULL,NULL,m.state FROM managed_terminals m WHERE m.state IN ('occupied','uncertain')
     UNION SELECT 'execution',s.id,s.attempt_id,a.project_id,s.state FROM attempt_sessions s JOIN attempts a ON a.id=s.attempt_id WHERE s.state IN ('reserved','active','uncertain')
     UNION SELECT 'execution',o.id,o.attempt_id,a.project_id,o.state FROM terminal_occupancies o JOIN attempts a ON a.id=o.attempt_id WHERE o.state IN ('occupied','uncertain')
-    UNION SELECT 'execution',c.id,c.attempt_id,a.project_id,
-      CASE WHEN c.state IN ('pending','running') THEN c.state ELSE 'uncertain' END FROM checks c JOIN attempts a ON a.id=c.attempt_id
-      WHERE c.state IN ('pending','running') OR c.diagnostic='VERIFICATION_INTERRUPTED' OR c.diagnostic LIKE '%STOP_UNCONFIRMED%' OR c.execution_diagnostic LIKE '%STOP_UNCONFIRMED%'
-    UNION SELECT 'execution',v.id,v.attempt_id,a.project_id,v.state FROM verification_runs v JOIN attempts a ON a.id=v.attempt_id WHERE v.state='running'
     UNION SELECT 'execution',c.id,d.attempt_id,a.project_id,c.state FROM capture_runs c JOIN deliveries d ON d.id=c.delivery_id JOIN attempts a ON a.id=d.attempt_id WHERE c.state='running'
     UNION SELECT 'publication',p.operation_id,p.attempt_id,a.project_id,p.state FROM publication_requests p JOIN attempts a ON a.id=p.attempt_id WHERE p.state IN ('accepted','running','unknown')
     UNION SELECT 'publication',e.operation_id,e.attempt_id,a.project_id,e.state FROM effects e LEFT JOIN attempts a ON a.id=e.attempt_id WHERE e.state IN ('not_started','running','unknown')

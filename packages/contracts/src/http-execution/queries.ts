@@ -12,7 +12,6 @@ import { DeliveryView } from "./deliveries.js";
 import { PublicationSummary, EffectView } from "./publication.js";
 import { AttemptResource } from "./recovery.js";
 import { Criterion, PublicationTargetIntent } from "../preparations.js";
-import { CheckRun } from "./verification.js";
 import { Finding, Review, RoundHistory } from "./reviews.js";
 import { CriterionOutcome } from "./protocol-views.js";
 import { PassageRole } from "./protocol-views.js";
@@ -34,6 +33,7 @@ export const AttemptListQuery = Type.Object({
 export type AttemptListQuery = Static<typeof AttemptListQuery>;
 export const AttemptSummary = Type.Object({
     id: OperationId, project_id: OperationId, issue_id: Type.String(), issue_number: nullable(Type.Integer({ minimum: 1 })), issue_title: Type.Optional(nullable(Type.String({ maxLength: 65536 }))),
+    diagnostic: Type.Optional(AttemptStatus.properties.diagnostic),
     phase: AttemptStatus.properties.phase, result: AttemptStatus.properties.result, suspension: AttemptStatus.properties.suspension,
     revision: Type.Integer(), created_at_ms: Type.Integer(), updated_at_ms: Type.Integer(),
 }, closed);
@@ -48,7 +48,7 @@ export const HistoricalEffectiveProfile = Type.Object({
     context_summary: Type.String({ maxLength: 8192 }), technical_contract_summary: Type.String({ minLength: 1, maxLength: 4096 }),
     credentials_redacted: Type.Literal(true),
 }, closed);
-export const DetailSection = Type.Union(['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources', 'profiles', 'finding_assessments', 'finding_disputes', 'decisions', 'target_selections'].map(v => Type.Literal(v)));
+export const DetailSection = Type.Union(['rounds', 'passages', 'criteria', 'reviews', 'findings', 'questions', 'effects', 'resources', 'profiles', 'finding_assessments', 'finding_disputes', 'decisions', 'target_selections'].map(v => Type.Literal(v)));
 export type DetailSection = Static<typeof DetailSection>;
 export const AttemptDetailQuery = Type.Object({ ...paging, round_id: Type.Optional(Type.String({ pattern: '^[1-6]$' })), delivery_id: Type.Optional(OperationId), section: Type.Optional(DetailSection) }, closed);
 export type AttemptDetailQuery = Static<typeof AttemptDetailQuery>;
@@ -68,7 +68,7 @@ export const QuestionSummary = Type.Object({ id: OperationId, attempt_id: Operat
     state: Question.properties.state, revision: Type.Integer(), created_at_ms: Type.Integer(), expires_at_ms: nullable(Type.Integer()), delivery_receipt: Question.properties.delivery_receipt }, closed);
 export const FindingDetail = Type.Object({ ...Finding.properties, resolutions: Type.Array(Type.Object({ review_id: OperationId, delivery_id: OperationId,
         verdict: Type.Union([Type.Literal('resolved'), Type.Literal('unresolved')]), evidence: CriterionOutcome.properties.evidence }, closed), { maxItems: 6 }) }, closed);
-export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, CheckRun, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource, HistoricalEffectiveProfile, FindingAssessment, FindingDispute, AttemptDecisionView, PublicationTargetSelection]);
+export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource, HistoricalEffectiveProfile, FindingAssessment, FindingDispute, AttemptDecisionView, PublicationTargetSelection]);
 export type DetailItem = Static<typeof DetailItem>;
 export const DetailPage = Type.Object({ section: DetailSection, ...Page(DetailItem).properties }, closed);
 export type DetailPage = Static<typeof DetailPage>;
@@ -101,31 +101,4 @@ export const DeliveryDetail = Type.Object({ ...DeliveryView.properties,
 }, closed);
 export type DeliveryDetail = Static<typeof DeliveryDetail>;
 
-export const AttemptComparisonQuery = Type.Object({ left_attempt_id: OperationId, right_attempt_id: OperationId }, closed);
-export type AttemptComparisonQuery = Static<typeof AttemptComparisonQuery>;
-export const HistoricalComparisonValue = Type.Object({
-    state: Type.Union(['available', 'unavailable', 'not_comparable'].map(value => Type.Literal(value))),
-    value: Type.Union([Type.String({ maxLength: 8192 }), Type.Integer({ minimum: 0 }), Type.Boolean(), Type.Null()]),
-    reason: nullable(Type.String({ minLength: 1, maxLength: 2048 })),
-}, closed);
-export type HistoricalComparisonValue = Static<typeof HistoricalComparisonValue>;
-export const AttemptComparisonSide = Type.Object({
-    attempt_id: OperationId, started_at_ms: Type.Integer({ minimum: 0 }),
-    result: nullable(Type.Union(['delivered', 'rejected', 'failed', 'cancelled', 'interrupted'].map(value => Type.Literal(value)))),
-    failure_reason: nullable(Type.String({ minLength: 1, maxLength: 2048 })),
-    round: nullable(Type.Integer({ minimum: 1, maximum: 6 })), delivery_id: nullable(OperationId),
-    content_identity: nullable(Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' })),
-    project_revision_id: nullable(OperationId), preparation_revision: nullable(Type.Integer({ minimum: 1 })),
-    configuration_state: Type.Union([Type.Literal('available'), Type.Literal('unavailable')]),
-    details_url: Type.String({ minLength: 1, maxLength: 512 }),
-}, closed);
-export type AttemptComparisonSide = Static<typeof AttemptComparisonSide>;
-export const AttemptComparison = Type.Object({
-    project_id: OperationId, repository_id: Type.String({ minLength: 1, maxLength: 256 }), issue_id: Type.String({ minLength: 1, maxLength: 256 }),
-    issue_number: nullable(Type.Integer({ minimum: 1 })), left: AttemptComparisonSide, right: AttemptComparisonSide,
-    differences: Type.Array(Type.Object({ field: Type.String({ minLength: 1, maxLength: 256 }),
-        left: HistoricalComparisonValue, right: HistoricalComparisonValue }, closed), { maxItems: 100 }),
-    limitations: Type.Array(Type.String({ minLength: 1, maxLength: 2048 }), { maxItems: 100 }),
-}, closed);
-export type AttemptComparison = Static<typeof AttemptComparison>;
 import { StageActivity } from '../stage-activity.js';

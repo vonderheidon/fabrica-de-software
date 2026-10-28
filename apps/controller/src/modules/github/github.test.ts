@@ -31,18 +31,21 @@ describe('GitHub identity and query diagnostics', () => {
     expect(f.calls[1]?.variables).toMatchObject({cursor:'next'});
     expect(f.calls.every(call => call.query.startsWith('query FactoryBranches') && call.query.includes('refPrefix:"refs/heads/"'))).toBe(true);
   });
-  it('groups queue field pages by identity, retaining independent cursors, values and failures', async () => {
+  it('groups queue field pages by identity, retaining status pagination and failures without numeric values', async () => {
     const header = http({ data: { node: { __typename: 'Issue', id: 'I_group', number: 17, title: 'Title', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository } } });
     const ids = ['item-a', 'item-b', 'item-c'];
     const prefix = () => [header, http({ data: { node: { assignees: page([]) } } }), http({ data: { node: { blockedBy: page([]) } } }),
       http({ data: { node: { projectItems: page(ids.map(id => ({ id, isArchived: false, project: { id: 'PVT_1' } }))) } } })];
-    const value = (id: string) => ({ __typename: 'ProjectV2ItemFieldNumberValue', id, number: 7, field: { id: 'number' } });
-    const nodes = ids.map(id => ({ id, __typename: 'ProjectV2Item', fieldValues: page([value(id)], `${id}-cursor`) }));
-    const valid = fixture([...prefix(), http({ data: { nodes: [...nodes].reverse() } }), ...ids.map(id => http({ data: { node: { fieldValues: page([value(`${id}-next`)]) } } }))]);
+    const value = (id: string, number: number) => ({ __typename: 'ProjectV2ItemFieldNumberValue', id, number, field: { id: 'number' } });
+    const nodes = ids.map((id, index) => ({ id, __typename: 'ProjectV2Item', fieldValues: page([value(id, index)], `${id}-cursor`) }));
+    const valid = fixture([...prefix(), http({ data: { nodes: [...nodes].reverse() } }), ...ids.map((id, index) => http({ data: { node: { fieldValues: page([value(`${id}-next`, 100 + index)]) } } }))]);
     const response = await valid.client.getIssueContextById('I_group', { purpose: 'queue' });
     expect(response.state).toBe('complete');
-    expect((response.data as IssueContext).memberships.map(m => [m.itemId, m.numberValues?.length])).toEqual(ids.map(id => [id, 2]));
+    expect((response.data as IssueContext).memberships.map(m => m.statusValues)).toEqual(ids.map(() => []));
+    expect((response.data as IssueContext).memberships[0]).not.toHaveProperty('numberValues');
     expect(valid.calls.slice(5).map(call => call.variables)).toEqual(ids.map(id => ({ id, cursor: `${id}-cursor` })));
+    expect(valid.calls[4]?.query).toContain('ProjectV2ItemFieldNumberValue { id }');
+    expect(valid.calls[4]?.query).not.toContain('number field');
     for (const broken of [null, { ...nodes[1], id: 'item-a' }, { ...nodes[1], __typename: 'Issue' }]) {
       const failed = fixture([...prefix(), http({ data: { nodes: [nodes[0], broken, nodes[2]] } }), http({ data: { node: { fieldValues: page([]) } } }), http({ data: { node: { fieldValues: page([]) } } })]);
       expect(await failed.client.getIssueContextById('I_group', { purpose: 'queue' })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'RESPONSE_INVALID' }] });
@@ -138,7 +141,7 @@ describe('GitHub identity and query diagnostics', () => {
 });
 
 describe('complete repository and Project queries', () => {
-  it('reads numeric field definitions on later pages and retains documented item positions across pages', async () => {
+  it('ignores numeric field definitions and retains documented item positions across pages', async () => {
     const f = fixture([
       http({ data: { node: { ...wireProject, __typename: 'ProjectV2' } } }),
       http({ data: { node: { fields: page([], 'fields2') } } }),
@@ -146,7 +149,10 @@ describe('complete repository and Project queries', () => {
       http({ data: { node: { items: page([{ id: 'ITEM9', isArchived: false, status: { optionId: 'READY', field: { id: 'STATUS' } }, content: { __typename: 'Issue', id: 'I9', title: 'Ninth', url: 'https://github.com/o/r/issues/9' } }], 'items2') } } }),
       http({ data: { node: { items: page([{ id: 'ITEM1', isArchived: false, content: { __typename: 'Issue', id: 'I1', title: 'First', url: 'https://github.com/o/r/issues/1' } }]) } } }),
     ]);
-    expect(await f.client.getProject('PVT_1')).toMatchObject({ state: 'complete', data: { numberFields: [{ id: 'PRIORITY', name: 'Priority' }] } });
+    const project = await f.client.getProject('PVT_1');
+    expect(project).toMatchObject({ state: 'complete', data: { singleSelectFields: [] } });
+    expect(project.data).not.toHaveProperty('numberFields');
+    expect(f.calls[1]?.query).not.toContain('dataType');
     const items = (await f.client.listProjectItems('PVT_1')).data;
     expect(items?.map((item) => [item.id, item.position])).toEqual([['ITEM9', 1], ['ITEM1', 2]]);
     expect(items?.[0]?.status).toEqual({ fieldId: 'STATUS', optionId: 'READY' });
@@ -269,16 +275,24 @@ describe('issue preparation context', () => {
     expect(response).toMatchObject({ state: 'complete', data: { id: 'I_1', comments: [], references: [], blockers: [{ state: 'OPEN' }, { state: 'CLOSED' }], memberships: [{ statusValues: [{ optionId: 'READY' }] }] } });
     expect(calls.some(call => call.query.includes('FactoryComments'))).toBe(false);
   });
-  it('reads numeric priority values by exact field ID on independent field-value pages', async () => {
-    const responses = issueResponses();
-    responses[9] = http({ data: { node: { fieldValues: page([
-      { id: 'V_PRIORITY', __typename: 'ProjectV2ItemFieldNumberValue', field: { id: 'PRIORITY' }, number: 0 },
-    ], 'v2') } } });
-    const f = fixture(responses);
-    expect(await f.client.getIssueContext({ owner: 'operator', name: 'actual-repo', number: 1 })).toMatchObject({ state: 'complete', data: {
-      memberships: [{ numberValues: [{ fieldId: 'PRIORITY', value: 0 }], statusValues: [{ fieldId: 'F_STATUS', optionId: 'READY' }] }],
-    } });
-    expect(f.calls[9]?.query).toContain('ProjectV2ItemFieldNumberValue');
+  it('does not read numeric values while preserving fieldValues pagination', async () => {
+    const observe = async (numericValue: number) => {
+      const responses = issueResponses();
+      responses[9] = http({ data: { node: { fieldValues: page([
+        { id: 'V_PRIORITY', __typename: 'ProjectV2ItemFieldNumberValue', field: { id: 'PRIORITY' }, number: numericValue },
+      ], 'v2') } } });
+      const f = fixture(responses);
+      const response = await f.client.getIssueContext({ owner: 'operator', name: 'actual-repo', number: 1 });
+      expect(f.calls[9]?.query).toContain('ProjectV2ItemFieldNumberValue { id }');
+      expect(f.calls[9]?.query).not.toContain('number field');
+      expect(f.calls[9]?.query).not.toContain('number }');
+      return response;
+    };
+    const response = await observe(0);
+    const changedNumericValue = await observe(999);
+    expect(response).toMatchObject({ state: 'complete', data: { memberships: [{ statusValues: [{ fieldId: 'F_STATUS', optionId: 'READY' }] }] } });
+    expect(response.data && 'repository' in response.data ? response.data.memberships[0] : null).not.toHaveProperty('numberValues');
+    expect(changedNumericValue.data).toEqual(response.data);
   });
   it('loads all nested pages, body, comments, references, assignees, blockers and Status IDs', async () => {
     const { client, calls } = fixture(issueResponses());

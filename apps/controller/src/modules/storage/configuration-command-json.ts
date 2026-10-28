@@ -1,5 +1,5 @@
 import type { ConfigurationUpdate, PreparationChoices, PreparationUpdate, ProfileChanges, ProjectChanges, ProjectRegistration, SettingsUpdate } from '#contracts';
-import { storeCheck, storeMapping } from './configuration-json.js';
+import { storeMapping } from './configuration-json.js';
 
 // Idempotency hashes retain the immediately preceding public command shape.
 // Common snake_case fields were already public before this family changed.
@@ -13,13 +13,10 @@ function projectChanges(value: ProjectChanges) {
     ...(value.github_project === undefined ? {} : { githubProject: value.github_project === null ? null : storeMapping(value.github_project) }),
     ...(value.implementer_profile_id === undefined ? {} : { implementerProfileId: value.implementer_profile_id }),
     ...(value.reviewer_profile_id === undefined ? {} : { reviewerProfileId: value.reviewer_profile_id }),
-    ...(value.checks === undefined ? {} : { checks: value.checks.map(storeCheck) }),
     ...(value.correction_limit === undefined ? {} : { correctionLimit: value.correction_limit }),
     ...(value.default_delivery_mode === undefined ? {} : { defaultDeliveryMode: value.default_delivery_mode }),
     ...(value.automation_enabled === undefined ? {} : { automationEnabled: value.automation_enabled }),
     ...(order === undefined ? {} : { queueOrder: {
-      ...(order.priority_field_id === undefined ? {} : { priorityFieldId: order.priority_field_id }),
-      ...(order.priority_direction === undefined ? {} : { priorityDirection: order.priority_direction }),
       ...(order.use_board_position === undefined ? {} : { useBoardPosition: order.use_board_position }),
     } }),
     ...(value.guidance === undefined ? {} : { guidance: value.guidance }),
@@ -71,7 +68,6 @@ function preparationChanges(value: PreparationUpdate['changes']) {
       ...(overrides.base_branch === undefined ? {} : { baseBranch: overrides.base_branch }),
       ...(overrides.implementer_profile === undefined ? {} : { implementerProfile: overrides.implementer_profile }),
       ...(overrides.reviewer_profile === undefined ? {} : { reviewerProfile: overrides.reviewer_profile }),
-      ...(overrides.checks === undefined ? {} : { checks: overrides.checks.map(storeCheck) }),
       ...(overrides.correction_limit === undefined ? {} : { correctionLimit: overrides.correction_limit }),
       ...(overrides.time_defaults === undefined ? {} : { timeDefaults: overrides.time_defaults }),
       ...(overrides.artifact_policy === undefined ? {} : { artifactPolicy: overrides.artifact_policy }),

@@ -3,12 +3,12 @@ import { AttemptDecisionView, HttpAttemptDecisionView, HttpMakeAttemptDecision, 
 import type { TSchema } from '@sinclair/typebox';
 import { Type, TypeGuard } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { PassageBinding, HttpPassageBinding, ExecutionQuestion, HttpExecutionQuestion, CriterionOutcome, HttpCriterionOutcome, ImplementerResult, HttpImplementerResult, ReviewerResult, HttpReviewerResult, StartAttempt, HttpStartAttempt, AttemptStatus, HttpAttemptStatus, ScopeChange, HttpScopeChange, Question, HttpQuestion, AnswerQuestion, HttpAnswerQuestion, PassageMeasurements, HttpPassageMeasurements, AttemptMeasurements, HttpAttemptMeasurements, RecoveryCapability, HttpRecoveryCapability, CancelAttempt, HttpCancelAttempt, AttemptResource, HttpAttemptResource, AttemptResources, HttpAttemptResources, RemovalPlan, HttpRemovalPlan, RemoveResource, HttpRemoveResource, FolderSurface, HttpFolderSurface, PassageInteraction, HttpPassageInteraction, GitObjectId, HttpGitObjectId, CaptureWarning, HttpCaptureWarning, Delivery, HttpDelivery, DeliveryView, HttpDeliveryView, CaptureRetry, HttpCaptureRetry, DeliveryDiffQuery, HttpDeliveryDiffQuery, DiffEntry, HttpDiffEntry, DeliveryDiff, HttpDeliveryDiff, CheckState, HttpCheckState, Artifact, HttpArtifact, CheckRun, HttpCheckRun, VerificationSummary, HttpVerificationSummary, CheckHistoryQuery, HttpCheckHistoryQuery, CheckHistory, HttpCheckHistory, Finding, HttpFinding, Review, HttpReview, RoundHistory, HttpRoundHistory, ProducerResult, HttpProducerResult, EffectIdentity, HttpEffectIdentity, EffectReceipt, HttpEffectReceipt, EffectView, HttpEffectView, CompletePublication, HttpCompletePublication, ReconcilePublication, HttpReconcilePublication, AuthorizeUpgrade, HttpAuthorizeUpgrade, ModeUpgradeSummary, HttpModeUpgradeSummary, PublicationSummary, HttpPublicationSummary, IssueHeader, HttpIssueHeader, AttemptListQuery, HttpAttemptListQuery, AttemptSummary, HttpAttemptSummary, AttemptPage, HttpAttemptPage, DetailSection, HttpDetailSection, AttemptDetailQuery, HttpAttemptDetailQuery, DeliveryDetailQuery, HttpDeliveryDetailQuery, PassageSummary, HttpPassageSummary, CriterionDetail, HttpCriterionDetail, ReviewSummary, HttpReviewSummary, QuestionSummary, HttpQuestionSummary, FindingDetail, HttpFindingDetail, DetailItem, HttpDetailItem, DetailPage, HttpDetailPage, AttemptDetail, HttpAttemptDetail, DeliveryDetail, HttpDeliveryDetail, AttemptParams, QuestionParams, ResourceParams, InteractionParams, DeliveryParams, CaptureRetryParams, ArtifactParams } from './index.js';
+import { PassageBinding, HttpPassageBinding, ExecutionQuestion, HttpExecutionQuestion, CriterionOutcome, HttpCriterionOutcome, ImplementerResult, HttpImplementerResult, ReviewerResult, HttpReviewerResult, StartAttempt, HttpStartAttempt, AttemptStatus, HttpAttemptStatus, ScopeChange, HttpScopeChange, Question, HttpQuestion, AnswerQuestion, HttpAnswerQuestion, PassageMeasurements, HttpPassageMeasurements, AttemptMeasurements, HttpAttemptMeasurements, RecoveryCapability, HttpRecoveryCapability, CancelAttempt, HttpCancelAttempt, AttemptResource, HttpAttemptResource, AttemptResources, HttpAttemptResources, RemovalPlan, HttpRemovalPlan, RemoveResource, HttpRemoveResource, FolderSurface, HttpFolderSurface, PassageInteraction, HttpPassageInteraction, GitObjectId, HttpGitObjectId, CaptureWarning, HttpCaptureWarning, Delivery, HttpDelivery, DeliveryView, HttpDeliveryView, CaptureRetry, HttpCaptureRetry, DeliveryDiffQuery, HttpDeliveryDiffQuery, DiffEntry, HttpDiffEntry, DeliveryDiff, HttpDeliveryDiff, Finding, HttpFinding, Review, HttpReview, RoundHistory, HttpRoundHistory, ProducerResult, HttpProducerResult, EffectIdentity, HttpEffectIdentity, EffectReceipt, HttpEffectReceipt, EffectView, HttpEffectView, CompletePublication, HttpCompletePublication, ReconcilePublication, HttpReconcilePublication, AuthorizeUpgrade, HttpAuthorizeUpgrade, ModeUpgradeSummary, HttpModeUpgradeSummary, PublicationSummary, HttpPublicationSummary, IssueHeader, HttpIssueHeader, AttemptListQuery, HttpAttemptListQuery, AttemptSummary, HttpAttemptSummary, AttemptPage, HttpAttemptPage, DetailSection, HttpDetailSection, AttemptDetailQuery, HttpAttemptDetailQuery, DeliveryDetailQuery, HttpDeliveryDetailQuery, PassageSummary, HttpPassageSummary, CriterionDetail, HttpCriterionDetail, ReviewSummary, HttpReviewSummary, QuestionSummary, HttpQuestionSummary, FindingDetail, HttpFindingDetail, DetailItem, HttpDetailItem, DetailPage, HttpDetailPage, AttemptDetail, HttpAttemptDetail, DeliveryDetail, HttpDeliveryDetail, AttemptParams, QuestionParams, ResourceParams, InteractionParams, DeliveryParams, CaptureRetryParams } from './index.js';
 
 // Historical optional fields have explicit HTTP projections while private envelopes remain unchanged.
 function expectedHttpSchema(schema: TSchema): unknown {
   const rename = (key: string): string => key.replace(/[A-Z]/g, letter => '_'+letter.toLowerCase());
-  const requiredProjection = (key: string) => key === 'responseType' || key === 'additionalChangesJustification' || key === 'repeatReason' || (key === 'commandRepetitions' && 'verificationId' in (schema.properties ?? {}));
+  const requiredProjection = (key: string) => key === 'responseType' || key === 'additionalChangesJustification' || key === 'repeatReason' || (key === 'commandRepetitions' && 'implementerPassageId' in (schema.properties ?? {}));
   const reviewProjection = 'declaredVerdict' in (schema.properties ?? {}) && 'resolutions' in (schema.properties ?? {});
   if (TypeGuard.IsObject(schema)) return { ...schema,
     properties: { ...Object.fromEntries(Object.entries(schema.properties).map(([key, value]) => [rename(key),
@@ -50,12 +50,6 @@ const pairs: readonly (readonly [string, TSchema, TSchema])[] = [
   ['DeliveryDiffQuery', DeliveryDiffQuery, HttpDeliveryDiffQuery],
   ['DiffEntry', DiffEntry, HttpDiffEntry],
   ['DeliveryDiff', DeliveryDiff, HttpDeliveryDiff],
-  ['CheckState', CheckState, HttpCheckState],
-  ['Artifact', Artifact, HttpArtifact],
-  ['CheckRun', CheckRun, HttpCheckRun],
-  ['VerificationSummary', VerificationSummary, HttpVerificationSummary],
-  ['CheckHistoryQuery', CheckHistoryQuery, HttpCheckHistoryQuery],
-  ['CheckHistory', CheckHistory, HttpCheckHistory],
   ['Finding', Finding, HttpFinding],
   ['Review', Review, HttpReview],
   ['RoundHistory', RoundHistory, HttpRoundHistory],
@@ -109,8 +103,8 @@ it.each(commands)('rejects aliases alone and alongside canonical request fields 
   const { [key]: value, ...rest } = canonical;
   expect(Value.Check(schema, { ...rest, [alias]: value })).toBe(false);
 });
-it('preserves every path identifier, including question, resource, passage, delivery and artifact', () => {
-  for (const schema of [AttemptParams, QuestionParams, ResourceParams, InteractionParams, DeliveryParams, CaptureRetryParams, ArtifactParams]) {
+it('preserves every remaining path identifier, including question, resource, passage and delivery', () => {
+  for (const schema of [AttemptParams, QuestionParams, ResourceParams, InteractionParams, DeliveryParams, CaptureRetryParams]) {
     expect(Object.keys(schema.properties).some(key => /[A-Z]/.test(key))).toBe(true);
     for (const key of Object.keys(schema.properties)) expect(key).not.toContain('_');
   }

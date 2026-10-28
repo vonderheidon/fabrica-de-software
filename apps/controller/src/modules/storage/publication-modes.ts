@@ -15,7 +15,7 @@ export function upgradeSummaries(db: Database.Database, attemptId: string, deliv
   const capture = readCapture(db,attemptId);
   const publicationTarget = capture.v3Delivery?.publication_target ?? null;
   const version = db.prepare('SELECT id,revision,content_identity,base_sha,git_ref,has_delta FROM deliveries WHERE id=? AND attempt_id=?').get(deliveryId, attemptId);
-  const review = db.prepare('SELECT id,state,independence_state,content_identity,verification_id FROM reviews WHERE delivery_id=?').get(deliveryId);
+  const review = db.prepare('SELECT id,state,independence_state,content_identity,implementer_passage_id FROM reviews WHERE delivery_id=?').get(deliveryId);
   const effects = db.prepare('SELECT operation_id,kind,state,revision FROM effects WHERE attempt_id=? ORDER BY rowid').all(attemptId);
   const selections = db.prepare(`SELECT operation_id,repository_id,selection_kind,local_path,state,revision,request_hash
     FROM publication_target_selections WHERE attempt_id=? AND delivery_id=? ORDER BY rowid`).all(attemptId,deliveryId);

@@ -22,7 +22,6 @@
     "test:compiled": "node scripts/smoke-compiled.mjs",
     "test:http": "vitest run --config vitest.http.config.ts",
     "test:execution-compiled": "node scripts/smoke-execution.mjs",
-    "test:verification-compiled": "node scripts/smoke-verification.mjs",
     "test:acceptance": "vitest run tests/acceptance",
     "test:persistence": "vitest run tests/acceptance/persistence-maintenance.test.ts tests/acceptance/persistence-audit.test.ts tests/acceptance/execution-composition.test.ts tests/acceptance/persistence-report.test.ts tests/boundaries.test.ts --reporter=verbose",
     "proof:persistence": "node scripts/persistence-proof.mjs",

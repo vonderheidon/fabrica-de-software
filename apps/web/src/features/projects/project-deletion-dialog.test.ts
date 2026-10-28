@@ -22,7 +22,6 @@ const targets: ProjectDeletionPreview['targets'] = [
   { targetKey: 'private-target', targetKind: 'original_directory', path: 'C:/pasta muito longa/ação/.git', state: 'pending' },
   { targetKey: 'managed:managed:root', targetKind: 'exclusive_workspace', path: 'C:/fábrica/var/factory/projects/project-root/v1/managed', state: 'pending' },
   { targetKey: 'work', targetKind: 'exclusive_workspace', path: 'C:/ambientes/um', state: 'pending' },
-  { targetKey: 'artifact', targetKind: 'exclusive_artifact', path: 'C:/evidências/log', state: 'pending' },
 ];
 function render(currentRevision = 1, initialOperationId: string | null = null) {
   vi.stubGlobal('document', { body: {} });
@@ -39,7 +38,7 @@ it('keeps the project folder visible and internal paths in collapsed details wit
   expect(html).toContain(deletionWarning);
   expect(html).toContain('Será usada a configuração salva, sem as alterações deste rascunho.');
   for (const target of targets) expect(html).toContain(target.path);
-  for (const label of ['Pasta do projeto', 'Ambiente local exclusivo', 'Artefato exclusivo']) expect(html).toContain(label);
+  for (const label of ['Pasta do projeto', 'Ambiente local exclusivo']) expect(html).toContain(label);
   expect(html).not.toContain('destinos autorizados');
   expect(html).toContain('Ver detalhes das pastas internas');
   expect(html).toContain('<details class="project-deletion-more-targets">');

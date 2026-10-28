@@ -1,10 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { Review, RoundHistory, PassageBinding, type Finding, type ReviewerResult } from '#contracts';
+import { Review, RoundHistory, PassageBinding, ImplementerResult, type Finding, type ReviewerResult } from '#contracts';
 import { readAttempt, readCapture, attemptEvent } from './attempts.js';
 import { readDelivery } from './deliveries.js';
-import { verificationSummary } from './verification.js';
 import { guarded } from './configuration-reads.js';
 import { OperationError } from './operations.js';
 import { ExecutionError } from '../execution/index.js';
@@ -13,7 +12,7 @@ import { blockCorrection, readAttemptBlock, recordAssessments } from './progress
 import { respondToDisputes } from './disputes.js';
 
 const digestCriteria = (ids: string[]) => JSON.stringify([...ids].sort());
-const denied = () => new OperationError(409, 'REVIEW_NOT_ALLOWED', 'Review requires the current captured delivery, completed checks and live continuity.');
+const denied = () => new OperationError(409, 'REVIEW_NOT_ALLOWED', 'Review requires the current captured delivery, its accepted producer result and live continuity.');
 export function openFindings(db: Database.Database, attemptId: string, beforeRound: number): Finding[] {
   return db.prepare<[string, number, number], { id: string; reviewId: string; attemptId: string; key: string; criterion_ids_json: string; category: string; problem: string; evidence_json: string; expectedResult: string; blocking: number; priority: Finding["priority"]; originFindingId: string | null; deliveryId: string; contentIdentity: string }>(`
     SELECT f.id,f.review_id AS reviewId,f.attempt_id AS attemptId,f.finding_key AS key,f.criterion_ids_json,f.category,f.problem,f.evidence_json,f.expected_result AS expectedResult,f.blocking,f.priority,f.origin_finding_id AS originFindingId,r.delivery_id AS deliveryId,r.content_identity AS contentIdentity
@@ -30,7 +29,7 @@ export function openFindings(db: Database.Database, attemptId: string, beforeRou
 export function readReview(db: Database.Database, deliveryId: string): Review | null {
   readDelivery(db, deliveryId);
   const row = db.prepare<[string], Omit<Review, 'criteria' | 'findings' | 'resolutions'>>(`SELECT id,delivery_id AS deliveryId,attempt_id AS attemptId,passage_id AS passageId,
-    verification_id AS verificationId,content_identity AS contentIdentity,state,reason,independence_state AS independenceState,diagnostic,
+    implementer_passage_id AS implementerPassageId,content_identity AS contentIdentity,state,reason,independence_state AS independenceState,diagnostic,
     (SELECT json_extract(summary_json,'$.verdict') FROM passage_results WHERE passage_id=reviews.passage_id) AS declaredVerdict,
     created_at_ms AS createdAtMs,completed_at_ms AS completedAtMs FROM reviews WHERE delivery_id=?`).get(deliveryId);
   if (!row) return null;
@@ -50,10 +49,19 @@ export function beginReview(db: Database.Database, deliveryId: string): Review |
   return guarded(() => db.transaction(() => {
     const delivery = readDelivery(db, deliveryId); const a = readAttempt(db, delivery.attemptId);
     const old = readReview(db, deliveryId); if (old) return null; // Never relaunch a claimed review.
-    const verification = verificationSummary(db, deliveryId);
-    if (a.result || (a.suspension && a.suspension !== 'VERIFICATION_FAILED') || a.phase !== 'verifying' || a.tracking !== 'tracked' ||
-      a.deliveryId !== delivery.id || delivery.captureState !== 'captured' || !verification || verification.contentIdentity !== delivery.contentIdentity ||
-      ['running', 'error'].includes(verification.state) || db.prepare("SELECT id FROM execution_questions WHERE attempt_id=? AND state<>'delivered'").get(a.id)) throw denied();
+    const producer = db.prepare<[string, string, number, string], { summary_json: string }>(`SELECT result.summary_json FROM passages p
+      JOIN passage_results result ON result.passage_id=p.id AND result.attempt_id=p.attempt_id
+      WHERE p.id=? AND p.attempt_id=? AND p.round_number=? AND p.delivery_version=?
+        AND p.role='implementer' AND p.state='ready' AND p.tracking_state='tracked'`)
+      .get(delivery.producerPassageId, a.id, delivery.round, delivery.id);
+    const producerCriteria = db.prepare<[string], { criterionId: string; verdict: string; evidence_json: string }>(
+      'SELECT criterion_id AS criterionId,verdict,evidence_json FROM criterion_results WHERE passage_id=?').all(delivery.producerPassageId);
+    const producerResult: unknown = producer ? { ...JSON.parse(producer.summary_json), criteria: producerCriteria.map(c => ({ criterionId: c.criterionId, verdict: c.verdict, evidence: JSON.parse(c.evidence_json) })) } : null;
+    const expectedCriteria = db.prepare<[string], { id: string }>('SELECT criterion_id AS id FROM attempt_criteria WHERE attempt_id=?').all(a.id).map(c => c.id);
+    if (a.result || a.suspension || a.phase !== 'verifying' || a.tracking !== 'tracked' ||
+      a.deliveryId !== delivery.id || delivery.captureState !== 'captured' || !Value.Check(ImplementerResult, producerResult) ||
+      expectedCriteria.length === 0 || digestCriteria(expectedCriteria) !== digestCriteria(producerCriteria.map(c => c.criterionId)) ||
+      db.prepare("SELECT id FROM execution_questions WHERE attempt_id=? AND state<>'delivered'").get(a.id)) throw denied();
     const capture = readCapture(db, a.id); const role = capture.roleResources.find(r => r.role === 'reviewer');
     if (!role) throw denied();
     if (openFindings(db, a.id, delivery.round).length > 1000) throw new OperationError(503, 'FINDING_CONTEXT_LIMIT', 'The unresolved finding context exceeds the supported limit.');
@@ -66,8 +74,8 @@ export function beginReview(db: Database.Database, deliveryId: string): Review |
     db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,created_at_ms,attempt_session_id,session_source_id)
       VALUES (?,?,?,?,'reviewer',?,?,'starting','pending',?,(SELECT id FROM attempt_sessions WHERE attempt_id=? AND role='reviewer'),?)`)
       .run(passageId, a.id, delivery.round, delivery.id, JSON.stringify(role), `factory-${passageId}`, now, a.id, source?.id ?? null);
-    db.prepare(`INSERT INTO reviews(id,delivery_id,attempt_id,passage_id,verification_id,content_identity,state,independence_state,workspace_state,created_at_ms)
-      VALUES (?,?,?,?,?,?,'pending','pending','planned',?)`).run(id, delivery.id, a.id, passageId, verification.id, delivery.contentIdentity, now);
+    db.prepare(`INSERT INTO reviews(id,delivery_id,attempt_id,passage_id,implementer_passage_id,content_identity,state,independence_state,workspace_state,created_at_ms)
+      VALUES (?,?,?,?,?,?,'pending','pending','planned',?)`).run(id, delivery.id, a.id, passageId, delivery.producerPassageId, delivery.contentIdentity, now);
     db.prepare(`INSERT INTO resources(id,attempt_id,passage_id,kind,reference,owned,launch_state,created_at_ms) VALUES (?,?,?,'terminal',?,0,'planned',?)`).run(randomUUID(), a.id, passageId, `factory-${passageId}`, now);
     db.prepare("UPDATE attempts SET phase='reviewing',suspension=NULL,diagnostic=NULL,revision=revision+1,updated_at_ms=? WHERE id=?").run(now, a.id);
     attemptEvent(db, a.id, 'review.planned');
@@ -86,7 +94,12 @@ export function recordReviewIntegrity(db: Database.Database, binding: PassageBin
   guarded(() => db.transaction(() => {
     if (!Value.Check(PassageBinding, binding) || binding.role !== 'reviewer' || typeof valid !== 'boolean') throw denied();
     const r = readReview(db, binding.deliveryVersion); const a = readAttempt(db, binding.attemptId);
-    if (!r || r.passageId !== binding.passageId || r.state !== 'pending' || a.result || a.suspension || a.deliveryId !== r.deliveryId || a.phase !== 'reviewing') throw denied();
+    const passage = db.prepare<[string], { attempt_id: string; round_number: number; delivery_version: string; role: string; state: string; tracking_state: string }>(
+      'SELECT attempt_id,round_number,delivery_version,role,state,tracking_state FROM passages WHERE id=?').get(binding.passageId);
+    if (!r || r.passageId !== binding.passageId || r.attemptId !== binding.attemptId || !passage || passage.attempt_id !== binding.attemptId ||
+      passage.round_number !== binding.round || passage.delivery_version !== binding.deliveryVersion || passage.role !== 'reviewer' ||
+      passage.state !== 'ready' || passage.tracking_state !== 'tracked' ||
+      r.state !== 'pending' || a.result || a.suspension || a.deliveryId !== r.deliveryId || a.phase !== 'reviewing') throw denied();
     // Once observed invalid, a repaired checkout cannot recover independence for this review.
     db.prepare("UPDATE reviews SET independence_state=CASE WHEN independence_state='invalid' OR ?=0 THEN 'invalid' ELSE 'valid' END,diagnostic=CASE WHEN independence_state='invalid' OR ?=0 THEN 'REVIEW_PRODUCT_CHANGED' ELSE NULL END WHERE id=?")
       .run(valid ? 1 : 0, valid ? 1 : 0, r.id);
@@ -105,10 +118,13 @@ export function readRounds(db: Database.Database, attemptId: string): RoundHisto
 export function acceptReview(db: Database.Database, binding: PassageBinding, result: ReviewerResult): void {
   const r = readReview(db, binding.deliveryVersion); const a = readAttempt(db, binding.attemptId);
   if (!r || r.passageId !== binding.passageId || r.state !== 'pending' || r.independenceState === 'pending' || a.deliveryId !== r.deliveryId) throw new ExecutionError('RESULT_INVALID');
+  if (result.verdict === 'approved' && result.criteria.some(c => c.evidence.some(e =>
+    /^(?:[a-f0-9]{40}|[a-f0-9]{64}|artifact:[^\s]+)$/i.test(e.trim())))) throw new ExecutionError('RESULT_INVALID');
   const prior = openFindings(db, a.id, binding.round);
   for (const repetition of result.commandRepetitions ?? []) {
-    if (repetition.check_id && !db.prepare(`SELECT id FROM checks WHERE id=? AND verification_id=? AND delivery_id=? AND content_identity=? AND command=?`)
-      .get(repetition.check_id, r.verificationId, r.deliveryId, r.contentIdentity, repetition.command)) throw new ExecutionError('RESULT_INVALID');
+    if (!repetition.prior_evidence.length || !repetition.prior_evidence.every(e => db.prepare(`
+      SELECT 1 FROM passage_results p,json_each(p.summary_json,'$.checks') c
+      WHERE p.passage_id=? AND json_extract(c.value,'$.evidence')=?`).get(r.implementerPassageId, e))) throw new ExecutionError('RESULT_INVALID');
   }
   if (prior.length > 1000 || result.resolutions.length !== prior.length || result.resolutions.some(x => !prior.some(f => f.id === x.findingKey)) ||
     new Set(result.resolutions.map(x => x.findingKey)).size !== prior.length ||
@@ -127,12 +143,12 @@ export function acceptReview(db: Database.Database, binding: PassageBinding, res
     .run(x.findingKey, r.id, a.id, r.independenceState === 'valid' ? x.verdict : 'unresolved', JSON.stringify(x.evidence));
   recordAssessments(db, r.id, result, [...new Set(prior.map(f => f.originFindingId ?? f.id))]);
   respondToDisputes(db, r.id, result);
-  const v = verificationSummary(db, r.deliveryId);
-  const approved = result.verdict === 'approved' && r.independenceState === 'valid' && v?.id === r.verificationId &&
-    (v.state === 'passed' || (v.state === 'not_applicable' && v.checkCount === 0));
+  const approved = result.verdict === 'approved' && r.independenceState === 'valid' && result.criteria.length > 0 &&
+    result.criteria.every(c => c.verdict === 'passed') && !result.findings.some(f => f.blocking) &&
+    !prior.some(f => f.blocking && !result.resolutions.some(x => x.findingKey === f.id && x.verdict === 'resolved'));
   db.prepare('UPDATE reviews SET state=?,reason=?,completed_at_ms=? WHERE id=?').run(approved ? 'approved' : 'rejected', result.summary, Date.now(), r.id);
   // Technical approval is historical. Publication still needs its current authority gate.
-  db.prepare('UPDATE attempts SET phase=?,diagnostic=? WHERE id=?').run(approved ? 'publishing' : 'reviewing', approved ? null : r.diagnostic ?? (v?.state === 'failed' ? 'CHECKS_FAILED' : 'REVIEW_REJECTED'), a.id);
+  db.prepare('UPDATE attempts SET phase=?,diagnostic=? WHERE id=?').run(approved ? 'publishing' : 'reviewing', approved ? null : r.diagnostic ?? 'REVIEW_REJECTED', a.id);
   if (!approved && r.independenceState === 'valid') blockCorrection(db, r.deliveryId);
 }
 export interface CorrectionPlan { sourcePassageId: string; passageId: string; findings: Finding[]; review: Review; guidance: string | null;

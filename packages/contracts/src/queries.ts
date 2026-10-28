@@ -12,7 +12,6 @@ import { DeliveryView } from './deliveries.js';
 import { PublicationSummary, EffectView } from './publication.js';
 import { AttemptResource } from './recovery.js';
 import { Criterion, PublicationTargetIntent } from './preparations.js';
-import { CheckRun } from './verification.js';
 import { Finding, Review, RoundHistory } from './reviews.js';
 import { CriterionOutcome } from './execution.js';
 import { PassageRole } from './execution.js';
@@ -34,6 +33,7 @@ export const AttemptListQuery = Type.Object({
 }, closed);
 export type AttemptListQuery = Static<typeof AttemptListQuery>;
 export const AttemptSummary = Type.Object({
+  diagnostic: Type.Optional(AttemptStatus.properties.diagnostic),
   id: OperationId, projectId: OperationId, issueId: Type.String(), issueNumber: nullable(Type.Integer({ minimum: 1 })), issueTitle: Type.Optional(nullable(Type.String({ maxLength: 65536 }))),
   phase: AttemptStatus.properties.phase, result: AttemptStatus.properties.result, suspension: AttemptStatus.properties.suspension,
   revision: Type.Integer(), createdAtMs: Type.Integer(), updatedAtMs: Type.Integer(),
@@ -50,7 +50,7 @@ export const HistoricalEffectiveProfile = Type.Object({
   credentialsRedacted: Type.Literal(true),
 }, closed);
 export type HistoricalEffectiveProfile = Static<typeof HistoricalEffectiveProfile>;
-export const DetailSection = Type.Union(['rounds','passages','criteria','checks','reviews','findings','questions','effects','resources','profiles','finding_assessments', 'finding_disputes', 'decisions', 'target_selections'].map(v => Type.Literal(v)));
+export const DetailSection = Type.Union(['rounds','passages','criteria','reviews','findings','questions','effects','resources','profiles','finding_assessments', 'finding_disputes', 'decisions', 'target_selections'].map(v => Type.Literal(v)));
 export type DetailSection = Static<typeof DetailSection>;
 export const AttemptDetailQuery = Type.Object({ ...paging, roundId: Type.Optional(Type.String({ pattern: '^[1-6]$' })), deliveryId: Type.Optional(OperationId), section: Type.Optional(DetailSection) }, closed);
 export type AttemptDetailQuery = Static<typeof AttemptDetailQuery>;
@@ -70,7 +70,7 @@ export const QuestionSummary = Type.Object({ id: OperationId, attemptId: Operati
   state: Question.properties.state, revision: Type.Integer(), createdAtMs: Type.Integer(), expiresAtMs: nullable(Type.Integer()), deliveryReceipt: Question.properties.deliveryReceipt }, closed);
 export const FindingDetail = Type.Object({ ...Finding.properties, resolutions: Type.Array(Type.Object({ reviewId: OperationId, deliveryId: OperationId,
   verdict: Type.Union([Type.Literal('resolved'),Type.Literal('unresolved')]), evidence: CriterionOutcome.properties.evidence },closed),{ maxItems: 6 }) },closed);
-export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, CheckRun, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource, HistoricalEffectiveProfile, FindingAssessment, FindingDispute, AttemptDecisionView, PublicationTargetSelection]);
+export const DetailItem = Type.Union([RoundHistory.properties.entries.items, PassageSummary, CriterionDetail, ReviewSummary, FindingDetail, QuestionSummary, EffectView, AttemptResource, HistoricalEffectiveProfile, FindingAssessment, FindingDispute, AttemptDecisionView, PublicationTargetSelection]);
 export type DetailItem = Static<typeof DetailItem>;
 export const DetailPage = Type.Object({ section: DetailSection, ...Page(DetailItem).properties }, closed);
 export type DetailPage = Static<typeof DetailPage>;
@@ -102,31 +102,3 @@ export const DeliveryDetail = Type.Object({ ...DeliveryView.properties,
   details: nullable(DetailPage),
 }, closed);
 export type DeliveryDetail = Static<typeof DeliveryDetail>;
-
-export const AttemptComparisonQuery = Type.Object({ leftAttemptId: OperationId, rightAttemptId: OperationId }, closed);
-export type AttemptComparisonQuery = Static<typeof AttemptComparisonQuery>;
-export const HistoricalComparisonValue = Type.Object({
-  state: Type.Union(['available', 'unavailable', 'not_comparable'].map(value => Type.Literal(value))),
-  value: Type.Union([Type.String({ maxLength: 8192 }), Type.Integer({ minimum: 0 }), Type.Boolean(), Type.Null()]),
-  reason: nullable(Type.String({ minLength: 1, maxLength: 2048 })),
-}, closed);
-export type HistoricalComparisonValue = Static<typeof HistoricalComparisonValue>;
-export const AttemptComparisonSide = Type.Object({
-  attemptId: OperationId, startedAtMs: Type.Integer({ minimum: 0 }),
-  result: nullable(Type.Union(['delivered', 'rejected', 'failed', 'cancelled', 'interrupted'].map(value => Type.Literal(value)))),
-  failureReason: nullable(Type.String({ minLength: 1, maxLength: 2048 })),
-  round: nullable(Type.Integer({ minimum: 1, maximum: 6 })), deliveryId: nullable(OperationId),
-  contentIdentity: nullable(Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' })),
-  projectRevisionId: nullable(OperationId), preparationRevision: nullable(Type.Integer({ minimum: 1 })),
-  configurationState: Type.Union([Type.Literal('available'), Type.Literal('unavailable')]),
-  detailsUrl: Type.String({ minLength: 1, maxLength: 512 }),
-}, closed);
-export type AttemptComparisonSide = Static<typeof AttemptComparisonSide>;
-export const AttemptComparison = Type.Object({
-  projectId: OperationId, repositoryId: Type.String({ minLength: 1, maxLength: 256 }), issueId: Type.String({ minLength: 1, maxLength: 256 }),
-  issueNumber: nullable(Type.Integer({ minimum: 1 })), left: AttemptComparisonSide, right: AttemptComparisonSide,
-  differences: Type.Array(Type.Object({ field: Type.String({ minLength: 1, maxLength: 256 }),
-    left: HistoricalComparisonValue, right: HistoricalComparisonValue }, closed), { maxItems: 100 }),
-  limitations: Type.Array(Type.String({ minLength: 1, maxLength: 2048 }), { maxItems: 100 }),
-}, closed);
-export type AttemptComparison = Static<typeof AttemptComparison>;

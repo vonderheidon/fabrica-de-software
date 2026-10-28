@@ -1,9 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AuthorizeUpgrade, CheckRun, CompletePublication, EffectIdentity, EffectView, GitHubMutationResult, IssueContext, ReconcilePublication } from '#contracts';
+import type { AuthorizeUpgrade, CompletePublication, EffectIdentity, EffectView, GitHubMutationResult, IssueContext, ReconcilePublication } from '#contracts';
 import type { GitHub, GitHubEffectRequest } from '../github/index.js';
 import { OperationError, type AuthorityObservation, type PublicationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
-import type { Verification } from '../verification/index.js';
 import { createTargetSelections, type TargetWorkspaces } from './targets.js';
 import type { DeliveryTargetPlan } from '../storage/index.js';
 import { CaptureError } from '../workspaces/index.js';
@@ -16,7 +15,6 @@ export interface PublicationDependencies {
   storage: Storage;
   github: Pick<GitHub, 'getIdentity' | 'getIssueContextById' | 'getProject' | 'getRepository'> & Partial<Pick<GitHub,'reconcilePullRequest'>> & { mutateEffect: (input: GitHubEffectRequest) => Promise<GitHubMutationResult> };
   workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget' | 'inspectIntegrationTarget'>> & Partial<TargetWorkspaces>;
-  verification: Pick<Verification, 'getArtifact'>;
   cancelAttempt: (id: string) => Promise<void>;
   enqueue: (task: () => Promise<void>) => void;
   isClosed: () => boolean;
@@ -91,7 +89,7 @@ export function createPublication(deps: PublicationDependencies) {
     storage.recordAuthority(id, snapshot.stamp, observation);
     if (observation.reason === 'ASSIGNEE_CHANGED' && !snapshot.status.result) await deps.cancelAttempt(id);
     const suspension = storage.getAttempt(id).suspension;
-    return observation.reason === null && (suspension === null || (stage === 'inReview' && suspension === 'VERIFICATION_FAILED'));
+    return observation.reason === null && suspension === null;
   }
   async function reconcileEffect(effect: EffectView): Promise<void> {
     if (!['running','unknown'].includes(effect.state) || !effect.attemptId) return;
@@ -193,20 +191,8 @@ export function createPublication(deps: PublicationDependencies) {
     // Projection failure preserves local work. send() prevents any later remote mutation until reconciliation.
     return storage.getAttempt(id).suspension === null;
   }
-  function approvedChecks(deliveryId: string, verificationId: string): CheckRun[] {
-    const checks: CheckRun[] = []; let cursor: string | undefined;
-    for (let page = 0; page < 100; page++) {
-      const history = storage.getCheckHistory(deliveryId,{ limit: '100',...(cursor ? { cursor } : {}) });
-      checks.push(...history.entries.filter(c => c.verificationId === verificationId));
-      if (!history.hasMore) return checks;
-      if (!history.nextCursor || history.nextCursor === cursor) blocked('CHECK_HISTORY_INVALID');
-      cursor = history.nextCursor!;
-    }
-    return blocked('CHECK_HISTORY_LIMIT');
-  }
   function commentBody(snapshot: Snapshot): string {
     const d = snapshot.delivery!; const review = storage.getReview(d.id)!;
-    const checks = approvedChecks(d.id,review.verificationId);
     const marker = `<!-- factory:${snapshot.mode}:${snapshot.settings.installation_id}:${snapshot.status.id}:${d.id} -->`;
     const commit = snapshot.effects.find(e => e.kind === 'local_commit' && e.deliveryId === d.id);
     const commitMode = snapshot.mode === 'commit';
@@ -214,10 +200,7 @@ export function createPublication(deps: PublicationDependencies) {
       `Base: ${d.baseSha}`, `Referência retida: ${d.gitRef}`, ...(commitMode && commit?.expectedIdentity.targetOperationId ? [`Tarefa: ${commit.expectedIdentity.taskType}: ${commit.expectedIdentity.taskDescription}`, `Branch: ${commit.expectedIdentity.branchRef}`] : []), `Revisão independente: approved (${review.id}).`,
       commitMode ? (commit?.state === 'not_applicable' ? 'Commit: not_applicable (APPROVED_NO_DELTA). Entrega revisada sem alterações; nenhum commit vazio foi criado.' : `Commit local: ${commit?.receipt?.id}; ${commit?.expectedIdentity.taskType ?? 'branch'} ${commit?.expectedIdentity.taskDescription ?? ''}; branch: ${commit?.expectedIdentity.branchRef}.`) : 'Versão aprovada para entrega local ICR. Alterações e ambiente preservados, sem commit de entrega ou push.',
       ...(commitMode ? ['Publicação local, sem push, PR ou fechamento da issue.'] : []), '', 'Critérios verificados:',
-      ...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}; ${c.evidence.length} referência(s) de evidência no resultado oficial.`),
-      '', `Checks do controlador: ${checks.length ? 'executados na versão aprovada' : 'not_applicable (nenhum check configurado)'}.`,
-      ...checks.map(c => `- ${c.id}: ${c.state}; exit=${c.exitCode ?? 'n/a'}.`),
-      ...checks.flatMap(c => c.artifacts.map(a => `- Evidência ${a.id}: sha256=${a.sha256}; ${a.sizeBytes} bytes; GET /api/v1/artifacts/${a.id}.`)),
+       ...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}; ${c.evidence.length} referência(s) de evidência no resultado oficial.`),
       '', `Detalhe local: GET /api/v1/deliveries/${d.id}`, `Diff sob demanda: GET /api/v1/deliveries/${d.id}/diff`,
       `Achados não impeditivos desta revisão: ${review.findings.filter(f => !f.blocking).length}.`];
     const body = lines.join('\n');
@@ -352,7 +335,6 @@ export function createPublication(deps: PublicationDependencies) {
   function pullRequestBody(s: Snapshot): string {
     const d = s.delivery!; const review = storage.getReview(d.id)!;
     const safe = (value: string) => value.replace(/[<>\r\n]/g,' ').replace(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|merge|force-push)\b/gi,'[termo omitido]');
-    const checks = approvedChecks(d.id,review.verificationId);
     const open = storage.getOpenFindings(s.status.id,d.round+1);
     if (open.length > 1000) blocked('PR_FINDING_LIMIT');
     const pending = open.filter(f => !f.blocking);
@@ -360,9 +342,7 @@ export function createPublication(deps: PublicationDependencies) {
       '### Entrega aprovada da fábrica',`Escopo: ${safe(s.capture.issue.title)}`,`Issue: ${s.capture.issue.url}`,
       `Tentativa (attemptId): ${s.status.id}`,`Versão: ${d.id}`,`Base configurada: ${safe(s.capture.configuration.configuration.base_branch)} (${d.baseSha})`,
       `Tree aprovada: ${d.contentIdentity}`,`Referência: ${d.gitRef}`,`Parecer: ${review.state}; revisão ${review.id}.`,
-      'Critérios:',...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}.`),'Checks do controlador:',
-      ...checks.map(c => `- ${c.id}: ${c.state}; exit=${c.exitCode ?? 'n/a'}; evidências: ${c.artifacts.map(a => `${a.id} sha256=${a.sha256}`).join(', ')}.`),
-      ...(checks.length ? [] : ['- not_applicable: CHECKS_NOT_CONFIGURED.']),
+      'Critérios:',...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}.`),
       'Pendências não impeditivas:',...pending.map(f => `- ${f.id}: ${safe(f.problem)}; esperado: ${safe(f.expectedResult)}.`),
       ...(!pending.length ? ['- Nenhuma.'] : []),`Detalhes: GET /api/v1/deliveries/${d.id}`].join('\n');
     if (body.length > 60_000) blocked('PR_BODY_LIMIT');
@@ -426,11 +406,7 @@ export function createPublication(deps: PublicationDependencies) {
       const resources = storage.getResources(id);
       if (!resources.entries.some(r => r.kind === 'implementation' && r.owned && !r.removed && r.launchState === 'ready')) blocked('ICR_ENVIRONMENT_UNAVAILABLE');
     }
-    const review = storage.getReview(deliveryId)!;
-    for (const c of approvedChecks(deliveryId,review.verificationId)) {
-      for (const artifact of c.artifacts) await deps.verification.getArtifact(artifact.id);
-    }
-    // Re-observe current authority after potentially slow Git/artifact IO, before sending a comment.
+    // Re-observe current authority after potentially slow Git IO, before sending a comment.
     if (!await observeAuthority(id)) blocked('PUBLICATION_BLOCKED');
     storage.assertPublicationEligible(id, deliveryId, true);
     snapshot = storage.getPublicationSnapshot(id, deliveryId);
@@ -514,9 +490,7 @@ export function createPublication(deps: PublicationDependencies) {
       storage.assertPublicationEligible(attemptId,body.deliveryId,true);
       try {
         await deps.workspaces.verifyRetainedDelivery(storage.getDelivery(body.deliveryId).delivery);
-        const review = storage.getReview(body.deliveryId)!;
-        for (const check of approvedChecks(body.deliveryId,review.verificationId)) for (const artifact of check.artifacts) await deps.verification.getArtifact(artifact.id);
-      } catch { deps.logFailure('UPGRADE_VERSION_UNAVAILABLE'); throw new OperationError(409,'PUBLICATION_BLOCKED','The retained version or its evidence cannot be verified.'); }
+      } catch { deps.logFailure('UPGRADE_VERSION_UNAVAILABLE'); throw new OperationError(409,'PUBLICATION_BLOCKED','The retained version cannot be verified.'); }
       if (!await observeAuthority(attemptId)) blocked('PUBLICATION_BLOCKED');
       return accept(command);
     },

@@ -7,7 +7,6 @@ export * from './preparations.js';
 export * from './execution.js';
 export * from './attempts.js';
 export * from './deliveries.js';
-export * from './verification.js';
 export * from './reviews.js';
 export * from './questions.js';
 export * from './stage-activity.js';

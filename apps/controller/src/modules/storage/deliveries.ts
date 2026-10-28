@@ -9,7 +9,6 @@ import { digest, eventCursor, guarded } from './configuration-reads.js';
 import { readSettings } from './settings.js';
 import { StorageError } from './errors.js';
 import type { CapturedContent, CaptureInput } from '../workspaces/index.js';
-import { verificationSummary } from './verification.js';
 
 export interface RetryCaptureCommand {
   operationId: string; expectedRevision: string | undefined; attemptId: string; deliveryId: string; body: CaptureRetry;
@@ -133,4 +132,4 @@ export function finishCapture(db: Database.Database, c: CaptureClaim, content: C
     attemptEvent(db, d.attemptId, accepted ? 'capture.captured' : 'capture.failed');
   }).immediate());
 }
-export function deliveryView(db: Database.Database, id: string) { return { delivery: readDelivery(db, id), verification: verificationSummary(db, id), eventCursor: eventCursor(db) }; }
+export function deliveryView(db: Database.Database, id: string) { return { delivery: readDelivery(db, id), eventCursor: eventCursor(db) }; }

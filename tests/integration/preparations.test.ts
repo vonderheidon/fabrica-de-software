@@ -93,11 +93,17 @@ describe('persistent preparation HTTP contracts', () => {
   });
   it('captures typed choices, effective values, occurrence criteria, effects and origins without changing defaults', async () => {
     const f = fixture(); const before = f.storage.getConfiguration(f.projectId);
-    const response = await create(f, { ...choices, delivery_mode: 'pr', overrides: { correction_limit: 0, checks: [], time_defaults: { ...before.view.settings.time_defaults, polling_interval_ms: 2000 } } });
+    const response = await create(f, { ...choices, delivery_mode: 'pr', overrides: { correction_limit: 0, time_defaults: { ...before.view.settings.time_defaults, polling_interval_ms: 2000 } } });
     expect(response.statusCode, response.body).toBe(201); expect(Value.Check(PreparationCreated, response.json())).toBe(true);
     const result = response.json<PreparationCreated>(); const p = result.preparation;
+    expect(p.effective_configuration.configuration).not.toHaveProperty('checks');
+    expect(p.effective_configuration.origins).not.toHaveProperty('checks');
+    const storedChoices = f.db.prepare<[string], { choices_json: string }>('SELECT choices_json FROM preparation_revisions WHERE preparation_id=? AND revision=1').get(p.id)!;
+    const choicesDocument = JSON.parse(storedChoices.choices_json) as Record<string, unknown>;
+    expect(choicesDocument).not.toHaveProperty('checks');
+    expect(JSON.stringify(choicesDocument)).not.toContain('"checks"');
     expect(p).toMatchObject({ revision: 1, can_start: false, delivery_mode: 'pr', base_sha: baseSha,
-      effective_configuration: { configuration: { correction_limit: 0 }, origins: { correction_limit: 'preparation', checks: 'preparation', time_defaults: 'preparation', base_branch: 'project' }, guidance: 'Project guidance\nAttempt guidance' } });
+      effective_configuration: { configuration: { correction_limit: 0 }, origins: { correction_limit: 'preparation', time_defaults: 'preparation', base_branch: 'project' }, guidance: 'Project guidance\nAttempt guidance' } });
     expect(p.criteria_preview.criteria.map((c) => [c.id, c.text])).toEqual([['ac-1', 'Same text'], ['ac-2', 'Same text']]);
     expect(p.prerequisites.map((p) => p.code)).toEqual(['PUBLICATION_TARGET_REQUIRED', 'EXECUTOR_REVALIDATION_REQUIRED']);
     expect(p.effects_preview.find((e) => e.kind === 'push')?.requested).toBe(true);
@@ -114,11 +120,29 @@ describe('persistent preparation HTTP contracts', () => {
     const f = fixture(); const headers = await session(f); const url = `/api/v1/projects/${f.projectId}/preparations`;
     expect((await f.app.inject({ method: 'POST', url, headers: { host, origin }, payload: choices })).statusCode).toBe(401);
     expect((await f.app.inject({ method: 'POST', url, headers: { ...headers, 'x-csrf-token': '' }, payload: choices })).statusCode).toBe(403);
+    const eventsBefore = f.db.prepare<[], { n: number }>('SELECT count(*) AS n FROM events').get()!.n;
+    const operationsBefore = f.db.prepare<[], { n: number }>('SELECT count(*) AS n FROM operation_requests').get()!.n;
+    vi.mocked(f.github.getIssueContextById).mockClear(); vi.mocked(f.workspaces.inspectOrigin).mockClear();
     for (const overrides of [{ arbitraryCommand: 'private-marker' }, { correction_limit: 6 }, { costDefaults: { attemptCost: 9 } }]) {
       const r = await create(f, { ...choices, overrides } as PreparationChoices); expect(r.statusCode).toBe(400); expect(r.body).not.toContain('private-marker');
     }
-    const r = await create(f, { ...choices, overrides: { checks: [{ id: 'check', command: 'npm test', cwd_relative: '../escape' }] } });
-    expect(r.statusCode).toBe(400);
+    const definitions = [{ id: 'retired', command: 'npm test', cwd_relative: '.' }];
+    const rejectedBodies: Record<string, unknown>[] = [
+      { ...choices, checks: definitions },
+      { ...choices, overrides: { checks: definitions } },
+      { ...choices, checks: definitions, overrides: { checks: definitions } },
+    ];
+    for (const body of rejectedBodies) {
+      const response = await f.app.inject({ method: 'POST', url,
+        headers: { ...headers, 'idempotency-key': randomUUID() }, payload: body });
+      expect(response.statusCode).toBe(400);
+      expect(response.json<{ code: string }>().code).toBe('VALIDATION_FAILED');
+    }
+    expect(f.db.prepare('SELECT count(*) AS n FROM preparations').get()).toEqual({ n: 0 });
+    expect(f.db.prepare('SELECT count(*) AS n FROM preparation_revisions').get()).toEqual({ n: 0 });
+    expect(f.db.prepare('SELECT count(*) AS n FROM events').get()).toEqual({ n: eventsBefore });
+    expect(f.db.prepare('SELECT count(*) AS n FROM operation_requests').get()).toEqual({ n: operationsBefore });
+    expect(f.github.getIssueContextById).not.toHaveBeenCalled(); expect(f.workspaces.inspectOrigin).not.toHaveBeenCalled();
   });
   it('uses CAS and a durable receipt; every save invalidates the previous summary', async () => {
     const f = fixture(); const initial = await create(f); const p = initial.json<PreparationCreated>().preparation;

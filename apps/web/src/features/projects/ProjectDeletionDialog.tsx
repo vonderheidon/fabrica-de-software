@@ -14,7 +14,7 @@ export function ProjectDeletionWarnings({ hasUnsavedChanges }: { sourceKind: 'lo
 }
 
 export function ProjectDeletionTargetList({ targets }: { targets: ProjectDeletionPreview['targets'] }) {
-  const labels = { original_directory: 'Pasta original inteira', exclusive_workspace: 'Ambiente local exclusivo', exclusive_artifact: 'Artefato exclusivo' };
+  const labels = { original_directory: 'Pasta original inteira', exclusive_workspace: 'Ambiente local exclusivo' };
   const states = { pending: 'Aguardando remoção', removing: 'Remoção em andamento', removed: 'Removido e conferido', blocked: 'Bloqueado' };
   return <ul className="project-deletion-targets">{targets.map((target) => <li key={target.targetKey}><b>{labels[target.targetKind]}</b><span>{target.path}</span><small>{states[target.state]}</small></li>)}</ul>;
 }

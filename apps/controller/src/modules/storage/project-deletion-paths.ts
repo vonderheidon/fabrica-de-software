@@ -24,7 +24,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     source: { kind: authorized.source_kind, location: authorized.source_location } } : readProject(db, projectId).project;
   const inventory = projectDeletionInventory(db, projectId);
   const blockers = inventory.blockers.map(({ reason, recovery }) => ({ reason, recovery }));
-  const targets: { key: string; kind: 'original_directory' | 'exclusive_workspace' | 'exclusive_artifact';
+  const targets: { key: string; kind: 'original_directory' | 'exclusive_workspace';
     path: string; ownerKind: 'project' | 'attempt'; ownerId: string }[] = [];
   const addAttempt = (id: string): void => {
     if (!Value.Check(OperationId, id)) {
@@ -34,7 +34,6 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     for (const [key, path, kind] of [
       ['work', resolve(dataDirectory, 'work', id), 'exclusive_workspace'],
       ['git', resolve(dataDirectory, 'git', `${id}.git`), 'exclusive_workspace'],
-      ['artifacts', resolve(dataDirectory, 'artifacts', id), 'exclusive_artifact'],
     ] as const) targets.push({ key: `${key}:${id}`, kind, path, ownerKind: 'attempt', ownerId: id });
   };
   if (project.source.kind === 'local') targets.push({ key: `original:${projectId}`, kind: 'original_directory',
@@ -98,14 +97,6 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     const original = project.source.kind === 'local' && resolve(project.source.location).toLowerCase() === resolve(target.local_path).toLowerCase();
     if (!original) targets.push({ key: `delivery-target:${target.operation_id}`,kind: 'exclusive_workspace',path: target.local_path,ownerKind: 'attempt',ownerId: target.attempt_id });
   }
-  const artifacts = db.prepare<[string], { id: string; attempt_id: string; check_id: string; path_relative: string }>(
-    'SELECT id,attempt_id,check_id,path_relative FROM artifacts WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
-  ).all(projectId);
-  if (artifacts.some(a => !Value.Check(OperationId, a.id) || !Value.Check(OperationId, a.check_id) ||
-    a.path_relative !== `${a.attempt_id}/${a.check_id}/${a.id}.log`)) {
-    blockers.push({ reason: 'O caminho de uma evidência diverge do inventário conhecido.',
-      recovery: 'Corrija o vínculo da evidência antes de tentar excluir o projeto.' });
-  }
   for (const resource of resources) {
     if (!resource.owned && resource.launch_state === 'planned') continue;
     // Attempt registration stores this exact relative reference. Keep accepting
@@ -148,24 +139,24 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
   const protectedPaths = [...otherOrigins.map(o => o.path), ...selectedTargets.map(t => t.local_path), ...otherDeliveryTargets.map(t => t.local_path),
     ...creations.filter(c => c.project_id !== projectId || project.source.kind !== 'local' || c.destination !== project.source.location).map(c => c.destination),
-    ...others.flatMap(a => [resolve(dataDirectory, 'work', a.id), resolve(dataDirectory, 'git', `${a.id}.git`), resolve(dataDirectory, 'artifacts', a.id)]),
+    ...others.flatMap(a => [resolve(dataDirectory, 'work', a.id), resolve(dataDirectory, 'git', `${a.id}.git`)]),
     ...otherPassages.map(p => resolve(dataDirectory, 'execution-bootstrap', p.id)),
     ...otherResources.flatMap(r => [resolve(dataDirectory, r.reference), resolve(dataDirectory, 'work', r.attempt_id, 'implementation')]),
     ...validOtherStorageLocations.map(location => resolve(installationRoot, ...location.root_relative.split('/'))),
     resolve(dataDirectory, 'factory.sqlite'), resolve(dataDirectory, 'controller-lock.sqlite')];
   const settings = readSettings(db);
   const schema = db.prepare<[], { version: number; checksum: string }>('SELECT version,checksum FROM schema_migrations ORDER BY version').all();
-  if (schema.length !== 51 || schema.at(-1)?.version !== 51) blockers.push({
+  if (schema.length !== 53 || schema.at(-1)?.version !== 53) blockers.push({
     reason: 'A versão do inventário de recursos não é suportada nesta conferência.',
     recovery: 'Atualize a política de conferência para o schema instalado.' });
   // Data and install containers cannot themselves be removed. Exclusive leaves
-  // below work/git/artifacts remain eligible; no shared container is a target.
+  // below work/git remain eligible; no shared container is a target.
   const containers = [resolve(dataDirectory), resolve(dataDirectory, '..'), resolve(dataDirectory, '../..'),
-    resolve(dataDirectory, 'work'), resolve(dataDirectory, 'git'), resolve(dataDirectory, 'artifacts'),
+    resolve(dataDirectory, 'work'), resolve(dataDirectory, 'git'),
     resolve(dataDirectory, 'execution-bootstrap'), resolve(dataDirectory, 'projects'),
     ...(settings.projects_root ? [settings.projects_root] : [])];
   const inventoryVersion = digest({ version: 1, schema, project, keys: inventory.keys, storageLocations, otherStorageLocations,
-    resources, artifacts, passages, otherPassages, otherResources, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations, others,
+    resources, passages, otherPassages, otherResources, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations, others,
     installation: settings.installation_id, account: settings.account_id, containers });
   const originalProtectedPaths = [resolve(dataDirectory), resolve(dataDirectory, '../..')];
   return { projectId, projectName: project.name, projectRevision: project.revision, sourceKind: project.source.kind,

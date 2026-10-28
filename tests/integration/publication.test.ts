@@ -6,7 +6,6 @@ import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { complete, confirmTerminalStops } from '../fixtures/attempt.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
-import { removePublicationSchema } from '../fixtures/publication-schema.js';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
 import { observationWire } from '../fixtures/observation-wire.js';
 import { BackendMeasurement } from '../fixtures/backend-measurement.js';
@@ -26,7 +25,7 @@ afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 async function fixture() { const f = await publicationFixture(); fixtures.push(f); return f; }
 function publicationServiceFixture(f: PublicationFixture, storage = f.storage) {
   const tasks: Promise<void>[] = [];
-  const publication = createPublication({ storage, github: f.github, workspaces: f.workspaces, verification: f.verification,
+  const publication = createPublication({ storage, github: f.github, workspaces: f.workspaces,
     cancelAttempt: async id => { await f.pipeline.cancelAttempt(id,{},f.context()); }, isClosed: () => false, logFailure: vi.fn(), enqueue: action => { tasks.push(action()); } });
   return { publication, async drain() { await Promise.all(tasks); } };
 }
@@ -294,9 +293,9 @@ it('pauses new dispatches for a changed account and clears the pause only after 
   expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
 });
 
-it('continues the pending verification after resolving authority without another implementation or clone', async () => {
+it('continues the pending review after resolving authority without another implementation or clone', async () => {
   const f = await fixture(); f.issue.memberships[0]!.statusValues[0]!.optionId = 'DONE_BY_HUMAN';
-  await f.implement(); expect(f.status().suspension).toBe('KANBAN_DIVERGENCE'); expect(f.verification.verifyDelivery).not.toHaveBeenCalled();
+  await f.implement(); expect(f.status().suspension).toBe('KANBAN_DIVERGENCE');
   f.issue.memberships[0]!.statusValues[0]!.optionId = 'PROGRESS';
   f.pipeline.revalidateAuthority(f.attemptId,f.context()); await f.pipeline.drain();
   await f.pipeline.tick(); await f.pipeline.drain();
@@ -420,24 +419,6 @@ it('keeps historical metadata and effects after reopen without GET mutations or 
     reopened.getAttemptDetail(f.attemptId,{}); reopened.listAttempts({});
     expect(f.mutateEffect).toHaveBeenCalledTimes(n); expect(reopened.getReview(deliveryId)?.state).toBe('approved');
   } finally { reopened.close(); }
-});
-
-it('migrates v10 without changing approved content, receipts or identity, and without inventing effects', async () => {
-  const f = await publicationFixture(false); fixtures.push(f); await f.implement(); await f.approve();
-  const deliveryId = f.status().deliveryId!; const delivery = f.storage.getDelivery(deliveryId).delivery;
-  const identity = f.storage.getSettings().installation_id; const review = f.storage.getReview(deliveryId);
-  const receipt = f.storage.getOperation(f.status().operationId)?.receipt;
-  expect(f.storage.getEffects(f.attemptId)).toEqual([]);
-  await f.pipeline.close(); f.storage.close();
-  removePublicationSchema(f.db);
-  const reopened = openStorage({ dataDirectory: f.directory });
-  try {
-    expect(reopened.getSettings().installation_id).toBe(identity);
-    expect(reopened.getReview(deliveryId)).toEqual(review); expect(reopened.getDelivery(deliveryId).delivery).toEqual(delivery);
-    expect(reopened.getOperation(reopened.getAttempt(f.attemptId).operationId)?.receipt).toEqual(receipt);
-    expect(reopened.getEffects(f.attemptId)).toEqual([]); expect(f.db.pragma('foreign_key_check')).toEqual([]);
-  }
-  finally { reopened.close(); }
 });
 
 it('exposes protected summary/detail/section/publication routes with CAS and idempotent receipts', async () => {

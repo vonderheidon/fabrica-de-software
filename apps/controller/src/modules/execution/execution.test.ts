@@ -189,6 +189,17 @@ describe('distributed role contracts', () => {
     expect([...roles.keys()]).toEqual(['implementer', 'reviewer']);
     expect(roles.get('implementer')?.reference.path).toBe('resources/roles/implementer.v1.json');
     expect(roles.get('reviewer')?.reference.sha256).toMatch(/^[a-f0-9]{64}$/);
+    const implementer = roles.get('implementer')!.instructions;
+    const reviewer = roles.get('reviewer')!.instructions;
+    expect(implementer).toContain('ImplementerResult.checks');
+    expect(implementer).toContain('typecheck, lint e testes automatizados');
+    expect(implementer).toContain('comando em id, o resultado observado em outcome');
+    expect(implementer).toContain('qualquer limitação em evidence');
+    expect(implementer).not.toContain('checks configurados');
+    expect(reviewer).toContain('validações registradas nesse resultado');
+    expect(reviewer).toContain('prior_evidence');
+    expect(reviewer).not.toContain('check_id');
+    expect(reviewer).not.toContain('artifact:<id>');
     expect(() => loadRoleResources('missing-role-directory')).toThrow('RESOURCE_INVALID');
   });
 });

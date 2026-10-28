@@ -39,8 +39,8 @@ const initialStorage = {
 };
 const configuration = { ...settings, deletion: null, prerequisites: [], storage: initialStorage, configuration_lock: null,
   configuration: { id: 'revision', project_id: projectId, revision: 1, created_at_ms: 1, source: { kind: 'local', location: initialStorage.original_path }, base_branch: 'main', github_project: null,
-    implementer_profile_id: null, reviewer_profile_id: null, checks: [{ id: 'check', command: 'npm test', cwd_relative: '.', timeout_ms: 1000 }], correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
-    queue_order: { priority_field_id: null, priority_direction: 'asc', use_board_position: true }, guidance: '' },
+    implementer_profile_id: null, reviewer_profile_id: null, correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
+    queue_order: { use_board_position: true }, guidance: '' },
 };
 let browser;
 const result = { surface: 'production bundle / isolated Chrome / controlled HTTP; not Playwright MCP or native movement', passed: [], screenshots: [], requests: [], errors: [] };

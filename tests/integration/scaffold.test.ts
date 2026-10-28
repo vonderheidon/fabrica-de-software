@@ -12,7 +12,7 @@ import { loadScaffoldCatalog, renderEngineering, renderScaffoldReadme } from '..
 import { createLocalScaffolder } from '../../apps/controller/src/modules/workspaces/scaffold.js';
 import { ScaffoldWorkspaceError } from '../../apps/controller/src/modules/workspaces/scaffold-path-guard.js';
 import { GitReadError, type GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
-import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage, openStorageAtMigrationVersionForTests } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
@@ -32,10 +32,13 @@ afterEach(async () => {
   vi.mocked(directoryFs.realpath).mockImplementation(async path => resolve(String(path)));
   vi.clearAllMocks();
 });
-function fixture() {
+function fixture(migrationVersionForTest?: number) {
   const cache = resolve('.cache'); mkdirSync(cache,{ recursive: true }); const directory = mkdtempSync(join(cache,'scaffold-test-')); directories.push(directory);
   const projectsRoot = join(directory,'projects'); mkdirSync(projectsRoot);
-  const storage = openStorage({ dataDirectory: join(directory,'data'), busyTimeoutMs: 20 }); cleanup.push(() => storage.close());
+  const storageOptions = { dataDirectory: join(directory,'data'), busyTimeoutMs: 20 };
+  const storage = migrationVersionForTest === undefined ? openStorage(storageOptions)
+    : openStorageAtMigrationVersionForTests(storageOptions, migrationVersionForTest);
+  cleanup.push(() => storage.close());
   storage.saveSettings({ operationId: randomUUID(), expectedRevision: storage.getGlobalConfiguration().etag, body: { changes: { projects_root: projectsRoot } }, changes: { projects_root: projectsRoot } });
   let login = 'fixture-user'; let branch = 'main'; let failGit = false; let missingIdentity = false;
   let configExit = 0; let configError: Error | undefined;
@@ -321,12 +324,12 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const receipt = saveTimeDefaults(db,{ operationId,expectedRevision: settingsETag(identity,old.revision),timeDefaults: { ...old.time_defaults,polling_interval_ms: 2000 } });
     expect(db.pragma('user_version',{ simple: true })).toBe(12); db.close();
     const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(51);
+    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(53);
     expect(reopened.getOperation(operationId)).toEqual(receipt); expect(reopened.listProjects({}).items).toEqual([]);
     const probe = new Database(join(directory,'factory.sqlite')); try { expect(probe.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 }); expect(probe.pragma('foreign_key_check')).toEqual([]); } finally { probe.close(); }
   });
   it('preserves creation history and inbound step references while removing the historical destination reservation', async () => {
-    const f = fixture(); const body = await authorized(f);
+    const f = fixture(52); const body = await authorized(f);
     const accepted = f.storage.acceptCreation({ operationId: randomUUID(), body });
     const id = accepted.operation.resource.id;
     f.storage.recordCreationStep(id, 'directory', 'running');
@@ -334,7 +337,7 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const creation = f.storage.getCreation(id);
     const operation = f.storage.getOperation(accepted.operation.operation_id);
     const events = f.storage.getEvents({}).items;
-    f.db.exec('CREATE UNIQUE INDEX historical_creation_destination ON project_creations(destination); DELETE FROM schema_migrations WHERE version=51; PRAGMA user_version=50');
+    f.db.exec('CREATE UNIQUE INDEX historical_creation_destination ON project_creations(destination); DELETE FROM schema_migrations WHERE version>50; PRAGMA user_version=50');
     applyMigrations(f.db, loadMigrations(), () => { throw new Error('MUST_NOT_RESEED'); });
     expect(f.storage.getCreation(id)).toEqual(creation);
     expect(f.storage.getOperation(accepted.operation.operation_id)).toEqual(operation);

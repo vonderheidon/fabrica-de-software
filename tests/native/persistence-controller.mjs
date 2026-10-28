@@ -4,6 +4,8 @@ import { execFile, fork } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute } from 'node:path';
+import Database from 'better-sqlite3';
+import { persistenceReferenceSnapshot } from './persistence-references.mjs';
 import { loadConfiguration } from '../../dist/apps/controller/src/config.js';
 import { createApp } from '../../dist/apps/controller/src/http/app.js';
 import { acquireControllerLock, openStorage } from '../../dist/apps/controller/src/modules/storage/index.js';
@@ -15,15 +17,14 @@ import { createRetainedVerifier } from '../../dist/apps/controller/src/modules/w
 import { createPreparations } from '../../dist/apps/controller/src/modules/projects/index.js';
 import { createExecution } from '../../dist/apps/controller/src/modules/execution/index.js';
 import { createPipeline } from '../../dist/apps/controller/src/modules/pipeline/index.js';
-import { createVerification } from '../../dist/apps/controller/src/modules/verification/index.js';
 
 // Explicit test composition of compiled controller modules. IPC is test control;
-// HTTP routes, SQLite, controller lock, recovery, diff and artifact reads are real.
+// HTTP routes, SQLite, controller lock, recovery and diff reads are real.
 // No host/keyring attestation, provider, production executor or capture is claimed.
 /** @param {number} index */
 function argument(index) { const value = process.argv[index]; assert(value); return value; }
 const directory = resolve(argument(2));
-const attemptId = argument(3); const deliveryId = argument(4); const artifactId = argument(5);
+const attemptId = argument(3); const deliveryId = argument(4);
 assert(process.send);
 let canonicalization = 'real';
 /** @type {(path: string) => Promise<string>} */
@@ -66,17 +67,18 @@ const git = async (cwd, args, input) => {
 };
 const lock = acquireControllerLock(directory);
 const storage = openStorage({ dataDirectory: directory });
+storage.checkHealth();
 const github = createGitHub();
 const workspaces = { ...createWorkspaces({ github }), ...createEnvironmentRecovery(directory, git, undefined, canonicalize),
   getDeliveryDiff: createDeliveryDiff(directory, git, canonicalize) };
 const preparations = createPreparations({ storage, github, workspaces });
 const execution = createExecution({ dataDirectory: directory, persistence: storage.executionPersistence() });
 const failures = /** @type {string[]} */ ([]);
-const verification = createVerification({ storage, workspaces, dataDirectory: directory, logFailure: code => failures.push(code) }, { canonicalize });
-const pipeline = createPipeline({ storage, preparations, execution, workspaces, verification, observeTools: async () => [], logFailure: code => failures.push(code) });
+const pipeline = createPipeline({ storage, preparations, execution, workspaces, observeTools: async () => [], logFailure: code => failures.push(code) });
 const app = createApp(loadConfiguration({ FACTORY_DATA_DIR: directory, FACTORY_LOG_LEVEL: 'silent' }, directory), storage,
   undefined, undefined, undefined, pipeline);
 await app.ready();
+const auditDb = new Database(join(directory, 'factory.sqlite'), { readonly: true });
 const bootstrap = await app.inject({ method: 'POST', url: '/api/v1/session', headers: {
   host: '127.0.0.1:4310', origin: 'http://127.0.0.1:4310', 'x-factory-client': 'web',
 }, payload: {} });
@@ -101,7 +103,10 @@ async function handle(action) {
   const resource = storage.getResources(attemptId).entries.find(r => r.kind === 'implementation'); assert(resource);
   if (action === 'start-processes') {
     assert.equal(processes.size, 0);
-    for (const passage of storage.getResources(attemptId).entries.filter(r => r.kind === 'terminal')) {
+    const terminalPassages = /** @type {{passageId:string}[]} */ (auditDb.prepare(`SELECT id AS passageId FROM passages WHERE attempt_id=? AND delivery_version=?
+      AND role IN ('implementer','reviewer') ORDER BY role`).all(attemptId, deliveryId));
+    assert.equal(terminalPassages.length, 2);
+    for (const passage of terminalPassages) {
       assert(passage.passageId);
       // Owned physical probes associated with fixture passages, not Maestri terminals.
       const child = fork(new URL('./persistence-probe.mjs', import.meta.url), [], {
@@ -138,18 +143,28 @@ async function handle(action) {
     return { operation: storage.getOperation(operation.operation_id), resources: storage.getResources(attemptId) };
   }
   if (action === 'diff') return await pipeline.getDeliveryDiff(deliveryId, {});
-  if (action === 'artifact') {
-    const artifact = await pipeline.getArtifact(artifactId);
-    return { sha256: storage.getArtifact(artifactId).sha256, sizeBytes: artifact.bytes.length };
+  if (action === 'producer-result') {
+    const response = await app.inject({ url: `/api/v1/deliveries/${deliveryId}/producer-result`, headers });
+    assert.equal(response.statusCode, 200);
+    return { statusCode: response.statusCode, producerResult: response.json() };
   }
-  if (action === 'stored-state') return { delivery: storage.getDelivery(deliveryId).delivery, review: storage.getReview(deliveryId), artifact: storage.getArtifact(artifactId) };
+  if (action === 'stored-state') return { delivery: storage.getDelivery(deliveryId).delivery, review: storage.getReview(deliveryId), producerResult: storage.getProducerResult(deliveryId) };
   if (action === 'snapshot') {
     await createRetainedVerifier(directory, git, canonicalize)(storage.getDelivery(deliveryId).delivery);
     const response = await app.inject({ url: `/api/v1/deliveries/${deliveryId}`, headers });
     assert.equal(response.statusCode, 200);
+    const diagnostics = storage.getDiagnostics();
+    const integrityCheck = auditDb.pragma('integrity_check', { simple: true });
+    const foreignKeyViolations = auditDb.pragma('foreign_key_check');
+    const schemaObjects = /** @type {{type:string,name:string,sql:string|null}[]} */ (auditDb.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all());
+    const retiredTables = ['verification_runs','checks','artifacts'].filter(name => schemaObjects.some(object => object.type === 'table' && object.name === name));
+    const deletionTargets = schemaObjects.find(object => object.type === 'table' && object.name === 'project_deletion_targets');
+    if (deletionTargets && /exclusive_artifact/.test(deletionTargets.sql ?? '')) retiredTables.push('exclusive_artifact');
     return { pid: process.pid, delivery: storage.getDelivery(deliveryId).delivery, review: storage.getReview(deliveryId),
-      artifact: storage.getArtifact(artifactId), resources: storage.getResources(attemptId), httpStatus: response.statusCode,
-      httpPayloadSha256: (await import('node:crypto')).createHash('sha256').update(response.body).digest('hex'), gitCommands: [...new Set(gitCommands)] };
+      producerResult: storage.getProducerResult(deliveryId), resources: storage.getResources(attemptId), httpStatus: response.statusCode,
+      httpPayloadSha256: (await import('node:crypto')).createHash('sha256').update(response.body).digest('hex'), gitCommands: [...new Set(gitCommands)],
+      persistenceReferences: persistenceReferenceSnapshot(auditDb, attemptId),
+      databaseIntegrity: { integrityCheck, foreignKeyViolations, schemaVersion: diagnostics.schemaVersion, retiredTables } };
   }
   throw new Error('PROOF_ACTION_INVALID');
 }
@@ -163,7 +178,12 @@ process.on('message', message => {
 process.on('disconnect', () => {
   void (async () => {
     for (const child of processes.values()) await stop(child);
-    await app.close(); lock.close();
+    await app.close(); auditDb.close(); lock.close();
   })().catch(() => { process.exitCode = 1; });
 });
-process.send({ ready: true, pid: process.pid, readyAtMs: Date.now(), canonicalization });
+const schemaObjects = /** @type {{type:string,name:string,sql:string|null}[]} */ (auditDb.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all());
+const retiredTables = ['verification_runs','checks','artifacts'].filter(name => schemaObjects.some(object => object.type === 'table' && object.name === name));
+const deletionTargets = schemaObjects.find(object => object.type === 'table' && object.name === 'project_deletion_targets');
+if (deletionTargets && /exclusive_artifact/.test(deletionTargets.sql ?? '')) retiredTables.push('exclusive_artifact');
+process.send({ ready: true, pid: process.pid, readyAtMs: Date.now(), canonicalization, schemaVersion: storage.getDiagnostics().schemaVersion,
+  integrityCheck: auditDb.pragma('integrity_check', { simple: true }), foreignKeyViolations: auditDb.pragma('foreign_key_check'), retiredTables });

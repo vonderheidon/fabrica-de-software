@@ -1,4 +1,4 @@
-import { storeCheck, storeStatusOptions, storeQueueOrder } from './configuration-json.js';
+import { storeStatusOptions, storeQueueOrder } from './configuration-json.js';
 import { configurationCommandJson, registrationCommandJson, settingsCommandJson } from './configuration-command-json.js';
 import { serializeOperationReceipt, storeTimeDefaults, storeArtifactPolicy } from './common-json.js';
 import { randomUUID } from 'node:crypto';
@@ -338,11 +338,19 @@ export function insertRevision(db: Database.Database, projectId: string, revisio
   assertProjectProfileRoles(db, c);
   const hasBranchChoice = db.prepare<[], { name: string }>("PRAGMA table_info('project_revisions')").all().some(column => column.name === 'delivery_branch_json');
   if (!hasBranchChoice && c.delivery_branch != null) throw new OperationError(409, 'MIGRATION_REQUIRED', 'Atualize o banco antes de escolher a branch de destino.');
-  db.prepare(`INSERT INTO project_revisions(id, project_id, revision_number, source_kind, source_location, repository_id, repository_url, base_branch, github_project_id, github_project_owner_id, status_field_id, status_options_json, implementer_profile_id, reviewer_profile_id, checks_json, correction_limit, default_delivery_mode, automation_enabled, queue_order_json, guidance, origin_notes_json, created_at_ms${hasBranchChoice ? ", delivery_branch_json" : ""})
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${hasBranchChoice ? ", ?" : ""})`)
-    .run(revisionId, projectId, revision, c.source.kind, c.source.location, c.source.repository_id ?? null, c.source.repository_url ?? null, c.base_branch,
-      c.github_project?.id ?? null, c.github_project?.owner_id ?? null, c.github_project?.status_field_id ?? null, JSON.stringify(c.github_project ? storeStatusOptions(c.github_project.status_option_ids) : {}),
-      c.implementer_profile_id, c.reviewer_profile_id, JSON.stringify(c.checks.map(storeCheck)), c.correction_limit, c.default_delivery_mode, Number(c.automation_enabled), JSON.stringify(storeQueueOrder(c.queue_order)), c.guidance, JSON.stringify(notes), Date.now(), ...(hasBranchChoice ? [c.delivery_branch === undefined ? null : JSON.stringify(c.delivery_branch)] : []));
+  const columns = ['id', 'project_id', 'revision_number', 'source_kind', 'source_location', 'repository_id', 'repository_url', 'base_branch',
+    'github_project_id', 'github_project_owner_id', 'status_field_id', 'status_options_json', 'implementer_profile_id', 'reviewer_profile_id',
+    'correction_limit', 'default_delivery_mode', 'automation_enabled', 'queue_order_json', 'guidance', 'origin_notes_json', 'created_at_ms'];
+  const values: Array<string | number | null> = [revisionId, projectId, revision, c.source.kind, c.source.location, c.source.repository_id ?? null,
+    c.source.repository_url ?? null, c.base_branch, c.github_project?.id ?? null, c.github_project?.owner_id ?? null,
+    c.github_project?.status_field_id ?? null, JSON.stringify(c.github_project ? storeStatusOptions(c.github_project.status_option_ids) : {}),
+    c.implementer_profile_id, c.reviewer_profile_id, c.correction_limit, c.default_delivery_mode, Number(c.automation_enabled),
+    JSON.stringify(storeQueueOrder(c.queue_order)), c.guidance, JSON.stringify(notes), Date.now()];
+  if (hasBranchChoice) {
+    columns.push('delivery_branch_json');
+    values.push(c.delivery_branch === undefined ? null : JSON.stringify(c.delivery_branch));
+  }
+  db.prepare(`INSERT INTO project_revisions(${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`).run(...values);
 }
 export function registerProject(db: Database.Database, input: RegisterProject): StoredOperation {
   if (input.githubProject !== undefined && (!Value.Check(ProjectMapping, input.githubProject) ||
@@ -359,8 +367,8 @@ export function registerProject(db: Database.Database, input: RegisterProject): 
     const s = readSettings(db); const id = randomUUID(); const revisionId = randomUUID(); const now = Date.now();
     db.prepare('INSERT INTO projects(id, account_id, name, current_revision_id, revision, created_at_ms, updated_at_ms) VALUES (?, ?, ?, ?, 1, ?, ?)').run(id, s.account_id, input.body.name, revisionId, now, now);
     insertRevision(db, id, revisionId, 1, { source: input.source, base_branch: input.body.base_branch, github_project: input.githubProject ?? null,
-      implementer_profile_id: null, reviewer_profile_id: null, checks: [], correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
-      queue_order: { priority_field_id: null, priority_direction: 'asc', use_board_position: true }, guidance: '' }, input.originNotes);
+      implementer_profile_id: null, reviewer_profile_id: null, correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
+      queue_order: { use_board_position: true }, guidance: '' }, input.originNotes);
     return record(db, command, id, 1);
   }).immediate());
 }

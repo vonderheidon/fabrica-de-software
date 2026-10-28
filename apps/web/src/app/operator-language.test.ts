@@ -99,7 +99,6 @@ describe('operator language', () => {
       'Automação deste projeto habilitada', 'Ordem de prioridade', 'Campo de prioridade (ID)',
       'Usar posição do quadro', 'Orientações do projeto', 'GitHub Project', 'Campo Status',
       'Status Ready', 'Status Em andamento', 'Status Em revisão', 'Status Entregue', 'Orientações opcionais',
-      'Comando do check 1', 'cwd relativo do check 1', 'Timeout do check 1',
       'Modo de entrega', 'Orientação', 'Issue', 'Projeto', 'Executor', 'Provider', 'Modelo', 'Esforço',
     ];
 

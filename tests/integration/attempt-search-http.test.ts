@@ -35,6 +35,23 @@ describe('attempt search HTTP contract', () => {
     expect(found.statusCode, found.body).toBe(200);
     expect(found.json().items).toHaveLength(1);
     expect(found.json().items[0]).toMatchObject({ issue_number: 17, issue_title: 'Executable issue' });
+    const attemptId = String(found.json().items[0].id);
+
+    const retired = await app.inject({ url: `/api/v1/attempt-comparisons?left_attempt_id=${attemptId}&right_attempt_id=${attemptId}`, headers });
+    expect(retired.statusCode).toBe(404);
+    expect(retired.headers.location).toBeUndefined();
+    expect(retired.json()).toMatchObject({ code: 'NOT_FOUND', request_id: expect.any(String) });
+
+    const alias = await app.inject({ url: '/api/v1/attempts?issueNumber=17', headers });
+    expect(alias.statusCode).toBe(400);
+    expect(alias.json()).toMatchObject({ code: 'VALIDATION_FAILED' });
+
+    const detail = await app.inject({ url: `/api/v1/attempts/${attemptId}`, headers });
+    expect(detail.statusCode, detail.body).toBe(200);
+    expect(detail.json()).toMatchObject({ id: attemptId, issue: { number: 17 } });
+    const rounds = await app.inject({ url: `/api/v1/attempts/${attemptId}/rounds`, headers });
+    expect(rounds.statusCode, rounds.body).toBe(200);
+    expect(rounds.json().entries.length).toBeGreaterThan(0);
 
     const impossible = await app.inject({ url: '/api/v1/attempts?date_from=2024-02-30&time_zone=UTC', headers });
     expect(impossible.statusCode).toBe(400);

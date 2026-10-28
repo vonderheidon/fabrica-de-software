@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import type { TSchema } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { ConfigurationOptions, ConfigurationOptionsQuery, ConfigurationSaved, ConfigurationUpdate, PreparationChoices, PreparationCreated, PreparationParams, PreparationUpdate, ProjectParams, ProjectRegistered, ProjectRegistration, SettingsSaved, SettingsUpdate } from './index.js';
+import { ChoiceOrigins, ConfigurationOptions, ConfigurationOptionsQuery, ConfigurationSaved, ConfigurationUpdate, DeliverySummaryView, EffectiveConfiguration, PreparationChoices, PreparationCreated, PreparationOverrides, PreparationParams, PreparationUpdate, ProjectChanges, ProjectConfiguration, ProjectParams, ProjectRegistered, ProjectRegistration, SettingsSaved, SettingsUpdate } from './index.js';
 
 const id = 'f0fce308-07bb-49c0-b645-21bdcbe8ef30';
 
@@ -39,6 +39,38 @@ it('rejects aliases even beside canonical keys, including partial nested updates
   }
   expect(Value.Check(PreparationChoices, { ...choices, overrides: { correction_limit: 0, correctionLimit: 0 } })).toBe(false);
   expect(Value.Check(PreparationUpdate, { changes: { previous_attempt_id: id } })).toBe(false);
+  expect(Value.Check(ConfigurationUpdate, { project_changes: { checks: [{ id: 'legacy', command: 'npm test', cwd_relative: '.' }] } })).toBe(false);
+  expect(Value.Check(PreparationChoices, { ...choices, overrides: { checks: [{ id: 'legacy', command: 'npm test', cwd_relative: '.' }] } })).toBe(false);
+  expect(ProjectConfiguration.properties.queue_order.properties).toHaveProperty('use_board_position');
+  expect(ProjectConfiguration.properties.queue_order.properties).not.toHaveProperty('priority_field_id');
+  expect(ProjectConfiguration.properties.queue_order.properties).not.toHaveProperty('priority_direction');
+  for (const queue_order of [
+    { use_board_position: true, priority_field_id: null },
+    { use_board_position: true, priority_direction: 'asc' },
+    { use_board_position: false, priority_field_id: 'PRIORITY', priority_direction: 'desc' },
+  ]) expect(Value.Check(ConfigurationUpdate, { project_changes: { queue_order } })).toBe(false);
+});
+
+it('keeps retired manual check definitions out of configuration, preparation and summary contracts', () => {
+  expect(ProjectConfiguration.properties).not.toHaveProperty('checks');
+  expect(ProjectChanges.properties).not.toHaveProperty('checks');
+  expect(ConfigurationUpdate.properties.project_changes.properties).not.toHaveProperty('checks');
+  expect(PreparationChoices.properties).not.toHaveProperty('checks');
+  expect(PreparationOverrides.properties).not.toHaveProperty('checks');
+  expect(ChoiceOrigins.properties).not.toHaveProperty('checks');
+  expect(EffectiveConfiguration.properties.configuration.properties).not.toHaveProperty('checks');
+  expect(EffectiveConfiguration.properties.origins.properties).not.toHaveProperty('checks');
+  expect(DeliverySummaryView.properties).not.toHaveProperty('checks_succeeded');
+  expect(DeliverySummaryView.properties).not.toHaveProperty('checks_total');
+
+  const choices = { issue_id: 'ISSUE', delivery_mode: 'icr', guidance: '', overrides: {} };
+  const definitions = [{ id: 'retired', command: 'npm test', cwd_relative: '.' }];
+  expect(Value.Check(ConfigurationUpdate, { project_changes: { source: { kind: 'local', location: 'C:/project', checks: definitions } } })).toBe(false);
+  expect(Value.Check(ConfigurationUpdate, {
+    project_changes: { correction_limit: 3, checks: definitions }, global_changes: { time_defaults: { polling_interval_ms: 20000 }, checks: definitions },
+  })).toBe(false);
+  expect(Value.Check(PreparationChoices, { ...choices, checks: definitions })).toBe(false);
+  expect(Value.Check(PreparationUpdate, { changes: { overrides: { checks: definitions } } })).toBe(false);
 });
 
 it('preserves omission, explicit null and numeric bounds without coercion', () => {
@@ -49,9 +81,6 @@ it('preserves omission, explicit null and numeric bounds without coercion', () =
   }
   for (const correction_limit of [0, 5]) expect(Value.Check(ConfigurationUpdate, { project_changes: { correction_limit } })).toBe(true);
   for (const correction_limit of [-1, 6, 1.5, '2']) expect(Value.Check(ConfigurationUpdate, { project_changes: { correction_limit } })).toBe(false);
-  for (const timeout_ms of [0, 2_147_483_648, 1.5, '1', null]) {
-    expect(Value.Check(ConfigurationUpdate, { project_changes: { checks: [{ id: 'test', command: 'test', cwd_relative: '.', timeout_ms }] } })).toBe(false);
-  }
 });
 
 it('preserves path identifiers while requiring snake_case query names', () => {

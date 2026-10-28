@@ -2,6 +2,16 @@ import type Database from 'better-sqlite3';
 
 /** Disposable migration fixtures only; this never downgrades an installation. */
 export function removeAttemptDecisionSchema(db: Database.Database): void {
+  if (db.pragma('user_version', { simple: true }) === 53) {
+    const reviews = db.prepare<[], { count: number }>('SELECT count(*) AS count FROM reviews').get();
+    if (reviews?.count !== 0) throw new Error('E1_REVIEW_ROWS_CANNOT_BE_DOWNGRADED');
+    db.exec('DELETE FROM schema_migrations WHERE version=53; PRAGMA user_version=52;');
+  }
+  if (db.pragma('user_version', { simple: true }) === 52) {
+    const reviews = db.prepare<[], { count: number }>('SELECT count(*) AS count FROM reviews').get();
+    if (reviews?.count !== 0) throw new Error('E1_REVIEW_ROWS_CANNOT_BE_DOWNGRADED');
+    db.exec('DROP TRIGGER IF EXISTS review_assessments_complete; DROP INDEX IF EXISTS reviews_attempt; DELETE FROM schema_migrations WHERE version=52; PRAGMA user_version=51;');
+  }
   if (db.pragma('user_version', { simple: true }) === 51) {
     db.exec('DELETE FROM schema_migrations WHERE version=51; PRAGMA user_version=50;');
   }
@@ -76,13 +86,11 @@ export function removeFindingDisputesSchema(db: Database.Database): void {
 export function removeSessionContinuitySchema(db: Database.Database): void {
   removeFindingDisputesSchema(db);
   if (db.pragma('user_version', { simple: true }) === 37) {
-    db.exec(`DROP TABLE finding_assessments; DROP TABLE attempt_blocks; DELETE FROM schema_migrations WHERE version=37; PRAGMA user_version=36;`);
+    db.exec(`DROP TRIGGER IF EXISTS review_assessments_complete;
+      DROP TABLE finding_assessments; DROP TABLE attempt_blocks; DELETE FROM schema_migrations WHERE version=37; PRAGMA user_version=36;`);
   }
   if (db.pragma('user_version', { simple: true }) === 36) {
-    db.exec(`DROP TRIGGER review_complete_approval_guard;
-      DROP TRIGGER check_repeat_reason_required;
-      DROP TRIGGER check_repeat_reason_immutable;
-      ALTER TABLE checks DROP COLUMN repeat_reason;
+    db.exec(`DROP TRIGGER IF EXISTS review_complete_approval_guard;
       DELETE FROM schema_migrations WHERE version=36; PRAGMA user_version=35;`);
   }
   if (db.pragma('user_version', { simple: true }) === 35) {

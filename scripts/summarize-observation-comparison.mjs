@@ -77,12 +77,12 @@ for (const [label, data] of [['antes', before], ['depois', after]]) {
     lines.push(`| ${label} | ${cache} | ${surface} | 5 × 20 | ${stats(values.map(row => row.medianMs))} | ${Math.min(...values.map(row => row.payloadMinBytes))}-${Math.max(...values.map(row => row.payloadMaxBytes))} |`);
   }
 }
-lines.push('', '| Versão | Cache bytes | DB/WAL/SHM | Artefatos | Git fixture | Trabalho operacional | Auxiliares |', '|---|---:|---|---:|---:|---:|---:|');
+lines.push('', '| Versão | Cache bytes | DB/WAL/SHM | Git fixture | Trabalho operacional | Auxiliares |', '|---|---:|---|---:|---:|---:|');
 for (const [label, data] of [['antes', before], ['depois', after]]) for (const stage of rows(data, 'disabled', 'AC29_REPORT')[0].stages) {
   const s = stage.sizes;
-  lines.push(`| ${label} | ${stage.generatedCacheBytes} | ${s.databaseBytes}/${s.walBytes}/${s.sharedMemoryBytes} | ${s.evidenceBytes} | ${s.retainedGitDiskBytes} | ${s.operationalWorkBytes} | ${s.otherAuxiliaryBytes} |`);
+  lines.push(`| ${label} | ${stage.generatedCacheBytes} | ${s.databaseBytes}/${s.walBytes}/${s.sharedMemoryBytes} | ${s.retainedGitDiskBytes} | ${s.operationalWorkBytes} | ${s.otherAuxiliaryBytes} |`);
 }
-lines.push('', 'Tamanhos acima: primeira repetição, sem ocultar que WAL varia com eventos legítimos. As cinco execuções de cada captura comprovam invariância durante a leitura em 0/16/64 MiB, payloads por superfície, ausência de acesso a work/git/artifacts nos resumos e de marcadores de conteúdo/auxiliares persistidos. Há controle positivo dos spies. Só o cache operacional cresce proporcionalmente. Referências Git são controladas em memória; a prova não certifica IO Git nativo ou recuperação de processo físico.', '',
+lines.push('', 'Tamanhos acima: primeira repetição, sem ocultar que WAL varia com eventos legítimos. As cinco execuções de cada captura comprovam invariância durante a leitura em 0/16/64 MiB, payloads por superfície, ausência de acesso a work/git nos resumos e de marcadores de conteúdo/auxiliares persistidos. Há controle positivo dos spies. Só o cache operacional cresce proporcionalmente. Referências Git são controladas em memória; a prova não certifica IO Git nativo ou recuperação de processo físico.', '',
   '## Web simulada, atualidade e conteúdo útil', '',
   '| Automação | Cenário web | n por versão | Leituras antes/depois | Bytes antes/depois | Tempo de conteúdo útil |', '|---|---|---:|---|---|---|');
 for (const mode of ['disabled', 'enabled']) {

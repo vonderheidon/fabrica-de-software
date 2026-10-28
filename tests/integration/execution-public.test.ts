@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { HttpAttemptDetail, HttpAttemptPage, HttpQuestion, HttpAttemptMeasurements, HttpDeliveryDetail, HttpReview, HttpProducerResult, HttpRoundHistory, HttpCheckHistory, HttpAttemptResources, type OperationAccepted } from '#contracts';
+import { HttpAttemptDetail, HttpAttemptPage, HttpQuestion, HttpAttemptMeasurements, HttpDeliveryDetail, HttpReview, HttpProducerResult, HttpRoundHistory, HttpAttemptResources, type OperationAccepted } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
@@ -120,18 +120,21 @@ it('projects both historical versions, official results, checks and publication 
     const detail = await app.inject({ url: `/api/v1/attempts/${f.attemptId}?round_id=${round}&delivery_id=${id}&section=criteria&limit=1`, headers });
     expect(detail.statusCode, detail.body).toBe(200); expect(Value.Check(HttpAttemptDetail, detail.json())).toBe(true);
     expect(detail.json()).toMatchObject({ selected_delivery_id: id, selected_round: round, publication: { review_state: state } });
-    for (const section of ['rounds', 'passages', 'criteria', 'checks', 'reviews', 'findings', 'questions', 'effects', 'resources']) {
+    for (const section of ['rounds', 'passages', 'criteria', 'reviews', 'findings', 'questions', 'effects', 'resources']) {
       const page = await app.inject({ url: `/api/v1/attempts/${f.attemptId}?round_id=${round}&delivery_id=${id}&section=${section}&limit=1`, headers });
       expect(page.statusCode, page.body).toBe(200); expect(Value.Check(HttpAttemptDetail, page.json())).toBe(true);
     }
     const expected = f.storage.getDelivery(id).delivery;
-    const delivery = await app.inject({ url: `/api/v1/deliveries/${id}?section=checks`, headers });
+    const delivery = await app.inject({ url: `/api/v1/deliveries/${id}`, headers });
     expect(Value.Check(HttpDeliveryDetail, delivery.json())).toBe(true);
+    expect(delivery.json()).not.toHaveProperty('verification');
     expect(delivery.json()).toMatchObject({ delivery: { id, git_ref: expected.gitRef, content_identity: expected.contentIdentity, base_sha: expected.baseSha, producer_passage_id: expected.producerPassageId }, review: { state, content_identity: expected.contentIdentity } });
     const review = await app.inject({ url: `/api/v1/deliveries/${id}/review`, headers }); expect(Value.Check(HttpReview, review.json())).toBe(true);
     const producer = await app.inject({ url: `/api/v1/deliveries/${id}/producer-result`, headers }); expect(Value.Check(HttpProducerResult, producer.json())).toBe(true);
     expect(producer.json()).toMatchObject({ binding: { attempt_id: f.attemptId, delivery_version: id, round }, result: { format_version: 1, writes_stopped: true, criteria: [{ criterion_id: 'ac-1' }, { criterion_id: 'ac-2' }] } });
-    const checks = await app.inject({ url: `/api/v1/deliveries/${id}/checks`, headers }); expect(Value.Check(HttpCheckHistory, checks.json())).toBe(true);
+    expect((await app.inject({ url: `/api/v1/attempts/${f.attemptId}?section=checks`, headers })).statusCode).toBe(400);
+    expect((await app.inject({ url: `/api/v1/deliveries/${id}/checks`, headers })).statusCode).toBe(404);
+    expect((await app.inject({ url: `/api/v1/artifacts/${randomUUID()}`, headers })).statusCode).toBe(404);
   }
   const rounds = await app.inject({ url: `/api/v1/attempts/${f.attemptId}/rounds`, headers }); expect(Value.Check(HttpRoundHistory, rounds.json())).toBe(true);
   const resources = await app.inject({ url: `/api/v1/attempts/${f.attemptId}/resources`, headers }); expect(Value.Check(HttpAttemptResources, resources.json())).toBe(true);

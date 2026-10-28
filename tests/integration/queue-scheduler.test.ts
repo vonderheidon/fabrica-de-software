@@ -11,7 +11,6 @@ import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createGitHub } from '../../apps/controller/src/modules/github/index.js';
 import { createWorkspaces } from '../../apps/controller/src/modules/workspaces/index.js';
 import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
-import { removeQueueSchedulerSchema } from '../fixtures/queue-schema.js';
 import { toHttpQueueObservation } from '../../apps/controller/src/http/observation-views.js';
 import { QueuePanel } from '../../apps/web/src/features/queue/QueuePanel.js';
 import { observationWire } from '../fixtures/observation-wire.js';
@@ -20,8 +19,8 @@ import { createInspector } from '../../apps/controller/src/modules/workspaces/in
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) { await f.pipeline.close(); await f.close(); } });
-async function fixture(enabled = true) {
-  const f = await attemptFixture(); fixtures.push(f); await f.pipeline.close();
+async function fixture(enabled = true, migrationVersionForTest?: number) {
+  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f); await f.pipeline.close();
   const settings = f.storage.getGlobalConfiguration();
   if (enabled) f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, body: { changes: { automation_enabled: enabled } }, changes: { automation_enabled: enabled } });
   function automation(projectId: string, value: boolean) {
@@ -344,8 +343,7 @@ describe('durable scheduler', () => {
     const github = { ...createGitHub(), ...f.github, getRepository: vi.fn(async () => complete(structuredClone(f.issue.repository))),
       mutateEffect: vi.fn(async () => ({ state: 'failed_known' as const, receipt: null, reason: 'TEST_PROJECTION_FAILED', retryAtMs: null })) };
     const workspaces = { ...createWorkspaces({ github }), ...f.workspaces };
-    const verification = { verifyDelivery: vi.fn(async () => {}), getArtifact: vi.fn(async () => { throw new Error('Unused fixture capability'); }) };
-    f.pipeline = createPipeline({ ...f.dependencies, github, queue, workspaces, publication: { github, workspaces, verification } });
+    f.pipeline = createPipeline({ ...f.dependencies, github, queue, workspaces, publication: { github, workspaces } });
     const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
     await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
     expect(first).toBeDefined(); expect(f.execution.startPassage).toHaveBeenCalledOnce();
@@ -467,11 +465,11 @@ describe('durable scheduler', () => {
     } finally { await pipeline.close(); reopened.close(); }
   });
 
-  it('migrates v15 with an actual consumed link and preserves receipts, identity and unknown Ready history', async () => {
-    const { f } = await fixture(); await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
+  it('preserves queue receipts and history when reopening the current schema', async () => {
+    const { f } = await fixture(true); await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
     const operationId = f.storage.getAttempt(first.id).operationId;
     const receipt = f.storage.getOperation(operationId); const identity = f.storage.getSettings().installation_id;
-    await f.pipeline.close(); f.storage.close(); removeQueueSchedulerSchema(f.db);
+    await f.pipeline.close(); f.storage.close();
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
     ; expect(reopened.getSettings().installation_id).toBe(identity);

@@ -8,7 +8,6 @@ import { createWorkspaces, type GitContext } from './modules/workspaces/index.js
 import { createPreparations, createQueue, validateScaffoldResources, createDeletionCoordinator } from './modules/projects/index.js';
 import { createExecution, ExecutionError, withWindowsTerminalJobs, type ExecutionHost } from './modules/execution/index.js';
 import { createPipeline, type Pipeline } from './modules/pipeline/index.js';
-import { createVerification } from './modules/verification/index.js';
 import type { ToolObservation } from '#contracts';
 import { createToolDetector } from './modules/tools/index.js';
 
@@ -87,9 +86,8 @@ export async function startController(hostContext: ControllerHostContext = {}, d
         if (!pipeline) throw new Error('PIPELINE_UNAVAILABLE');
         await pipeline.prepareProjectDeletion(ids, operationId);
       } });
-    const verification = createVerification({ storage, workspaces, dataDirectory: configuration.dataDirectory, logFailure });
     const queue = createQueue({ storage, github, workspaces });
-    pipeline = createPipeline({ storage, execution, preparations, workspaces, verification, github, queue, publication: { github, workspaces, verification },
+    pipeline = createPipeline({ storage, execution, preparations, workspaces, github, queue, publication: { github, workspaces },
       observeTools: async () => {
         const [tools, preflight] = await Promise.all([
           hostContext.discoverTools ? toolDetector.detect(storage.getGlobalConfiguration().view.tool_preferences, storage.getGitHubExecutablePath())

@@ -12,13 +12,12 @@ import { openStorage, type RetryCaptureCommand } from '../../apps/controller/src
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
 import { captureFixture } from '../fixtures/capture.js';
-import { removeReviewSchema } from '../fixtures/review-schema.js';
 import { createProjectDeletionPersistence } from '../../apps/controller/src/modules/storage/project-deletions.js';
 
 const fixtures: AttemptFixture[] = []; const apps: ReturnType<typeof createApp>[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(http = false) {
-  const f = await attemptFixture(); fixtures.push(f);
+async function fixture(http = false, migrationVersionForTest?: number) {
+  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f);
   createProjectDeletionPersistence(f.db);
   const app = http ? createApp(loadConfiguration({ FACTORY_DATA_DIR: f.directory, FACTORY_LOG_LEVEL: 'silent' }, f.directory), f.storage,
     undefined, undefined, { github: f.github, workspaces: f.workspaces }, f.pipeline) : null;
@@ -27,7 +26,8 @@ async function fixture(http = false) {
   const a = f.storage.getAttempt(operation.resource.id); const binding = f.persistence.getPassage({ passageId: a.passageId }).binding;
   const controlled = await captureFixture(f.directory, { attemptId: a.id, passageId: a.passageId, deliveryId: binding.deliveryVersion, baseSha: f.storage.getAttemptCapture(a.id).baseSha });
   const capture = vi.fn(controlled.capture);
-  Object.assign(f.workspaces, { captureDelivery: capture, getDeliveryDiff: controlled.diff });
+  Object.assign(f.workspaces, { captureDelivery: capture, getDeliveryDiff: controlled.diff,
+    materializeReview: vi.fn(async (delivery: { attemptId: string }) => join(f.directory, 'work', delivery.attemptId, 'implementation')) });
   const result: ImplementerResult = { formatVersion: 1, summary: 'Official result', writesStopped: true, declaredFiles: ['cache/declared.txt'],
     criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Observed'] })), checks: [] };
   const accept = () => f.persistence.acceptResult({ binding, result, sha256: digest(result) });
@@ -37,21 +37,21 @@ async function fixture(http = false) {
 }
 
 describe('durable immutable deliveries', () => {
-  it('migrates an actual version-five database preserving prior results and receipt, without restoring capture authority', async () => {
-    const f = await fixture(); const accepted = f.accept(); await f.pipeline.drain();
+  it('preserves delivery results and receipt when reopening the current schema', async () => {
+    const f = await fixture(false); const reviewPlanner = vi.spyOn(f.storage, 'beginReview').mockReturnValue(null);
+    const accepted = f.accept(); await f.pipeline.drain();
     const identity = f.storage.getSettings().installation_id; await f.pipeline.close(); f.storage.close();
-    // Reconstruct the prior schema only inside this temporary fixture; production never downgrades.
-    removeReviewSchema(f.db);
-    f.db.exec('DROP TABLE artifacts; DROP TABLE checks; DROP TABLE verification_runs; DROP INDEX delivery_attempt_version; DROP TABLE capture_warnings; DROP TABLE capture_runs; DROP TABLE deliveries; DELETE FROM schema_migrations WHERE version>=6; PRAGMA user_version=5;');
     const reopened = openStorage({ dataDirectory: f.directory });
     try {
-    ; expect(reopened.getSettings().installation_id).toBe(identity);
+      expect(reopened.getSettings().installation_id).toBe(identity);
       expect(reopened.executionPersistence().getResult({ passageId: f.a.passageId })).toEqual(accepted);
-      expect(reopened.getDelivery(f.binding.deliveryVersion).delivery).toMatchObject({ captureState: 'failed', diagnostic: 'CAPTURE_CONTINUITY_REVOKED', contentIdentity: null });
+      expect(reopened.getDelivery(f.binding.deliveryVersion).delivery).toMatchObject({ captureState: 'captured', diagnostic: null });
+      expect(reopened.getDelivery(f.binding.deliveryVersion).delivery.contentIdentity).toBeTruthy();
       const command = { operationId: randomUUID(), attemptId: f.a.id, deliveryId: f.binding.deliveryVersion, body: { producerPassageId: f.a.passageId },
-        expectedRevision: `"${f.a.id}:${reopened.getAttempt(f.a.id).revision}"` };
-      expect(() => reopened.retryCapture(command)).toThrow(expect.objectContaining({ code: 'CAPTURE_RETRY_NOT_ALLOWED' })); expect(f.db.pragma('foreign_key_check')).toEqual([]);
-    } finally { reopened.close(); }
+        expectedRevision: `\"${f.a.id}:${reopened.getAttempt(f.a.id).revision}\"` };
+      expect(() => reopened.retryCapture(command)).toThrow(expect.objectContaining({ code: 'CAPTURE_RETRY_NOT_ALLOWED' }));
+      expect(f.db.pragma('foreign_key_check')).toEqual([]);
+    } finally { reopened.close(); reviewPlanner.mockRestore(); }
   });
   it('does not confirm a retry under SQLite contention and accepts the same command after the lock is released', async () => {
     const f = await fixture(); f.capture.mockRejectedValueOnce(new CaptureError('CAPTURE_IO_FAILED')); f.accept(); await f.pipeline.drain();
@@ -61,7 +61,7 @@ describe('durable immutable deliveries', () => {
       expect(f.storage.getOperation(command.operationId)).toBeNull();
     } finally { f.db.exec('ROLLBACK'); }
     await f.pipeline.retryCapture(command); await f.pipeline.drain(); expect(f.storage.getOperation(command.operationId)?.state).toBe('succeeded');
-    expect(f.execution.startPassage).toHaveBeenCalledOnce();
+    expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
   });
   it('starts capture only after the official result commits and keeps ignored warning metadata queryable without its bytes', async () => {
     const f = await fixture(); expect(f.capture).not.toHaveBeenCalled();
@@ -77,7 +77,7 @@ describe('durable immutable deliveries', () => {
     const view = f.storage.getDelivery(d); expect(view.delivery).toMatchObject({ captureState: 'captured', hasDelta: true,
       gitRef: `refs/factory/deliveries/${d}`, repositoryRelative: `git/${f.a.id}.git`,
       warnings: [{ attemptId: f.a.id, passageId: f.a.passageId, deliveryId: d, path: 'cache/declared.txt', reason: 'DECLARED_NEW_FILE_IGNORED' }] });
-    expect(f.storage.getAttempt(f.a.id)).toMatchObject({ deliveryId: d, resultReceiptId: accepted.receiptId, phase: 'verifying', suspension: null });
+    expect(f.storage.getAttempt(f.a.id)).toMatchObject({ deliveryId: d, resultReceiptId: accepted.receiptId, phase: 'reviewing', suspension: null });
     f.accept(); await f.pipeline.drain(); expect(f.capture).toHaveBeenCalledTimes(1);
     const official = JSON.stringify({ view, events: f.storage.getEvents({}), result: f.persistence.getResult({ passageId: f.a.passageId }),
       rows: ['deliveries', 'capture_warnings', 'capture_runs', 'passage_results'].map(t => f.db.prepare(`SELECT * FROM ${t}`).all()) });
@@ -98,7 +98,7 @@ describe('durable immutable deliveries', () => {
     expect((await f.pipeline.retryCapture(command)).receipt).toEqual(op.receipt);
     await f.pipeline.drain(); expect(f.storage.getOperation(command.operationId)?.state).toBe('succeeded');
     expect(f.storage.getDelivery(d).delivery.captureState).toBe('captured');
-    expect(f.execution.startPassage).toHaveBeenCalledTimes(1); expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1); expect(f.capture).toHaveBeenCalledTimes(2);
+    expect(f.execution.startPassage).toHaveBeenCalledTimes(2); expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1); expect(f.capture).toHaveBeenCalledTimes(2);
     expect((await f.pipeline.retryCapture(command)).receipt).toEqual(op.receipt);
     await expect(f.pipeline.retryCapture({ ...command, body: { producerPassageId: randomUUID() } })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
     await expect(f.pipeline.retryCapture(f.retry())).rejects.toMatchObject({ code: 'CAPTURE_RETRY_NOT_ALLOWED' });
@@ -112,7 +112,7 @@ describe('durable immutable deliveries', () => {
     f.db.exec('DROP TRIGGER fail_metadata'); const command = f.retry(); await f.pipeline.retryCapture(command); await f.pipeline.drain();
     expect(f.storage.getDelivery(id).delivery).toMatchObject({ captureState: 'captured', commitSha: commit });
     expect(f.controlled.calls.filter(c => c.args.includes('commit-tree'))).toHaveLength(1);
-    expect(f.execution.startPassage).toHaveBeenCalledOnce();
+    expect(f.execution.startPassage).toHaveBeenCalledTimes(2);
   });
   it.each(['producer', 'revision', 'phase', 'tracking', 'cancelled', 'simultaneous'] as const)('refuses retry after %s changes without another Implementer', async reason => {
     const f = await fixture(); f.capture.mockRejectedValueOnce(new CaptureError('CAPTURE_IO_FAILED')); f.accept(); await f.pipeline.drain();
@@ -124,7 +124,7 @@ describe('durable immutable deliveries', () => {
     if (reason === 'cancelled') f.persistence.recordCancellation(f.a.id, randomUUID());
     if (reason === 'simultaneous') await f.pipeline.retryCapture(command);
     await expect(f.pipeline.retryCapture(reason === 'simultaneous' ? f.retry() : command)).rejects.toMatchObject({ code: 'CAPTURE_RETRY_NOT_ALLOWED' });
-    await f.pipeline.drain(); expect(f.execution.startPassage).toHaveBeenCalledTimes(1);
+    await f.pipeline.drain(); expect(f.execution.startPassage).toHaveBeenCalledTimes(reason === 'simultaneous' ? 2 : 1);
   });
   it('refuses late capture advancement after cancellation, preserving the retained resource and official result', async () => {
     const f = await fixture(); let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; });

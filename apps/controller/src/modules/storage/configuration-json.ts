@@ -8,26 +8,21 @@ import { storedTimeDefaults, storedArtifactPolicy, readTimeDefaults, storeTimeDe
 // object shape for immutable persisted JSON. Only known contract fields are mapped.
 const closed = { additionalProperties: false } as const;
 const text = (maxLength = 2048) => Type.String({ minLength: 1, maxLength, pattern: '.*\\S.*' });
-const nullable = (maxLength = 256) => Type.Union([text(maxLength), Type.Null()]);
 const revision = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
 const timestamp = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
 export const storedExecutionProfile = Type.Object({ ...ExecutionProfileValue.properties, id: OperationId, revision, createdAtMs: timestamp,
   updatedAtMs: timestamp, composition_version: Type.Optional(Type.Union([revision, Type.Null()])) }, closed);
 export const composedExecutionProfile = Type.Object({ ...ComposedExecutionProfileValue.properties }, closed);
-export const checkDefinitionJson = Type.Object({
-  id: text(128), command: text(4096), cwdRelative: Type.String({ minLength: 1, maxLength: 4096 }),
-  timeoutMs: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_147_483_647 })),
-}, closed);
 export const legacyStatusOptionIdsJson = Type.Object({ ready: text(256), inProgress: text(256), inReview: text(256), delivered: text(256) }, closed);
 export const statusOptionIdsJson = Type.Object({ backlog: text(256), ...legacyStatusOptionIdsJson.properties }, closed);
 export const readStatusOptionIdsJson = Type.Union([statusOptionIdsJson, legacyStatusOptionIdsJson]);
 export const projectMappingJson = Type.Object({ id: text(256), ownerId: text(256), statusFieldId: text(256), statusOptionIds: readStatusOptionIdsJson }, closed);
-export const queueOrderJson = Type.Object({ priorityFieldId: nullable(), priorityDirection: Type.Union([Type.Literal('asc'), Type.Literal('desc')]), useBoardPosition: Type.Boolean() }, closed);
+export const queueOrderJson = Type.Object({ useBoardPosition: Type.Boolean() }, closed);
 export const projectConfigurationJson = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repositoryId: Type.Optional(text(256)), repositoryUrl: Type.Optional(text(4096)) }, closed),
   baseBranch: text(1024), deliveryBranch: ProjectConfiguration.properties.delivery_branch, githubProject: Type.Union([projectMappingJson, Type.Null()]),
   implementerProfileId: Type.Union([OperationId, Type.Null()]), reviewerProfileId: Type.Union([OperationId, Type.Null()]),
-  checks: Type.Array(checkDefinitionJson, { maxItems: 50 }), correctionLimit: Type.Integer({ minimum: 0, maximum: 5 }),
+  correctionLimit: Type.Integer({ minimum: 0, maximum: 5 }),
   defaultDeliveryMode: DeliveryMode, automationEnabled: Type.Boolean(), queueOrder: queueOrderJson,
   guidance: Type.String({ maxLength: 8192 }),
 }, closed);
@@ -38,7 +33,7 @@ const profileChoice = Type.Union([
 export const preparationOverridesJson = Type.Partial(Type.Object({
   baseBranch: projectConfigurationJson.properties.baseBranch,
   implementerProfile: profileChoice, reviewerProfile: profileChoice,
-  checks: projectConfigurationJson.properties.checks, correctionLimit: projectConfigurationJson.properties.correctionLimit,
+  correctionLimit: projectConfigurationJson.properties.correctionLimit,
   timeDefaults: storedTimeDefaults, artifactPolicy: storedArtifactPolicy,
 }, closed));
 export const preparationChoicesJson = Type.Object({
@@ -48,7 +43,7 @@ export const preparationChoicesJson = Type.Object({
 }, closed);
 const origin = Type.Union([Type.Literal('project'), Type.Literal('global'), Type.Literal('preparation')]);
 export const choiceOriginsJson = Type.Object({
-  baseBranch: origin, implementerProfile: origin, reviewerProfile: origin, checks: origin, correctionLimit: origin,
+  baseBranch: origin, implementerProfile: origin, reviewerProfile: origin, correctionLimit: origin,
   timeDefaults: origin, artifactPolicy: origin, guidance: origin, deliveryMode: origin,
 }, closed);
 export const effectiveConfigurationJson = Type.Object({
@@ -60,24 +55,6 @@ export const effectiveConfigurationJson = Type.Object({
   origins: choiceOriginsJson,
 }, closed);
 export const criterionJson = Type.Object({ id: Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), text: Type.String({ minLength: 1, maxLength: 65536 }), occurrenceIndex: revision, explicit: Type.Boolean() }, closed);
-
-export function readCheck(value: Static<typeof checkDefinitionJson>): ProjectConfiguration['checks'][number] {
-  return {
-    id: value.id,
-    command: value.command,
-    cwd_relative: value.cwdRelative,
-    ...(value.timeoutMs === undefined ? {} : { timeout_ms: value.timeoutMs }),
-  };
-}
-
-export function storeCheck(value: ProjectConfiguration['checks'][number]): Static<typeof checkDefinitionJson> {
-  return {
-    id: value.id,
-    command: value.command,
-    cwdRelative: value.cwd_relative,
-    ...(value.timeout_ms === undefined ? {} : { timeoutMs: value.timeout_ms }),
-  };
-}
 
 export function readStatusOptions(value: Static<typeof readStatusOptionIdsJson>): NonNullable<ProjectConfiguration['github_project']>['status_option_ids'] {
   return {
@@ -100,19 +77,11 @@ export function storeStatusOptions(value: NonNullable<ProjectConfiguration['gith
 }
 
 export function readQueueOrder(value: Static<typeof queueOrderJson>): ProjectConfiguration['queue_order'] {
-  return {
-    priority_field_id: value.priorityFieldId,
-    priority_direction: value.priorityDirection,
-    use_board_position: value.useBoardPosition,
-  };
+  return { use_board_position: value.useBoardPosition };
 }
 
 export function storeQueueOrder(value: ProjectConfiguration['queue_order']): Static<typeof queueOrderJson> {
-  return {
-    priorityFieldId: value.priority_field_id,
-    priorityDirection: value.priority_direction,
-    useBoardPosition: value.use_board_position,
-  };
+  return { useBoardPosition: value.use_board_position };
 }
 
 export function readSource(value: Static<typeof projectConfigurationJson>['source']): ProjectConfiguration['source'] {
@@ -159,7 +128,6 @@ export function readProjectConfiguration(value: Static<typeof projectConfigurati
     github_project: value.githubProject === null ? null : readMapping(value.githubProject),
     implementer_profile_id: value.implementerProfileId,
     reviewer_profile_id: value.reviewerProfileId,
-    checks: value.checks.map(readCheck),
     correction_limit: value.correctionLimit,
     default_delivery_mode: value.defaultDeliveryMode,
     automation_enabled: value.automationEnabled,
@@ -176,7 +144,6 @@ export function storeProjectConfiguration(value: ProjectConfiguration): Static<t
     githubProject: value.github_project === null ? null : storeMapping(value.github_project),
     implementerProfileId: value.implementer_profile_id,
     reviewerProfileId: value.reviewer_profile_id,
-    checks: value.checks.map(storeCheck),
     correctionLimit: value.correction_limit,
     defaultDeliveryMode: value.default_delivery_mode,
     automationEnabled: value.automation_enabled,
@@ -190,7 +157,6 @@ export function readOrigins(value: Static<typeof choiceOriginsJson>): EffectiveC
     base_branch: value.baseBranch,
     implementer_profile: value.implementerProfile,
     reviewer_profile: value.reviewerProfile,
-    checks: value.checks,
     correction_limit: value.correctionLimit,
     time_defaults: value.timeDefaults,
     artifact_policy: value.artifactPolicy,
@@ -204,7 +170,6 @@ export function storeOrigins(value: EffectiveConfiguration['origins']): Static<t
     baseBranch: value.base_branch,
     implementerProfile: value.implementer_profile,
     reviewerProfile: value.reviewer_profile,
-    checks: value.checks,
     correctionLimit: value.correction_limit,
     timeDefaults: value.time_defaults,
     artifactPolicy: value.artifact_policy,
@@ -273,7 +238,6 @@ export function readOverrides(value: Static<typeof preparationOverridesJson>): P
     ...(value.baseBranch === undefined ? {} : { base_branch: value.baseBranch }),
     ...(value.implementerProfile === undefined ? {} : { implementer_profile: value.implementerProfile }),
     ...(value.reviewerProfile === undefined ? {} : { reviewer_profile: value.reviewerProfile }),
-    ...(value.checks === undefined ? {} : { checks: value.checks.map(readCheck) }),
     ...(value.correctionLimit === undefined ? {} : { correction_limit: value.correctionLimit }),
     ...(value.timeDefaults === undefined ? {} : { time_defaults: readTimeDefaults(value.timeDefaults) }),
     ...(value.artifactPolicy === undefined ? {} : { artifact_policy: readArtifactPolicy(value.artifactPolicy) }),
@@ -285,7 +249,6 @@ export function storeOverrides(value: PreparationChoices['overrides']): Static<t
     ...(value.base_branch === undefined ? {} : { baseBranch: value.base_branch }),
     ...(value.implementer_profile === undefined ? {} : { implementerProfile: value.implementer_profile }),
     ...(value.reviewer_profile === undefined ? {} : { reviewerProfile: value.reviewer_profile }),
-    ...(value.checks === undefined ? {} : { checks: value.checks.map(storeCheck) }),
     ...(value.correction_limit === undefined ? {} : { correctionLimit: value.correction_limit }),
     ...(value.time_defaults === undefined ? {} : { timeDefaults: storeTimeDefaults(value.time_defaults) }),
     ...(value.artifact_policy === undefined ? {} : { artifactPolicy: storeArtifactPolicy(value.artifact_policy) }),
@@ -313,10 +276,6 @@ export function storeChoices(value: PreparationChoices): Static<typeof preparati
   };
 }
 
-export function readCheckDefinitions(value: unknown): ProjectConfiguration['checks'] {
-  if (!Value.Check(Type.Array(checkDefinitionJson, { maxItems: 50 }), value)) throw new StorageError('PROJECT_DATA_INVALID');
-  return value.map(readCheck);
-}
 export function readStatusOptionIds(value: unknown): NonNullable<ProjectConfiguration['github_project']>['status_option_ids'] {
   if (!Value.Check(readStatusOptionIdsJson, value)) throw new StorageError('PROJECT_DATA_INVALID');
   return readStatusOptions(value);

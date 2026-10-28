@@ -253,8 +253,6 @@ export function interruptAttempts(db: Database.Database): void {
     db.prepare("UPDATE terminal_occupancies SET state='uncertain',reason='TRACKING_LOST' WHERE state='occupied'").run();
     db.prepare("UPDATE managed_terminals SET state='uncertain',updated_at_ms=? WHERE state='occupied'").run(Date.now());
     db.prepare("UPDATE attempt_sessions SET state='interrupted',updated_at_ms=? WHERE state IN ('reserved','active')").run(Date.now());
-    db.prepare("UPDATE checks SET state='error',diagnostic='VERIFICATION_INTERRUPTED',ended_at_ms=?,duration_ms=0 WHERE state IN ('pending','running')").run(Date.now());
-    db.prepare("UPDATE verification_runs SET state='error',diagnostic='VERIFICATION_INTERRUPTED',ended_at_ms=? WHERE state='running'").run(Date.now());
     db.prepare("UPDATE capture_runs SET state='failed',diagnostic='CAPTURE_CONTINUITY_REVOKED',ended_at_ms=? WHERE state='running'").run(Date.now());
     db.prepare("UPDATE deliveries SET capture_state='failed',diagnostic='CAPTURE_CONTINUITY_REVOKED',revision=revision+1 WHERE capture_state IN ('pending','running')").run();
     const rows = db.prepare<[], { id: string }>('SELECT id FROM attempts WHERE result IS NULL').all();
