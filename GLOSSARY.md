@@ -24,6 +24,9 @@ _Avoid_: Projeto cadastrado
 Conjunto de issues prontas e atribuídas exclusivamente à conta responsável pela esteira, ainda não consumidas por uma tentativa automática.
 _Avoid_: Evento de transição Ready, qualquer card em Ready
 
+**Ordem da fila**:
+Sequência por ID de projeto. Dentro de cada projeto, usa a posição do quadro quando `use_board_position` está ativa e todos os itens retornados têm posição; caso contrário, usa número crescente da issue (nulos por último) e ID da issue/item.
+
 **Tentativa**:
 Execução identificada de uma issue, com configuração de partida e ambiente próprios. Outra tentativa não retoma a sessão nem substitui o histórico da anterior.
 _Avoid_: Rodada, reinício do agente
@@ -35,6 +38,10 @@ _Avoid_: Nova tentativa
 **Passagem**:
 Trabalho de um papel em uma rodada, com resultado e vínculo próprios, associado à sessão lógica desse papel na tentativa.
 _Avoid_: Terminal, conversa
+
+**Resultado do Implementador**:
+Resultado estruturado da passagem com as validações técnicas pertinentes realizadas pelo agente e evidências vinculadas à identidade imutável da versão. Cada correção exige novo resultado para a nova versão.
+A fábrica não cadastra comandos de validação nem inicia executor manual.
 
 **Sessão lógica OMP**:
 Conversa própria de um papel dentro de uma tentativa, compartilhada pelas passagens daquele papel nas rodadas. Outra tentativa recebe uma sessão nova, mesmo quando usa o mesmo terminal físico.
@@ -65,7 +72,7 @@ Conjunto identificado de alterações e evidências produzido pela tentativa, in
 _Avoid_: Resposta textual, qualquer diff presente
 
 **Versão de entrega**:
-Identidade do conteúdo submetido a verificações e revisão. Aprovação de uma versão não aprova alterações posteriores.
+Identidade do conteúdo associado aos resultados e evidências das validações técnicas pertinentes e à revisão independente. Aprovação de uma versão não aprova alterações posteriores.
 _Avoid_: HEAD como único identificador, sessão aprovada
 
 **Modo de entrega**:
@@ -73,7 +80,7 @@ Percurso escolhido entre ICR, ICR + Commit e ICR + Commit + PR.
 _Avoid_: Permissão permanente de publicação
 
 **ICR**:
-Implement -> Code-review: Implementação, verificações pertinentes e revisão independente, com resultado e alterações disponíveis sem commit de entrega.
+Implement -> Code-review: Implementação, validações técnicas pertinentes registradas pelo Implementador e revisão independente, com resultado e alterações disponíveis sem commit de entrega.
 _Avoid_: Código integrado, PR criada
 
 **Publicação**:

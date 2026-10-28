@@ -4,11 +4,12 @@ Parte normativa da [SPEC](SPEC.md). Revisão de escopo aprovada em 2026-10-16: a
 
 ## 1. Responsabilidades e confiança
 
-Decisão do usuário em 23/10/2026, 18:37: há um único checkout de código por tentativa. Implementador, checks e Revisor trabalham alternadamente nele. Isso substitui a separação física de checkout e a criação de cópias por revisão/check nos contratos anteriores. Os papéis e suas conversas continuam separados. O papel anterior deve concluir seu resultado, ficar ocioso e ter seus processos próprios parados antes do próximo papel ou dos checks. Retomada mantém o mesmo cwd e o mesmo ID OMP do papel; outra tentativa recebe novo checkout e novas conversas. Referências Git, pareceres e evidências continuam imutáveis por versão/rodada. Conferências antes/depois recusam alteração do código durante revisão/checks, sem reset automático. Ambientes legados não são apagados nem convertidos por leitura ou restart.
+Decisão do usuário em 23/10/2026, 18:37: há um único checkout de código por tentativa. Implementador e Revisor trabalham alternadamente; as validações técnicas pertinentes integram a passagem do Implementador e são registradas no resultado da versão, sem etapa de executor manual. Isso substitui a separação física de checkout e a criação de cópias por revisão ou validação nos contratos anteriores. As conversas dos papéis continuam separadas. O papel anterior deve concluir seu resultado, ficar ocioso e ter seus processos próprios parados antes do próximo papel. Retomada mantém o mesmo cwd e ID OMP do papel; outra tentativa recebe novo checkout e novas conversas. Referências Git, pareceres e evidências continuam imutáveis por versão/rodada. Conferências antes/depois recusam alteração do código durante validação técnica ou revisão, sem reset automático. Ambientes legados não são apagados nem convertidos por leitura ou restart.
+Decisão V4/E1 do usuário em 28/10/2026: a fábrica não cadastra nem executa comandos manuais de validação. Cada rodada conserva resultado estruturado próprio do Implementador, com validações técnicas pertinentes e evidências vinculadas à tentativa, passagem, rodada e versão; correção exige novo resultado e revisão independente da nova versão. Banco limpo é permitido e a compatibilidade dos mecanismos retirados não é requisito; registros atuais, capturas e evidências seguem preservados. Publicação usa a referência aprovada. Ensaios e evidências históricas não substituem a prova do produto atual.
 
 | Componente | Responsabilidade |
 | --- | --- |
-| Fábrica | Tentativas, despacho, checks, entrega/revisão estruturadas, histórico e seus próprios efeitos Git/GitHub |
+| Fábrica | Tentativas, despacho, resultados do Implementador, revisão estruturada, histórico e seus próprios efeitos Git/GitHub |
 | Maestri | Terminais e interação normal do operador |
 | OMP | Sessão do agente, ferramentas nativas, instruções, configuração e gerenciamento normal de MCPs |
 | Implementador | Implementar, verificar e entregar sem assumir publicação da fábrica |
@@ -34,7 +35,7 @@ CLI ou bootstrap SDK suportado são opções de implementação, não obrigaçõ
 
 ## 3. Resultados e perguntas
 
-A extensão mínima registra execution_complete e execution_question; não há execution_accept nem autorização para execution_block genérico. Vincular resultados à tentativa, passagem, papel e versão; o modelo não escolhe identidades privadas. Persistir resultado válido antes de confirmar, permitir correção de payload inválido e impedir que repetição/confusão entre passagens gere outra entrega.
+A extensão mínima registra execution_complete e execution_question; não há execution_accept nem autorização para execution_block genérico. Vincular resultados estruturados à tentativa, passagem, papel, rodada e versão; o modelo não escolhe identidades privadas. Persistir resultado válido antes de confirmar, permitir correção de payload inválido e impedir que repetição/confusão entre passagens gere outra entrega.
 
 Fim de turno, texto approved, feed e scrollback não substituem resultado estruturado. Não exigir transcript completo para acompanhar a tentativa.
 
@@ -42,7 +43,7 @@ Pergunta contém decisão, contexto e alternativas. Validar schema e vínculo, s
 
 A integração usa transporte local suportado e correlação suficiente para não misturar sessões. Se houver canal próprio, restringi-lo a loopback, proteger o bootstrap, não expor segredos e usar framing/decodificação UTF-8 corretos ou biblioteca consolidada. Fechamento deve encerrar esperas com diagnóstico. Isso não exige construir uma plataforma genérica de protocolos.
 
-A ação explícita “Encerrar tentativa” na pergunta usa `action=end_attempt`: resposta e cancelamento lógico são gravados na mesma transação, antes da parada física. Resultados e respostas atrasados não podem reabrir a tentativa nem iniciar revisão/correção. Texto livre é orientação ao agente, não comando de cancelamento interpretado por palavras-chave. O Implementador registra pré-requisito impeditivo em check com `outcome=blocked`; o controlador suspende a tentativa antes da captura/revisão. O Revisor confere primeiro a existência dos arquivos necessários e, se ausentes, registra evidência e parecer de rejeição sem repetir testes visuais de uma página inexistente.
+A ação explícita “Encerrar tentativa” na pergunta usa `action=end_attempt`: resposta e cancelamento lógico são gravados na mesma transação, antes da parada física. Resultados e respostas atrasados não podem reabrir a tentativa nem iniciar revisão/correção. Texto livre é orientação ao agente, não comando de cancelamento interpretado por palavras-chave. O Implementador registra pré-requisito impeditivo no resultado estruturado com `outcome=blocked`; o controlador suspende a tentativa antes da captura/revisão. O Revisor confere primeiro a existência dos arquivos necessários e, se ausentes, registra evidência e parecer de rejeição sem repetir testes visuais de uma página inexistente.
 
 ## 4. MCPs e ferramentas
 
@@ -50,7 +51,7 @@ Usar a configuração e o gerenciamento normal suportado do OMP. A fábrica não
 
 Conferir se a ferramenta necessária está disponível e realizar uma chamada útil no runtime real. Configuração presente ou tools/list, isoladamente, não provam funcionamento. Respeitar configuração disabled pelo mecanismo nativo; não reabilitar servidor silenciosamente. Erro corrigível de argumento não encerra a tentativa.
 
-O Implementador executa os checks pertinentes disponíveis: build, typecheck, lint e testes automatizados relacionados à alteração. A validação visual completa dos critérios de aceite cabe ao Revisor independente sobre a versão fixa; o Implementador não realiza auditoria visual no navegador e registra como not_verified os critérios visuais que não verificou, indicando o encaminhamento ao Revisor.
+O Implementador executa as validações técnicas pertinentes disponíveis — build, typecheck, lint e testes automatizados relacionados à alteração — e registra resultados/evidências no ImplementerResult vinculado à versão. A fábrica não cadastra comandos, diretórios ou timeouts nem cria executor manual. A validação visual completa dos critérios de aceite cabe ao Revisor independente sobre a versão fixa; o Implementador não realiza auditoria visual no navegador e registra como not_verified os critérios visuais que não verificou, indicando o encaminhamento ao Revisor.
 
 Playwright MCP/Google Chrome continua sendo a superfície de aceite web do Revisor. Usar navegador/perfil de teste, não o browser pessoal do operador; verificar conteúdo e screenshot, não apenas arquivo não vazio. Fechar o browser iniciado pelo teste. O uso do Portal Maestri, suas ferramentas de navegador e skills é proibido para Implementador e Revisor, inclusive para observação, testes ou alternativa ao Playwright. Instruções do projeto ou de skills não substituem essa proibição.
 
@@ -60,7 +61,7 @@ Critérios que exigem escrita externa precisam de autorização e alvo específi
 
 ## 5. Entrega e perda de acompanhamento
 
-Implementador encerra escritas próprias antes de entregar. A fábrica captura conteúdo identificado; checks e sessão independente do Revisor usam essa versão. Correção cria nova rodada/versão. Publicação usa o conteúdo aprovado, nunca recolhe novamente um clone mutável para montar a entrega.
+Implementador encerra escritas próprias antes de entregar. A fábrica captura conteúdo identificado; o resultado próprio do Implementador e a sessão independente do Revisor ficam vinculados à versão fixa. Correção cria nova rodada/versão e exige novo resultado próprio do Implementador, com validações técnicas pertinentes e evidências dessa versão, e revisão independente. Publicação usa o conteúdo aprovado, nunca recolhe novamente um clone mutável para montar a entrega.
 
 A versão capturada é mantida no Git por referência imutável, sem publicação remota implícita. Persistência da fábrica guarda referências Git e hashes/metadados necessários, configuração, critérios, resultados, evidências pertinentes e estado operacional. Não serializar checkout, índice, arquivos ignorados ou caches em banco ou snapshots auxiliares, nem contornar essa regra por compressão, deduplicação ou armazenamento externo. Listagens, histórico e polling usam resumos sem carregar conteúdo do projeto. Validar tamanho persistido e latência com caches volumosos conforme AC-29 da SPEC.
 
@@ -120,7 +121,7 @@ IDs são preservados para rastreabilidade; descrições abaixo substituem os con
 | INT-15 | Cancelamento representativo na inicialização e no trabalho com filho; coordenação/publicação interrompidas |
 | INT-16 | Parada limitada aos recursos próprios conhecidos; incerteza explícita, arquivos e recursos manuais preservados |
 | INT-17 | Nova tentativa real em outro ambiente sem reset/liberação global |
-| INT-18 | Checks/revisão e publicação usam a mesma versão aprovada; correção cria nova versão |
+| INT-18 | Resultado do Implementador, revisão e publicação usam a mesma versão aprovada; correção cria nova versão |
 
 MCP de fixture, resultado simulado e screenshots históricos não comprovam o produto completo. Publicação GitHub e governança do Kanban mantêm as provas específicas da SPEC. Suíte padrão não faz chamadas pagas ou operações externas implicitamente.
 
@@ -157,7 +158,7 @@ Proposta de mapeamento compatível:
 O V3 pede área gerenciada por projeto, mas não autoriza mover a pasta original do operador. A unidade de identidade deve ser `project_id` e uma chave estável de localização/layout versionado; nome de projeto, título de issue, caminho antigo ou nome de pasta não identificam propriedade. Banco e recursos compartilhados permanecem na raiz global da instalação. Não se fixa nesta proposta um nome final de diretório físico ainda não decidido.
 
 1. **Inventariar e classificar sem mover:** mapear cada localização e recurso exclusivo ao projeto/tentativa/passagem/versão e registrar caminho legado, identidade do objeto, proprietário, estado e consumidores. Recursos compartilhados ficam globais. Não ler conteúdo para gerar snapshots, nem persistir checkout, índice, ignorados ou caches no SQLite/JSON.
-2. **Manter leitores de compatibilidade:** criar um resolvedor por identidade e chave de localização. Referências históricas continuam apontando para seus caminhos registrados; referências novas usam a localização versionada do projeto. Atualizar, em fatias próprias, criação, execução, captura, checks, revisão, recuperação, retenção, publicação, artefatos e exclusão para consultarem o resolvedor. Leitura não escolhe outro caminho por nome nem regrava referência histórica.
+2. **Manter leitores de compatibilidade:** criar um resolvedor por identidade e chave de localização. Referências históricas continuam apontando para seus caminhos registrados; referências novas usam a localização versionada do projeto. Atualizar, em fatias próprias, criação, execução, captura, resultados do Implementador, revisão, recuperação, retenção, publicação, recursos e exclusão para consultarem o resolvedor. Leitura não escolhe outro caminho por nome nem regrava referência histórica.
 3. **Bloquear atividade incompatível:** não planejar nem executar transição enquanto houver implementação/check/revisão/publicação em uso, lançamento ou captura pendente, ocupação de terminal ativa/incerta, efeito externo incerto, exclusão concorrente ou arquivo aberto cuja identidade não possa ser conferida. Bloqueio preserva ambos os locais e informa recuperação concreta.
 4. **Planejar antes de escrever:** produzir plano fechado vinculado a projeto, revisão/geração, localizações de origem/destino, identidade observada e hash. Destino é calculado pelo host a partir do projeto/layout aprovado; a API não aceita caminho arbitrário. Confirmar autorização e persistir operação/diário e etapa antes de qualquer IO.
 5. **Executar e reconciliar por etapas:** conferir canonicalização e identidade na origem/destino sem seguir links; transportar somente recursos gerenciados identificados; conferir conteúdo/árvore ou checksum e metadados necessários no destino; atualizar localização corrente somente depois dessa confirmação. SQLite e filesystem não compartilham transação: interrupção mantém estado `unknown/blocked`, consulta ambos os lados e retoma a mesma operação sem apagar o único exemplar válido.

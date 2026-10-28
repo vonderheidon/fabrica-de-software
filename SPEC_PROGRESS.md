@@ -4138,3 +4138,237 @@ Conferência mecânica do índice contra a SPEC: 23 stories, **88/88** critério
 - Atualizados `README.md` e `docs/operation/README.md`: comandos locais configurados, formulários de configuração existentes, modos atuais, permissão explícita e limites das notificações locais, recuperação e encerramento. Foram corrigidas afirmações antigas sobre a indisponibilidade dos formulários e bloqueio de PR; evidências históricas foram mantidas com o limite correspondente.
 - A produção não mudou nesta sprint. A identidade do código avaliado permanece compatível com as provas de produção da Sprint 043. Nenhum Git/GitHub externo, provider, terminal Maestri/OMP, staging, commit, push ou publicação foi iniciado.
 - `feat-083` e `feat-085` implementados e validados localmente. As conclusões externas continuam limitadas aos cenários explicitamente registrados na Sprint 043; este fechamento não aprova critérios fora dessas evidências.
+
+## Sprint — Gate atual por resultados e vínculo produtor obrigatório [IMPLEMENTADA E VALIDADA LOCALMENTE]
+
+Data: 2026-10-28. Escopo: vínculo produtor da revisão, início de revisão sem gate manual, aprovação por evidência completa da versão e progresso estruturado por avaliação independente. Fontes: AGENTS.md, SPEC vigente §§2.1/5/8/10.2, GLOSSARY.md, INTEGRACAO-MAESTRI-OMP.md e documentos da SPEC/PRD/stories em `docs/Docs20261027_205916/`. Mantidos banco e checkout reais sem limpeza ou mutação externa; nenhuma alteração Git de escrita, provider, terminal Maestri/OMP, publicação ou avanço de fase.
+
+- Migration 052 torna `reviews.implementer_passage_id` obrigatório e o vincula por FK composta ao produtor da entrega e ao resultado persistido. Guards validam produtor/revisor, tentativa, rodada, versão, entrega capturada, resultado aceito, passagem viva e conjunto de critérios. O resultado do Implementador também é exigido no resumo interno, DTO HTTP, conversores e consultas. Não há `verification_id` nem ramo alternativo de revisão em contratos ou projeções atuais.
+- `beginReview` agora inicia após captura durável e resultado estruturado válido, inclusive com critérios `not_verified`, evidência insuficiente ou erro técnico declarado pelo produtor. Não agenda verificação manual nem exige `verification_runs`, checks aprovados ou artefato. Permanecem os bloqueios estruturais de captura, identidade, tentativa/passagens vivas, critérios e contexto.
+- A aprovação exige independência confirmada, resultado Revisor aprovado para a passagem/versão corrente, cada critério atual exatamente uma vez com evidência textual válida e pertinente, e ausência de bloqueantes não resolvidos. A guarda SQL repete os invariantes relevantes; listas de checks ausentes/vazias não constituem reprovação ou aprovação por si só.
+- Avaliações de achados são persistidas somente quando correspondem exatamente à avaliação do resultado Revisor aceito e à versão atual. `proven`/`partial` exigem evidência não vazia que corresponda à evidência de critério pertinente do Revisor; `none`/`not_assessable` exigem justificativa sem fabricar progresso. Nenhuma avaliação é sintetizada para completar um resultado; a guarda impede encerrar revisão independente com avaliação raiz pendente. Recorrência, prioridade, bloqueios, resoluções, contestações e imutabilidade continuam cobertos.
+- E1 é aplicada sem conversão nem limpeza: migration 052 recusa antes de alterar o schema quando encontra revisões persistidas; o banco permanece intacto. Instalações com tabela de revisões vazia aplicam o schema novo normalmente. Nenhum banco pessoal foi aberto ou migrado. Atualizados inventário de exclusão, fixtures, manutenção/medição e consumidores de consultas/publicação para o novo vínculo.
+- Validação: suíte integral **2.061/2.061 testes em 174 arquivos**; typecheck, lint, build e `git diff --check` passaram. `test:compiled` passou com HTTP/SSE/SQLite, lock, encerramento e reinício; sua readiness passou a consultar o health endpoint do processo filho. `test:execution-compiled` passou com fixture Node, declarando `maestriOmpIntegration:not_executed`. O build conserva o aviso conhecido do bundle web acima de 500 kB.
+- Limites: não houve prova real Maestri/OMP, GitHub, provider, navegador ou publicação externa; o smoke de execução usa fixture Node e não valida integração nativa. A recusa da migration para bancos com revisões antigas é deliberada por E1. Nenhum staging, commit, push ou próxima sprint.
+
+## Sprint 001 - Gate atual por resultados e vínculo produtor obrigatório [CONCLUIDA]
+- Resultado produtor obrigatório na identidade da revisão: Tornar consultável e obrigatório o vínculo persistente entre revisão, entrega capturada e resultado estruturado do Implementador.
+- Início da revisão com lacunas ou falhas técnicas: Permitir que a revisão independente avalie resultados formalmente válidos contendo lacunas ou validações inconclusivas.
+- Aprovação completa da versão sem gate manual: Exigir evidência pertinente e revisão independente para aprovação, removendo os vínculos exclusivos de verificações antigas da revisão atual.
+- Progresso comprovado por avaliação independente da versão: Adaptar finding_assessments às evidências estruturadas aceitas, preservando recorrência, bloqueios e imutabilidade.
+
+## Sprint — Percurso integrado sem executor manual [IMPLEMENTADA E VALIDADA LOCALMENTE]
+
+Data: 2026-10-28. Implementação no workspace canônico, consumindo o vínculo obrigatório do produtor da Sprint anterior. Nenhuma dependência foi instalada; não houve provider, terminal Maestri/OMP, GitHub externo, publicação, mudança de fase ou escrita Git.
+
+- O pipeline agora avança do resultado estruturado e da captura Git durável diretamente para a revisão independente. Não agenda nem espera `verification_runs`, não exige `CHECKS_NOT_CONFIGURED` e mantém a etapa histórica `verifying` no contrato. A revisão recebe o `ProducerResult` completo e a identidade da versão, sem conversa do Implementador. O Revisor passa a usar a identidade de evidência do produtor em `ReviewCommandRepetition`; o contrato e as gravações não têm `check_id`. Correções seguem produzindo nova rodada, entrega e revisão próprias, sem herdar aprovação ou inventar checks.
+- O contexto do Implementador orienta build, typecheck, lint e testes pertinentes. `ImplementerResult.checks` registra comando em `id`, resultado observado em `outcome` e evidência junto das limitações em `evidence`; causas concretas são registradas quando algo não pôde ser executado. Os checks são resultado da passagem, não comandos de configuração. O detalhe existente consulta esse resultado para a passagem/versão selecionada sob demanda.
+- Removidos o módulo e a composição de verificação, leitores de resultado/log, contratos/rotas de histórico e artifacts, adaptadores de materialização exclusivos, smoke compilado exclusivo e estados/textos de verificação manual. Resumo da entrega, histórico, detalhes e publicação deixaram de depender de tabelas ou artifacts manuais. O Revisor permanece vinculado ao resultado do produtor, à captura e à versão; os gates de autoridade e publicação com `git_ref`/`content_identity` aprovados permanecem vigentes. A transição de diretório gerenciado também não consulta mais a tabela `checks` retirada.
+- Migration 053 aplica E1: antes de qualquer delta, recusa com erro técnico existente se encontrar linhas em `verification_runs`, `checks`, `artifacts` ou destinos `exclusive_artifact`; a recusa preserva schema, ledger e bytes do banco. Em instalação vazia, remove as três tabelas, o trigger legado de aprovação, o tipo de destino e os eventos de verificação da projeção/intervalos. Preserva `diagnostic_runs.checks_json`, prioridade dos achados, resultados/evidências dos agentes e referências imutáveis. Bancos descartáveis de testes recriam o schema histórico vazio somente para exercitar upgrades anteriores; isso não é leitura ou compatibilidade de produção.
+- A configuração e a preparação ainda podem conter definições históricas de checks, mas o percurso atual não as despacha. A retirada desses campos e de `checks_json` da configuração pertence à Sprint 003 conforme o recorte fornecido; diagnósticos operacionais continuam separados.
+- Validação final: suíte completa **2.014/2.014 testes em 170 arquivos**, `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build`, `npm.cmd run test:compiled` e `npm.cmd run test:execution-compiled` passaram. O smoke compilado do controlador confirmou HTTP/SSE/SQLite, lock, shutdown e reinício; o smoke de execução validou recursos/schema e transporte com fixture Node. Ambos declaram Maestri/OMP real como não executado.
+- Prova visual Playwright MCP/Chrome com bundle construído e API controlada: detalhe da tentativa sem a seção “Checks e logs”, evidência do Implementador visível na passagem da versão selecionada e nenhuma requisição a rotas `/checks` ou `/artifacts`; sem `pageerror` observado. O fixture não simula a conexão saudável do stream de eventos, então a prova não cobre o indicador de conexão. Evidência mantida em `.cache/automated-visual/sprint-integrated-no-manual-20261028/`.
+- Nota documental: `SPEC20261027_205916.md` §5.1 item 7 ainda descreve leitura de `/checks`, `/artifacts` e vínculo `artifacts.check_id`, em conflito com §3.4/§4.6 E1 e com os critérios explícitos desta sprint, que retiram esses mecanismos. A implementação seguiu o recorte explícito da sprint; a SPEC normativa não foi alterada. Nenhuma integração real ou aceite de provider é inferido pelos testes controlados.
+
+## Sprint 002 - Percurso integrado sem executor manual [CONCLUIDA]
+- Progressão da captura para revisão independente: Retirar o acionamento do executor de definições manuais do percurso coordenado e fornecer os resultados produtores ao Revisor.
+- Correções e repetições vinculadas à nova versão: Manter o ciclo de correção com validação pertinente, avaliação independente e justificativa de comandos repetidos.
+- Entrega aprovada e efeitos sem duplicação: Conservar a publicação da referência aprovada e os bloqueios de autoridade após a mudança do gate técnico.
+- Ausência do executor e dos leitores exclusivamente manuais: Retirar os resíduos exclusivos do executor e seus consumidores junto à mudança funcional, sem camada de compatibilidade.
+
+## Sprint 003 - Retirar checks da configuração, preparação, captura e detalhe [IMPLEMENTADA E VALIDADA LOCALMENTE]
+
+Data: 2026-10-28. Fontes: `AGENTS.md`, decisão explícita de 28/10 no topo de `SPEC.md` e seção E1 da SPEC em `docs/Docs20261027_205916/`, contratos atuais e progressos das sprints 001–002. Preservadas as alterações preexistentes. Nenhuma dependência, migração de banco operacional, execução Git, provider, terminal Maestri/OMP, publicação ou avanço de fase.
+
+- `ProjectConfiguration`, `ProjectChanges` e `ConfigurationUpdate` deixaram de expor `CheckDefinition`; os codecs privados de configuração e preparação, `ChoiceOrigins`, `PreparationOverrides`, `PreparationChoices` e `EffectiveConfiguration` não carregam mais definições nem origem `checks`. Saves novos persistem apenas os campos restantes. `project_revisions.checks_json` já é removido pelo delta 053; removido o escritor condicional que voltava a inserir `[]` em schemas antigos. Nenhuma conversão ou leitor histórico de definições foi adicionado.
+- Preparações, novas capturas e sua configuração efetiva permanecem sem definições manuais. O início controlado confirma hash/revisão atuais e chega ao despacho sem campo de checks. A restauração de rascunho ignora o caminho retirado e regrava os outros campos editados, sem conservar o valor obsoleto.
+- `DeliverySummaryView` e sua projeção SQL não consultam verificações manuais nem expõem `checks_succeeded`/`checks_total`. `DeliverySummary` não mostra “Checks aprovados”. O `ProjectForm` não oferece editor/controles manuais ou estilos exclusivos, e o `PreparationDialog` não mostra uma seção vazia. A comparação histórica não rotula checks. Resultados, evidências e justificativas de repetição declarados pelo agente permanecem vinculados à tentativa/versão e consultáveis sob demanda.
+- Rotas reais de `createApp` rejeitam propriedades retiradas diretas, aninhadas, combinadas e tipos numéricos coercíveis antes de qualquer revisão/operação/evento/execução. Testes também conferem save/reopen da configuração restante, JSON atual de preparação/captura, schema sem a coluna, sumário sem contadores, descarte de draft antigo e ausência de controles renderizados.
+- Fixtures de testes que dependiam de escrever configurações antes do delta 053 foram ajustadas para o schema corrente; os casos sem projeto que verificam recusa de migração com dados de verificação permanecem. Nenhum banco real foi limpo, convertido ou migrado.
+
+### Validação desta sprint
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict, inclusive contratos, armazenamento, React e testes. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| Testes direcionados de configuração, preparação, tentativa, sumário e React | Exit 0; 198 testes em 7 arquivos. |
+| Testes direcionados de reabertura, exclusão, filas, captura e scaffold afetados por fixtures E1 | Exit 0; 159 testes em 8 arquivos. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **2.010 testes em 170 arquivos**, sem falhas ou pendências. |
+| `npm.cmd run build` | Exit 0; controlador, recursos e bundle web compilados. Bundle JS 1.172,44 kB (gzip 292,91 kB). |
+| Playwright MCP/Chrome, bundle de produção | Passou com APIs sintéticas: preparação sem seção/controles manuais; resumo preserva critérios, revisão independente e referência aprovada, sem contagem de checks. `pageerror` vazio. Capturas em `.cache/sprint-checks-retirement/`. Uma execução exploratória do roteiro amplo parou numa asserção de texto de erro de preparação desatualizada; a prova final ficou limitada às superfícies desta sprint e não confirma esse estado de erro. |
+| `git diff --check` | Exit 0; avisos de normalização CRLF do Git, sem erros de whitespace. |
+
+A primeira execução integral reprovou oito casos de migração que criavam projetos em schemas anteriores à retirada de `checks_json`; após adaptar/remover esses fixtures incompatíveis com E1, a repetição integral passou. A validação no Chrome usa a aplicação compilada e endpoints inteiramente interceptados; não equivale a integração real de Maestri/OMP, GitHub ou publicação. O servidor estático próprio foi encerrado e a porta 4310 ficou livre. Nenhuma revisão de referência imutável, aprovação ou mudança de fase foi presumida.
+
+## Sprint 003 - Retirar checks da configuração, preparação, captura e detalhe [CONCLUIDA LOCALMENTE]
+- Configuração sem definições: Remover tipos, codecs, escrita compatível e superfície de edição, mantendo a rejeição estrita dos campos retirados.
+- Preparação e captura sem checks manuais: Preservar escolhas restantes, revalidação/hash e resultados por valor.
+- Resumo sem contadores manuais: Remover os contadores e a linha da UI preservando critérios, parecer, referência e evidências do agente.
+
+## Sprint 003 - Retirar checks da configuração, preparação, captura e detalhe [CONCLUIDA]
+- Configuração ativa sem definições manuais: Eliminar definições manuais dos contratos, gravações e projeções de configuração, com rejeição explícita de propriedades retiradas.
+- Preparação e captura sem cadastro de checks: Retirar definições, overrides e origens de checks das preparações e novas capturas de tentativa.
+- Formulário e resumo sem superfícies do mecanismo removido: Eliminar os editores manuais e os contadores de checks do resumo de entrega, preservando o acesso às evidências dos agentes.
+
+## Sprint — Retirar prioridade numérica da fila de ponta a ponta [IMPLEMENTADA E VALIDADA LOCALMENTE]
+
+Data: 2026-10-28. Fontes: `AGENTS.md`, SPEC da configuração inicial em `docs/Docs20261027_205916/SPEC20261027_205916.md` (US-04, RF-22–28/32, RNF-03–06), contratos correntes, GLOSSARY e as superfícies indicadas na tarefa. E1 aplicado sem migração, conversão, leitor de compatibilidade ou abertura/limpeza de banco operacional. Sem dependências novas, escrita Git ou efeitos externos.
+
+- `QueueOrder` ativo, revisões novas, JSON de configuração, hash do comando e capturas contêm somente `use_board_position`. `queue_order_json` permanece para essa opção. A decodificação é fechada; documentos antigos com escolhas numéricas não são convertidos nem projetados. Saves e reopen atuais preservam apenas a opção; a captura de tentativa também sela somente esse booleano.
+- `projects/queue.ts` ordena projetos por ID. Para cada projeto, usa posição ascendente somente quando a opção está ligada e a lista completa contém posição documentada para todos os itens, inclusive inelegíveis e além da página visível. Caso contrário, todo o projeto usa número crescente, nulos por último e ID de issue/item para desempate. Valores de campo numérico não entram na consulta do resumo, critério, valor do item ou `summary_hash`. O hash inclui os candidatos na sequência efetiva e uma mudança de sequência retorna o conflito atual antes de gravar ou consumir.
+- GitHub não carrega mais definições numéricas de Project nem valores numéricos de campo; `numberFields`/`numberValues` foram retirados dos modelos e da projeção HTTP de opções. O fragmento de valor numérico pede somente o ID opaco para deduplicar a paginação da conexão `fieldValues`; não solicita o número ou o campo. A consulta preserva campos single-select, cursores e diagnósticos. Prioridade dos achados e diagnósticos operacionais não foram alterados. A forma da conexão foi conferida na [referência GraphQL de Projects](https://docs.github.com/en/graphql/reference/projects) via Context7.
+- `ProjectForm` conserva somente “Usar posição do quadro”. Rascunhos antigos descartam os dois caminhos retirados durante restauração/rebase e a montagem de PUT projeta somente o booleano. `QueuePanel` e `QueueEnableSummary` exibem a descrição de ordem recebida; os controles numéricos e textos antigos de prioridade foram removidos sem nova explicação de fallback ou confirmação.
+- Regressões cobrem projetos múltiplos, posição completa/parcial/ausente/desabilitada, item arquivado sem posição fora da página, posições empatadas, itens sem número/issue, alteração numérica sem mudança de projeção, alteração da sequência com rejeição da autorização anterior, GET sem consumo, rejeição HTTP de campos diretos/aninhados isolados/combinados, gravação/reopen, captura e rascunho obsoleto.
+
+### Validação desta sprint
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| Testes direcionados iniciais | Exit 0; 221 testes em 7 arquivos. A regressão final de `QueueEnableSummary` passou também em 5/5 testes direcionados. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **2.014 testes em 170 arquivos**, sem falhas ou pendências. |
+| `npm.cmd run build` | Exit 0; controlador, recursos e web compilados. Bundle JS 1.172,17 kB (gzip 292,95 kB); permanece o aviso de chunk acima de 500 kB. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite, lock, shutdown e restart do controlador compilado; preflight Maestri/OMP controlado. |
+| Playwright MCP/Chrome | Build final com APIs sintéticas: configuração mostra o checkbox de posição sem controles numéricos; Fila e diálogo de habilitação exibem a descrição do servidor sem menção à prioridade. Nenhum PUT da fila foi enviado. A fixture SSE é finita e o indicador de conexão não foi avaliado nesta prova. A primeira fixture omitiu `source`/ETag e gerou estado de erro; outra usou prazo de polling já vencido. Após corrigir a fixture e reiniciar a página, as verificações finais passaram; esses erros não foram atribuídos ao produto. |
+| `git diff --check` | Exit 0; somente avisos existentes de normalização CRLF, sem erros de whitespace. |
+
+A suíte não executa GitHub real, provider ou Maestri/OMP; a prova visual usou respostas API controladas. Não houve alteração de banco operacional, migration, conversão de dados antigos, staging, commit, push, aprovação ou mudança de fase. O preview estático próprio foi encerrado e a porta 4310 ficou livre.
+
+## Sprint 004 - Retirar prioridade numérica da fila de ponta a ponta [CONCLUIDA]
+- Sequência determinística pelos critérios preservados: Aplicar exclusivamente ID de projeto, posição condicional completa, número e identidade da issue/item.
+- Hash atual e consumo protegido: Preservar autorização da sequência efetiva e as barreiras contra inícios ou efeitos duplicados.
+- Contratos e gravações somente com use_board_position: Eliminar escolhas numéricas de prioridade da configuração e de todos os documentos ativos pertinentes.
+- Formulário e apresentação da fila simplificados: Retirar os controles numéricos e conservar a operação da fila pelos critérios recebidos do servidor.
+
+## Sprint — Retirar comparação preservando consulta individual [IMPLEMENTADA E VALIDADA LOCALMENTE]
+
+Data: 2026-10-28. Implementação no checkout canônico, preservando as alterações anteriores das sprints 001–003. Sem migration, dependência nova, execução de provider, alteração Git de versionamento ou efeito externo.
+
+- Removidos o endpoint `/api/v1/attempt-comparisons`, contratos internos/HTTP, conversores, método público de Storage/Queries, projeção SQL e módulos de storage e UI exclusivos. O GET autenticado da rota retirada recebe o 404 global, sem redirecionamento. A seleção em par, diálogo, textos e estilos foram removidos; `Consultar` e `Nova tentativa` permanecem.
+- Busca e histórico individuais permanecem. Filtros combinados de projeto, resultado, número, título literal e período incluem caso cuja correspondência está fora da primeira página; paginação e cursor são aplicados depois dos filtros. A navegação mantém o filtro aplicado separado do rascunho, e Buscar/Limpar/Atualizar reiniciam a continuação. Datas de fronteira e DST, validação de fusos/períodos e aliases continuam recusados nos contratos existentes.
+- Detalhe e rodadas seguem consultáveis. A regressão de retry confirma `previous_attempt_id`, nova identidade, captura e clone, sessões lógicas/diretórios distintos e preservação do resultado/captura anteriores. Não há conversão ou compatibilidade para os dados exclusivos de comparação.
+
+### Validação observada
+
+| Check | Resultado |
+| --- | --- |
+| Typecheck | `npm.cmd run typecheck`: exit 0. |
+| Lint | `npm.cmd run lint`: exit 0; fronteiras e convenções aprovadas. |
+| Testes direcionados | 52 aprovados em cinco arquivos de busca HTTP/SQLite, rota hash, ações da lista e retry. |
+| Suíte completa | `npm.cmd test -- --reporter=dot --no-color`: **2.012 testes em 169 arquivos**, sem falhas ou pendências. |
+| Build | `npm.cmd run build`: exit 0; controlador, recursos e bundle web compilados. Bundle JS 1.161,57 kB (gzip 290,31 kB), acima do aviso configurado de 500 kB. |
+| Playwright MCP/Chrome | Assets finais e API sintética: controles comparativos ausentes, ações individuais presentes, página 2 e retorno, busca de título, URL de comparação recusada, zero requisições à rota removida e zero `pageerror`. A primeira repetição usou seletor ambíguo para os 25 títulos iguais; corrigido no roteiro, o percurso final passou. Servidor estático próprio encerrado; porta 4310 livre. |
+| `git diff --check` | Exit 0; somente avisos de normalização CRLF já existentes. |
+
+O teste da rota compara o envelope `NOT_FOUND` do handler global e ausência de `Location`; consultas individuais de tentativa e rodadas retornam 200. O navegador usa API controlada e não substitui integração de produto. Nenhuma aprovação, mudança de fase, staging, commit ou push foi simulada.
+
+## Sprint 005 - Retirar comparação preservando consulta individual [CONCLUIDA]
+- API e consultas sem projeção comparativa: Retirar rota, contratos, conversores, exports e consultas usados exclusivamente para comparar tentativas.
+- Lista sem seleção ou diálogo comparativo: Eliminar controles, estado, navegação, requisições e estilos exclusivos da comparação.
+- Regressão da busca e da continuidade individual: Comprovar os percursos preservados após a retirada dos consumidores comparativos.
+
+## Sprint — Regressão local única e conferência do schema final [VALIDADA LOCALMENTE; UMA PROVA NATIVA AMPLA FALHOU]
+
+Data: 2026-10-28. Fontes: `AGENTS.md`; SPEC da configuração inicial `docs/Docs20261027_205916/SPEC20261027_205916.md` (RF-09/15/19/20/26–33, RNF-01–09 e E1); GLOSSARY; INTEGRACAO-MAESTRI-OMP; contratos e políticas vigentes. HEAD observado por `git log -1`: `4710d59c1b342c59f43fdc3074b5897ec5c8e340`; o working tree já continha alterações das sprints anteriores, todas preservadas. Não foi feito commit ou push do checkout canônico, migração do banco operacional, chamada externa ou início de outra sprint.
+
+- `tests/native/persistence-references.mjs` projeta, sem imprimir conteúdo, referências e hashes de configurações globais/de projeto, perfis, revisões, preparação, captura, tentativa, rodadas, passagens, resultados/evidências, refs Git, pareceres/achados/resoluções/avaliações e recibos originais. `persistence-recovery.proof.ts` usa o armazenamento temporário criado pelo caminho normal, rejeita mudanças no conjunto estável e compara o manifesto antes/depois de três controladores compilados em PIDs distintos, encerrados por SIGKILL. O cenário tem duas rodadas (parecer inicial rejeitado e segunda versão aprovada), duas capturas e quatro resultados oficiais; o diff continua ligado à versão aprovada depois do reinício.
+- A prova registra schema 53, `integrity_check=ok`, zero violações de FK e ausência de `verification_runs`, `checks`, `artifacts` e `exclusive_artifact` na inicialização e nas três reaberturas. O hash de referências permaneceu idêntico nos três processos; foram preservados IDs e conteúdo de duas versões, oito conjuntos de evidência de critérios, dois pareceres, um achado/resolução/avaliação e os cinco recibos de operação originais. A fixture remove somente a implementação temporária após o gate existente; nenhuma exclusão de projeto/dado operacional foi executada.
+- `storage.test.ts` acrescenta recusa pelo `openStorage` do schema 52 com dados retirados e compara os bytes do banco antes/depois. A barreira `inspectHistory` já fazia essa sondagem na conexão somente leitura e `applyMigrations` a repete transacionalmente; a implementação de produção foi preservada. O inventário relacional final continua conferindo todas as tabelas STRICT, ausência de `checks_json`, ausência de `exclusive_artifact` e ausência de triggers que consultem as tabelas retiradas.
+- `persistence-maintenance.test.ts` amplia a medição existente de cache 0/16/64 MiB para primeira página, página seguinte, busca sem resultado e detalhe sob demanda. Lista e polling continuam sem captura/resultados/pareceres completos; páginas e payloads permaneceram estáveis, sem IO em `work/` ou `git/`, banco/WAL/SHM proporcional ao cache ou auxiliares inesperados. SQLite de 4.096 bytes, WAL de 3.036.472 bytes, payloads fixos por superfície e latências observadas constam em `.cache/persistence-proof-mWAMmU/report.json`; são medições locais, sem novo limite de latência ou SLA.
+- `scripts/persistence-proof.mjs` valida os relatórios de inicialização, integridade, identidades e recuperação e executa apenas os dois relatórios nativos exigidos por esta prova. `scripts/prove-storage-browser.mjs` foi alinhado ao `queue_order` atual, sem propriedades numéricas retiradas. Não foram adicionadas migrations, dependências, serviços, benchmarks ou leitores de comparação/verificação manual.
+
+### Validação observada
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict, cliente, testes e scripts. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; **2.014 testes em 169 arquivos**, sem falhas ou pendências. |
+| `npm.cmd run build` | Exit 0; controlador, recursos e bundle web. Bundle JS 1.161,57 kB/gzip 290,31 kB, acima do aviso de 500 kB. |
+| `npm.cmd run proof:persistence` | Exit 0; `local_persistence_and_process_recovery_passed`, relatório `.cache/persistence-proof-mWAMmU/report.json`; 52 testes do recorte de persistência/fronteiras e as provas nativas de composição e reinício passaram. |
+| `npm.cmd run test:persistence` | Exit 0; 52 testes em cinco arquivos, incluindo cache, integridade, rejeição de schema e relatórios. |
+| `npm.cmd run test:compiled` | Exit 0; HTTP/SSE/SQLite, sessão, CAS/idempotência, lock, shutdown e restart; preflight Maestri/OMP controlado. |
+| `npm.cmd run test:http` | Exit 0; quatro testes em dois arquivos. |
+| `npm.cmd run test:execution-compiled` | Exit 0; framing/UTF-8/EOF e launcher com Node de fixture; Maestri/OMP real não executado. |
+| `npm.cmd run test:acceptance` | Exit 0; 64 testes em oito arquivos. |
+| `npm.cmd run test:distribution` | Exit 0; pacote relocado, assets/API/SQLite, exclusividade do controlador e reinício preservando identidade. Âncora Maestri/OMP controlada. |
+| `git diff --check` | Exit 0; somente avisos de normalização CRLF existentes. |
+
+**Limitação de ensaio nativo amplo:** `npm.cmd run test:maintenance-native` compilou, e `maintenance.proof.ts` e a nova recuperação de persistência passaram; quatro casos preexistentes de `delivery-target.proof.ts` falharam quando a fixture tentou `git push` para um bare repo temporário (`exit 128`). O teste não produziu diagnóstico além de `fixture git failed: push`. Esse comando não alterou o checkout canônico nem usou remoto; a fixture temporária foi removida pelo `afterEach`. A mesma fixture foi repetida duas vezes para diagnóstico e continuou falhando. Não será executada novamente sob a restrição de Git somente leitura. A suíte ampla não foi repetida; `proof:persistence` conserva os dois relatórios nativos pertinentes, passou integralmente e não inclui essa fixture de entrega por Git.
+
+As regressões HTTP/SQLite da suíte cobrem Host/Origin/sessão/CSRF, campos retirados isolados/aninhados/combinados antes de escrita ou adapters, CAS/ETag/idempotência, resultados tardios, logs sem secrets, busca/listagem/resumo leves, notificações, prioridade de achados, pausa/retomada da fila e deduplicação de publicação. As verificações de comparação/verificação manual/prioridade antigas que permanecem em migrations e testes são guardas/assertivas de remoção; `ProjectForm` apenas descarta strings de caminhos obsoletos ao restaurar/rebasear rascunhos e não carrega nem reenvia seus valores. Não há rota, import de módulo ou produtor ativo dessas superfícies. Não houve Playwright, GitHub real, provider Maestri/OMP ou alteração de configuração operacional. Remoções ocorreram somente em diretórios SQLite/filesystem temporários das fixtures; nenhuma exclusão em instalação ou pasta de projeto do operador foi executada. Sem staging, commit, push remoto, aprovação ou mudança de fase.
+
+## Sprint 006 - Regressão local única e conferência do schema final [CONCLUIDA]
+- Perímetro HTTP e rejeição sem efeitos: Consolidar casos positivos e negativos nas superfícies alteradas sem ampliar autoridade.
+- Persistência atual e custo limitado das consultas: Verificar continuidade após reinício e ausência de cópia de caches para persistência ou respostas comuns.
+- Regressão integrada e comandos finais executáveis: Validar o checkout resultante com os checks configurados e preservar funções compartilhadas sensíveis.
+
+## Sprint — Gate de UI existente após as remoções [CONCLUÍDA LOCALMENTE; APIs CONTROLADAS]
+
+Data: 2026-10-28. Fontes: `AGENTS.md`, decisão E1 no topo de `SPEC.md`, `docs/Docs20261027_205916/SPEC20261027_205916.md`, `GLOSSARY.md`, `INTEGRACAO-MAESTRI-OMP.md` §4, contratos correntes e instruções desta sprint. Alterações anteriores preservadas; sem instalação, migração operacional, Git/GitHub, provider, Maestri/OMP, publicação ou mudança de fase.
+
+- `ProjectForm.tsx` não reconhece mais nomes de caminhos retirados ao restaurar ou rebasear rascunhos. A rebase aceita somente campos atualmente editáveis, e `configurationCommand` projeta explicitamente os campos ativos. Saves correntes continuam preservando os rascunhos ao receber conflito ou falha; a regressão exercita caminho não suportado sem ler/converter os mecanismos retirados. `project-readiness.test.ts` e `configuration-requests.test.ts` cobrem essa fronteira.
+- `QueuePanel.tsx` recebeu somente a separação textual `·` entre a descrição de ordem retornada pelo servidor e a frase existente sobre projetos bloqueados, para evitar que fossem exibidas como uma frase concatenada.
+- `tests/browser/ui-removal-gate.playwright.js` é a prova executada pelo Playwright MCP/Chrome. A distribuição foi compilada e servida em `127.0.0.1:4310` por Vite Preview; a página requisitou `index-CgQwicAS.js` e `index-CK1Sh9xa.css`, ambos com HTTP 200. SHA-256 observado no Chrome: JS `065a6bd7a60869897fee0e6b11368ecfbfdc19dc970837b1a0d3b25aa83452ae` (1.162.345 bytes); CSS `03ac198283ef1328be93d0aaed623d8095827c43877f259be5d3d724b29a1da7` (103.595 bytes).
+- Com APIs inteiramente controladas, passaram: ausência de editor manual, comparação e controles numéricos de prioridade; save/reopen da configuração, conflito com rebase e falha mantendo rascunho; preparação; busca por título e paginação; consulta do detalhe reprovado e aprovado com estado distinto; consulta sob demanda do `producer-result` da versão e exibição da evidência do Implementador; resumo sem “Checks aprovados”; Nova tentativa com vínculo da tentativa anterior; ausência de requisições a comparison/check/artifact manuais e de campos retirados nos bodies; posição completa, fallback por número e invalidação da autorização antiga após conflito de hash. Foram sete mutações de produto interceptadas (quatro PUTs de configuração, dois POSTs de preparação e um PUT da fila); nenhum efeito chegou ao controlador.
+- Teclado conferiu foco inicial, percurso por Tab, Escape e retorno ao acionador. Viewports: 1440×1000, 1100×480 e 390×640, todos em DPR 1/zoom 100%; as dez medições mantiveram `documentWidth <= innerWidth`. As oito ações conferidas ficaram dentro da viewport. Catorze capturas finais estão em `.cache/ui-removal-gate-20261028/`; o resultado completo, com geometria, foco, assets, requests e limites, está em `result-final.json`.
+- Validação: `npm.cmd run typecheck` e `npm.cmd run lint` passaram; **91 testes em 7 arquivos** de projeto/readiness, serialização, busca, detalhe, hash, fila e scheduler passaram; `npm.cmd run build` passou. Bundle JS 1.162,34 kB (gzip 290,46 kB), mantendo o aviso existente acima de 500 kB. `node --check tests/browser/ui-removal-gate.playwright.js` passou.
+
+Limites: Vite Preview serviu a UI compilada; sessões, projetos, tentativas, resultados, evidências, ordem da fila e conflitos foram sintéticos. Isso comprova DOM, teclado, navegação, serialização e a projeção visual das duas ordens; não comprova o cálculo backend da fila, controller/SQLite real, GitHub, Windows nativo, OMP/Maestri, provider ou publicação. O EventSource foi estabilizado por fixture; seu estado de conexão não é parte deste aceite. O navegador de teste e o preview próprio foram encerrados após a prova; a porta 4310 foi conferida livre. Nenhuma tela, componente ou estado visual novo foi criado.
+
+## Sprint 007 - Gate de UI existente após as remoções [CONCLUIDA]
+- Prova funcional das remoções e percursos preservados: Verificar DOM, foco, rede e operação real das telas alteradas na versão compilada entregue.
+- Prova de teclado, dimensões e estabilidade visual: Conferir as condições de usabilidade normativas nas superfícies efetivamente alteradas.
+
+## Sprint 008 V4 — Matriz final e gates [REGISTRO PREPARADO; APROVAÇÃO E GATES EXTERNOS PENDENTES]
+
+Data: 2026-10-28. Reabertura final do plano V4 após o feedback do Evaluator. Referência de código: `git log -1` = `4710d59c1b342c59f43fdc3074b5897ec5c8e340`; validações executadas sobre esse HEAD mais o working tree não commitado. Alterações desta reabertura foram documentais; mudanças de implementação já presentes no working tree foram preservadas.
+
+- `SPEC.md` registra precedência V4/E1, a retirada de US-22/RF-86/87, a preservação da busca US-21/RF-84/85, validação pertinente e resultado próprio do Implementador por versão corrigida. `DeliverySummaryView` não tem `checks_succeeded`/`checks_total`; `QueueOrder` e `ProjectChanges` usam somente `use_board_position`, com cálculo/fallback residual descrito por projeto e sem pedir mensagens, rótulos, estados visuais ou explicação nova na UI.
+- `INTEGRACAO-MAESTRI-OMP.md` e `GLOSSARY.md` descrevem validações técnicas pertinentes, evidências do resultado estruturado, revisão independente e entrega pela referência aprovada sem cadastro ou executor manual. E1 permite banco limpo sem exigir readers/check_id/branches antigos; registros atuais são conservados. Documentos/provas históricos não foram reescritos.
+- `docs/Docs20261027_205916/v4-final-acceptance-matrix.md` mapeia cada um dos 25 critérios US, 33 RF, 9 RNF e os 12 critérios de feat-024/025/026, com implementação, prova ou pendência. Separa testes locais, suíte, build, browser controlado, Windows nativo, Maestri/OMP e publicação.
+
+### Revalidação técnica local
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0; TypeScript strict. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; 2.014 testes em 169 arquivos, sem falhas; duração observada 110,83 s. |
+| `npm.cmd run build` | Exit 0; 409 módulos web transformados. JS 1.162.345 bytes (1.162,34 kB; gzip 290,46 kB), CSS 103.595 bytes (gzip 18,44 kB). O bundle JS supera 500 kB; sem falha de build. |
+| `npm.cmd run test:compiled` | Exit 0; controller compilado com HTTP/SSE/SQLite reais locais, CAS/idempotência, shutdown, process lock e restart; âncora Maestri/OMP controlada; integração real não executada. |
+| `npm.cmd run test:execution-compiled` | Exit 0 em Windows; transporte UTF-8/EOF/diagnósticos e lançamento PowerShell passaram com fixture Node. Saída declara `windowsLaunch=passed_with_node_fixture` e `maestriOmpIntegration=not_executed`. |
+| Browser controlado | Evidência anterior da Sprint 007 reutilizada porque os assets permanecem idênticos; APIs foram controladas e browser não foi reaberto nesta revalidação documental. JS `index-CgQwicAS.js`, SHA-256 `065a6bd7a60869897fee0e6b11368ecfbfdc19dc970837b1a0d3b25aa83452ae`; CSS `index-CK1Sh9xa.css`, SHA-256 `03ac198283ef1328be93d0aaed623d8095827c43877f259be5d3d724b29a1da7`. Não prova Maestri/OMP nem publicação. |
+| `git diff --check` | Exit 0; warnings de normalização CRLF existentes, sem erros de whitespace. |
+
+### Gates ainda pendentes
+
+- Maestri/OMP real: não executado. Requer autorização de alvo, perfil/modelo e limite de custo; smoke local/controlado não substitui o ciclo real, nem a correção com nova rodada, revisão própria, sessões e consultas do produto.
+- Publicação real: não executada. Requer autorização específica, destino e referência aprovada. Nenhum efeito externo ou substituto por mock/202 foi usado.
+- Aprovação da validação do plano: reaberta em `docs/Docs20261027_205916/sprint-validation20261027_205916.md` e permanece pendente. Aprovação é pré-condição; este registro não avança gate nem atribui status completo à Sprint 008.
+
+Sprint 008 permanece sem status completo até aprovação e decisão/prova dos gates exigidos. Não houve staging, commit, push, publicação, abertura/limpeza de banco real, exclusão de dados reais, cópia concorrente ou pipeline de auditoria arquitetural.
+
+### Revalidação técnica adicional após o feedback do Evaluator
+
+Data: 2026-10-28. HEAD mantido em `4710d59c1b342c59f43fdc3074b5897ec5c8e340`, mais o working tree existente. Rodada executada a pedido do usuário; esta nota acrescenta a evidência mais recente sem substituir os registros anteriores.
+
+| Comando/prova | Resultado |
+| --- | --- |
+| `npm.cmd run typecheck` | Exit 0. |
+| `npm.cmd run lint` | Exit 0; fronteiras e convenções TypeScript aprovadas. |
+| `npm.cmd run build` | Exit 0; Vite 8.3.4, 409 módulos transformados; mesmos assets e tamanhos registrados acima. |
+| `npm.cmd test -- --reporter=dot --no-color` | Exit 0; 2.014/2.014 testes em 169 arquivos; 114,96 s. |
+| `git diff --check` | Exit 0; avisos de normalização CRLF existentes, sem erro de whitespace. |
+
+Esta rodada comprova somente validação técnica local. Maestri/OMP real e o cenário real de correção continuam sem autorização de alvo, perfil/modelo e custo; a aprovação da validação do plano continua pendente no mecanismo próprio. Nenhum gate externo foi promovido e Sprint 008 permanece sem status completo.
+
+### Ciclo real autorizado no chat — 2026-10-28, 13:34–13:39
+
+Após autorização explícita do usuário, executado `npm.cmd exec -- vitest run --config vitest.sessions.config.ts --reporter=verbose` pelo Shell #5 do Maestri, com a build atual concluída. Resultado: exit 0, 1/1 teste, 314,99 s. Evidências em `.cache/session-real-1793205251471/result.json`, `progress.json`, `bridge-trace.json` e banco/sessões do diretório `factory-attempt-vrAXOW`; log em `.cache/v4-real-cycle.log`.
+
+- OMP/provider reais `openai-codex/gpt-6-luna/high`: seis passagens, duas conversas separadas preservadas ao longo de três versões no mesmo checkout. Implementação inicial, duas correções, duas rejeições e aprovação independente final; conteúdo observado de `value.txt`: 1, 2 e 3. Captura Git, SQLite, integridade e parada por Windows Jobs reais. Ambos os terminais próprios foram observados parados no feed Wire após o teste.
+- Houve intervenção operacional na segunda revisão: o agente repetia payloads recusados porque a evidência de assessment `proven` não estava reproduzida literalmente na evidência de um critério relacionado, exigência de `recordAssessments`. A orientação foi enviada na mesma sessão; o agente reenviou suas observações e o contrato aceitou. Nenhum resultado foi inserido diretamente nem validação relaxada. A execução não foi totalmente autônoma.
+- Limites: tarefa mínima e rejeições deliberadamente roteirizadas para exercitar as correções; autoridade/efeitos GitHub controlados pelo fixture. O roteiro usa `ImplementerResult.checks=[]`, portanto não comprova produção real de registros de comandos de validação nem justificação de repetição pelo Revisor. O encerramento observado é `publishing` após aprovação, sem publicação real. UI/HTTP completos, retry como outra tentativa, publicação externa e aprovação formal do plano não foram comprovados por este ciclo. A Sprint 008 permanece sem aceite completo.
