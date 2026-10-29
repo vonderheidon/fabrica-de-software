@@ -34,8 +34,8 @@ describe('offline first slice evidence gate', () => {
   it('offers review only: consistent metadata and checksums cannot approve a real integration', () => {
     expect(evaluate(candidate())).toMatchObject({ state: 'ready_for_review', readyForReview: true, acceptance: 'requires_independent_review' });
   });
-  it('keeps the current unexecuted run pending instead of reporting success', () => {
-    const result = checkManifestFile(resolve('docs/integration/first-slice/20261017-01/manifest.json'));
+  it('keeps an unexecuted manifest pending instead of reporting success', () => {
+    const result = checkManifestFile(resolve('tests/fixtures/first-slice-pending-manifest.json'));
     expect(result.readyForReview).toBe(false);
     expect(result.diagnostics).toContain('AUTHORIZATION_PENDING');
     expect(result.diagnostics).toContain('REAL_EXECUTION_PENDING');

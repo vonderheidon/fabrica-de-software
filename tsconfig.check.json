@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true,
-    "allowJs": true
-  },
-  "include": ["apps/controller/src/**/*.ts", "apps/web/src/**/*.ts", "apps/web/src/**/*.tsx", "packages/contracts/src/**/*.ts", "tests/**/*.ts", "tests/native/*.mjs", "vitest.config.ts", "vitest.maintenance.config.ts", "vitest.deletion.config.ts", "vitest.deletion-baseline.config.ts", "scripts/*.mjs", "vite.config.ts"]
-}

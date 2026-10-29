@@ -10,31 +10,29 @@ Antes de planejar ou alterar código, leia as seções pertinentes e identifique
 
 | Fonte | Quando consultar |
 | --- | --- |
-| `SPEC.md` | Produto, stack, arquitetura, dados, jornadas e critérios AC; contrato principal |
-| `INTEGRACAO-MAESTRI-OMP.md` | Executor, terminal Maestri, resultados, MCPs, cancelamento e critérios INT |
+| `README.md` e `docs/operation/README.md` | Instalação, execução, operação e validação |
+| `package.json`, `apps/`, `packages/contracts/`, `resources/` e `tests/` | Comandos, comportamento implementado, contratos atuais e cobertura |
 | `GLOSSARY.md` | Termos de domínio, estados e significado de Ready |
 | `.agents/skills/` | Instruções da skill pertinente à tarefa; leia seu `SKILL.md` antes de aplicar |
-| `ensaios-fabrica/MANUAL-MAESTRI-WIRE.md` | Acesso do LionClaw ao Maestri para ensaios, usando os helpers existentes |
-| `ensaios-fabrica/casos/validacoes.json` e `ensaios-fabrica/evidencias/relatorio-validacao.md` | Prova mínima de acesso e limites efetivamente observados |
 
-`PESQUISA-PONTE-LIONCLAW-MAESTRI.md` é pesquisa exploratória, não backlog. Evidências de ensaio não comprovam o produto implementado. Havendo conflito entre documentos normativos, registre o ponto e peça decisão antes de mudar o contrato; não restaure requisitos de estudos descartados.
+Evidências de ensaio não comprovam o produto implementado. Confirme o escopo e os critérios da tarefa com as instruções atuais do usuário; registre conflitos antes de mudar o contrato e não restaure requisitos de estudos descartados.
 
 ## Trabalho no workspace e pipeline dev 2.0
 
 - Trabalhe neste repositório canônico. Preserve alterações existentes; não crie cópias, worktrees ou floors concorrentes para desenvolver esta fábrica. Os clones por tentativa previstos no produto são outro contexto.
-- Use a SPEC existente como entrada do pipeline. Preserve decisões consolidadas; pergunte somente por lacunas que afetem produto ou escopo e não possam ser respondidas pelas fontes disponíveis.
+- Use os artefatos aprovados da tarefa como entrada quando houver pipeline. Preserve decisões consolidadas; pergunte somente por lacunas que afetem produto ou escopo e não possam ser respondidas pelas fontes disponíveis.
 - Siga a tarefa e os artefatos aprovados da fase atual. Mudança de fase, aprovação e Design Lock pertencem aos mecanismos do pipeline; não simule esses eventos nem trate esta instrução como aprovação.
 - O Design Lock do dev 2.0 é decisão do usuário. Mantenha o layout aprovado ao implementar a UI e registre conflitos com requisitos funcionais.
 - Resolva manutenção operacional reversível autonomamente. Não amplie escopo para construir infraestrutura sem um impedimento concreto da implementação.
-- Diferencie requisitos do produto de restrições dos ensaios. O perfil Luna/high em `ensaios-fabrica/AGENTS.md` vale para esses ensaios, não fixa todos os perfis configuráveis da fábrica.
+- Diferencie requisitos do produto de restrições de ensaios; perfis usados em validações anteriores não fixam os perfis configuráveis da fábrica.
 
 ## Implementação
 
-- Siga a arquitetura e a sequência de fatias funcionais da SPEC, seções 8 e 10. Comece pelo percurso integrado verificável; cada fatia deve produzir comportamento real.
-- Stack definida: TypeScript strict, Node.js LTS, Fastify, React/Vite e SQLite, com dependências fixadas em lockfile. Consulte a SPEC para versões e organização. Não invente comandos de build ou teste antes de existir configuração executável.
+- Preserve as fronteiras dos módulos e implemente por fatias funcionais verificáveis; cada fatia deve produzir comportamento real.
+- Stack definida: TypeScript strict, Node.js 24.x, Fastify, React/Vite e SQLite, com dependências fixadas em lockfile. Consulte package.json para versões e comandos de build e teste.
 - Implemente os módulos do zero. Não analise, copie, importe ou encapsule o legado Aula-IA como base. Avalie um workaround somente quando um problema concreto exigir e documente a decisão pertinente.
 - Use OMP, ferramentas nativas e gerenciamento MCP normais. Preserve a TUI e a interação previstas no contrato. Integrações próprias só com necessidade concreta e escopo mínimo.
-- Para o scaffold, consulte `.agents/skills/setup-matt-pocock-skills/SKILL.md` e os recursos referenciados, conforme SPEC 3.2. Essa referência orienta o produto; não execute seu setup neste workspace por mera leitura destas instruções.
+- Para o scaffold do produto, confira os templates em `resources/templates/` e os testes pertinentes. Não execute setup de scaffold neste workspace por mera leitura destas instruções.
 - Use caminhos relativos ou configuração resolvida em runtime. O produto será distribuído em aula e não pode depender de diretórios pessoais ou recursos desta máquina.
 
 ## Persistência
@@ -47,14 +45,37 @@ Antes de planejar ou alterar código, leia as seções pertinentes e identifique
 ## Validação e entrega
 
 - Para validar a UI, iniciar o servidor local é manutenção operacional autorizada e independe da aprovação de implementação ou do gate da sprint. Confira primeiro `http://127.0.0.1:4310/api/v1/health`; se responder, reutilize o processo existente.
-- Se estiver parado, siga `ensaios-fabrica/MANUAL-MAESTRI-WIRE.md`: use `controle/wire-request.ps1` com a credencial protegida no caminho indicado pelo manual, consulte `/api/workspaces` e o feed, e encontre o terminal-âncora pelo nome. Neste workspace, use `Shell #5` quando estiver no prompt PowerShell livre; confirme nome, diretório e atividade antes de enviar comandos. Ausência de `MAESTRI_PIPE` no shell externo não impede esse caminho.
+- Se estiver parado, use o procedimento Wire abaixo para encontrar o terminal-âncora. Neste workspace, use `Shell #5` quando estiver no prompt PowerShell livre; confirme nome, diretório e atividade antes de enviar comandos.
 - No terminal confirmado, entre no repositório canônico e execute `npm.cmd start`; confira o feed e o health na porta 4310. O caminho foi testado com sucesso no Shell #5 em 2026-10-29. Isso inicia o bundle já compilado em `dist/`; se precisar validar alterações de fonte, faça o build pertinente antes. Preserve processos ocupados e relate falhas concretas de acesso ou inicialização.
 - Essa autorização cobre disponibilizar o servidor para validação; chamadas pagas, recrutamento de agentes, publicação e captura atribuída ao Revisor mantêm seus requisitos próprios.
 - Antes de editar, defina como comprovar o comportamento e quais critérios AC/INT são pertinentes. Use os comandos efetivamente configurados no repositório.
-- Siga SPEC 10.2: testes determinísticos e de contratos nas superfícies pertinentes; integração real Maestri/OMP para o percurso; Playwright MCP/Chrome para a UI. Compilação e typecheck não comprovam funcionamento da integração ou da interface.
+- Use testes determinísticos e de contratos nas superfícies pertinentes; integração real Maestri/OMP para o percurso; Playwright MCP/Chrome para a UI. Compilação e typecheck não comprovam funcionamento da integração ou da interface.
 - Suíte padrão não chama providers, recruta terminais nem publica recursos externos implicitamente. Execuções reais exigem autorização correspondente, com custo e efeitos conhecidos.
 - Revisão independente avalia a versão entregue. Registre achados e correções sem sobrescrever os resultados anteriores; não exija revisão de outro agente para cada ajuste documental.
 - Informe o que mudou, o que foi comprovado e o que permanece sem validação. Falha, interrupção ou evidência parcial não são sucesso.
+
+## Acesso ao Maestri pelo LionClaw
+
+Use PowerShell 7 e os helpers `scripts/wire-request.ps1` (HTTPS GET/POST, requer `curl.exe`) e `scripts/wire-terminal.ps1` (WSS, captura ANSI e teclas). Ambos leem a credencial protegida pelo Windows na memória e verificam o pin do certificado. Execute com a mesma conta e máquina do pareamento; mantenha credencial e token fora do repositório, comandos, logs e evidências. Ausência de `MAESTRI_PIPE` no shell externo não comprova indisponibilidade do Wire. Esse acesso de manutenção não comprova a conexão nativa do produto.
+
+Na raiz do repositório:
+
+```powershell
+$request = (Resolve-Path './scripts/wire-request.ps1').Path
+$stream = (Resolve-Path './scripts/wire-terminal.ps1').Path
+$auth = @{ CredentialPath = (Join-Path $env:LOCALAPPDATA 'NovaFabricaSoftware\validation\maestri-wire.xml') }
+$info = & $request @auth -Route '/api/info' | ConvertFrom-Json
+$workspaces = (& $request @auth -Route '/api/workspaces' | ConvertFrom-Json).workspaces
+$workspaces | Select-Object id, name
+# Selecione o workspace confirmado, sem presumir o primeiro da lista.
+$feed = & $request @auth -Route "/api/workspaces/$workspaceId/feed" | ConvertFrom-Json
+$terminals = @($feed.items | Where-Object kind -eq 'terminal' | ForEach-Object terminal)
+$terminals | Select-Object id, name, isRunning, isActive, needsAttention, preview
+```
+
+Confirme o ID do terminal e o prompt livre no feed atualizado; se necessário, capture a tela com `& $stream @auth -TerminalId $terminalId -Seconds 3 -OutputPath <arquivo.ansi>`. Para enviar comando/prompt, use `& $request @auth -Method POST -Route "/api/terminals/$terminalId/prompt" -Body (@{ text = $texto } | ConvertTo-Json -Compress)`: o texto vai ao processo atual, shell ou OMP. O stream aceita `-InputText` para teclas de uma resposta autorizada. Preserve terminais ocupados; após timeout, consulte feed/tela antes de repetir efeitos. ACK de parada não comprova término físico.
+
+Em erro 401/403, confira autorização do dispositivo; em falha de pin, confira a chave nas configurações Wire do Maestri, sem desabilitar a verificação. Se não houver credencial válida, solicite pareamento pela interface do Maestri. Não recrute agentes, faça chamadas pagas ou publique recursos sem autorização correspondente.
 
 ## Ferramentas e segurança
 

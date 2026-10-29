@@ -100,6 +100,6 @@ for (const mode of ['disabled', 'enabled']) {
 lines.push('', 'Tempos da tabela web são amostras de blocos dentro dos cinco processos, não cinco totais homogêneos; inclui conclusão manual sem atraso injetado. Logs WEB_WINDOW_REPORT preservam os 16 cenários, blocos, gatilhos, resultados valid/empty/partial/error/previous, requests/responseBytes, completions, abortedPending/drained e pendências. Cinco repetições por modo. Fetch sintético de 10 ms; passos de 200 ms e verificação de DOM em 1 ms. Não mede pintura, GPU ou rede. Atualidade/polling, vinte eventos globais, resync e corridas são os mesmos testes do baseline, sem mudança de UI ou frequência.', '',
   '## Identidade dos arquivos medidos', '', '| Arquivo | SHA-256 atual |', '|---|---|');
 for (const [file, hash] of Object.entries(after.hashes)) lines.push(`| ${file} | ${hash} |`);
-lines.push('', 'As evidências visuais, checks, rollback e o mapa C4-01 a C4-11 constam no fechamento da sprint-007 em SPEC_PROGRESS.md. Este documento registra comparação controlada; aprovação final pertence ao usuário nos mecanismos existentes, sem avanço de pipeline.');
+lines.push('', 'Este documento registra comparação controlada; aprovação final pertence ao usuário nos mecanismos existentes, sem avanço de pipeline.');
 await writeFile(join(root, '.lionclaw/pipelines/architecture-review/20261021_150214-1ec379/observation-comparison.md'), lines.join('\n') + '\n');
 console.log('Comparison report generated; current measured hashes verified, historical baseline preserved.');

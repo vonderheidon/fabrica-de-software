@@ -146,7 +146,7 @@ async function main() {
   await runNode([join(root, 'node_modules/typescript/bin/tsc'), '-p', 'tsconfig.json']);
   await runNode([join(root, 'scripts/copy-resources.mjs')]);
   phase = 'native_process_proofs';
-  const nativeOutput = await runTests(['run', '--config', 'vitest.maintenance.config.ts', 'tests/native/maintenance.proof.ts',
+  const nativeOutput = await runTests(['run', '--config', 'config/vitest.maintenance.config.ts', 'tests/native/maintenance.proof.ts',
     'tests/native/persistence-recovery.proof.ts', '--reporter=dot', '--no-color']);
   phase = 'native_reports';
   const native = extractReport(nativeOutput, 'AC28_NATIVE_REPORT');
@@ -157,7 +157,7 @@ async function main() {
   const sources = await Promise.all(['scripts/check-boundaries.mjs', 'scripts/persistence-proof.mjs', 'tests/acceptance/persistence-maintenance.test.ts',
     'tests/fixtures/persistence-measurement.ts', 'tests/fixtures/retained-git.ts', 'tests/fixtures/attempt.ts', 'tests/fixtures/publication.ts',
     'tests/native/maintenance.proof.ts', 'tests/native/persistence-recovery.proof.ts', 'tests/native/persistence-controller.mjs', 'tests/native/persistence-references.mjs',
-    'tests/native/persistence-probe.mjs', 'tests/acceptance/execution-composition.test.ts', 'vitest.maintenance.config.ts', 'package.json', 'package-lock.json'].map(async file => {
+    'tests/native/persistence-probe.mjs', 'tests/acceptance/execution-composition.test.ts', 'config/vitest.maintenance.config.ts', 'package.json', 'package-lock.json'].map(async file => {
     const bytes = await readFile(join(root, file));
     return { path: file, sizeBytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
   }));

@@ -1,6 +1,6 @@
-# Operação local da primeira entrega
+# Operação local
 
-O contrato é [SPEC §§8–11](../../SPEC.md) e [integração Maestri/OMP](../../INTEGRACAO-MAESTRI-OMP.md). Resultados observados e pendências ficam em [SPEC_PROGRESS.md](../../SPEC_PROGRESS.md). O pacote não transporta configuração pessoal, projetos, credenciais ou skills do autor.
+Este manual cobre instalação, configuração, execução e recuperação. Consulte o [README](../../README.md) para os comandos principais. O pacote não transporta configuração pessoal, projetos, credenciais ou skills do autor.
 
 ## Preparar e distribuir
 
@@ -58,7 +58,7 @@ HTML, JS e CSS são entregues por GET/HEAD antes da sessão, permitindo a navega
 
 O hostname real é capturado automaticamente antes da preparação, do início e do controle da fila; não há seleção de outra máquina. Maestri usa o contexto herdado do terminal-âncora, sem Workspace ID editável. Em Configuração, confira a raiz local de projetos e perfis `maestri-omp` com provider/modelo/esforço exatos. Selecione Implementador e Revisor, branch-base e Project/owner/campo/quatro opções de Status por ID. Tempo ativo, TTL e polling são configuração persistida, não ambiente do bundle. Intervalo de consulta e tempo ativo usam inteiros de 1 a 2.147.483.647 ms, com defaults de 15.000 e 1.800.000 ms. A espera humana não acumula atividade e o TTL permanece independente. Não há configuração de teto financeiro ou de tokens de inferência. Revise o resumo de início; automação exige habilitação explícita e resumo atual. Várias UIs compartilham o worker do controlador.
 
-**Limite de instalação nova:** a superfície atual ainda não oferece vínculo inicial da conta observada ao singleton; observação de conta não faz esse vínculo. Se a conta persistida estiver ausente, mantenha execução bloqueada e registre `PF-06` conforme o roteiro first-slice. Não usar seed SQL, conta demonstrativa ou edição manual do banco como procedimento de operação. Este pacote não resolve esse gate preexistente.
+**Limite de instalação nova:** a superfície atual ainda não oferece vínculo inicial da conta observada ao singleton; observação de conta não faz esse vínculo. Se a conta persistida estiver ausente, mantenha execução bloqueada e registre o impedimento. Não usar seed SQL, conta demonstrativa ou edição manual do banco como procedimento de operação. Este pacote não resolve esse gate preexistente.
 
 O launcher básico habilita scaffold pela política de plano confirmado: consultar ou revisar não cria recursos; a criação exige confirmação explícita dos efeitos do plano. Publicação conserva suas autorizações próprias. Hosts restritos podem compor `startController({githubMutationAuthorization, scaffoldAuthorization, ...})` com alvos previamente autorizados. Consulte os tipos públicos compilados; não obter essas capacidades de body HTTP, flags de ambiente ou credencial no bundle. Abertura nativa/confirmar parada também depende dos callbacks confiáveis do host. Sem capacidade, a UI informa indisponibilidade/incerteza e não cria substituto.
 
@@ -98,10 +98,49 @@ Não apagar WAL/SHM, substituir banco incompatível por vazio, editar ledger/che
 
 No repositório de desenvolvimento, executar os comandos efetivamente configurados: `typecheck`, `lint`, `test`, `test:http`, `test:acceptance`, `build`, `test:compiled`, `test:execution-compiled`, `test:distribution`, `test:persistence` e `proof:persistence`. `test:maintenance-native` faz build e processos Node de prova local. Comandos de smoke são opt-in **locais**, usam loopback/processos próprios e não provam Maestri/GitHub. A suíte padrão bloqueia rede/subprocessos de produto. O pacote de operação inclui somente `start`; esses checks exigem o repositório, devDependencies e autorização de execução correspondentes.
 
-Prova Maestri/OMP/Git/GitHub real segue [first-slice](../integration/first-slice/README.md), com alvo, conta, host, perfis, orçamento e efeitos previamente autorizados. Não executar providers, recrutar ou publicar como efeito de build/instalação/health. Preflight Maestri é não pago, mas é consulta nativa real. `acceptance:check` verifica consistência de evidência; exit 2 é pendência, não aceite. Para AC-24, `test:execution-compiled` exercita frames/UTF-8/malformed/oversize/EOF com transporte local; TUI/MCP real exige observação separada.
+Prova Maestri/OMP/Git/GitHub real exige alvo, conta, host, perfis, orçamento e efeitos previamente autorizados; o acesso Wire pelo LionClaw está descrito em [AGENTS.md](../../AGENTS.md). Não executar providers, recrutar ou publicar como efeito de build/instalação/health. Preflight Maestri é não pago, mas é consulta nativa real. `npm run acceptance:check -- <manifest.json>` verifica consistência de evidência; exit 2 é pendência, não aceite. Para AC-24, `test:execution-compiled` exercita frames/UTF-8/malformed/oversize/EOF com transporte local; TUI/MCP real exige observação separada.
 
 Aceite visual usa Playwright MCP/Chrome de teste: conteúdo, screenshots conferidas, teclado/foco, desktop/mobile e as jornadas previstas. Build não o substitui. Não usar browser pessoal nem alegar inspeção por screenshots não observadas.
 
-## Fronteiras da primeira entrega
+## Playwright MCP no OMP para revisão web
+
+Revisões com critérios de interface exigem Playwright MCP e Google Chrome instalado no host executor. Ter Playwright disponível no chat do operador não o disponibiliza automaticamente às sessões OMP da fábrica.
+
+Na configuração de usuário do OMP, `~/.omp/agent/mcp.json`, acrescente a entrada abaixo ao objeto `mcpServers`, preservando os demais servidores e configurações:
+
+```json
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@0.0.83",
+        "--browser",
+        "chrome",
+        "--isolated",
+        "--allow-unrestricted-file-access"
+      ]
+    }
+  }
+}
+```
+
+Node.js/npm devem estar acessíveis ao OMP para executar `npx`. A versão acima foi validada em 19/10/2026. `--isolated` usa um perfil de teste separado do navegador pessoal; `--allow-unrestricted-file-access` permite abrir páginas por `file://`, necessário para critérios que exigem HTML local sem servidor, e também permite acesso a arquivos fora das raízes do workspace.
+
+Em `~/.omp/agent/config.yml`, configure:
+
+```yaml
+browser:
+  enabled: false
+```
+
+O OMP 18.11.1 suprime servidores de automação como Playwright MCP quando o navegador nativo está habilitado. Desabilitá-lo permite carregar o MCP exigido pelo Revisor. Se houver perfil OMP nomeado ou diretório de configuração personalizado, aplique as entradas na configuração efetivamente usada pelo executor; não apenas na do chat do operador.
+
+Novas sessões carregam a configuração. Em sessões existentes, execute `/mcp reload` e confira `/mcp list`: `playwright` deve aparecer conectado. Antes de uma revisão real, confirme abertura de HTML, inspeção do conteúdo renderizado e screenshot pelo MCP, fechando o navegador de teste ao terminar. A configuração foi validada com 25 ferramentas descobertas no OMP e abertura de HTML local no Chrome isolado; isso comprova o ambiente, não aprova entregas anteriores nem inicia outra tentativa.
+
+Referências de configuração: [OMP MCP](https://github.com/can1357/oh-my-pi/blob/main/docs/mcp-config.md) e [Playwright MCP](https://github.com/microsoft/playwright-mcp).
+
+## Fronteiras da operação
 
 Loopback não oferece cliente remoto pronto. Conexão remota autenticada precisa ser provida explicitamente pelo operador; esta entrega não provisiona túnel, proxy, TLS ou deployment. Sessão técnica não autentica pessoa. Credenciais normais do host e ferramentas/MCPs OMP são confiáveis, sem sandbox geral. O lock protege apenas a instalação local. A fábrica acompanha recursos próprios, preserva incerteza e não garante contenção de brokers/daemons/descendentes globais. O único executor de produção é Maestri/OMP; Wire pertence aos ensaios LionClaw e não ao bootstrap do produto.
