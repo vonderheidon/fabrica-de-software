@@ -152,7 +152,16 @@ export function createPipeline(deps: PipelineDependencies) {
     const reasons = p.prerequisites.filter(r => r.code !== 'EXECUTOR_REVALIDATION_REQUIRED');
     if (reasons.length || !p.issue || !p.base_sha || !p.criteria_preview.executable || !config.view.settings.account_id ||
       !p.effective_configuration.implementer_profile || !p.effective_configuration.reviewer_profile) {
-      throw new OperationError(409, 'START_PREREQUISITES', 'The issue, committed base, account and configuration must satisfy all start prerequisites.');
+      const blocker = reasons[0] ?? {
+        code: !p.issue ? 'ISSUE_CONTEXT_INVALID' : !p.base_sha ? 'BASE_UNCONFIRMED' : !p.criteria_preview.executable ? p.criteria_preview.reasons[0] ?? 'CRITERIA_LIST_INVALID'
+          : !config.view.settings.account_id ? 'ACCOUNT_UNOBSERVED' : 'PROFILES_REQUIRED',
+        message: 'A preparação não tem todos os dados necessários para iniciar.',
+        recovery: 'Consulte novamente a preparação e corrija os impedimentos apresentados.',
+      };
+      throw new OperationError(409, blocker.code, blocker.message, {
+        facts: { prerequisite_codes: (reasons.length ? reasons.map(item => item.code) : [blocker.code]).join(',') },
+        recovery: blocker.recovery,
+      });
     }
     const catalog = await observeStartCatalog(execution, deps.logFailure);
     validateSavedProfile('implementer', p.effective_configuration.implementer_profile, catalog);

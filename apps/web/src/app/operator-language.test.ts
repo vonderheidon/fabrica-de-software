@@ -3,6 +3,10 @@ import { diagnosticCopyFor, isKnownOperatorEvent, isPortugueseOperatorText, oper
 import { fieldGuidanceFor } from '../features/projects/FieldHelp.js';
 
 describe('operator language', () => {
+  it('keeps a concrete prerequisite message instead of claiming data changed', () => {
+    expect(operatorErrorMessage('ISSUE_OBJECTIVE_REQUIRED', 'O objetivo da issue está ausente ou não foi reconhecido.', 409)).toBe('O objetivo da issue está ausente ou não foi reconhecido.');
+    expect(operatorErrorMessage('ISSUE_CLOSED', 'Issue is closed.', 409)).toBe('Issue fechada');
+  });
   it('describes every persisted Kanban creation operation and transition', () => {
     const operations = {
       create_board: 'Criação do quadro Kanban', configure_status: 'Configuração das colunas do Kanban',

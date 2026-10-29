@@ -149,7 +149,7 @@ export function createClient(rootReader: GraphQLReader) {
     try {
       const raw = child(header.data, 'repository', 'issueOrPullRequest');
       if (raw === null) return inaccessible();
-      issue = queueHeader ? { ...object(raw), body: '' } : object(raw);
+      issue = object(raw);
       if (issue.__typename === 'PullRequest') return { ...header, data: checked(ProjectItem, { id: issue.id, contentId: issue.id, title: issue.title, url: issue.url, kind: 'pull_request', archived: false, executable: false }) };
       if (issue.__typename !== 'Issue') return result('unavailable', null, ['RESPONSE_INVALID']);
       checked(IssueContext, { ...baseIssue(issue), assignees: [], comments: [], blockers: [], memberships: [], references: [] });
@@ -193,7 +193,7 @@ export function createClient(rootReader: GraphQLReader) {
       parts.push(fields);
       populated.push({ ...membership, statusValues: (fields.data ?? []).flatMap((entry) => entry?.kind === 'select' ? [entry.field] : []) });
     }
-    const bodies = [String(issue.body), ...(comments.data ?? []).map((comment) => comment.body)];
+    const bodies = queueHeader ? [] : [String(issue.body), ...(comments.data ?? []).map((comment) => comment.body)];
     const references = [...new Set(bodies.flatMap((body) => body.match(/https?:\/\/[^\s<>\)\]]+|(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#[1-9][0-9]*/g) ?? []))].filter((ref) => ref.length <= 4096);
     const data = checked(IssueContext, { ...baseIssue(issue), assignees: assignees.data ?? [], comments: comments.data ?? [], blockers: blockers.data ?? [], memberships: populated, references });
     return result(parts.every((part) => part.state === 'complete') ? 'complete' : 'partial', data,

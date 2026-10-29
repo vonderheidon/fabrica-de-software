@@ -8,7 +8,7 @@ import { assessIssueReadiness, type GitHub } from '../github/index.js';
 import { isLocalAbsoluteTargetPath, OperationError, publicationTargetHash, publicationTargetPath, type PreparationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import { validateProjectConfiguration, type CommandContext } from './index.js';
-import { interpretIssue, preparationDigest } from '../pipeline/index.js';
+import { interpretIssue, preparationDigest, issueContentPrerequisite } from '../pipeline/index.js';
 import { matchesObservedV3StatusMapping } from './status-mapping.js';
 
 type PreparationObservation = Omit<Preparation, 'issue'> & { issue: IssueContext | null };
@@ -20,6 +20,8 @@ export interface PreparationDependencies {
 }
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
 function prerequisite(code: string): Prerequisite {
+  const content = issueContentPrerequisite(code);
+  if (content) return content;
   if (code === 'PUBLICATION_TARGET_REQUIRED') return { code,
     message: 'Esta issue por URL exige um destino local para Commit local ou Pull request.',
     recovery: 'Escolha um clone existente ou um caminho para criar o clone no destino da versão aprovada, salve e revise o resumo novamente.' };

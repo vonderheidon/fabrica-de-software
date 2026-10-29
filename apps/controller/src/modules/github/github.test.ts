@@ -32,7 +32,7 @@ describe('GitHub identity and query diagnostics', () => {
     expect(f.calls.every(call => call.query.startsWith('query FactoryBranches') && call.query.includes('refPrefix:"refs/heads/"'))).toBe(true);
   });
   it('groups queue field pages by identity, retaining status pagination and failures without numeric values', async () => {
-    const header = http({ data: { node: { __typename: 'Issue', id: 'I_group', number: 17, title: 'Title', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository } } });
+    const header = http({ data: { node: { __typename: 'Issue', id: 'I_group', number: 17, title: 'Title', body: 'Objective', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository } } });
     const ids = ['item-a', 'item-b', 'item-c'];
     const prefix = () => [header, http({ data: { node: { assignees: page([]) } } }), http({ data: { node: { blockedBy: page([]) } } }),
       http({ data: { node: { projectItems: page(ids.map(id => ({ id, isArchived: false, project: { id: 'PVT_1' } }))) } } })];
@@ -269,9 +269,11 @@ describe('issue preparation context', () => {
     const responses = issueResponses();
     responses.splice(3, 2);
     responses.shift();
-    const header = http({ data: { node: { __typename: 'Issue', id: 'I_1', number: 1, title: 'Implement', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/1', repository: wireRepository } } });
+    const header = http({ data: { node: { __typename: 'Issue', id: 'I_1', number: 1, title: 'Implement', body: '## What to build\nImplement feature. See #2\n## Acceptance criteria\n- Works', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/1', repository: wireRepository } } });
     const { client, calls } = fixture([header, ...responses]);
     const response = await client.getIssueContextById('I_1', { purpose: 'queue' });
+    expect((response.data as IssueContext).body).toContain('What to build');
+    expect(calls[0]!.query).toContain('title body state');
     expect(response).toMatchObject({ state: 'complete', data: { id: 'I_1', comments: [], references: [], blockers: [{ state: 'OPEN' }, { state: 'CLOSED' }], memberships: [{ statusValues: [{ optionId: 'READY' }] }] } });
     expect(calls.some(call => call.query.includes('FactoryComments'))).toBe(false);
   });

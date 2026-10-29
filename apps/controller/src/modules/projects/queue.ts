@@ -1,12 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { Value } from '@sinclair/typebox/value';
-import { QueueCommand, QueueQuery, type GitHubAccount, type GitHubQueryResult, type QueueItem, type QueueObservation, type QueueQuery as QueueQueryType } from '#contracts';
+import { QueueCommand, QueueQuery, QueueReason, type GitHubAccount, type GitHubQueryResult, type QueueItem, type QueueObservation, type QueueQuery as QueueQueryType } from '#contracts';
 import type { Static } from '@sinclair/typebox';
 import { OperationError, type Storage } from '../storage/index.js';
 import { assessIssueReadiness, type GitHub } from '../github/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import { matchesObservedV3StatusMapping } from './status-mapping.js';
+import { interpretIssue } from '../pipeline/index.js';
 
 type QueueGitHub = Pick<GitHub, 'getIdentity' | 'getProject' | 'listProjectItems' | 'getIssueContextById'>;
 type QueueDependencies = { storage: Storage; github: QueueGitHub; workspaces: Pick<Workspaces, 'inspectOrigin'>; hostName?: string };
@@ -172,8 +173,9 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
             const readiness = assessIssueReadiness({ identity, issue, project: projectDetails, expectedAccountId: settings.view.settings.account_id ?? '',
               repositoryId: configuration.source.repository_id, projectId: configuration.github_project.id,
               statusFieldId: configuration.github_project.status_field_id, readyOptionId: configuration.github_project.status_option_ids.ready });
-            reasons = readiness.reasons;
-            eligible = readiness.eligible;
+            const contentReasons = interpretIssue(context).reasons.filter((code): code is QueueItem['reasons'][number] => Value.Check(QueueReason, code));
+            reasons = [...readiness.reasons, ...contentReasons];
+            eligible = readiness.eligible && contentReasons.length === 0;
             issueId = context.id;
             number = context.number;
             title = context.title;

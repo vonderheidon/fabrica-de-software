@@ -428,6 +428,7 @@ export function operatorErrorMessage(code: string, message: string, status?: num
   const translated = errorCopy[code];
   if (translated) return translated;
   if (isPortugueseOperatorText(message)) return message;
+  if (codeLabels[code]) return codeLabels[code]!;
   if (code.startsWith('PROFILE_')) return 'Revise o perfil e as referências de projeto antes de continuar.';
   if (code.startsWith('PROJECTS_ROOT_')) return 'Revise e confirme novamente a pasta dos projetos em Configuração.';
   if (status === 409 || code.includes('CONFLICT') || code.endsWith('_CHANGED')) return 'Os dados mudaram durante esta ação. Consulte o estado atual antes de continuar.';

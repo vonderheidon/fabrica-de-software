@@ -35,6 +35,18 @@ async function fixture(enabled = true) {
   f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue });
   return { f, queue, automation };
 }
+it('shows invalid ticket content in the queue and avoids repeated automatic preparations', async () => {
+  const { f, queue } = await fixture();
+  f.issue.body = '## Parent\n#23\n## Acceptance criteria\n- Observable result';
+  const observed = await queue.read({});
+  expect(observed.items[0]).toMatchObject({ ready: true, eligible: false, reasons: ['ISSUE_OBJECTIVE_REQUIRED'] });
+  await f.pipeline.tick(); await f.pipeline.drain();
+  expect(f.db.prepare('SELECT count(*) AS n FROM preparations').get()).toEqual({ n: 0 });
+  expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+  f.issue.body = '## Parent\n#23\n## What to build\nConfigure installation.\n## Acceptance criteria\n- Settings persist.';
+  expect((await queue.observe({})).items[0]).toMatchObject({ ready: true, eligible: true, reasons: [] });
+});
+
 function command(observation: QueueObservation, enabled: boolean): QueueCommand {
   return { enabled, scope: observation.scope, ...(observation.observationId ? { observationId: observation.observationId } : {}), ...(observation.summaryHash ? { authorizedSummaryHash: observation.summaryHash } : {}) };
 }

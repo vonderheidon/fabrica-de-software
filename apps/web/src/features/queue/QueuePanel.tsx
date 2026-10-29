@@ -11,6 +11,12 @@ const reasonLabels: Record<QueueItem['reasons'][number], string> = {
   ASSIGNEE_MISSING: 'Sem responsável', ASSIGNEE_OTHER: 'Responsável de outra conta', MULTIPLE_ASSIGNEES: 'Múltiplos responsáveis',
   REMOTE_UNCONFIRMED: 'Remoto GitHub não confirmado', CODE_NOT_PUBLISHED: 'Commit da branch-base não publicado',
   PROJECT_REQUIRED: 'Quadro GitHub não vinculado', STATUS_MAPPING_INVALID: 'Mapeamento de Status inválido',
+  ISSUE_TITLE_REQUIRED: 'Informe o título da issue',
+  ISSUE_OBJECTIVE_REQUIRED: 'Descreva o objetivo sob Objetivo, Descrição ou What to build',
+  CRITERIA_LIST_INVALID: 'Inclua uma lista Markdown de critérios sob Critérios de aceite ou Acceptance criteria',
+  CRITERION_ID_INVALID: 'Use identificadores AC com número positivo ou omita os IDs',
+  CRITERION_ID_DUPLICATED: 'Use um identificador diferente para cada critério',
+  CRITERION_TEXT_INVALID: 'Preencha cada critério e respeite o limite de 65.536 caracteres',
 };
 
 export function QueuePanel({ load, pageNotice, pauseNotice, pauseUncertain, onConsultPause, onRefresh, onNextPage, onPreviousPage, canGoBack, pausing, onEnable, onPause, onAuthority }: {

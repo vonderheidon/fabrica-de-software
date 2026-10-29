@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { CriteriaPreview, Criterion } from '#contracts';
+import type { CriteriaPreview, Criterion, Prerequisite } from '#contracts';
 
 export function preparationDigest(value: unknown): string {
   function canonical(item: unknown): string {
@@ -10,6 +10,20 @@ export function preparationDigest(value: unknown): string {
   return createHash('sha256').update(canonical(value)).digest('hex');
 }
 const normalized = (text: string) => text.normalize('NFD').replace(/[\u0300-\u036f*_`]/g, '').toLowerCase().replace(/[\s:/_-]+/g, ' ').trim();
+
+const contentDiagnostics: Readonly<Record<string, Omit<Prerequisite, 'code'>>> = {
+  ISSUE_TITLE_REQUIRED: { message: 'A issue não tem título.', recovery: 'Informe um título que identifique o trabalho e consulte novamente a preparação.' },
+  ISSUE_OBJECTIVE_REQUIRED: { message: 'O objetivo da issue está ausente ou não foi reconhecido.', recovery: 'Descreva o trabalho sob Objetivo, Escopo, Descrição, Objective, Scope ou What to build e consulte novamente a preparação.' },
+  CRITERIA_LIST_INVALID: { message: 'A lista de critérios de aceite está ausente, vazia ou excede 1.000 itens.', recovery: 'Use uma lista Markdown não vazia sob Critérios de aceite, Critérios de aceitação ou Acceptance criteria.' },
+  CRITERION_ID_INVALID: { message: 'Um critério tem identificação inválida.', recovery: 'Use identificadores AC-1, AC-2 e seguintes, com número positivo, ou omita os IDs para gerá-los automaticamente.' },
+  CRITERION_ID_DUPLICATED: { message: 'Dois ou mais critérios usam o mesmo identificador.', recovery: 'Atribua um identificador AC distinto a cada critério e consulte novamente a preparação.' },
+  CRITERION_TEXT_INVALID: { message: 'Um critério está vazio ou excede 65.536 caracteres.', recovery: 'Descreva um resultado verificável em cada item da lista, dentro do limite de tamanho.' },
+};
+
+export function issueContentPrerequisite(code: string): Prerequisite | null {
+  const diagnostic = contentDiagnostics[code];
+  return diagnostic ? { code, ...diagnostic } : null;
+}
 
 /** Only the issue body introduces criteria. Comments and task-list check marks are not authority. */
 export function interpretIssue(input: { title: string; body: string }): CriteriaPreview {
@@ -37,8 +51,8 @@ export function interpretIssue(input: { title: string; body: string }): Criteria
     const heading = /^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (heading) {
       const name = normalized(heading[2] ?? ''); const depth = heading[1]!.length;
-      if (name === 'criterios de aceite' || name === 'acceptance criteria') { section = 'criteria'; sectionDepth = depth; }
-      else if (/^(?:objetivo|escopo|objetivo e escopo|objetivo escopo|objective|scope|objective and scope)$/.test(name)) { section = 'objective'; sectionDepth = depth; }
+      if (/^(?:criterios de aceite|criterios de aceitacao|acceptance criteria)$/.test(name)) { section = 'criteria'; sectionDepth = depth; }
+      else if (/^(?:objetivo|escopo|objetivo e escopo|objetivo escopo|descricao|o que construir|o que implementar|objective|scope|objective and scope|description|what to build|what to implement)$/.test(name)) { section = 'objective'; sectionDepth = depth; }
       else if (depth <= sectionDepth) { section = 'other'; sectionDepth = depth; }
       active = -1; continue;
     }

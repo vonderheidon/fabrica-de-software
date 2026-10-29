@@ -48,7 +48,7 @@ async function queueFixture() {
       branch: { repositoryId: 'REPO_test', name: 'main', sha: 'a'.repeat(40) } },
     diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false });
   const contexts: IssueContext[] = [1, 2, 3].map((number) => ({
-    id: `ISSUE_${number}`, number, url: `https://github.com/test-org/repo/issues/${number}`, title: `Issue ${number}`, body: 'Goal', state: 'OPEN',
+    id: `ISSUE_${number}`, number, url: `https://github.com/test-org/repo/issues/${number}`, title: `Issue ${number}`, body: 'Goal\n## Acceptance criteria\n- Observable result', state: 'OPEN',
     repository: { id: 'REPO_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true },
     assignees: [{ id: 'ACCOUNT_test', login: 'test-user' }], blockers: [], comments: [], references: [],
     memberships: [{ itemId: `ITEM_${number}`, projectId: mapping.id, archived: false, statusValues: [{ fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready, name: 'Ready' }] }],
@@ -1289,7 +1289,7 @@ describe('global and aggregate configuration', () => {
       { id: 'ITEM_3', archived: false, kind: 'draft', contentId: 'DRAFT_3', title: 'Draft issue', url: null, executable: false },
       { id: 'ITEM_4', archived: false, kind: 'pull_request', contentId: 'PR_4', title: 'Pull request card', url: 'https://github.com/test-org/repo/pull/4', executable: false },
     ];
-    const issue = (id: string, number: number, assignees: IssueContext['assignees']): IssueContext => ({ id, number, url: `https://github.com/test-org/repo/issues/${number}`, title: projectItems[number - 1]?.title ?? 'Issue', body: '## Acceptance criteria\n- [ ] Keep queue state durable', state: 'OPEN',
+    const issue = (id: string, number: number, assignees: IssueContext['assignees']): IssueContext => ({ id, number, url: `https://github.com/test-org/repo/issues/${number}`, title: projectItems[number - 1]?.title ?? 'Issue', body: '## What to build\nPreserve the queue.\n## Acceptance criteria\n- [ ] Keep queue state durable', state: 'OPEN',
       repository: { id: 'REPO_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true },
       assignees, comments: [], blockers: [], memberships: [{ itemId: `ITEM_${number}`, projectId: mapping.id, archived: false, statusValues: [{ fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready, name: 'Ready' }] }], references: [] });
     const contexts = new Map<string, IssueContext>([

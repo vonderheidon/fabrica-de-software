@@ -5,6 +5,17 @@ import { interpretIssue } from './index.js';
 
 const parse = (list: string, heading = 'Critérios de aceite') => interpretIssue({ title: 'Implement feature', body: `## Objetivo / Escopo\nDeliver an observable feature.\n## ${heading}\n${list}` });
 describe('criteria captured from the issue body by occurrence', () => {
+  it.each(['What to build', 'Descrição', 'Description', 'O que construir', 'Objetivo e escopo'])('accepts ticket content under %s after metadata', heading => {
+    const result = interpretIssue({ title: 'Configure installation', body: `## Parent\n#23\n## ${heading}\nConfigure the local installation.\n## Acceptance criteria\n- AC-1: Settings persist.\n## Blocked by\nNone` });
+    expect(result).toMatchObject({ executable: true, objective: 'Configure the local installation.', reasons: [] });
+    expect(result.criteria).toHaveLength(1);
+  });
+  it.each(['Critérios de aceitação', 'Acceptance Criteria:', 'Critérios de aceite'])('accepts criteria heading %s', heading => {
+    expect(parse('- Observable result', heading).executable).toBe(true);
+  });
+  it('does not use metadata or unrelated lists as objective and criteria', () => {
+    expect(interpretIssue({ title: 'Task', body: '## Parent\n#23\n## References\n- Link\n## Acceptance criteria\n- Valid' })).toMatchObject({ executable: false, reasons: ['ISSUE_OBJECTIVE_REQUIRED'] });
+  });
   it.each(['Critérios de aceite', 'Acceptance criteria', '**Critérios de aceite**'])('accepts a Markdown list under %s', (heading) => {
     const result = parse('- [ ] [ac-9] First criterion\n1. Second criterion\n+ [x] Third criterion', heading);
     expect(result.executable).toBe(true); expect(Value.Check(CriteriaPreview, result)).toBe(true);

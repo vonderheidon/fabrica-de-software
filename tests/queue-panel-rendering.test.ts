@@ -34,6 +34,16 @@ function render(load: QueueLoad): string {
   return renderToStaticMarkup(createElement(QueuePanel, props));
 }
 
+it('explains a ticket content blocker in the existing queue situation cell', () => {
+  const data = observation();
+  data.page.items[0] = { ...data.page.items[0]!, ready: true, eligible: false, consumption: 'available', attempt_id: null,
+    reasons: ['ISSUE_OBJECTIVE_REQUIRED', 'CRITERION_ID_DUPLICATED'] };
+  const html = render({ status: 'ready', observation: data, etag: 'revision' });
+  expect(html).toContain('Descreva o objetivo sob Objetivo, Descrição ou What to build');
+  expect(html).toContain('Use um identificador diferente para cada critério');
+  expect(html).not.toContain('ISSUE_OBJECTIVE_REQUIRED');
+});
+
 it('keeps the observed queue and rows visible during background refresh without transient notices', () => {
   const html = render({ status: 'loading', observation: observation(), etag: 'revision', previousError: null });
   expect(html.toLowerCase()).not.toContain('prioridade');

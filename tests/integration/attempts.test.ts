@@ -180,7 +180,7 @@ describe('manual attempt composition and HTTP', () => {
     const command = await f.prepare();
     const preview = await f.preparations.getPreparation(command.body.preparationId);
     expect(preview.view.preparation.prerequisites.map(item => item.code)).toContain('PROFILE_COMPOSITION_REQUIRED');
-    await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
+    await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({ code: 'PROFILE_COMPOSITION_REQUIRED' });
     expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
 
     const current = f.storage.getGlobalConfiguration();
@@ -230,6 +230,29 @@ describe('manual attempt composition and HTTP', () => {
     expect(results.find(r => r.status === 'rejected')).toMatchObject({ reason: { code: 'ATTEMPT_ACTIVE', resource: { type: 'attempt' } } });
     await f.pipeline.drain(); expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1); expect(f.execution.startPassage).toHaveBeenCalledTimes(1);
   });
+  it('returns the concrete ticket error and recovery before creating an attempt', async () => {
+    const f = await fixture();
+    f.issue.body = '## Parent\n#23\n## Acceptance criteria\n- Observable result';
+    const command = await f.prepare();
+    await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({
+      code: 'ISSUE_OBJECTIVE_REQUIRED',
+      message: 'O objetivo da issue está ausente ou não foi reconhecido.',
+      details: { facts: { prerequisite_codes: 'ISSUE_OBJECTIVE_REQUIRED' }, recovery: expect.stringContaining('What to build') },
+    });
+    const app = createApp(loadConfiguration({ FACTORY_LOG_LEVEL: 'silent' }, f.directory), f.storage,
+      undefined, undefined, { github: f.github, workspaces: f.workspaces }, f.pipeline); apps.push(app);
+    const bootstrap = await app.inject({ method: 'POST', url: '/api/v1/session', headers: { host, origin, 'content-type': 'application/json', 'x-factory-client': 'web' }, payload: {} });
+    const response = await app.inject({ method: 'POST', url: '/api/v1/attempts',
+      headers: { host, origin, 'content-type': 'application/json', cookie: String(bootstrap.headers['set-cookie']).split(';')[0]!,
+        'x-csrf-token': bootstrap.json<SessionResponse>().csrf_token, 'idempotency-key': randomUUID(), 'if-match': command.context.expectedRevision },
+      payload: toHttpStartAttempt(command.body) });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ code: 'ISSUE_OBJECTIVE_REQUIRED',
+      message: 'O objetivo da issue está ausente ou não foi reconhecido.',
+      facts: { prerequisite_codes: 'ISSUE_OBJECTIVE_REQUIRED' }, recovery: expect.stringContaining('What to build') });
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+  });
   it.each(['icr', 'commit', 'pr'] as const)('revalidates Ready and all authority prerequisites for %s', async mode => {
     const f = await fixture(); const p = await f.prepare();
     const updated = await f.preparations.updatePreparation(p.body.preparationId, { changes: { delivery_mode: mode, ...(mode === 'icr' ? {} : { publication_target: { format_version: 1, repository_id: f.issue.repository.id, selection: { kind: 'existing_clone', path: join(f.directory,'target') } } }) } }, { operationId: randomUUID(), expectedRevision: p.context.expectedRevision });
@@ -237,7 +260,7 @@ describe('manual attempt composition and HTTP', () => {
     f.issue.assignees.push({ id: 'OTHER', login: 'other' });
     await expect(f.pipeline.startAttempt(body, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: 'SUMMARY_CHANGED' });
     const current = await f.preparations.getPreparation(p.body.preparationId);
-    await expect(f.pipeline.startAttempt({ ...body, authorizedSummaryHash: current.view.preparation.summary_hash }, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
+    await expect(f.pipeline.startAttempt({ ...body, authorizedSummaryHash: current.view.preparation.summary_hash }, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: current.view.preparation.prerequisites[0]!.code });
     expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
   });
   it.each(['closed', 'ready', 'project', 'membership', 'remote', 'base', 'dependency', 'account', 'partial'] as const)('refuses invalid %s observations before effects', async target => {
@@ -251,7 +274,7 @@ describe('manual attempt composition and HTTP', () => {
     if (target === 'dependency') f.issue.blockers.push({ id: 'I_block', number: 4, title: 'Blocker', url: 'https://github.com/test-org/repo/issues/4', state: 'OPEN' });
     if (target === 'account') vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));
     if (target === 'partial') vi.mocked(f.github.getIdentity).mockResolvedValue({ state: 'partial', data: null, diagnostics: [], retryAtMs: null });
-    const c = await f.prepare(); await expect(f.pipeline.startAttempt(c.body, c.context)).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
+    const c = await f.prepare(); await expect(f.pipeline.startAttempt(c.body, c.context)).rejects.toMatchObject({ code: c.saved.view.preparation.prerequisites[0]!.code });
     expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 }); expect(f.execution.startPassage).not.toHaveBeenCalled();
   });
   it.each([
@@ -275,7 +298,7 @@ describe('manual attempt composition and HTTP', () => {
     const command = await f.prepare();
     const current = await f.preparations.getPreparation(command.saved.view.preparation.id);
     expect(current.view.preparation.prerequisites.map(item => item.code)).toContain(reason);
-    await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
+    await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({ code: reason });
     expect(f.storage.listAttempts({}).items).toHaveLength(0);
     expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
     expect(f.execution.startPassage).not.toHaveBeenCalled();

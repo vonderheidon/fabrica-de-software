@@ -112,7 +112,7 @@ describe('revocation and explicit retry', () => {
     if (kind === 'membership') f.issue.memberships = [];
     const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {}, previous_attempt_id: f.id }, f.context());
     const p = saved.view.preparation;
-    await expect(f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true }, { ...f.context(), expectedRevision: saved.etag })).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
+    await expect(f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true }, { ...f.context(), expectedRevision: saved.etag })).rejects.toMatchObject({ code: p.prerequisites[0]!.code });
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
   });
   it('preserves captures and results when reopening the current schema', async () => {

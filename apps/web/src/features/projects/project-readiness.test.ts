@@ -195,7 +195,7 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
   const container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   await act(async () => root!.render(createElement(PreparationDialog, { projectId: preparationProjectId, initialIssueId: 'ISSUE_test', onOpenAttempt: () => {} })));
   expect(container.querySelector('.preparation-section')?.textContent).toContain('A consulta das issues está incompleta');
-  expect(container.textContent).toContain('Resumo da tentativa'); expect(container.textContent).toContain('Critérios não executáveis');
+  expect(container.textContent).toContain('Resumo da tentativa'); expect(container.textContent).toContain('Conteúdo da issue precisa de ajuste');
   expect(container.textContent).toContain('Issue fechada');
   expect(container.textContent).toContain('Base local e remota divergentes');
   expect(container.textContent).toContain('Confirme o repositório GitHub');

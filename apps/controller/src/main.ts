@@ -7,7 +7,7 @@ import { createGitHub, type GitHubContext, type GitHubHostAccess, type GitHubMut
 import { createWorkspaces, type GitContext } from './modules/workspaces/index.js';
 import { createPreparations, createQueue, validateScaffoldResources, createDeletionCoordinator } from './modules/projects/index.js';
 import { createExecution, ExecutionError, withWindowsTerminalJobs, type ExecutionHost } from './modules/execution/index.js';
-import { createPipeline, type Pipeline } from './modules/pipeline/index.js';
+import { createPipeline, issueContentPrerequisite, type Pipeline } from './modules/pipeline/index.js';
 import type { ToolObservation } from '#contracts';
 import { createToolDetector } from './modules/tools/index.js';
 
@@ -80,7 +80,11 @@ export async function startController(hostContext: ControllerHostContext = {}, d
     await validateScaffoldResources();
     const activeExecution = execution;
     const preparations = createPreparations({ storage, github, workspaces });
-    const logFailure = (code: string) => console.error(JSON.stringify({ level: 'error', code, message: 'Pipeline operation failed.' }));
+    const logFailure = (code: string) => {
+      const diagnostic = issueContentPrerequisite(code);
+      console.error(JSON.stringify({ level: 'error', code, message: diagnostic?.message ?? 'Pipeline operation failed.',
+        ...(diagnostic ? { recovery: diagnostic.recovery } : {}) }));
+    };
     deletions = createDeletionCoordinator({ storage, workspaces, logFailure,
       prepareAttempts: async (ids, operationId) => {
         if (!pipeline) throw new Error('PIPELINE_UNAVAILABLE');
