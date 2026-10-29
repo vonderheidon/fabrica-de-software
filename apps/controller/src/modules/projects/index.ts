@@ -113,8 +113,7 @@ function receipt(operation: StoredOperation) {
   return operation.receipt;
 }
 export function validateProjectConfiguration(configuration: ProjectConfiguration): void {
-  if (configuration.github_project && 'backlog' in configuration.github_project.status_option_ids &&
-      new Set(Object.values(configuration.github_project.status_option_ids)).size !== 5) {
+  if (configuration.github_project && new Set(Object.values(configuration.github_project.status_option_ids)).size !== 5) {
     fail(400, 'STATUS_MAPPING_INVALID', 'A V3 Status mapping requires five distinct option IDs.');
   }
   if (!Value.Check(ProjectConfiguration, configuration)) fail(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');
@@ -256,7 +255,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
   }
   async function validateMapping(configuration: ProjectConfiguration): Promise<void> {
     const mapping = configuration.github_project;
-    if (!mapping || !('backlog' in mapping.status_option_ids)) return;
+    if (!mapping) return;
     const optionIds = mapping.status_option_ids;
     const statusOptionIds = V3StatusMapping.map(({ key }) => optionIds[key]);
     const result = await github.validateProjectSelection({ id: mapping.id, statusFieldId: mapping.status_field_id, statusOptionIds });
@@ -274,10 +273,6 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     if (!configuration.github_project) {
       throw new OperationError(409, 'PROJECT_REQUIRED', 'Vincule um quadro GitHub válido antes de habilitar a automação.',
         { affected_requirements: ['RF-15'], recovery: 'Selecione o quadro do projeto, vincule o repositório e configure as cinco opções de Status V3.' });
-    }
-    if (!('backlog' in configuration.github_project.status_option_ids)) {
-      throw new OperationError(409, 'STATUS_MAPPING_LEGACY', 'O quadro ainda usa um mapeamento histórico de quatro valores.',
-        { affected_requirements: ['RF-15'], recovery: 'Selecione novamente o campo Status e confirme as cinco opções V3, incluindo Backlog.' });
     }
     const origin = await workspaces.inspectOrigin({ source: { kind: configuration.source.kind, location: configuration.source.location }, baseBranch: configuration.base_branch });
     const remoteConfirmed = origin.state === 'identified' && Boolean(origin.remote?.confirmed && origin.remote.repository &&

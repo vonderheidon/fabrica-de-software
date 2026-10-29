@@ -48,9 +48,6 @@ type SaveState = { status: 'idle' } | { status: 'saving' } | { status: 'saved'; 
 const editorKey = 'project-configuration';
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right);
 const isConfigurationView = (view: EditableView): view is ConfigurationView => 'configuration' in view;
-function isV3ProjectMapping(value: ProjectConfiguration['github_project']): value is ProjectMapping {
-  return value !== null && Object.prototype.hasOwnProperty.call(value.status_option_ids, 'backlog');
-}
 const editableProfile = (profile: StoredExecutionProfile): EditableProfile => ({
   id: profile.id, name: profile.name, profile_type: profile.profile_type, executor: profile.executor, provider: profile.provider, model: profile.model, effort: profile.effort, guidance: profile.guidance,
 });
@@ -490,7 +487,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       const nextMapping = draft.project.github_project;
       if (!same(baseline.configuration.github_project, nextMapping)) {
         if (nextMapping === null) projectChanges.github_project = null;
-        else if (isV3ProjectMapping(nextMapping)) projectChanges.github_project = nextMapping;
+        else projectChanges.github_project = nextMapping;
       }
     }
     const hasGlobalChanges = Object.keys(globalChanges).length > 0;
@@ -718,7 +715,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       {!projectId && (saveState.status === 'idle' || saveState.status === 'saved') && <span className="muted">{same(draft.global, draft.baselineGlobal) ? 'Nenhuma alteração pendente.' : 'Há alterações não salvas.'}</span>}
       {saveState.status === 'saving' && <span role="status">Salvando alterações…</span>}
       {saveState.status === 'saved' && <span className="pill">{saveState.message}</span>}
-      {saveState.status === 'error' && (saveState.code && (saveState.recovery || ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'REMOTE_UNCONFIRMED', 'PROJECT_REQUIRED', 'STATUS_MAPPING_LEGACY', 'CODE_NOT_PUBLISHED'].includes(saveState.code))
+      {saveState.status === 'error' && (saveState.code && (saveState.recovery || ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'REMOTE_UNCONFIRMED', 'PROJECT_REQUIRED', 'CODE_NOT_PUBLISHED'].includes(saveState.code))
         ? <div role="alert"><OperatorDiagnosticCard code={saveState.code} state="blocked" cause={saveState.message} recovery={saveState.recovery ?? null} projectId={projectId} /></div>
         : <span className="error" role="alert">Erro: {saveState.message}</span>)}
       {saveState.status === 'conflict' && <span className="conflict-message" role="alert">Conflito: {saveState.message}</span>}
@@ -768,15 +765,14 @@ function ProjectMappingEditor({ configuration, options, optionsError, onChange, 
     if (!mapping) return;
     const previous = mapping.status_option_ids;
     const status_option_ids: ProjectMapping['status_option_ids'] = {
-      backlog: 'backlog' in previous ? previous.backlog : '', ready: previous.ready, in_progress: previous.in_progress,
+      backlog: previous.backlog, ready: previous.ready, in_progress: previous.in_progress,
       in_review: previous.in_review, delivered: previous.delivered,
     };
     status_option_ids[role] = optionId;
     updateMapping({ id: mapping.id, owner_id: mapping.owner_id, status_field_id: mapping.status_field_id, status_option_ids });
   }
   return <fieldset className="mapping-editor"><legend>Mapeamento GitHub Project e Status</legend>
-    <p className="muted">Escolha o quadro pelo nome. Um mapeamento novo exige os cinco valores do Status; um mapeamento histórico de quatro valores permanece somente para leitura até a adequação.</p>
-    {mapping && !('backlog' in mapping.status_option_ids) && <div className="notice field-full"><b>Mapeamento histórico de quatro valores</b><p>Ele continua legível, mas não libera novos inícios. Selecione novamente o campo e os cinco valores para gravar uma nova revisão V3.</p></div>}
+    <p className="muted">Escolha o quadro pelo nome e mapeie os cinco valores do Status.</p>
     <div className="form-grid">
       <SelectField label="GitHub Project" value={chosenProject} onChange={(id) => {
         if (!id) { updateMapping(null); return; }
@@ -788,7 +784,7 @@ function ProjectMappingEditor({ configuration, options, optionsError, onChange, 
         <p className="field-full muted">Campo: <strong>{selectedField?.name ?? fixedField?.name ?? 'Status'}</strong></p>
         {staleField && <div className="notice field-full"><b>Campo Status salvo não aparece nas opções atuais</b><p>Atualize as opções do quadro antes de salvar.</p></div>}
         {statusRoles.map((role) => {
-          const id = role === 'backlog' ? ('backlog' in mapping.status_option_ids ? mapping.status_option_ids.backlog : '') : mapping.status_option_ids[role];
+          const id = mapping.status_option_ids[role];
           const roleLabel = ({ backlog: 'Backlog', ready: 'Ready', in_progress: 'Em andamento', in_review: 'Em revisão', delivered: 'Entregue' } as const)[role];
           return <Fragment key={role}><SelectField label={`Status ${roleLabel}`} value={id && optionNames.has(id) ? id : ''} onChange={(optionId) => updateStatusOption(role, optionId)} options={(selectedField?.options ?? []).map((option) => ({ value: option.id, label: option.name }))} disabled={!selectedField} {...(id && !optionNames.has(id) ? { help: 'O valor salvo não aparece nas opções atuais. Atualize o catálogo e escolha o valor correspondente.' } : {})} /></Fragment>;
         })}

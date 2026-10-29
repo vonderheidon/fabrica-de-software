@@ -143,8 +143,9 @@ export const ToolOptions = Type.Object({
   observed_at_ms: timestamp,
 }, closed);
 export type ToolOptions = Static<typeof ToolOptions>;
-export const LegacyStatusOptionIds = Type.Object({ ready: text(256), in_progress: text(256), in_review: text(256), delivered: text(256) }, closed);
-export const StatusOptionIds = Type.Object({ backlog: text(256), ...LegacyStatusOptionIds.properties }, closed);
+export const StatusOptionIds = Type.Object({
+  backlog: text(256), ready: text(256), in_progress: text(256), in_review: text(256), delivered: text(256),
+}, closed);
 const ProjectMappingShape = Type.Object({ id: text(256), owner_id: text(256), status_field_id: text(256), status_option_ids: StatusOptionIds }, closed);
 const ProjectMappingDistinctKind = 'ProjectMappingDistinctOptionIds';
 TypeRegistry.Set(ProjectMappingDistinctKind, (_schema, value) => {
@@ -159,16 +160,12 @@ TypeRegistry.Set(ProjectMappingDistinctKind, (_schema, value) => {
 const ProjectMappingDistinctConstraint = Type.Unsafe({ [Kind]: ProjectMappingDistinctKind, type: 'object' });
 export const ProjectMapping = Type.Intersect([ProjectMappingShape, ProjectMappingDistinctConstraint]);
 export type ProjectMapping = Static<typeof ProjectMapping>;
-export const LegacyProjectMapping = Type.Object({ id: text(256), owner_id: text(256), status_field_id: text(256), status_option_ids: LegacyStatusOptionIds }, closed);
-export type LegacyProjectMapping = Static<typeof LegacyProjectMapping>;
-export const ReadProjectMapping = Type.Union([ProjectMapping, LegacyProjectMapping]);
-export type ReadProjectMapping = Static<typeof ReadProjectMapping>;
 export const QueueOrder = Type.Object({ use_board_position: Type.Boolean() }, closed);
 export const ProjectConfiguration = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repository_id: Type.Optional(text(256)), repository_url: Type.Optional(text(4096)) }, closed),
   base_branch: text(1024),
   delivery_branch: Type.Optional(Type.Union([Type.Null(), Type.Object({ kind: Type.Union([Type.Literal('new'), Type.Literal('existing')]), name: text(1024) }, closed)])),
-  github_project: Type.Union([ReadProjectMapping, Type.Null()]),
+  github_project: Type.Union([ProjectMapping, Type.Null()]),
   implementer_profile_id: Type.Union([OperationId, Type.Null()]), reviewer_profile_id: Type.Union([OperationId, Type.Null()]),
   correction_limit: Type.Integer({ minimum: 0, maximum: 5 }),
   default_delivery_mode: DeliveryMode, automation_enabled: Type.Boolean(), queue_order: QueueOrder,

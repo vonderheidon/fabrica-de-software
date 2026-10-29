@@ -37,8 +37,6 @@ function prerequisite(code: string): Prerequisite {
     recovery: 'Publique a branch-base no repositório configurado e consulte a preparação novamente.' };
   if (code === 'PROJECT_REQUIRED') return { code, message: 'O projeto ainda não tem um quadro GitHub vinculado.',
     recovery: 'Selecione um GitHub Project acessível, vincule o repositório e configure o campo Status.' };
-  if (code === 'STATUS_MAPPING_LEGACY') return { code, message: 'O quadro está salvo com o mapeamento histórico de quatro valores.',
-    recovery: 'Selecione novamente o campo Status e confirme as cinco opções V3, incluindo Backlog.' };
   if (code === 'STATUS_MAPPING_INVALID') return { code, message: 'O quadro ou uma das cinco opções de Status configuradas não está acessível.',
     recovery: 'Confira o quadro, o campo Status e as cinco opções atuais na configuração do projeto.' };
   if (code === 'BASE_BRANCH_INVALID') return { code, message: 'A branch-base configurada não corresponde à branch confirmada no remoto.',
@@ -151,15 +149,13 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
       reasons.push(diagnostic.code);
     }
     if (!config.github_project) reasons.push('PROJECT_REQUIRED');
-    else if (!('backlog' in config.github_project.status_option_ids)) reasons.push('STATUS_MAPPING_LEGACY');
     if (project && config.github_project) {
       reasons.push(...assessIssueReadiness({ identity, issue: issueResult, project,
         expectedAccountId: view.settings.account_id ?? '', repositoryId: config.source.repository_id ?? '',
         projectId: config.github_project.id, statusFieldId: config.github_project.status_field_id,
         readyOptionId: record.previous_attempt_id ? issue?.memberships.find(m => m.projectId === config.github_project?.id)?.statusValues.find(v => v.fieldId === config.github_project?.status_field_id)?.optionId ?? config.github_project.status_option_ids.ready : config.github_project.status_option_ids.ready }).reasons);
       if (project.data?.project.owner.id !== config.github_project.owner_id) reasons.push('PROJECT_OWNER_MISMATCH');
-      if ('backlog' in config.github_project.status_option_ids &&
-          (!project.data || !matchesObservedV3StatusMapping(config.github_project, project.data))) reasons.push('STATUS_MAPPING_INVALID');
+      if (!project.data || !matchesObservedV3StatusMapping(config.github_project, project.data)) reasons.push('STATUS_MAPPING_INVALID');
     }
     if (!issue || issue.id !== record.issue_id || issue.repository.id !== config.source.repository_id) reasons.push('ISSUE_CONTEXT_INVALID');
     if (issue?.repository.isArchived) reasons.push('REPOSITORY_ARCHIVED');

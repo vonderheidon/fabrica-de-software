@@ -13,10 +13,10 @@ const timestamp = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
 export const storedExecutionProfile = Type.Object({ ...ExecutionProfileValue.properties, id: OperationId, revision, createdAtMs: timestamp,
   updatedAtMs: timestamp, composition_version: Type.Optional(Type.Union([revision, Type.Null()])) }, closed);
 export const composedExecutionProfile = Type.Object({ ...ComposedExecutionProfileValue.properties }, closed);
-export const legacyStatusOptionIdsJson = Type.Object({ ready: text(256), inProgress: text(256), inReview: text(256), delivered: text(256) }, closed);
-export const statusOptionIdsJson = Type.Object({ backlog: text(256), ...legacyStatusOptionIdsJson.properties }, closed);
-export const readStatusOptionIdsJson = Type.Union([statusOptionIdsJson, legacyStatusOptionIdsJson]);
-export const projectMappingJson = Type.Object({ id: text(256), ownerId: text(256), statusFieldId: text(256), statusOptionIds: readStatusOptionIdsJson }, closed);
+export const statusOptionIdsJson = Type.Object({
+  backlog: text(256), ready: text(256), inProgress: text(256), inReview: text(256), delivered: text(256),
+}, closed);
+export const projectMappingJson = Type.Object({ id: text(256), ownerId: text(256), statusFieldId: text(256), statusOptionIds: statusOptionIdsJson }, closed);
 export const queueOrderJson = Type.Object({ useBoardPosition: Type.Boolean() }, closed);
 export const projectConfigurationJson = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repositoryId: Type.Optional(text(256)), repositoryUrl: Type.Optional(text(4096)) }, closed),
@@ -56,9 +56,9 @@ export const effectiveConfigurationJson = Type.Object({
 }, closed);
 export const criterionJson = Type.Object({ id: Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), text: Type.String({ minLength: 1, maxLength: 65536 }), occurrenceIndex: revision, explicit: Type.Boolean() }, closed);
 
-export function readStatusOptions(value: Static<typeof readStatusOptionIdsJson>): NonNullable<ProjectConfiguration['github_project']>['status_option_ids'] {
+export function readStatusOptions(value: Static<typeof statusOptionIdsJson>): NonNullable<ProjectConfiguration['github_project']>['status_option_ids'] {
   return {
-    ...('backlog' in value ? { backlog: value.backlog } : {}),
+    backlog: value.backlog,
     ready: value.ready,
     in_progress: value.inProgress,
     in_review: value.inReview,
@@ -66,9 +66,9 @@ export function readStatusOptions(value: Static<typeof readStatusOptionIdsJson>)
   };
 }
 
-export function storeStatusOptions(value: NonNullable<ProjectConfiguration['github_project']>['status_option_ids']): Static<typeof readStatusOptionIdsJson> {
+export function storeStatusOptions(value: NonNullable<ProjectConfiguration['github_project']>['status_option_ids']): Static<typeof statusOptionIdsJson> {
   return {
-    ...('backlog' in value ? { backlog: value.backlog } : {}),
+    backlog: value.backlog,
     ready: value.ready,
     inProgress: value.in_progress,
     inReview: value.in_review,
@@ -277,7 +277,7 @@ export function storeChoices(value: PreparationChoices): Static<typeof preparati
 }
 
 export function readStatusOptionIds(value: unknown): NonNullable<ProjectConfiguration['github_project']>['status_option_ids'] {
-  if (!Value.Check(readStatusOptionIdsJson, value)) throw new StorageError('PROJECT_DATA_INVALID');
+  if (!Value.Check(statusOptionIdsJson, value)) throw new StorageError('PROJECT_DATA_INVALID');
   return readStatusOptions(value);
 }
 export function readQueueOrderJson(value: unknown): ProjectConfiguration['queue_order'] {

@@ -19,8 +19,8 @@ import { createInspector } from '../../apps/controller/src/modules/workspaces/in
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) { await f.pipeline.close(); await f.close(); } });
-async function fixture(enabled = true, migrationVersionForTest?: number) {
-  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f); await f.pipeline.close();
+async function fixture(enabled = true) {
+  const f = await attemptFixture(); fixtures.push(f); await f.pipeline.close();
   const settings = f.storage.getGlobalConfiguration();
   if (enabled) f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, body: { changes: { automation_enabled: enabled } }, changes: { automation_enabled: enabled } });
   function automation(projectId: string, value: boolean) {

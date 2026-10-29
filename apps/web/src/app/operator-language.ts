@@ -75,7 +75,6 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
   PROJECT_PROFILE_TYPE_MISMATCH: { title: 'Associação de perfil incompatível', cause: 'Um perfil associado ao projeto não corresponde ao papel esperado.', nextAction: 'Corrija a associação na configuração deste projeto.' },
   PROJECT_OWNER_MISMATCH: { title: 'Proprietário do quadro divergente', cause: 'O proprietário observado não corresponde ao quadro configurado.', nextAction: 'Confira o quadro e seu proprietário na configuração deste projeto.' },
   STATUS_MAPPING_INVALID: { title: 'Mapeamento de Status inválido', cause: 'O campo ou uma das opções de Status configuradas não foi confirmado no quadro.', nextAction: 'Atualize as opções e confira os cinco valores de Status na configuração deste projeto.' },
-  STATUS_MAPPING_LEGACY: { title: 'Mapeamento histórico de quatro valores', cause: 'Esta configuração ainda não contém a coluna Backlog exigida pelo quadro V3.', nextAction: 'Na configuração do projeto, selecione novamente o campo Status e mapeie os cinco valores para gravar uma nova revisão.' },
   SCAFFOLD_GIT_IDENTITY_REQUIRED: { title: 'Autoria do commit inicial ausente', cause: 'O Git deste computador não tem nome e e-mail configurados para o commit inicial.', nextAction: 'Configure seu nome e e-mail no Git e crie novamente o projeto. Nenhum arquivo foi criado.' },
   GIT_VERSION_UNSUPPORTED: { title: 'Atualize ou selecione um Git compatível', cause: 'O executável Git não confirmou suporte a --no-lazy-fetch. Git 2.43 não oferece essa proteção contra busca implícita de objetos.', nextAction: 'Instale ou selecione Git 2.45.0 ou superior e execute nova detecção em Configuração. Não desative a proteção; esta falha não indica ausência de nome e e-mail.' },
   SCAFFOLD_GIT_CONFIG_FAILED: { title: 'Não foi possível ler a configuração do Git', cause: 'O comando de consulta da configuração falhou; a autoria do commit inicial não foi determinada.', nextAction: 'Confira o executável e a configuração do Git. Selecione Git 2.45.0 ou superior com suporte a --no-lazy-fetch e execute nova detecção antes de tentar novamente. Não reconfigure nome e e-mail apenas por esta falha.' },
@@ -447,7 +446,7 @@ export function diagnosticCopyFor(code: string, state: string, cause?: string | 
     return { ...copy, cause: `${copy.cause} Código de saída do Git: ${configExit}.` };
   }
   const known = diagnosticCopy[code];
-  if (known) return ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'PROJECT_REQUIRED', 'REMOTE_UNCONFIRMED', 'CODE_NOT_PUBLISHED', 'STATUS_MAPPING_LEGACY', 'STATUS_MAPPING_INVALID'].includes(code) && cause && isPortugueseOperatorText(cause) ? { ...known, cause, ...(recovery && isPortugueseOperatorText(recovery) ? { nextAction: recovery } : {}) } : known;
+  if (known) return ['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'PROJECT_REQUIRED', 'REMOTE_UNCONFIRMED', 'CODE_NOT_PUBLISHED', 'STATUS_MAPPING_INVALID'].includes(code) && cause && isPortugueseOperatorText(cause) ? { ...known, cause, ...(recovery && isPortugueseOperatorText(recovery) ? { nextAction: recovery } : {}) } : known;
   const status = operatorState(state);
   return {
     title: status.known && state.toLocaleLowerCase('en') === 'passed' ? 'Verificação concluída' : 'Atenção necessária',

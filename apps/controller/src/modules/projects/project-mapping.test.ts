@@ -10,9 +10,11 @@ const base: Omit<ProjectConfiguration, 'github_project'> = {
 const mapping: NonNullable<ProjectConfiguration['github_project']> = { id: 'P', owner_id: 'O', status_field_id: 'F',
   status_option_ids: { backlog: 'B', ready: 'R', in_progress: 'IP', in_review: 'IR', delivered: 'D' } };
 
-it('requires five distinct status option IDs for new V3 project mappings while retaining valid legacy reads', () => {
+it('requires five distinct status option IDs and rejects a retired four-state mapping', () => {
   expect(() => validateProjectConfiguration({ ...base, github_project: { ...mapping, status_option_ids: { ...mapping.status_option_ids, delivered: 'B' } } }))
     .toThrowError(expect.objectContaining({ code: 'STATUS_MAPPING_INVALID' }));
   expect(() => validateProjectConfiguration({ ...base, github_project: { id: 'P', owner_id: 'O', status_field_id: 'F',
-    status_option_ids: { ready: 'R', in_progress: 'IP', in_review: 'IR', delivered: 'D' } } })).not.toThrow();
+    status_option_ids: { ready: 'R', in_progress: 'IP', in_review: 'IR', delivered: 'D' } } } as unknown as ProjectConfiguration))
+    .toThrowError(expect.objectContaining({ code: 'STATUS_MAPPING_INVALID' }));
+  expect(() => validateProjectConfiguration({ ...base, github_project: mapping })).not.toThrow();
 });

@@ -322,7 +322,7 @@ describe('manual attempt composition and HTTP', () => {
     const passage = f.persistence.getPassage({ passageId: second.status.passageId });
     expect(passage.executorVersion).toBe('18.11.1'); expect(passage.effectiveProfile).toMatchObject({ model: 'model', effort: 'high' });
   });
-  it('keeps a legacy four-value mapping readable after an unrelated save and leaves the captured attempt unchanged', async () => {
+  it('refuses a retired four-value mapping without rewriting it or the captured attempt', async () => {
     const f = await fixture(); const attempt = await start(f);
     const captureBefore = JSON.stringify(f.storage.getAttemptCapture(attempt.id));
     f.storage.interruptAttempts();
@@ -331,23 +331,13 @@ describe('manual attempt composition and HTTP', () => {
     f.db.exec('DROP TRIGGER project_revision_update_immutable');
     f.db.prepare('UPDATE project_revisions SET status_options_json=? WHERE id=?')
       .run(JSON.stringify({ ready: 'READY', inProgress: 'PROGRESS', inReview: 'REVIEW', delivered: 'DELIVERED' }), current.view.configuration.id);
-    const legacy = f.storage.getConfiguration(f.projectId);
-    expect(legacy.view.configuration.github_project?.status_option_ids).toEqual({ ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' });
-    const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = legacy.view.configuration;
-    f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: legacy.etag, projectId: f.projectId,
-      body: { project_changes: { guidance: 'Updated without remapping Status.' } },
-      configuration: { ...configuration, guidance: 'Updated without remapping Status.' }, globalChanges: {} });
-    const after = f.storage.getConfiguration(f.projectId);
-    expect(after.view.configuration.github_project?.status_option_ids).toEqual({ ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' });
-    expect(after.view.prerequisites.map(item => item.code)).toContain('STATUS_MAPPING_LEGACY');
-    expect(JSON.stringify(f.storage.getAttemptCapture(attempt.id))).toBe(captureBefore);
-    const next = await f.prepare();
-    const preview = await f.preparations.getPreparation(next.saved.view.preparation.id);
-    expect(preview.view.preparation.prerequisites.map(item => item.code)).toContain('STATUS_MAPPING_LEGACY');
-    const attemptsBeforeStart = f.storage.listAttempts({}).items.length;
+    const before = f.db.prepare('SELECT * FROM project_revisions ORDER BY id').all();
+    const operations = f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all();
     const physicalPreparesBefore = f.workspaces.prepareAttempt.mock.calls.length;
-    await expect(f.pipeline.startAttempt(next.body, next.context)).rejects.toMatchObject({ code: 'START_PREREQUISITES' });
-    expect(f.storage.listAttempts({}).items).toHaveLength(attemptsBeforeStart);
+    expect(() => f.storage.getConfiguration(f.projectId)).toThrowError(expect.objectContaining({ code: 'PROJECT_DATA_INVALID' }));
+    expect(JSON.stringify(f.storage.getAttemptCapture(attempt.id))).toBe(captureBefore);
+    expect(f.db.prepare('SELECT * FROM project_revisions ORDER BY id').all()).toEqual(before);
+    expect(f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all()).toEqual(operations);
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(physicalPreparesBefore);
   });
   it('preserves partial ownership and late clone completion after cancellation without launching', async () => {

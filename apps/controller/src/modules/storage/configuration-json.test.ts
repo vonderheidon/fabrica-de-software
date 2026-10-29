@@ -1,12 +1,10 @@
 import { expect, it } from 'vitest';
 import { readStatusOptionIds, storeStatusOptions } from './configuration-json.js';
 
-it('preserves legacy status option keys and only writes backlog when supplied', () => {
+it('rejects a four-state mapping and preserves the five current IDs without inventing Backlog', () => {
   const legacy = { ready: 'R', inProgress: 'IP', inReview: 'IR', delivered: 'D' };
-  const readLegacy = readStatusOptionIds(legacy);
-  expect(readLegacy).toEqual({ ready: 'R', in_progress: 'IP', in_review: 'IR', delivered: 'D' });
-  expect(Object.hasOwn(readLegacy, 'backlog')).toBe(false);
-  expect(storeStatusOptions(readLegacy)).toEqual(legacy);
+  expect(() => readStatusOptionIds(legacy)).toThrowError(expect.objectContaining({ code: 'PROJECT_DATA_INVALID' }));
+  expect(legacy).not.toHaveProperty('backlog');
 
   const current = { backlog: 'B', ready: 'R', in_progress: 'IP', in_review: 'IR', delivered: 'D' };
   const readCurrent = readStatusOptionIds({ backlog: 'B', ...legacy });

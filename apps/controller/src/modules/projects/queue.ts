@@ -73,14 +73,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
       }
       if (!selectedIds && !configuration.automation_enabled) continue;
       modesByProject.push({ projectId: projectSummary.id, mode: configuration.default_delivery_mode });
-      if (configuration.github_project && !('backlog' in configuration.github_project.status_option_ids)) {
-        complete = false;
-        blockedProjects.push(projectSummary.id);
-        diagnostics.push({ code: 'STATUS_MAPPING_LEGACY', message: `${projectSummary.name}: o mapeamento salvo ainda não contém Backlog.`,
-          recovery: 'Configure o mapeamento de cinco valores na configuração do projeto antes de iniciar pela fila.' });
-        continue;
-      }
-      if (!configuration.github_project || !('backlog' in configuration.github_project.status_option_ids)) {
+      if (!configuration.github_project) {
         complete = false;
         blockedProjects.push(projectSummary.id);
         diagnostics.push({ code: 'PROJECT_REQUIRED', message: `${projectSummary.name}: não há quadro GitHub válido vinculado.`, recovery: 'Vincule o repositório a um quadro GitHub e configure as cinco opções de Status V3.' });

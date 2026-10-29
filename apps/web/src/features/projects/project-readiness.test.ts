@@ -18,7 +18,7 @@ const prerequisite = (code: string): Prerequisite => ({ code, message: `Condiç�
 const projectId = 'ed0ae84a-3f5b-47c3-bfc5-d6e135880356';
 let sequence = 0;
 let savedConfiguration: ConfigurationView;
-async function mount(locked = false, legacy = false, savedDraft?: DraftValue) {
+async function mount(locked = false, mapped = false, savedDraft?: DraftValue) {
   const identity = configurationDraftIdentity(null, projectId);
   clearDraft(identity, 'project-configuration');
   if (savedDraft !== undefined) setDraft(identity, 'project-configuration', savedDraft);
@@ -35,10 +35,10 @@ async function mount(locked = false, legacy = false, savedDraft?: DraftValue) {
   };
   const configuration: ConfigurationView = { ...settings, deletion: null, prerequisites: [],
     storage: { managed_root: null, original_path: 'C:\\source', locations: [], transition_plan: null,
-      active_transition_operation_id: null, state: 'legacy', cause: null, recovery: null },
+      active_transition_operation_id: null, state: 'current', cause: null, recovery: null },
     configuration_lock: locked ? { attempt_id: 'active-attempt' } : null,
     configuration: { id: 'revision', project_id: projectId, revision: 1, created_at_ms: 1,
-      source: { kind: 'local', location: 'C:\\source' }, base_branch: 'main', github_project: legacy ? { id: 'board', owner_id: 'owner', status_field_id: 'status', status_option_ids: { ready: 'ready', in_progress: 'progress', in_review: 'review', delivered: 'done' } } : null,
+      source: { kind: 'local', location: 'C:\\source' }, base_branch: 'main', github_project: mapped ? { id: 'board', owner_id: 'owner', status_field_id: 'status', status_option_ids: { backlog: 'backlog', ready: 'ready', in_progress: 'progress', in_review: 'review', delivered: 'done' } } : null,
       implementer_profile_id: null, reviewer_profile_id: null,
       correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
       queue_order: { use_board_position: true }, guidance: '' },
@@ -132,10 +132,9 @@ it.each([
   ['PROJECT_CONFIGURATION_CHANGED', 'configuration'], ['PROFILE_REFERENCE_CHANGED', 'profiles'],
   ['CRITERIA_MISSING', 'criteria'], ['ISSUE_CLOSED', 'issue'], ['BLOCKED', 'issue'], ['STATUS_NOT_READY', 'issue'],
 ])('locates %s without changing eligibility', (code, section) => expect(conditionSection(code)).toBe(section));
-it('keeps a legacy mapping readable and omits it when saving another field', async () => {
+it('preserves the current mapping when saving another field', async () => {
   const container = await mount(false, true);
-  expect(container.textContent).toContain('Mapeamento histórico de quatro valores');
-  expect(container.textContent).toContain('Selecione novamente o campo');
+  expect(container.textContent).not.toContain('Mapeamento histórico de quatro valores');
   const field = container.querySelector<HTMLTextAreaElement>('#project-guidance')!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Orientação editada'); field.dispatchEvent(new Event('input', { bubbles: true })); });
   metadata.mockResolvedValueOnce({ data: { ...savedConfiguration, operation_id: crypto.randomUUID(), receipt: { revision: 2, event_cursor: '2' } }, etag: '"saved"' });
@@ -143,9 +142,9 @@ it('keeps a legacy mapping readable and omits it when saving another field', asy
   await act(async () => save.click());
   const [, init] = metadata.mock.calls.find(([, options]) => options?.method === 'PUT')!;
   expect(JSON.parse(String(init.body))).toEqual({ project_changes: { guidance: 'Orientação editada' } });
-  expect(savedConfiguration.configuration.github_project?.status_option_ids).not.toHaveProperty('backlog');
+  expect(savedConfiguration.configuration.github_project?.status_option_ids).toHaveProperty('backlog', 'backlog');
 });
-it.each(['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'REMOTE_UNCONFIRMED', 'PROJECT_REQUIRED', 'STATUS_MAPPING_LEGACY', 'CODE_NOT_PUBLISHED'])('keeps automation edits and displays the server cause and recovery for %s', async (code) => {
+it.each(['PROJECT_NOT_READY', 'PROJECT_QUEUE_BLOCKED', 'REMOTE_UNCONFIRMED', 'PROJECT_REQUIRED', 'CODE_NOT_PUBLISHED'])('keeps automation edits and displays the server cause and recovery for %s', async (code) => {
   const container = await mount();
   const automation = [...container.querySelectorAll('label')].find(item => item.textContent?.includes('Automação deste projeto habilitada'))!.querySelector<HTMLInputElement>('input')!;
   await act(async () => automation.click());
