@@ -27,11 +27,9 @@ const initialForm: FormState = {
   ownerId: '', remoteName: '', boardName: '', visibility: 'private',
 };
 const modeLabels: Record<CreationMode, string> = {
-  local: 'Somente local', remote_no_push: 'Remoto sem push', remote_push: 'Remoto com push',
+  remote_push: 'Remoto com push',
 };
 const modeDescriptions: Record<CreationMode, string> = {
-  local: 'Cria a pasta e um repositório Git com o commit inicial neste computador.',
-  remote_no_push: 'Também cria e vincula um repositório vazio no GitHub. Os arquivos permanecem somente neste computador.',
   remote_push: 'Também cria um repositório no GitHub e publica os arquivos do commit inicial na branch escolhida.',
 };
 const stepLabels: Record<string, string> = {
@@ -179,10 +177,9 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
   }, [creationId, reconcileAccepted]);
 
   const modeCapability = options?.creation_modes.find((item) => item.mode === form.creationMode)?.capability;
-  const remoteMode = true;
   const missingFields = [!form.name.trim() && 'nome do projeto', !form.destinationRelative.trim() && 'pasta do projeto',
-    !form.baseBranch.trim() && 'branch-base', remoteMode && !form.ownerId.trim() && 'proprietário',
-    remoteMode && !form.remoteName.trim() && 'nome do repositório', !form.boardName.trim() && 'nome do quadro'].filter(Boolean);
+    !form.baseBranch.trim() && 'branch-base', !form.ownerId.trim() && 'proprietário',
+    !form.remoteName.trim() && 'nome do repositório', !form.boardName.trim() && 'nome do quadro'].filter(Boolean);
   const destinationPreview = options?.projects_root
     ? `${options.projects_root.replace(/[\\/]+$/, '')}${options.projects_root.includes('\\') ? '\\' : '/'}${form.destinationRelative.trim() || '(pasta do projeto)'}` : null;
   const currentView = creation.status === 'ready' && creation.view.creation.id === creationId && !creation.error ? creation.view : null;
@@ -357,9 +354,9 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
     const input = currentView.creation.plan.input;
     invalidatePlan(() => ({
       name: input.name, templateId: input.template_id, destinationRelative: input.destination_relative,
-      baseBranch: input.base_branch, creationMode: 'remote_push', ownerId: input.remote?.owner_id ?? options?.account.id ?? '',
-      remoteName: input.remote?.name ?? suggestedPath(input.name), boardName: ('board_name' in input ? input.board_name : undefined) ?? input.name,
-      visibility: input.remote?.visibility ?? 'private',
+      baseBranch: input.base_branch, creationMode: 'remote_push', ownerId: input.remote.owner_id,
+      remoteName: input.remote.name, boardName: input.board_name,
+      visibility: input.remote.visibility,
     }));
     setActiveOperationId(null);
     setOperationNotice(`A criação anterior ${currentView.creation.id} permanece no histórico. Revise um novo plano e confirme a autorização antes de criar novamente.`);
@@ -381,7 +378,7 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
       <div><small>Template</small><b>{options?.templates.find((item) => item.id === plan.plan.input.template_id)?.label}</b></div>
       <div><small>Branch-base</small><code>{plan.plan.input.base_branch}</code></div>
       <div><small>Conta observada</small><b>{plan.plan.account.login ?? 'Não confirmada'}</b></div>
-      {plan.plan.input.remote && <div><small>Repositório remoto</small><b>{plan.plan.owner_login ?? 'Proprietário selecionado'}/{plan.plan.input.remote.name}</b><span>{plan.plan.input.remote.visibility === 'private' ? 'Privado' : 'Público'}</span></div>}
+      <div><small>Repositório remoto</small><b>{plan.plan.owner_login ?? 'Proprietário selecionado'}/{plan.plan.input.remote.name}</b><span>{plan.plan.input.remote.visibility === 'private' ? 'Privado' : 'Público'}</span></div>
       <div><small>Quadro Kanban</small><b>{plan.plan.input.board_name}</b></div>
     </div>
     <div className="creation-resource-list"><h4>Arquivos planejados</h4>{plan.plan.files.map((file) => <div className="creation-resource-row" key={file.path}><code>{file.path}</code><span>{file.bytes} bytes</span></div>)}</div>
@@ -410,14 +407,12 @@ export function ProjectCreationDialog({ creationId, onCreationId, onPlanReview, 
       {destinationPreview && <div className="creation-destination-preview field-full" id="creation-destination-preview"><span>O projeto será criado em</span><code>{destinationPreview}</code></div>}
       <div className="creation-group-heading creation-repository-heading field-full"><h3>Repositório e quadro</h3><span>Criação completa obrigatória</span></div>
       <div className="notice field-full"><b>Repositório GitHub com push inicial</b><p>{modeDescriptions.remote_push}</p>{modeCapability && !modeCapability.available && <small className="error">{modeCapability.reason} {modeCapability.recovery}</small>}</div>
-      {remoteMode && <>
         <div className="form-field"><div className="form-field"><label htmlFor="creation-owner-account">Proprietário do repositório *</label><CustomSelect id="creation-owner-account" required value={form.ownerId === options?.account.id ? form.ownerId : ''} onChange={(event) => { const ownerId = event.currentTarget.value; ownerEditedRef.current = true; invalidatePlan((current) => ({ ...current, ownerId })); }}><option value="">Selecione…</option>{options?.account.id && options.account.login && <option value={options.account.id}>{options.account.login}</option>}</CustomSelect></div></div>
         <label className="form-field" htmlFor="creation-remote-name">Nome do repositório remoto *<input id="creation-remote-name" required value={form.remoteName} onChange={(event) => { const remoteName = event.currentTarget.value; setRemoteNameEdited(true); invalidatePlan((current) => ({ ...current, remoteName })); }} /></label>
         <label className="form-field" htmlFor="creation-board-name">Nome do quadro Kanban *<input id="creation-board-name" required value={form.boardName} onChange={(event) => { const boardName = event.currentTarget.value; boardNameEditedRef.current = true; invalidatePlan((current) => ({ ...current, boardName })); }} /></label>
         <div className="form-field"><label htmlFor="creation-visibility">Visibilidade</label><CustomSelect id="creation-visibility" value={form.visibility} onChange={(event) => { const visibility = event.currentTarget.value as FormState['visibility']; invalidatePlan((current) => ({ ...current, visibility })); }}><option value="private">Privado</option><option value="public">Público</option></CustomSelect></div>
-      </>}
     </div>
-    {options && remoteMode && <div className="creation-account-note"><small>Conta GitHub conectada: <b>{options.account.login ?? 'Não confirmada'}</b>. O repositório será criado para o proprietário selecionado.</small></div>}
+    {options && <div className="creation-account-note"><small>Conta GitHub conectada: <b>{options.account.login ?? 'Não confirmada'}</b>. O repositório será criado para o proprietário selecionado.</small></div>}
     {options?.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} />)}
     {options && (options.prerequisites.length > 0 || modeCapability?.available === false) && <a href="#principal/configuracao">Corrigir condições globais na Configuração</a>}
     {planError && <div className="read-state" role="alert">{planError}</div>}
@@ -451,10 +446,8 @@ export function CreationResult({ creationId, load, onRefresh, onOpenProject, onN
     <dl className="creation-result-grid"><div><dt>Pasta</dt><dd><code>{creation.plan.destination}</code></dd></div><div><dt>Modalidade</dt><dd>{modeLabels[creation.plan.input.creation_mode]}</dd></div><div><dt>Branch-base</dt><dd>{creation.plan.input.base_branch}</dd></div><div><dt>Conta</dt><dd>{creation.plan.account.login ?? 'Não confirmada'}</dd></div>
       <div><dt>Quadro Kanban</dt><dd>{boardName ?? 'Aguardando confirmação'}</dd>{boardUrl && <a href={boardUrl} target="_blank" rel="noreferrer">Abrir quadro</a>}</div>
       <div><dt>Próxima ação</dt><dd>{{ wait: 'Aguardar conclusão', reconcile: 'Reconciliar os efeitos incertos', create_new_plan: 'Revisar e autorizar um novo plano', review_effect: 'Revisar o efeito pendente', none: 'Nenhuma ação pendente' }[nextAction]}</dd></div></dl>
-    {creation.plan.input.creation_mode === 'local' && <p>O projeto está somente nesta máquina. Confirme um remoto GitHub antes de iniciar uma issue.</p>}
-    {creation.plan.input.creation_mode === 'remote_no_push' && <p>O repositório remoto foi solicitado sem envio do commit inicial. Confira os efeitos abaixo; a publicação do conteúdo local ainda precisa ser feita.</p>}
     <div className="creation-effect-list"><h4>Etapas locais</h4>{[...confirmedEffects, ...pendingEffects].map((item) => <div key={item.step} className="creation-effect-row"><b>{stepLabels[item.step]}</b><CreationStepState value={item.state} /></div>)}</div>
-    <div className="creation-effect-list"><h4>Efeitos remotos e pendências</h4>{visibleEffects.length === 0 && <p>Nenhum efeito remoto solicitado.</p>}{visibleEffects.map((effect) => <div key={`${effect.kind}:${effect.operation_id}`}><div className="creation-effect-row"><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><CreationStepState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state={effect.state === 'confirmed' ? 'passed' : 'blocked'} />}</div>)}</div>
+    <div className="creation-effect-list"><h4>Efeitos remotos e pendências</h4>{visibleEffects.map((effect) => <div key={`${effect.kind}:${effect.operation_id}`}><div className="creation-effect-row"><b>{stepLabels[effect.kind] ?? 'Etapa da criação'}</b><CreationStepState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state={effect.state === 'confirmed' ? 'passed' : 'blocked'} />}</div>)}</div>
     {load.view.board_operations.length > 0 && <div className="creation-effect-list"><h4>Quadro Kanban e vínculo</h4>{load.view.board_operations.map((effect) => <div key={effect.operation_id}><div className="creation-effect-row"><b>{stepLabels[effect.kind]}</b><CreationStepState value={effect.state} /></div>{effect.reason && <OperatorDiagnosticCard code={effect.reason} state="blocked" />}</div>)}</div>}
     {(creation.diagnostic || diagnostics.length > 0) && <div className="read-state" role="alert"><b>A criação precisa de atenção</b>{[...new Set([creation.diagnostic, ...diagnostics].filter((code): code is string => Boolean(code)))].map(code => <div key={code}><code>{code}</code><OperatorDiagnosticCard code={code} state="blocked" /></div>)}</div>}
     {prerequisites.length > 0 && <div className="notice"><b>Antes de iniciar uma issue</b>{prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} projectId={creation.project_id} />)}</div>}

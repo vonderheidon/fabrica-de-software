@@ -3,7 +3,7 @@ import { assertDeletionPathsAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { CreateScaffold, CreationView, OperationId, type CreationStep, type ProjectCreation } from '#contracts';
+import { CreateScaffold, CreationView, OperationId, ScaffoldPlanV3, type CreationStep, type ProjectCreation } from '#contracts';
 import { configurationETag, digest, eventCursor, guarded, readSettingsView, readProject } from './configuration-reads.js';
 import { registerProject } from './configuration-writes.js';
 import { readSettings } from './settings.js';
@@ -32,12 +32,14 @@ export function readCreation(db: Database.Database, id: string): CreationView {
   if (!r) throw new OperationError(404, 'CREATION_NOT_FOUND', 'Creation not found in the current scope.');
   const recorded = db.prepare<[string], CreationStep>('SELECT step,state FROM creation_steps WHERE creation_id=? ORDER BY rowid').all(id);
   const steps = (['directory','files','git','baseline','registration'] as const).map(step => recorded.find(s => s.step === step) ?? { step, state: 'not_started' as const });
-  const plan = JSON.parse(r.plan_json) as ProjectCreation['plan'];
+  const storedPlan: unknown = JSON.parse(r.plan_json);
+  if (!Value.Check(ScaffoldPlanV3, storedPlan) || digest(storedPlan) !== r.plan_hash) throw new StorageError('OPERATION_DATA_INVALID');
+  const plan = storedPlan as ProjectCreation['plan'];
   const effects = db.prepare('SELECT * FROM effects WHERE creation_id=? ORDER BY rowid').all(id).map(row => effectView(row as Parameters<typeof effectView>[0]));
   const remoteEffects = (['create_repository','associate_origin','baseline_push'] as const).map(kind => {
-    const effect = effects.find(e => e.kind === kind); const requested = plan.input.creationMode !== 'local' && (kind !== 'baseline_push' || plan.input.creationMode === 'remote_push');
-    return { kind,state: effect?.state ?? (requested ? 'not_started' : 'not_requested'),operationId: effect?.operationId ?? null,
-      identity: effect?.expectedIdentity ?? (plan.input.remote ? { ownerId: plan.input.remote.ownerId,repositoryOwner: plan.ownerLogin,repositoryName: plan.input.remote.name,visibility: plan.input.remote.visibility,planHash: r.plan_hash } : {}),reason: effect?.reason ?? null };
+    const effect = effects.find(e => e.kind === kind);
+    return { kind,state: effect?.state ?? 'not_started',operationId: effect?.operationId ?? null,
+      identity: effect?.expectedIdentity ?? { ownerId: plan.input.remote.ownerId,repositoryOwner: plan.ownerLogin,repositoryName: plan.input.remote.name,visibility: plan.input.remote.visibility,planHash: r.plan_hash },reason: effect?.reason ?? null };
   });
   const view = { creation: { id: r.id, operationId: r.operation_id, projectId: r.project_id, planHash: r.plan_hash, plan: JSON.parse(r.plan_json) as unknown,
     state: r.state, revision: r.revision, baselineSha: r.baseline_sha, baselineRef: r.baseline_ref, diagnostic: r.diagnostic, createdAtMs: r.created_at_ms },
@@ -56,7 +58,7 @@ export function acceptCreation(db: Database.Database, command: CreationCommand):
     const s = readSettings(db); const plan = command.body.plan;
     assertDeletionPathsAvailable(db, [plan.destination]);
     if (plan.installationId !== s.installation_id || plan.settingsETag !== configurationETag(readSettingsView(db)) ||
-      (plan.input.creationMode !== 'local' && (!s.account_id || plan.account.id !== s.account_id || plan.account.state !== 'complete' || !plan.input.remote || plan.ownerId !== plan.input.remote.ownerId || !plan.ownerLogin))) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration or account changed. Review a new creation plan.');
+      !s.account_id || plan.account.id !== s.account_id || plan.account.state !== 'complete' || plan.ownerId !== plan.input.remote.ownerId || !plan.ownerLogin) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration or account changed. Review a new creation plan.');
     const reserved = db.prepare<[string], { id: string; state: string; diagnostic: string | null }>(`SELECT c.id,c.state,c.diagnostic FROM project_creations c
       WHERE c.destination=? COLLATE NOCASE AND NOT (
         c.state='failed' AND c.project_id IS NULL AND c.baseline_sha IS NULL AND c.baseline_ref IS NULL
@@ -100,9 +102,9 @@ export function completeCreation(db: Database.Database, id: string): void {
     const c = readCreation(db,id).creation;
     const confirmed = db.prepare<[string], { n: number }>("SELECT count(*) AS n FROM creation_steps WHERE creation_id=? AND state='confirmed'").get(id)!.n;
     const effects = readCreation(db,id).effects;
-    const required = c.plan.input.creationMode === 'local' ? [] : c.plan.input.creationMode === 'remote_push' ? ['create_repository','associate_origin','baseline_push'] : ['create_repository','associate_origin'];
+    const required = ['create_repository','associate_origin','baseline_push'] as const;
     const boardOperations = listCreationBoardOperations(db,id);
-    const boardRequired = c.plan.input.creationMode !== 'local';
+    const boardRequired = true;
     const boardKinds = ['create_board','configure_status','link_repository','configure_view','verify_board'] as const;
     const verifiedBoard = boardOperations.find(item => item.kind === 'verify_board' && item.state === 'confirmed')?.receipt;
     const repository = effects.find(effect => effect.kind === 'create_repository' && effect.state === 'confirmed')?.receipt;
@@ -112,7 +114,7 @@ export function completeCreation(db: Database.Database, id: string): void {
         new Set(boardOperations.filter(item => item.state === 'confirmed' && boardKinds.includes(item.kind)).map(item => item.kind)).size !== boardKinds.length ||
         !verifiedBoard?.project_id || !verifiedBoard.status_field_id || !verifiedBoard.status_options || verifiedBoard.status_options.length !== 5 ||
         verifiedBoard.status_options.map(option => option.name).join('|') !== 'Backlog|Ready|In progress|In review|Done' ||
-        new Set(verifiedBoard.status_options.map(option => option.id)).size !== 5 || verifiedBoard.owner_id !== c.plan.input.remote?.ownerId ||
+        new Set(verifiedBoard.status_options.map(option => option.id)).size !== 5 || verifiedBoard.owner_id !== c.plan.input.remote.ownerId ||
         !repository?.repositoryId || !verifiedBoard.repository_ids?.includes(repository.repositoryId) || verifiedBoard.view_name !== 'Kanban' ||
         verifiedBoard.view_layout !== 'BOARD_LAYOUT' || !verifiedBoard.visible_field_ids?.includes(verifiedBoard.status_field_id) ||
         !verifiedBoard.group_by_field_ids?.includes(verifiedBoard.status_field_id)))) {

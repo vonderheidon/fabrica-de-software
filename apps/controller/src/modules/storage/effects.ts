@@ -35,7 +35,7 @@ function validateCreationEffect(db: Database.Database, creationId: string, kind:
     const remote = db.prepare<[string],{ receipt_json: string }>("SELECT receipt_json FROM effects WHERE creation_id=? AND kind='create_repository' AND state='confirmed'").get(creationId);
     const receipt = remote ? JSON.parse(remote.receipt_json) as EffectReceipt : null;
     if (!receipt || identity.repositoryId !== receipt.id || identity.commitSha !== c.baseline_sha || identity.branchRef !== c.baseline_ref) throw new OperationError(409,'REMOTE_IDENTITY_REQUIRED','Confirm the new repository and exact baseline first.');
-    if (kind === 'baseline_push' && (p.input.creationMode !== 'remote_push' || !db.prepare("SELECT operation_id FROM effects WHERE creation_id=? AND kind='associate_origin' AND state='confirmed'").get(creationId))) throw new OperationError(409,'PUSH_NOT_AUTHORIZED','Baseline publication requires the remote_push plan and confirmed origin.');
+    if (kind === 'baseline_push' && !db.prepare("SELECT operation_id FROM effects WHERE creation_id=? AND kind='associate_origin' AND state='confirmed'").get(creationId)) throw new OperationError(409,'PUSH_NOT_AUTHORIZED','Baseline publication requires a confirmed origin.');
   }
 }
 function explicitGrant(db: Database.Database, attemptId: string, deliveryId: string | null, operationId?: string): boolean {
@@ -132,7 +132,7 @@ export function recordEffectIntent(db: Database.Database, input: EffectIntent): 
   return guarded(() => db.transaction(() => {
     const s = readSettings(db); const { origin, authorization } = input;
     if (!Value.Check(EffectIdentity, input.expectedIdentity) || !Value.Check(OperationId, origin.attemptId ?? origin.creationId) ||
-      !Value.Check(OperationId, authorization.sourceOperationId) || authorization.accountId !== s.account_id || !['icr','commit','pr','local','remote_no_push','remote_push'].includes(authorization.mode) ||
+      !Value.Check(OperationId, authorization.sourceOperationId) || authorization.accountId !== s.account_id || !['icr','commit','pr','remote_push'].includes(authorization.mode) ||
       !['issue_comment','project_status','local_commit','push','pull_request','create_repository','associate_origin','baseline_push'].includes(input.kind) || input.scopeKey.length < 1 || input.scopeKey.length > 4096 ||
       (['local_commit','push','pull_request'].includes(input.kind) && (input.scopeKey !== origin.deliveryId || !origin.attemptId)) ||
       (origin.attemptId !== undefined) === (origin.creationId !== undefined)) {

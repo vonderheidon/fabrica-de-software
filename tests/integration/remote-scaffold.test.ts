@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { HttpCreationView, HttpScaffoldInput, HttpScaffoldOptions, HttpScaffoldPlanned, type CreateScaffold, type EffectReceipt, type EffectView, type GitHubMutationResult, type ScaffoldInputV3, type SessionResponse } from '#contracts';
 import { createScaffold, type ScaffoldDependencies } from '../../apps/controller/src/modules/projects/index.js';
-import { openStorage, openStorageAtMigrationVersionForTests } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { acceptCreation } from '../../apps/controller/src/modules/storage/creations.js';
 import { readOperation } from '../../apps/controller/src/modules/storage/operations.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -18,11 +18,9 @@ import { GraphQLReader } from '../../apps/controller/src/modules/github/transpor
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 const complete = <T>(data: T) => ({ state: 'complete' as const,data,diagnostics: [],retryAtMs: null });
-async function fixture(failure = '', migrationVersionForTest?: number) {
+async function fixture(failure = '') {
   const directory = mkdtempSync(join(tmpdir(),'remote-scaffold-'));
-  cleanup.push(() => rmSync(directory,{ recursive: true })); let storage = migrationVersionForTest === undefined
-    ? openStorage({ dataDirectory: directory,busyTimeoutMs: 10 })
-    : openStorageAtMigrationVersionForTests({ dataDirectory: directory,busyTimeoutMs: 10 }, migrationVersionForTest);
+  cleanup.push(() => rmSync(directory,{ recursive: true })); let storage = openStorage({ dataDirectory: directory,busyTimeoutMs: 10 });
   cleanup.push(() => storage.close());
   const db = new Database(join(directory,'factory.sqlite')); cleanup.push(() => { db.close(); }); db.pragma('foreign_keys=ON');
   db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,?,?,?)').run('ACCOUNT_test','test-user',1,1,1);
@@ -176,7 +174,7 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
   });
   it('reopens the current schema without reseeding installation data', async () => {
     const f = await fixture(''); const before = f.db.prepare("SELECT installation_id,account_id,revision FROM factory_settings WHERE id='local'").get();
-    const { applyMigrations, loadMigrations } = await import('../../apps/controller/src/modules/storage/migrations.js');
+    const { applyMigrations, loadMigrations } = await import('../fixtures/historical-schema.js');
     applyMigrations(f.db,loadMigrations(),() => { throw new Error('MUST_NOT_RESEED'); });
     expect(f.db.prepare('SELECT installation_id,account_id,revision FROM factory_settings WHERE id=\'local\'').get()).toEqual(before);
     expect(f.db.prepare('SELECT * FROM creation_board_operations').all()).toEqual([]);
@@ -371,19 +369,29 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(response.headers.location).toMatch(/^\/api\/v1\/operations\//);
     expect((await app.inject({ method: 'POST',url,headers,payload: { deliveryId: randomUUID() } })).statusCode).toBe(400);
   });
-  it('preserves a completed creation receipt when reopening the current schema',async () => {
-    const f = await fixture(''); const { remote: _remote,boardName: _boardName,...localInput } = f.input;
-    const planned = await f.scaffold.plan({ ...localInput,creationMode: 'local' });
+  it('refuses a completed creation with a retired local plan contract without changing its rows',async () => {
+    const f = await fixture('');
+    const planned = await f.scaffold.plan(f.input);
     const body: CreateScaffold = { planHash: planned.planHash,plan: planned.plan,authorized: true };
     const originalId = randomUUID(); const accepted = await f.scaffold.create(body,originalId); await f.scaffold.drain();
-    const before = readOperation(f.db,originalId); const instance = f.db.prepare('SELECT installation_id FROM factory_settings').get();
-    f.storage.close();
-    const storage = openStorage({ dataDirectory: f.directory }); cleanup.push(() => storage.close());
-    const probe = new Database(join(f.directory,'factory.sqlite')); cleanup.push(() => { probe.close(); });
-    expect(probe.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(instance); expect(probe.pragma('foreign_key_check')).toEqual([]);
-    expect(storage.getOperation(originalId)).toEqual(before);
-    expect(storage.getCreation(accepted.resource.id).creation).toMatchObject({ state: 'completed',baselineSha: 'a'.repeat(40),baselineRef: 'refs/heads/release/base' });
-    expect(storage.getCreation(accepted.resource.id).board_operations).toEqual([]);
-    expect(probe.prepare('SELECT count(*) AS n FROM effects').get()).toEqual({ n: 0 }); expect(probe.prepare('SELECT count(*) AS n FROM creation_reconciliations').get()).toEqual({ n: 0 });
+    const { remote: _remote, boardName: _boardName, ...localInput } = planned.plan.input;
+    const retired = { ...planned.plan, input: { ...localInput, creationMode: 'local' } };
+    const trigger = f.db.prepare<[], { sql: string }>("SELECT sql FROM sqlite_schema WHERE type='trigger' AND name='creation_identity'").get()!.sql;
+    f.db.exec('DROP TRIGGER creation_identity');
+    f.db.prepare('UPDATE project_creations SET plan_json=? WHERE id=?').run(JSON.stringify(retired), accepted.resource.id);
+    f.db.exec(trigger);
+    const before = {
+      creation: f.db.prepare('SELECT * FROM project_creations WHERE id=?').get(accepted.resource.id),
+      operation: f.db.prepare('SELECT * FROM operation_requests WHERE operation_id=?').get(originalId),
+      effects: f.db.prepare('SELECT * FROM effects WHERE creation_id=? ORDER BY operation_id').all(accepted.resource.id),
+    };
+    expect(() => openStorage({ dataDirectory: f.directory })).toThrowError(
+      expect.objectContaining({ code: 'OPERATION_DATA_INVALID' }),
+    );
+    expect({
+      creation: f.db.prepare('SELECT * FROM project_creations WHERE id=?').get(accepted.resource.id),
+      operation: f.db.prepare('SELECT * FROM operation_requests WHERE operation_id=?').get(originalId),
+      effects: f.db.prepare('SELECT * FROM effects WHERE creation_id=? ORDER BY operation_id').all(accepted.resource.id),
+    }).toEqual(before);
   });
 });

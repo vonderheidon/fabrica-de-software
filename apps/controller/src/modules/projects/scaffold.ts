@@ -26,15 +26,13 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
     if (!capability.available) result.push({ code: capability.reason_code ?? 'CONTEXT_UNAVAILABLE', message: capability.reason ?? 'Git context unavailable.', recovery: capability.recovery ?? 'Start the authorized host.' });
     return result;
   };
-  async function plan(input: import('#contracts').ScaffoldInput): Promise<ScaffoldPlanned> {
-    if (!Value.Check(ScaffoldInput, input) || !input.name.trim() || (input.boardName !== undefined && !input.boardName.trim()) ||
-        input.creationMode === 'remote_no_push' || (input.creationMode === 'remote_push' && !input.boardName)) {
+  async function plan(input: import('#contracts').ScaffoldInputV3): Promise<ScaffoldPlanned> {
+    if (!Value.Check(ScaffoldInput, input) || !input.name.trim() || !input.boardName.trim()) {
       throw new OperationError(400, 'SCAFFOLD_INPUT_INVALID', 'Remote creation requires remote_push and an explicit board name.');
     }
     input = { ...input, triageEnabled: true };
-    if ((input.creationMode === 'local') === Boolean(input.remote)) throw new OperationError(400,'SCAFFOLD_INPUT_INVALID','Remote choices are required only for remote modalities.');
-    if (input.creationMode !== 'local' && (!github.inspectScaffoldRemote || !github.createScaffoldRepository || !github.reconcileScaffoldRepository ||
-        !github.scaffoldBoardCapability || !github.createBoardOperation || !github.reconcileBoardOperation || !workspaces.executeScaffoldGit || !workspaces.reconcileScaffoldGit)) {
+    if (!github.inspectScaffoldRemote || !github.createScaffoldRepository || !github.reconcileScaffoldRepository ||
+        !github.scaffoldBoardCapability || !github.createBoardOperation || !github.reconcileBoardOperation || !workspaces.executeScaffoldGit || !workspaces.reconcileScaffoldGit) {
       throw new OperationError(409,'CREATION_MODE_UNAVAILABLE','The authorized remote scaffold adapters are unavailable.');
     }
     try { validateScaffoldBranch(input.baseBranch); }
@@ -49,22 +47,19 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
     const files = renderEngineering(template.id === 'engineering.v1' ? renderScaffoldReadme(template.files, input) : template.files, catalog.engineering, input.triageEnabled);
     const observed = await account();
     let ownerLogin: string | undefined;
-    if (input.remote) {
-      if (observed.state !== 'complete' || !s.account_id || observed.id !== s.account_id) throw new OperationError(409,'SCAFFOLD_ACCOUNT_CHANGED','Observe the configured account before remote creation.');
-      if (!github.scaffoldRemoteCapability?.(input.remote,s.account_id,input.creationMode === 'remote_push').available) throw new OperationError(409,'CREATION_TARGET_NOT_AUTHORIZED','The trusted host has not authorized this exact remote target and effects.');
-      if (!github.scaffoldBoardCapability?.(input.remote.ownerId,input.remote,s.account_id).available) throw new OperationError(409,'BOARD_TARGET_NOT_AUTHORIZED','The trusted host has not authorized GitHub Projects for this creation.');
-      const remote = await github.inspectScaffoldRemote!(input.remote,s.account_id);
-      if (remote.state !== 'complete' || !remote.data) throw new OperationError(409,'SCAFFOLD_REMOTE_UNAVAILABLE','The remote owner and name could not be completely observed.');
-      if (remote.data.repositoryId) throw new OperationError(409,'SCAFFOLD_REMOTE_EXISTS','The selected repository already exists and will not be adopted.');
-      ownerLogin = remote.data.ownerLogin;
-    }
+    if (observed.state !== 'complete' || !s.account_id || observed.id !== s.account_id) throw new OperationError(409,'SCAFFOLD_ACCOUNT_CHANGED','Observe the configured account before remote creation.');
+    if (!github.scaffoldRemoteCapability?.(input.remote,s.account_id,true).available) throw new OperationError(409,'CREATION_TARGET_NOT_AUTHORIZED','The trusted host has not authorized this exact remote target and effects.');
+    if (!github.scaffoldBoardCapability?.(input.remote.ownerId,input.remote,s.account_id).available) throw new OperationError(409,'BOARD_TARGET_NOT_AUTHORIZED','The trusted host has not authorized GitHub Projects for this creation.');
+    const remote = await github.inspectScaffoldRemote!(input.remote,s.account_id);
+    if (remote.state !== 'complete' || !remote.data) throw new OperationError(409,'SCAFFOLD_REMOTE_UNAVAILABLE','The remote owner and name could not be completely observed.');
+    if (remote.data.repositoryId) throw new OperationError(409,'SCAFFOLD_REMOTE_EXISTS','The selected repository already exists and will not be adopted.');
+    ownerLogin = remote.data.ownerLogin;
     if (configuration.etag !== storage.getGlobalConfiguration().etag) throw new OperationError(409, 'SCAFFOLD_PLAN_CHANGED', 'Configuration changed while planning. Review a new plan.');
     const value: ScaffoldPlan = { formatVersion: 1, input, installationId: s.installation_id, settingsETag: configuration.etag,
       ...destination, templateDigest: template.digest, files: files.map(f => ({ path: f.path, bytes: Buffer.byteLength(f.content), sha256: fileDigest(f.content) })),
-      engineering: engineeringSummary(input.triageEnabled), account: observed, ownerId: input.remote?.ownerId ?? null, ...(ownerLogin ? { ownerLogin } : {}),
+      engineering: engineeringSummary(input.triageEnabled), account: observed, ownerId: input.remote.ownerId, ...(ownerLogin ? { ownerLogin } : {}),
       effects: ['create_directory', 'write_template_and_engineering', 'initialize_git', 'create_conventional_baseline',
-        ...(input.remote ? ['create_repository','associate_origin',...(input.creationMode === 'remote_push' ? ['baseline_push'] : []),
-          'create_board','configure_status','link_repository','configure_view','verify_board'] : []),'register_local_project'] };
+        'create_repository','associate_origin','baseline_push','create_board','configure_status','link_repository','configure_view','verify_board','register_local_project'] };
     return { planHash: scaffoldDigest(value), plan: value, prerequisites: prerequisites() };
   }
   async function revalidate(body: CreateScaffold) {
@@ -84,8 +79,8 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
         if (closing && state === 'running') throw new OperationError(409, 'CREATION_INTERRUPTED', 'Controller is closing.');
         storage.recordCreationStep(id,step,state,sha);
       } });
-      if (current.plan.input.remote) await executeRemote(id,current.plan);
-      if (current.plan.input.remote) await executeBoard(id,current.plan);
+      await executeRemote(id,current.plan);
+      await executeBoard(id,current.plan);
       storage.completeCreation(id);
     } catch (error) {
       const code = error instanceof OperationError || error instanceof ScaffoldWorkspaceError ? error.code : 'SCAFFOLD_CREATION_FAILED';
@@ -104,7 +99,7 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
     const c = storage.getCreation(id).creation; const remote = plan.input.remote!;
     const common: EffectIdentity = { planHash: c.planHash,ownerId: remote.ownerId,repositoryOwner: plan.ownerLogin!,repositoryName: remote.name,visibility: remote.visibility };
     let repository: EffectView | undefined;
-    for (const kind of ['create_repository','associate_origin',...(plan.input.creationMode === 'remote_push' ? ['baseline_push'] as const : [])] as const) {
+    for (const kind of ['create_repository','associate_origin','baseline_push'] as const) {
       await currentAuthority(id,plan);
       const identity: EffectIdentity = kind === 'create_repository' ? { ...common,marker: `Factory-Creation:${plan.installationId}:${id}:${c.planHash}` }
         : { ...common,repositoryId: repository!.receipt!.id,commitSha: c.baselineSha!,branchRef: c.baselineRef! };
@@ -142,16 +137,12 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
   }
   const boardKinds: readonly CreationBoardOperationKind[] = ['create_board','configure_status','link_repository','configure_view','verify_board'];
   async function executeBoard(id: string, plan: ScaffoldPlan): Promise<void> {
-    if (!plan.input.remote || !plan.account.id || !github.createBoardOperation || !github.reconcileBoardOperation) {
+    if (!plan.account.id || !github.createBoardOperation || !github.reconcileBoardOperation) {
       throw new OperationError(409,'BOARD_CAPABILITY_UNAVAILABLE','GitHub Projects operations are unavailable in this host.');
     }
     const first = storage.getCreation(id); const repository = first.effects.find(effect => effect.kind === 'create_repository' && effect.state === 'confirmed');
     if (!repository?.receipt?.repositoryId) throw new OperationError(409,'CREATION_REMOTE_IDENTITY_REQUIRED','Confirm the repository before configuring its board.');
-    const existingBoards = first.board_operations;
-    const boardName = plan.input.boardName ?? existingBoards[0]?.expected_identity.board_name;
-    if (!boardName || (plan.input.boardName === undefined && existingBoards.length === 0) || existingBoards.some(item => item.expected_identity.board_name !== boardName)) {
-      throw new OperationError(409,'LEGACY_CREATION_REPLAN_REQUIRED','This legacy creation has no durable board authorization. Review and authorize a new complete plan.');
-    }
+    const boardName = plan.input.boardName;
     const authorization = { format_version: 1 as const, source_operation_id: first.creation.operationId, plan_hash: first.creation.planHash,
       account_id: plan.account.id, creation_id: id, actions: [...boardKinds] };
     let projectId = first.board_operations.find(item => item.kind === 'create_board')?.receipt?.project_id ?? null;
@@ -262,19 +253,15 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
             if (described.state !== 'confirmed') throw new OperationError(409,described.reason ?? 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED','The repository description could not be confirmed.');
           }
           current = storage.getCreation(id);
-          const required = current.creation.plan.input.creationMode === 'local' ? [] : current.creation.plan.input.creationMode === 'remote_push'
-            ? ['create_repository','associate_origin','baseline_push'] : ['create_repository','associate_origin'];
+          const required = ['create_repository','associate_origin','baseline_push'] as const;
           const unresolvedRemoteEffects = current.effects.some(effect => ['running','unknown','failed_known'].includes(effect.state));
-          if (current.creation.plan.input.creationMode !== 'local' && !unresolvedRemoteEffects) {
-            await executeRemote(id,current.creation.plan);
-          }
+          if (!unresolvedRemoteEffects) await executeRemote(id,current.creation.plan);
           current = storage.getCreation(id);
           const remoteEffectsConfirmed = required.every(kind => current.effects.some(effect => effect.kind === kind && effect.state === 'confirmed'));
-          if (remoteEffectsConfirmed && current.creation.plan.input.creationMode !== 'local') await executeBoard(id,current.creation.plan);
-          else if (current.creation.plan.input.creationMode !== 'local' && !remoteEffectsConfirmed) diagnostic ??= 'CREATION_REMOTE_EFFECTS_PENDING';
+          if (remoteEffectsConfirmed) await executeBoard(id,current.creation.plan);
+          else diagnostic ??= 'CREATION_REMOTE_EFFECTS_PENDING';
           current = storage.getCreation(id);
-          const boardComplete = current.creation.plan.input.creationMode === 'local' ||
-            (current.board_operations.length === boardKinds.length && boardKinds.every(kind => current.board_operations.some(item => item.kind === kind && item.state === 'confirmed')));
+          const boardComplete = current.board_operations.length === boardKinds.length && boardKinds.every(kind => current.board_operations.some(item => item.kind === kind && item.state === 'confirmed'));
           if (current.creation.state !== 'completed' && current.confirmedEffects.filter(s => s.step !== 'registration').length === 4 &&
               required.every(kind => current.effects.some(effect => effect.kind === kind && effect.state === 'confirmed')) && boardComplete) storage.completeCreation(id);
           if (storage.getCreation(id).creation.state !== 'completed') diagnostic ??= 'CREATION_INCOMPLETE';

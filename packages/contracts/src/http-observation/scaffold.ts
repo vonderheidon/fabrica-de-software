@@ -8,14 +8,8 @@ const closed = { additionalProperties: false } as const;
 const text = (maxLength = 4096) => Type.String({ minLength: 1, maxLength });
 const digest = Type.String({ pattern: '^[a-f0-9]{64}$' });
 const nullable = Type.Union([text(), Type.Null()]);
-export const CreationMode = Type.Union([Type.Literal('local'), Type.Literal('remote_no_push'), Type.Literal('remote_push')]);
+export const CreationMode = Type.Literal('remote_push');
 export type CreationMode = Static<typeof CreationMode>;
-export const LegacyScaffoldInput = Type.Object({
-    name: text(256), template_id: text(128), template_digest: digest, destination_relative: text(1024),
-    creation_mode: CreationMode, base_branch: text(256), triage_enabled: Type.Boolean(),
-    remote: Type.Optional(Type.Object({ owner_id: text(256), name: text(100), visibility: Type.Union([Type.Literal('private'), Type.Literal('public')]) }, closed)),
-}, closed);
-export type LegacyScaffoldInput = Static<typeof LegacyScaffoldInput>;
 export const ScaffoldInput = Type.Object({
     name: text(256), template_id: text(128), template_digest: digest, destination_relative: text(1024),
     creation_mode: Type.Literal('remote_push'), base_branch: text(256), triage_enabled: Type.Boolean(),
@@ -35,16 +29,14 @@ const scaffoldPlanFields = {
 } as const;
 export const ScaffoldPlanV3 = Type.Object({ ...scaffoldPlanFields, input: ScaffoldInput }, closed);
 export type ScaffoldPlanV3 = Static<typeof ScaffoldPlanV3>;
-export const LegacyScaffoldPlan = Type.Object({ ...scaffoldPlanFields, input: LegacyScaffoldInput }, closed);
-export type LegacyScaffoldPlan = Static<typeof LegacyScaffoldPlan>;
-export const ScaffoldPlan = Type.Union([ScaffoldPlanV3, LegacyScaffoldPlan]);
-export type ScaffoldPlan = Static<typeof ScaffoldPlan>;
+export const ScaffoldPlan = ScaffoldPlanV3;
+export type ScaffoldPlan = ScaffoldPlanV3;
 export const ScaffoldPlanned = Type.Object({ plan_hash: digest, plan: ScaffoldPlanV3, prerequisites: Type.Array(Prerequisite, { maxItems: 100 }) }, closed);
 export type ScaffoldPlanned = Static<typeof ScaffoldPlanned>;
 export const ScaffoldOptions = Type.Object({
     catalog: Type.Object({ id: text(128), version: Type.Literal(1), digest }, closed),
     templates: Type.Array(Type.Object({ id: text(128), digest, label: text(256), engineering_summary: text() }, closed), { maxItems: 20 }),
-    projects_root: nullable, creation_modes: Type.Array(Type.Object({ mode: CreationMode, capability: Capability }, closed), { maxItems: 3 }),
+    projects_root: nullable, creation_modes: Type.Array(Type.Object({ mode: CreationMode, capability: Capability }, closed), { maxItems: 1 }),
     account: ScaffoldAccount, prerequisites: Type.Array(Prerequisite, { maxItems: 100 }), event_cursor: Type.String({ pattern: '^[0-9]+$' }),
 }, closed);
 export type ScaffoldOptions = Static<typeof ScaffoldOptions>;
@@ -54,7 +46,7 @@ export const CreationParams = Type.Object({ creationId: OperationId }, closed);
 export const CreationStep = Type.Object({ step: Type.Union([Type.Literal('directory'), Type.Literal('files'), Type.Literal('git'), Type.Literal('baseline'), Type.Literal('registration')]), state: Type.Union([Type.Literal('not_started'), Type.Literal('running'), Type.Literal('confirmed'), Type.Literal('unknown')]) }, closed);
 export type CreationStep = Static<typeof CreationStep>;
 export const ProjectCreation = Type.Object({
-    id: OperationId, operation_id: OperationId, project_id: Type.Union([OperationId, Type.Null()]), plan_hash: digest, plan: ScaffoldPlan,
+    id: OperationId, operation_id: OperationId, project_id: Type.Union([OperationId, Type.Null()]), plan_hash: digest, plan: ScaffoldPlanV3,
     state: Type.Union(['pending', 'running', 'completed', 'partial', 'failed'].map(s => Type.Literal(s))),
     revision: Type.Integer({ minimum: 1 }), baseline_sha: Type.Union([Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' }), Type.Null()]), baseline_ref: nullable,
     diagnostic: nullable, created_at_ms: Type.Integer({ minimum: 0 }),

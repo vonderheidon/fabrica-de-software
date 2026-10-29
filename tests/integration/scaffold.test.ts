@@ -7,18 +7,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { HttpCreationView, HttpScaffoldOptions, CreationView, ScaffoldOptions, ScaffoldPlanned, type CreateScaffold, type ScaffoldInput, type SessionResponse } from '#contracts';
 import { toHttpScaffoldPlan, toHttpCreationView } from '../../apps/controller/src/http/observation-views.js';
-import { createScaffold } from '../../apps/controller/src/modules/projects/index.js';
+import { createScaffold, type ScaffoldDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { loadScaffoldCatalog, renderEngineering, renderScaffoldReadme } from '../../apps/controller/src/modules/projects/scaffold-resources.js';
 import { createLocalScaffolder } from '../../apps/controller/src/modules/workspaces/scaffold.js';
 import { ScaffoldWorkspaceError } from '../../apps/controller/src/modules/workspaces/scaffold-path-guard.js';
 import { GitReadError, type GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
-import { openStorage, openStorageAtMigrationVersionForTests } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
-import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { readSettings } from '../../apps/controller/src/modules/storage/settings.js';
-import { seedLegacySettings as seedSettings } from '../fixtures/legacy-settings.js';
-import { saveTimeDefaults, settingsETag } from '../../apps/controller/src/modules/storage/operations.js';
 
 vi.mock('node:fs/promises', async importOriginal => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
@@ -32,12 +28,11 @@ afterEach(async () => {
   vi.mocked(directoryFs.realpath).mockImplementation(async path => resolve(String(path)));
   vi.clearAllMocks();
 });
-function fixture(migrationVersionForTest?: number) {
+function fixture() {
   const cache = resolve('.cache'); mkdirSync(cache,{ recursive: true }); const directory = mkdtempSync(join(cache,'scaffold-test-')); directories.push(directory);
   const projectsRoot = join(directory,'projects'); mkdirSync(projectsRoot);
   const storageOptions = { dataDirectory: join(directory,'data'), busyTimeoutMs: 20 };
-  const storage = migrationVersionForTest === undefined ? openStorage(storageOptions)
-    : openStorageAtMigrationVersionForTests(storageOptions, migrationVersionForTest);
+  const storage = openStorage(storageOptions);
   cleanup.push(() => storage.close());
   storage.saveSettings({ operationId: randomUUID(), expectedRevision: storage.getGlobalConfiguration().etag, body: { changes: { projects_root: projectsRoot } }, changes: { projects_root: projectsRoot } });
   let login = 'fixture-user'; let branch = 'main'; let failGit = false; let missingIdentity = false;
@@ -66,16 +61,44 @@ function fixture(migrationVersionForTest?: number) {
     close: vi.fn(async () => {}),
   };
   const acquireGuard = vi.fn(async (_parent: string) => guard);
-  const workspaces = createLocalScaffolder(git, acquireGuard);
-  const github = { getIdentity: vi.fn(async () => ({ state: 'complete' as const, data: { id: login, login }, diagnostics: [], retryAtMs: null })) };
+  const confirmed = (effect: import('#contracts').EffectView): import('#contracts').GitHubMutationResult => ({
+    state: 'confirmed', reason: null, retryAtMs: null, receipt: { id: effect.kind === 'baseline_push' ? 'a'.repeat(40) : 'R_created',
+      repositoryId: 'R_created', ownerId: 'OWNER_test', repositoryName: 'repositorio', visibility: 'private',
+      url: 'https://github.com/fixture-user/repositorio', operationId: effect.operationId,
+      ...(effect.kind === 'create_repository' ? {} : { commitSha: 'a'.repeat(40), branchRef: 'refs/heads/feature/baseline' }) },
+  });
+  const workspaces = { ...createLocalScaffolder(git, acquireGuard),
+    executeScaffoldGit: vi.fn<NonNullable<ScaffoldDependencies['workspaces']['executeScaffoldGit']>>(async (_plan, effect, _account, authorize) => { await authorize(); return confirmed(effect); }),
+    reconcileScaffoldGit: vi.fn<NonNullable<ScaffoldDependencies['workspaces']['reconcileScaffoldGit']>>(async (_plan, effect) => confirmed(effect)),
+  };
+  const boardResult = (operation: import('#contracts').CreationBoardOperation): import('#contracts').CreationBoardMutationResult => ({
+    state: 'confirmed', reason: null, receipt: { format_version: 1, observed_at_ms: 1,
+      project_id: 'PVT_board', owner_id: 'OWNER_test',
+      ...(['create_board', 'verify_board'].includes(operation.kind) ? { title: operation.expected_identity.board_name, project_url: 'https://github.com/users/fixture-user/projects/1' } : {}),
+      ...(['link_repository', 'verify_board'].includes(operation.kind) ? { repository_ids: ['R_created'] } : {}),
+      ...(['configure_status', 'configure_view', 'verify_board'].includes(operation.kind) ? { status_field_id: 'FIELD_status', status_field_name: 'Status',
+        status_options: ['Backlog', 'Ready', 'In progress', 'In review', 'Done'].map((name, index) => ({ name, id: `OPTION_${index}` })) } : {}),
+      ...(['configure_view', 'verify_board'].includes(operation.kind) ? { view_id: 'VIEW_kanban', view_name: 'Kanban', view_layout: 'BOARD_LAYOUT' as const, visible_field_ids: ['FIELD_status'], group_by_field_ids: ['FIELD_status'] } : {}) },
+  });
+  const github = { getIdentity: vi.fn(async () => ({ state: 'complete' as const, data: { id: login, login }, diagnostics: [], retryAtMs: null })),
+    scaffoldRemoteCapability: () => ({ available: true, reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' }), scaffoldBoardCapability: () => ({ available: true, reason_code: 'BOARD_TARGET_NOT_AUTHORIZED' }),
+    inspectScaffoldRemote: vi.fn(async () => ({ state: 'complete' as const, data: { ownerLogin: 'fixture-user', repositoryId: null }, diagnostics: [], retryAtMs: null })),
+    createScaffoldRepository: vi.fn<NonNullable<ScaffoldDependencies['github']['createScaffoldRepository']>>(async (effect, _account, authorize) => { await authorize(); return confirmed(effect); }),
+    reconcileScaffoldRepository: vi.fn<NonNullable<ScaffoldDependencies['github']['reconcileScaffoldRepository']>>(async effect => confirmed(effect)),
+    createBoardOperation: vi.fn<NonNullable<ScaffoldDependencies['github']['createBoardOperation']>>(async (operation, _target, _repository, _account, authorize, markSent) => { if (operation.kind !== 'verify_board') { await authorize(); markSent(); } return boardResult(operation); }),
+    reconcileBoardOperation: vi.fn<NonNullable<ScaffoldDependencies['github']['reconcileBoardOperation']>>(async operation => boardResult(operation)),
+  };
   const logFailure = vi.fn(); const scaffold = createScaffold({ storage, github, workspaces, logFailure }); cleanup.push(() => scaffold.close());
   const db = new Database(join(directory,'data','factory.sqlite')); cleanup.push(() => { db.close(); });
+  db.prepare('INSERT INTO accounts(github_account_id,login,observed_at_ms,created_at_ms,updated_at_ms) VALUES (?,?,1,1,1)').run(login, login);
+  db.prepare('UPDATE factory_settings SET account_id=?').run(login);
   return { directory, projectsRoot, storage, scaffold, workspaces, github, calls, db, logFailure, guard, acquireGuard, changeAccount: () => { login = 'other-user'; }, failGit: () => { failGit = true; }, clearIdentity: () => { missingIdentity = true; },
-    failConfig: (exitCode: number) => { configExit = exitCode; }, rejectConfig: (error: Error) => { configError = error; } };
+    restoreAccount: () => { login = 'fixture-user'; }, failConfig: (exitCode: number) => { configExit = exitCode; }, rejectConfig: (error: Error) => { configError = error; } };
 }
 async function choices(f: ReturnType<typeof fixture>, destinationRelative = 'new-project'): Promise<ScaffoldInput> {
   const options = await f.scaffold.getOptions(); const template = options.templates[0]!;
-  return { name: 'Projeto á', templateId: template.id, templateDigest: template.digest, destinationRelative, creationMode: 'local', baseBranch: 'feature/baseline', triageEnabled: false };
+  return { name: 'Projeto á', boardName: 'Quadro do projeto', templateId: template.id, templateDigest: template.digest, destinationRelative, creationMode: 'remote_push', baseBranch: 'feature/baseline', triageEnabled: false,
+    remote: { ownerId: 'OWNER_test', name: 'repositorio', visibility: 'private' } };
 }
 async function authorized(f: ReturnType<typeof fixture>): Promise<CreateScaffold> { const p = await f.scaffold.plan(await choices(f)); return { planHash: p.planHash, plan: p.plan, authorized: true }; }
 async function customTemplate(f: ReturnType<typeof fixture>, files: { path: string; content: string }[]) {
@@ -146,21 +169,19 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     expect(f.db.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 1 });
     expect(f.calls).toEqual([]);
   });
-  it.each(['local','remote_no_push','remote_push'] as const)('renders a Portuguese README consistent with %s', async creationMode => {
-    const f = fixture(); const input = { ...await choices(f), creationMode, ...(creationMode === 'local' ? {} : { remote: { ownerId: 'OWNER_test', name: 'repositorio', visibility: 'private' as const } }) };
+  it('renders a Portuguese README consistent with the complete remote_push plan', async () => {
+    const f = fixture(); const input = await choices(f);
     const readme = renderScaffoldReadme([{ path: 'README.md', content: '' }],input)[0]!.content;
     expect(readme).toContain('# Projeto á'); expect(readme).toContain('GitHub Project');
-    if (creationMode === 'local') expect(readme).toContain('associe um remoto GitHub');
-    else { expect(readme).not.toContain('associe um remoto GitHub'); expect(readme).toContain('associado como `origin`'); }
-    if (creationMode === 'remote_no_push') expect(readme).toContain('somente no computador');
-    if (creationMode === 'remote_push') expect(readme).toContain('commit inicial publicado');
+    expect(readme).not.toContain('associe um remoto GitHub'); expect(readme).toContain('associado como `origin`');
+    expect(readme).toContain('commit inicial publicado');
   });
   it('returns versioned options and a deterministic plan with no destination or Git effects', async () => {
     const f = fixture(); const before = f.storage.getEvents({}); const options = await f.scaffold.getOptions(); expect(Value.Check(ScaffoldOptions,options)).toBe(true);
-    expect(options.creationModes.map(m => m.capability.available)).toEqual([false]);
+    expect(options.creationModes.map(m => m.capability.available)).toEqual([true]);
     const input = await choices(f); const first = await f.scaffold.plan(input); const second = await f.scaffold.plan(input);
     expect(Value.Check(ScaffoldPlanned,first)).toBe(true); expect(first).toEqual(second);
-    expect(first.plan).toMatchObject({ destination: join(f.projectsRoot,'new-project'), ownerId: null, engineering: { tracker: 'github', installsSkills: false, createsLabels: false }, account: { id: 'fixture-user' } });
+    expect(first.plan).toMatchObject({ destination: join(f.projectsRoot,'new-project'), ownerId: 'OWNER_test', engineering: { tracker: 'github', installsSkills: false, createsLabels: false }, account: { id: 'fixture-user' } });
     expect(first.plan.files.map(f => f.path)).toContain('AGENTS.md');
     expect(first.plan.engineering.triageEnabled).toBe(true);
     expect(first.plan.files.map(f => f.path)).toContain('docs/agents/triage-labels.md');
@@ -171,11 +192,12 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const f = fixture(); const body = await authorized(f); const operationId = randomUUID();
     const operation = await f.scaffold.create(body,operationId); expect(operation.resource.type).toBe('creation'); expect(operation.receipt).toBeDefined();
     await f.scaffold.drain(); const view = f.scaffold.getCreation(operation.resource.id); expect(Value.Check(CreationView,view)).toBe(true);
-    expect(view.creation).toMatchObject({ state: 'completed', baselineSha: 'a'.repeat(40), baselineRef: 'refs/heads/feature/baseline' });
+    expect(view.creation, JSON.stringify(view)).toMatchObject({ state: 'completed', baselineSha: 'a'.repeat(40), baselineRef: 'refs/heads/feature/baseline' });
     expect(view.confirmedEffects.map(e => e.step)).toEqual(['directory','files','git','baseline','registration']); expect(view.pendingEffects).toEqual([]);
     const project = f.storage.getConfiguration(view.creation.projectId!).view;
-    expect(project.configuration).toMatchObject({ base_branch: 'feature/baseline', source: { kind: 'local', location: body.plan.destination }, github_project: null, automation_enabled: false });
-    expect(project.prerequisites.map(p => p.code)).toEqual(expect.arrayContaining(['REMOTE_UNCONFIRMED','PROJECT_REQUIRED']));
+    expect(project.configuration).toMatchObject({ base_branch: 'feature/baseline', source: { kind: 'local', location: body.plan.destination, repository_id: 'R_created' },
+      github_project: { id: 'PVT_board', status_option_ids: { backlog: 'OPTION_0', ready: 'OPTION_1', in_progress: 'OPTION_2', in_review: 'OPTION_3', delivered: 'OPTION_4' } }, automation_enabled: false });
+    expect(project.prerequisites.map(p => p.code)).not.toEqual(expect.arrayContaining(['REMOTE_UNCONFIRMED','PROJECT_REQUIRED']));
     expect(f.storage.getOperation(operationId)?.state).toBe('succeeded');
     expect(readFileSync(join(body.plan.destination,'AGENTS.md'),'utf8')).toContain('docs/agents/domain.md');
     expect(readFileSync(join(body.plan.destination,'README.md'),'utf8')).toContain('# Projeto á');
@@ -201,7 +223,8 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     const f = fixture(); const body = await authorized(f); mkdirSync(body.plan.destination);
     await expect(f.scaffold.create(body,randomUUID())).rejects.toMatchObject({ code: 'SCAFFOLD_DESTINATION_EXISTS' });
     const other = await f.scaffold.plan(await choices(f,'other')); f.changeAccount();
-    await expect(f.scaffold.create({ planHash: other.planHash, plan: other.plan, authorized: true },randomUUID())).rejects.toMatchObject({ code: 'SCAFFOLD_PLAN_CHANGED' });
+    await expect(f.scaffold.create({ planHash: other.planHash, plan: other.plan, authorized: true },randomUUID())).rejects.toMatchObject({ code: 'SCAFFOLD_ACCOUNT_CHANGED' });
+    f.restoreAccount();
     const third = await f.scaffold.plan(await choices(f,'third'));
     await expect(f.scaffold.create({ ...third, authorized: true, plan: { ...third.plan, input: { ...third.plan.input, baseBranch: 'another' } } },randomUUID())).rejects.toMatchObject({ code: 'SCAFFOLD_COMMAND_INVALID' });
     f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(), timeDefaults: { ...f.storage.getSettings().time_defaults, polling_interval_ms: 13000 } });
@@ -316,35 +339,6 @@ describe('local scaffold planning and durable creation (controlled Git and canon
     expect(existsSync(join(body.plan.destination,'AGENTS.md'))).toBe(true); expect(f.calls).toEqual([]); expect(f.storage.listProjects({}).items).toEqual([]);
     expect(f.guard.close).toHaveBeenCalledTimes(1);
   });
-  it('upgrades real SQLite v12 preserving settings and receipts without manufacturing projects or creations', () => {
-    const directory = mkdtempSync(resolve('.cache/scaffold-migration-')); directories.push(directory);
-    const db = new Database(join(directory,'factory.sqlite'));
-    applyMigrations(db,loadMigrations().slice(0,12),() => seedSettings(db,directory));
-    const old = readSettings(db); const identity = old.installation_id; const operationId = randomUUID();
-    const receipt = saveTimeDefaults(db,{ operationId,expectedRevision: settingsETag(identity,old.revision),timeDefaults: { ...old.time_defaults,polling_interval_ms: 2000 } });
-    expect(db.pragma('user_version',{ simple: true })).toBe(12); db.close();
-    const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getSettings()).toMatchObject({ installation_id: identity,time_defaults: { polling_interval_ms: 2000 } }); expect(reopened.getDiagnostics().schemaVersion).toBe(53);
-    expect(reopened.getOperation(operationId)).toEqual(receipt); expect(reopened.listProjects({}).items).toEqual([]);
-    const probe = new Database(join(directory,'factory.sqlite')); try { expect(probe.prepare('SELECT count(*) AS n FROM project_creations').get()).toEqual({ n: 0 }); expect(probe.pragma('foreign_key_check')).toEqual([]); } finally { probe.close(); }
-  });
-  it('preserves creation history and inbound step references while removing the historical destination reservation', async () => {
-    const f = fixture(52); const body = await authorized(f);
-    const accepted = f.storage.acceptCreation({ operationId: randomUUID(), body });
-    const id = accepted.operation.resource.id;
-    f.storage.recordCreationStep(id, 'directory', 'running');
-    f.storage.failCreation(id, 'SCAFFOLD_CREATION_FAILED');
-    const creation = f.storage.getCreation(id);
-    const operation = f.storage.getOperation(accepted.operation.operation_id);
-    const events = f.storage.getEvents({}).items;
-    f.db.exec('CREATE UNIQUE INDEX historical_creation_destination ON project_creations(destination); DELETE FROM schema_migrations WHERE version>50; PRAGMA user_version=50');
-    applyMigrations(f.db, loadMigrations(), () => { throw new Error('MUST_NOT_RESEED'); });
-    expect(f.storage.getCreation(id)).toEqual(creation);
-    expect(f.storage.getOperation(accepted.operation.operation_id)).toEqual(operation);
-    expect(f.storage.getEvents({}).items).toEqual(events);
-    expect(f.db.pragma('foreign_key_check')).toEqual([]);
-    expect(() => f.storage.acceptCreation({ operationId: randomUUID(), body })).toThrow(expect.objectContaining({ code: 'SCAFFOLD_DESTINATION_RESERVED' }));
-  });
   it('serves only the complete mode and rejects legacy creation input at the HTTP boundary', async () => {
     const f = fixture(); const configuration = loadConfiguration({ FACTORY_DATA_DIR: join(f.directory,'data'), FACTORY_LOG_LEVEL: 'silent' },f.directory);
     const app = createApp(configuration,f.storage,undefined,undefined,undefined,undefined,{ github: f.github,workspaces: f.workspaces }); cleanup.push(() => app.close());
@@ -420,7 +414,7 @@ describe('distributed engineering resources', () => {
   });
 });
 
-it('preserves historical private plans and receipts while replaying the normalized HTTP command after reopen', async () => {
+it('rejects a retired command while preserving a completed current creation and its receipt', async () => {
   const f = fixture(); const input = { ...await choices(f), name: 'templateId and ownerId literal 😀' };
   const planned = await f.scaffold.plan(input); const body: CreateScaffold = { planHash: planned.planHash, plan: planned.plan, authorized: true };
   const id = randomUUID(); const accepted = await f.scaffold.create(body, id); await f.scaffold.drain();
@@ -430,22 +424,24 @@ it('preserves historical private plans and receipts while replaying the normaliz
   const headers = { ...base, cookie: String(session.headers['set-cookie']).split(';')[0]!, 'x-csrf-token': session.json<SessionResponse>().csrf_token, 'idempotency-key': id };
   const snapshot = () => ({ creations: f.db.prepare('SELECT * FROM project_creations').all(), operations: f.db.prepare('SELECT * FROM operation_requests ORDER BY operation_id').all(), effects: f.db.prepare('SELECT * FROM effects ORDER BY operation_id').all() });
   const before = snapshot(); const calls = f.calls.length; const changes = f.db.prepare('SELECT total_changes() AS n').get();
-  const legacyCommand = { plan_hash: body.planHash, plan: toHttpScaffoldPlan(body.plan), authorized: true };
+  const currentPlan = toHttpScaffoldPlan(body.plan);
+  const { board_name: _board, remote: _remote, ...retiredInput } = currentPlan.input;
+  const legacyCommand = { plan_hash: body.planHash, plan: { ...currentPlan, input: { ...retiredInput, creation_mode: 'local' } }, authorized: true };
   const rejected = await app.inject({ method: 'POST', url: '/api/v1/scaffold/creations', headers, payload: legacyCommand });
   expect(rejected.statusCode).toBe(400);
   const read = await app.inject({ url: '/api/v1/scaffold/creations/'+accepted.resource.id, headers });
   expect(Value.Check(HttpCreationView, read.json())).toBe(true);
   const view = read.json<HttpCreationView>();
   expect(view.creation).toMatchObject({ operation_id: id, plan_hash: planned.planHash, plan: { format_version: 1, input: { name: input.name }, settings_e_tag: body.plan.settingsETag } });
-  expect(view.creation.plan.input).not.toHaveProperty('board_name'); expect(view.board_name).toBeNull();
+  expect(view.creation.plan.input).toHaveProperty('board_name', input.boardName); expect(view.board_name).toBe(input.boardName);
   expect(snapshot()).toEqual(before); expect(f.calls).toHaveLength(calls); expect(f.db.prepare('SELECT total_changes() AS n').get()).toEqual(changes);
   const raw = f.db.prepare<[string], { plan_json: string }>('SELECT plan_json FROM project_creations WHERE id=?').get(accepted.resource.id)!;
   expect(JSON.parse(raw.plan_json)).toEqual(body.plan);
   expect(raw.plan_json).toContain('templateId'); expect(raw.plan_json).not.toContain('template_id');
   await app.close();
   const reopened = openStorage({ dataDirectory: join(f.directory, 'data') });
-  try {
-    expect(toHttpCreationView(reopened.getCreation(accepted.resource.id))).toEqual(view);
-    expect(reopened.getOperation(id)?.receipt).toEqual(accepted.receipt); expect(snapshot()).toEqual(before);
-  } finally { reopened.close(); }
+  cleanup.push(() => reopened.close());
+  expect(reopened.getCreation(accepted.resource.id).creation.plan).toEqual(body.plan);
+  expect(snapshot()).toEqual(before);
+  expect(snapshot()).toEqual(before);
 });

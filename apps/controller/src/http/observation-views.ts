@@ -113,17 +113,7 @@ export function toHttpScaffoldEngineering(value: Static<typeof ScaffoldEngineeri
 }
 
 export function toHttpScaffoldPlan(value: Static<typeof ScaffoldPlan>): Static<typeof HttpScaffoldPlan> {
-  const common = { format_version: value.formatVersion, installation_id: value.installationId, settings_e_tag: value.settingsETag,
-    projects_root: value.projectsRoot, destination: value.destination, parent_identity: value.parentIdentity, template_digest: value.templateDigest,
-    files: value.files, engineering: toHttpScaffoldEngineering(value.engineering), account: value.account, owner_id: value.ownerId,
-    ...(value.ownerLogin === undefined ? {} : { owner_login: value.ownerLogin }), effects: value.effects };
-  if ('boardName' in value.input && value.input.boardName && value.input.creationMode === 'remote_push' && value.input.remote) {
-    return { ...common, input: toHttpScaffoldInput(value.input as Static<typeof ScaffoldInputV3>) };
-  }
-  return { ...common, input: { name: value.input.name, template_id: value.input.templateId, template_digest: value.input.templateDigest,
-    destination_relative: value.input.destinationRelative, creation_mode: value.input.creationMode, base_branch: value.input.baseBranch,
-    triage_enabled: value.input.triageEnabled, ...(value.input.remote === undefined ? {} : { remote: { owner_id: value.input.remote.ownerId,
-      name: value.input.remote.name, visibility: value.input.remote.visibility } }) } };
+  return toHttpScaffoldPlanV3(value);
 }
 
 export function toHttpScaffoldPlanV3(value: Static<typeof ScaffoldPlanV3>): Static<typeof HttpScaffoldPlanV3> {
@@ -134,8 +124,7 @@ export function toHttpScaffoldPlanV3(value: Static<typeof ScaffoldPlanV3>): Stat
 }
 
 export function toHttpScaffoldPlanned(value: Static<typeof ScaffoldPlanned>): Static<typeof HttpScaffoldPlanned> {
-  if (!value.plan.input.boardName || value.plan.input.creationMode !== 'remote_push' || !value.plan.input.remote) throw new Error('Public scaffold plans must use V3.');
-  return { plan_hash: value.planHash, plan: toHttpScaffoldPlanV3(value.plan as Static<typeof ScaffoldPlanV3>), prerequisites: value.prerequisites };
+  return { plan_hash: value.planHash, plan: toHttpScaffoldPlanV3(value.plan), prerequisites: value.prerequisites };
 }
 
 export function toHttpScaffoldOptions(value: Static<typeof ScaffoldOptions>): Static<typeof HttpScaffoldOptions> {
@@ -143,8 +132,7 @@ export function toHttpScaffoldOptions(value: Static<typeof ScaffoldOptions>): St
 }
 
 export function toHttpCreateScaffold(value: Static<typeof CreateScaffold>): Static<typeof HttpCreateScaffold> {
-  if (!value.plan.input.boardName || value.plan.input.creationMode !== 'remote_push' || !value.plan.input.remote) throw new Error('Public scaffold commands must use V3.');
-  return { plan_hash: value.planHash, plan: toHttpScaffoldPlanV3(value.plan as Static<typeof ScaffoldPlanV3>), authorized: value.authorized };
+  return { plan_hash: value.planHash, plan: toHttpScaffoldPlanV3(value.plan), authorized: value.authorized };
 }
 
 export function fromHttpCreateScaffold(value: Static<typeof HttpCreateScaffold>): Static<typeof CreateScaffold> {
@@ -204,7 +192,7 @@ export function toHttpCreationView(value: Static<typeof CreationView>): Static<t
   const verifiedBoard = value.board_operations.find(item => item.kind === 'verify_board' && item.state === 'confirmed')?.receipt;
   const createdBoard = value.board_operations.find(item => item.kind === 'create_board' && item.state === 'confirmed')?.receipt;
   const provenBoard = verifiedBoard ?? createdBoard;
-  const board_name = value.creation.plan.input.boardName ?? provenBoard?.title ?? null;
+  const board_name = value.creation.plan.input.boardName;
   const board_url = confirmedGitHubUrl(provenBoard?.project_url);
   const uncertain = value.effects.some(item => item.state === 'running' || item.state === 'unknown') ||
     value.board_operations.some(item => item.state === 'running' || item.state === 'unknown');
@@ -213,7 +201,7 @@ export function toHttpCreationView(value: Static<typeof CreationView>): Static<t
     value.effects.length === 0 && value.board_operations.length === 0;
   const next_action = value.creation.state === 'completed' ? 'none' as const
     : ['pending','running'].includes(value.creation.state) ? 'wait' as const
-      : failedWithoutEffects || value.creation.diagnostic === 'LEGACY_CREATION_REPLAN_REQUIRED' ? 'create_new_plan' as const
+      : failedWithoutEffects ? 'create_new_plan' as const
         : uncertain ? 'reconcile' as const : 'review_effect' as const;
   return { creation: toHttpProjectCreation(value.creation), confirmed_effects: value.confirmedEffects, pending_effects: value.pendingEffects,
     effects: value.effects.map(entry1 => (toHttpCreationEffect(entry1))),
@@ -264,7 +252,6 @@ export function fromHttpQueueScope(value: Static<typeof HttpQueueScope>): Static
 }
 
 export function fromHttpScaffoldPlan(value: Static<typeof HttpScaffoldPlan>): Static<typeof ScaffoldPlan> {
-  if (!('board_name' in value.input)) throw new Error('A new scaffold command requires the V3 board name.');
   return { formatVersion: value.format_version, input: fromHttpScaffoldInput(value.input), installationId: value.installation_id,
     settingsETag: value.settings_e_tag, projectsRoot: value.projects_root, destination: value.destination, parentIdentity: value.parent_identity,
     templateDigest: value.template_digest, files: value.files, engineering: fromHttpScaffoldEngineering(value.engineering), account: value.account,

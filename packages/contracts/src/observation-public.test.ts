@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { TSchema } from '@sinclair/typebox';
 import { TypeGuard } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { DiagnosticCheck, HttpDiagnosticCheck, DiagnosticContext, HttpDiagnosticContext, DiagnosticChecks, HttpDiagnosticChecks, DiagnosticRequest, HttpDiagnosticRequest, ContextDiagnostic, HttpContextDiagnostic, DiagnosticReport, HttpDiagnosticReport, DiagnosticsView, HttpDiagnosticsView, OperationSummaryQuery, HttpOperationSummaryQuery, OperationSummary, HttpOperationSummary, QueueScope, HttpQueueScope, QueueReason, HttpQueueReason, QueueItem, HttpQueueItem, QueueDiagnostic, HttpQueueDiagnostic, QueueObservation, HttpQueueObservation, QueueQuery, HttpQueueQuery, QueueCommand, HttpQueueCommand, QueueSaved, HttpQueueSaved, QueueConflict, HttpQueueConflict, CreationMode, HttpCreationMode, ScaffoldInputV3, HttpScaffoldInput, ScaffoldFile, HttpScaffoldFile, ScaffoldAccount, HttpScaffoldAccount, ScaffoldEngineering, HttpScaffoldEngineering, ScaffoldPlanV3, HttpScaffoldPlan, HttpScaffoldPlanV3, HttpLegacyScaffoldPlan, HttpScaffoldPlanned, ScaffoldOptions, HttpScaffoldOptions, HttpCreateScaffold, HttpCreationParams, CreationStep, HttpCreationStep, HttpProjectCreation, CreationEffectIdentity, HttpCreationEffectIdentity, CreationEffect, HttpCreationEffect, CreationBoardOperation, HttpCreationBoardOperation, ControllerEvent, HttpControllerEvent, EventQuery, HttpEventQuery, EventListQuery, HttpEventListQuery, EventStreamQuery, HttpEventStreamQuery, EventPage, HttpEventPage, HttpControllerEventFrame } from './index.js';
+import { DiagnosticCheck, HttpDiagnosticCheck, DiagnosticContext, HttpDiagnosticContext, DiagnosticChecks, HttpDiagnosticChecks, DiagnosticRequest, HttpDiagnosticRequest, ContextDiagnostic, HttpContextDiagnostic, DiagnosticReport, HttpDiagnosticReport, DiagnosticsView, HttpDiagnosticsView, OperationSummaryQuery, HttpOperationSummaryQuery, OperationSummary, HttpOperationSummary, QueueScope, HttpQueueScope, QueueReason, HttpQueueReason, QueueItem, HttpQueueItem, QueueDiagnostic, HttpQueueDiagnostic, QueueObservation, HttpQueueObservation, QueueQuery, HttpQueueQuery, QueueCommand, HttpQueueCommand, QueueSaved, HttpQueueSaved, QueueConflict, HttpQueueConflict, CreationMode, HttpCreationMode, ScaffoldInputV3, HttpScaffoldInput, ScaffoldFile, HttpScaffoldFile, ScaffoldAccount, HttpScaffoldAccount, ScaffoldEngineering, HttpScaffoldEngineering, ScaffoldPlanV3, HttpScaffoldPlan, HttpScaffoldPlanV3, HttpScaffoldPlanned, ScaffoldOptions, HttpScaffoldOptions, HttpCreateScaffold, HttpCreationParams, CreationStep, HttpCreationStep, HttpProjectCreation, CreationEffectIdentity, HttpCreationEffectIdentity, CreationEffect, HttpCreationBoardOperation, CreationBoardOperation, HttpCreationEffect, ControllerEvent, HttpControllerEvent, EventQuery, HttpEventQuery, EventListQuery, HttpEventListQuery, EventStreamQuery, HttpEventStreamQuery, EventPage, HttpEventPage, HttpControllerEventFrame } from './index.js';
 
 // Test-only schema comparison: keywords and constraints stay verbatim; only declared JSON property names change.
 function expectedHttpSchema(schema: TSchema): unknown {
@@ -64,16 +64,15 @@ const legacyScaffoldPlan = {
   engineering: { tracker: 'github',domain: 'single-context',instruction_file: 'AGENTS.md',triage_enabled: true,installs_skills: false,creates_labels: false },
   account: { state: 'complete',id: 'account',login: 'operator' },owner_id: null,effects: ['register_local_project'],
 };
-it('shares the strict V3 plan across planning and new writes while retaining legacy plans for reads', () => {
+it('shares the strict current plan and rejects retired plans for reads and writes', () => {
   expect(HttpScaffoldPlanned.properties.plan).toEqual(HttpScaffoldPlanV3);
   expect(HttpCreateScaffold.properties.plan).toEqual(HttpScaffoldPlanV3);
-  expect(Value.Check(HttpScaffoldPlan,legacyScaffoldPlan)).toBe(true);
-  expect(Value.Check(HttpLegacyScaffoldPlan,legacyScaffoldPlan)).toBe(true);
+  expect(Value.Check(HttpScaffoldPlan,legacyScaffoldPlan)).toBe(false);
   expect(Value.Check(HttpScaffoldPlanV3,legacyScaffoldPlan)).toBe(false);
   expect(Value.Check(HttpCreateScaffold,{ plan_hash: 'd'.repeat(64),plan: legacyScaffoldPlan,authorized: true })).toBe(false);
   const historical = { id,operation_id: id,project_id: null,plan_hash: 'd'.repeat(64),plan: legacyScaffoldPlan,state: 'failed',revision: 1,
     baseline_sha: null,baseline_ref: null,diagnostic: null,created_at_ms: 0 };
-  expect(Value.Check(HttpProjectCreation,historical)).toBe(true);
+  expect(Value.Check(HttpProjectCreation,historical)).toBe(false);
   expect(historical.plan.input).not.toHaveProperty('board_name');
 });
 

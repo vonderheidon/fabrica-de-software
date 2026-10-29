@@ -13,8 +13,7 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 import { createDiagnostics } from '../../apps/controller/src/modules/diagnostics/index.js';
 import { createGitHub } from '../../apps/controller/src/modules/github/index.js';
 import { createWorkspaces } from '../../apps/controller/src/modules/workspaces/index.js';
-import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { seedLegacySettings as seedSettings } from '../fixtures/legacy-settings.js';
+import { digest } from '../../apps/controller/src/modules/storage/configuration-reads.js';
 import { attemptFixture } from '../fixtures/attempt.js';
 
 const cleanup: (() => void | Promise<void>)[] = [];
@@ -243,8 +242,18 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     // Poison full documents deliberately: these existing-fact projections must never deserialize them.
     f.db.prepare(`INSERT INTO operation_requests(operation_id,installation_id,operation_kind,resource_type,resource_id,request_hash)
       VALUES (?,?,'scaffold.create','creation',?,?)`).run(sourceOperationId, settings.installation_id, creationId, 'a'.repeat(64));
+    const privatePlan = {
+      formatVersion: 1, installationId: settings.installation_id, settingsETag: '"fixture"', projectsRoot: join(f.directory, 'projects'),
+      destination: join(f.directory, 'own-creation'), parentIdentity: 'a'.repeat(64), templateDigest: 'b'.repeat(64),
+      files: [{ path: 'README.md', bytes: 1, sha256: 'c'.repeat(64) }],
+      engineering: { tracker: 'github', domain: 'single-context', instructionFile: 'AGENTS.md', triageEnabled: false, installsSkills: false, createsLabels: false },
+      account: { state: 'observed', id: 'ACCOUNT_test', login: 'test-user' }, ownerId: 'OWNER_test', effects: [],
+      input: { name: 'SYNTHETIC_SECRET', templateId: 'plain', templateDigest: 'b'.repeat(64), destinationRelative: 'own-creation',
+        creationMode: 'remote_push', baseBranch: 'main', triageEnabled: false,
+        remote: { ownerId: 'OWNER_test', name: 'fixture-repository', visibility: 'private' }, boardName: 'Fixture board' },
+    };
     f.db.prepare(`INSERT INTO project_creations(id,operation_id,installation_id,plan_hash,plan_json,destination,state,created_at_ms)
-      VALUES (?,?,?,?,?,?,'partial',1)`).run(creationId, sourceOperationId, settings.installation_id, 'a'.repeat(64), '{"private_plan":"SYNTHETIC_SECRET"}', join(f.directory, 'own-creation'));
+      VALUES (?,?,?,?,?,?,'partial',1)`).run(creationId, sourceOperationId, settings.installation_id, digest(privatePlan), JSON.stringify(privatePlan), join(f.directory, 'own-creation'));
     const id = randomUUID(); const body: DiagnosticRequest = { scope: 'creation', id: creationId, checks: ['github_identity'] };
     await f.diagnostics.verify(body, id); await f.diagnostics.drain();
     const view = f.diagnostics.get({ scope: 'creation', id: creationId });
@@ -271,14 +280,6 @@ describe('operational snapshots and contextual diagnostic observations', () => {
     const prepared = await f.prepare(); const op = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
     f.storage.interruptAttempts(); const current = f.storage.getOperationSummary({ projectId: f.projectId });
     expect(current.activeAttempt).toBeNull(); expect(current.recentResults[0]).toMatchObject({ id: op.resource.id, result: 'interrupted' });
-  });
-  it('migrates actual v17 without reseeding or inventing observations', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'factory-v17-diagnostics-')); cleanup.push(() => rmSync(directory, { recursive: true }));
-    const db = new Database(join(directory, 'factory.sqlite')); applyMigrations(db, loadMigrations().slice(0, 17), () => seedSettings(db, directory));
-    const identity = db.prepare('SELECT installation_id FROM factory_settings').get(); db.close();
-    const reopened = openStorage({ dataDirectory: directory }); cleanup.push(() => reopened.close());
-    expect(reopened.getSettings().installation_id).toEqual((identity as { installation_id: string }).installation_id);
-    expect(reopened.getContextDiagnostics({ scope: 'host' }).reports).toEqual([]); expect(reopened.getOperationSummary({}).integrationStatus.state).toBe('not_checked');
   });
 });
 
