@@ -46,6 +46,10 @@ Antes de planejar ou alterar código, leia as seções pertinentes e identifique
 
 ## Validação e entrega
 
+- Para validar a UI, iniciar o servidor local é manutenção operacional autorizada e independe da aprovação de implementação ou do gate da sprint. Confira primeiro `http://127.0.0.1:4310/api/v1/health`; se responder, reutilize o processo existente.
+- Se estiver parado, siga `ensaios-fabrica/MANUAL-MAESTRI-WIRE.md`: use `controle/wire-request.ps1` com a credencial protegida no caminho indicado pelo manual, consulte `/api/workspaces` e o feed, e encontre o terminal-âncora pelo nome. Neste workspace, use `Shell #5` quando estiver no prompt PowerShell livre; confirme nome, diretório e atividade antes de enviar comandos. Ausência de `MAESTRI_PIPE` no shell externo não impede esse caminho.
+- No terminal confirmado, entre no repositório canônico e execute `npm.cmd start`; confira o feed e o health na porta 4310. O caminho foi testado com sucesso no Shell #5 em 2026-10-29. Isso inicia o bundle já compilado em `dist/`; se precisar validar alterações de fonte, faça o build pertinente antes. Preserve processos ocupados e relate falhas concretas de acesso ou inicialização.
+- Essa autorização cobre disponibilizar o servidor para validação; chamadas pagas, recrutamento de agentes, publicação e captura atribuída ao Revisor mantêm seus requisitos próprios.
 - Antes de editar, defina como comprovar o comportamento e quais critérios AC/INT são pertinentes. Use os comandos efetivamente configurados no repositório.
 - Siga SPEC 10.2: testes determinísticos e de contratos nas superfícies pertinentes; integração real Maestri/OMP para o percurso; Playwright MCP/Chrome para a UI. Compilação e typecheck não comprovam funcionamento da integração ou da interface.
 - Suíte padrão não chama providers, recruta terminais nem publica recursos externos implicitamente. Execuções reais exigem autorização correspondente, com custo e efeitos conhecidos.
