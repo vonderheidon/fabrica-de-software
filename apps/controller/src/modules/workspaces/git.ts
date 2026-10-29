@@ -37,7 +37,9 @@ export function createGitReader(context: GitContext): GitReader {
       if (!isAbsolute(input.indexFile)) { reject(new GitReadError('GIT_INDEX_INVALID')); return; }
       environment.GIT_INDEX_FILE = input.indexFile;
     }
-    const child = execFile(context.executable, [...gitSafety.options, '-c', 'core.fsmonitor=false', ...args], {
+    // Project-scoped UUID paths exceed MAX_PATH even for small repositories.
+    const pathOptions = process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : [];
+    const child = execFile(context.executable, [...gitSafety.options, '-c', 'core.fsmonitor=false', ...pathOptions, ...args], {
       cwd, shell: false, windowsHide: true, timeout: gitLimits.timeoutMs, maxBuffer: gitLimits.responseBytes,
       encoding: 'buffer', env: environment,
     }, (error, stdout) => {

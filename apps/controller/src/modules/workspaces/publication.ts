@@ -5,7 +5,7 @@ import { Delivery, EffectView, type EffectReceipt } from '#contracts';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
 import { createPublicationMaterializer } from './materialize.js';
 import type { GitReader } from './git.js';
-import type { AttemptRootResolver } from './project-storage.js';
+import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 
 export interface LocalCommitResult {
   state: 'confirmed' | 'not_applicable' | 'failed_known' | 'unknown';
@@ -25,7 +25,7 @@ export function createLocalPublisher(dataDirectory?: string, git?: GitReader, ca
       delivery.captureState !== 'captured' || identity.contentIdentity !== delivery.contentIdentity || identity.parentSha !== delivery.baseSha ||
       !identity.issueNumber || !identity.commitTime || identity.branchRef !== `refs/heads/factory/${identity.issueNumber}/${delivery.attemptId}`) throw new CaptureError('COMMIT_IDENTITY_INVALID');
     if (!dataDirectory || !isolated) throw new CaptureError('CONTEXT_UNAVAILABLE');
-    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory, canonicalize);
+    const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId), canonicalize);
     const root = resolve(data, 'git'); const repository = resolve(root, `${delivery.attemptId}.git`);
     await plainDirectory(root, canonicalize); await plainDirectory(repository, canonicalize); await noBorrowedObjects(repository);
     if ((await metadataBytes(resolve(repository, 'factory-owner'), 36)).toString('utf8') !== delivery.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');

@@ -6,7 +6,7 @@ import type { ExecutionHost } from '../../index.js';
 import type { RoleResource } from '../../roles.js';
 import type { PassageChannel } from './channel.js';
 import { runCli } from './native.js';
-import type { AttemptRootResolver } from '../../../workspaces/index.js';
+import { requireAttemptRootResolver, type AttemptRootResolver } from '../../../workspaces/index.js';
 
 export interface Bootstrap {
   path: string;
@@ -25,7 +25,7 @@ export function buildOmpArguments(request: PassageRequest, extensionPath: string
 export const writeBootstrap: BootstrapWriter = async (data, request, host, role, channel, ompVersion, resolveAttemptRoot,
   sessionDirectoryRelative = `sessions/${request.binding.attemptId}/${request.binding.role}`) => {
   if (!isAbsolute(data) || !isAbsolute(request.cwd)) throw new ExecutionError('INPUT_INVALID');
-  const resourceRoot = resolveAttemptRoot ? await resolveAttemptRoot(request.binding.attemptId) : data;
+  const resourceRoot = await requireAttemptRootResolver(resolveAttemptRoot)(request.binding.attemptId);
   const root = await realpath(resourceRoot);
   if (root !== resourceRoot || (await lstat(resourceRoot)).isSymbolicLink() || (await lstat(data)).isSymbolicLink()) throw new ExecutionError('RESOURCE_INVALID');
   const cwd = await realpath(request.cwd);

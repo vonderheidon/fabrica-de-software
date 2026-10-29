@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage } from './index.js';
-import { applyMigrations, loadMigrations } from './migrations.js';
+import { applyMigrations, loadMigrations } from '../../../../../tests/fixtures/historical-schema.js';
 import { seedSettings } from './settings.js';
 import { createProjectDeletionPersistence } from './project-deletions.js';
 import { deletionTables, identifier, keyExpression, primaryKey, type ProjectDeletionInventory } from './project-deletion-inventory.js';

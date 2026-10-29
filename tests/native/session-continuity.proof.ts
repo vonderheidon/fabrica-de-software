@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve, sep } from 'node:path';
 import Database from 'better-sqlite3';
@@ -14,6 +14,7 @@ import { createWorkspacePreparer } from '../../dist/apps/controller/src/modules/
 import { createCapturer } from '../../dist/apps/controller/src/modules/workspaces/capture.js';
 import { createAttemptMaterializer } from '../../dist/apps/controller/src/modules/workspaces/materialize.js';
 import { createDeliveryDiff } from '../../dist/apps/controller/src/modules/workspaces/diff.js';
+import { createProjectStorageInspector } from '../../dist/apps/controller/src/modules/workspaces/project-storage.js';
 
 function recordEvidence(evidence: string, db: Database.Database, attemptId: string, directory: string) {
   const progress = JSON.parse(readFileSync(join(evidence, 'progress.json'), 'utf8')) as { phase: string; round: number };
@@ -28,8 +29,10 @@ function recordEvidence(evidence: string, db: Database.Database, attemptId: stri
   expect(identities).toHaveLength(6); expect(new Set(identities.map(item => item.cwd)).size).toBe(1);
   for (const role of new Set(identities.map(item => item.roleDigest))) expect(new Set(identities.filter(item => item.roleDigest === role).map(item => item.sessionId)).size).toBe(1);
   for (const item of identities) expect(item).toMatchObject({ provider: 'openai-codex', model: 'gpt-6-luna', effort: 'high' });
-  expect(existsSync(join(directory, 'work', attemptId, 'reviews'))).toBe(false);
-  expect(readFileSync(join(directory, 'work', attemptId, 'implementation', 'value.txt'), 'utf8').trim()).toBe('3');
+  const location = db.prepare('SELECT l.root_relative FROM project_storage_locations l JOIN attempts a ON a.project_id=l.project_id WHERE a.id=? AND l.is_current=1 AND l.location_key=?').get(attemptId, 'managed') as { root_relative: string };
+  const managedRoot = resolve(directory, '..', '..', location.root_relative);
+  expect(existsSync(join(managedRoot, 'work', attemptId, 'reviews'))).toBe(false);
+  expect(readFileSync(join(managedRoot, 'work', attemptId, 'implementation', 'value.txt'), 'utf8').trim()).toBe('3');
   writeFileSync(join(evidence, 'result.json'), JSON.stringify({ ok: true, profile: 'openai-codex/gpt-6-luna/high', sessions, passages, singleCheckout: true,
     limits: ['GitHub authority is a controlled fixture port; Git clone/capture/diff/integrity, OMP, Maestri, SQLite, shared cwd and Windows process jobs are real.'], dataDirectory: directory }, null, 2));
 }
@@ -38,14 +41,16 @@ it('continues both real OMP conversations over three versions with native proces
   if (process.env.FACTORY_REAL_SESSION_RECHECK) {
     const evidence = resolve(process.env.FACTORY_REAL_SESSION_RECHECK);
     if (!evidence.startsWith(resolve('.cache') + sep)) throw new Error('PROOF_PATH_INVALID');
-    const directory = join(evidence, readdirSync(evidence).find(name => name.startsWith('factory-attempt-'))!);
+    const directory = join(evidence, 'var', 'factory');
     const db = new Database(join(directory, 'factory.sqlite'), { readonly: true });
     try { const row = db.prepare('SELECT id FROM attempts').get() as { id: string }; recordEvidence(evidence, db, row.id, directory); }
     finally { db.close(); }
     return;
   }
   if (process.env.FACTORY_REAL_SESSION_PROOF !== 'authorized') throw new Error('REAL_SESSION_PROOF_NOT_AUTHORIZED');
-  const evidence = resolve('.cache', `session-real-${Date.now()}`); mkdirSync(evidence, { recursive: true });
+  mkdirSync(resolve('.cache'), { recursive: true });
+  // Keep disposable installation paths below Git for Windows' subprocess path limit.
+  const evidence = mkdtempSync(join(resolve('.cache'), 'c-'));
   const seed = join(evidence, 'seed'); mkdirSync(seed);
   const gitExe = process.env.FACTORY_GIT_EXE!;
   const setupGit = (args: string[]) => {
@@ -54,14 +59,15 @@ it('continues both real OMP conversations over three versions with native proces
   };
   setupGit(['init', '-b', 'main']); writeFileSync(join(seed, 'value.txt'), '0'); writeFileSync(join(seed, '.gitignore'), '.factory-evidence/\n.cache/\nnode_modules/\n.omp/\n');
   setupGit(['add', '--', 'value.txt', '.gitignore']); setupGit(['-c', 'user.name=Factory proof', '-c', 'user.email=proof@factory.invalid', 'commit', '-m', 'Proof baseline']);
-  const f = await attemptFixture(evidence, setupGit(['rev-parse', 'HEAD']));
+  const f = await attemptFixture(evidence, setupGit(['rev-parse', 'HEAD']), 'high', 'var/factory');
   const git = createGitReader({ kind: 'windows_keyring', executable: gitExe });
-  const shared = createAttemptMaterializer(f.directory, git);
+  const { resolveAttemptRoot } = createProjectStorageInspector(f.directory, undefined, f.storage);
+  const shared = createAttemptMaterializer(f.directory, git, undefined, resolveAttemptRoot);
   const profileChanges = f.storage.getGlobalConfiguration().view.profiles.map(profile => ({ action: 'update' as const, id: profile.id,
     changes: { provider: 'openai-codex', model: 'gpt-6-luna', effort: 'high',
       guidance: `This is an authorized tiny runtime proof. Stay in the assigned cwd. Use native tools only. Do not use network, Git, MCPs or subagents. Do not change model or session. ${profile.profile_type === 'implementer'
         ? 'Write value.txt with 1 initially, then increment its integer by one for each correction. Read it back. Report execution_complete with formatVersion 1, writesStopped true, both ac-1 and ac-2 passed, checks [], and findingResponses for every supplied finding id on corrections. Do not do anything after completing.'
-        : 'Read value.txt using a native tool, never edit files. This is a deliberately staged transport proof, driven by task.delivery.round. In round 1 reject with both ac-1/ac-2 failed and one blocking finding key stage-one, category correctness, asking the producer to write integer 2. In round 2 reject with both criteria failed and one blocking finding key stage-two asking integer 3, even if it is already 3: two correction exchanges are required by this proof. In round 3 approve only if the integer is 3, both criteria passed and findings []. Always resolve every supplied previous finding id via resolutions as resolved when its expected integer was reached. Use formatVersion 1 and execution_complete. Do not do anything after completing.'}` } }));
+        : 'Read value.txt using a native tool, never edit files. This is a deliberately staged transport proof, driven by task.delivery.round. In round 1 reject with both ac-1/ac-2 failed and one blocking finding key stage-one, category correctness, asking the producer to write integer 2. In round 2 reject with both criteria failed and one NEW blocking finding key stage-two asking integer 3, even if it is already 3: two correction exchanges are required by this proof. The new stage-two finding has originFindingId null, because stage-one is resolved. In round 3 approve only if the integer is 3, both criteria passed and findings []. Always resolve every supplied previous finding via resolutions as resolved when its expected integer was reached. Both resolutions.findingKey and assessments.findingId use the previous finding UUID from the task, not its human-readable key. Every proven/partial assessment must reuse exactly the SAME evidence string also present in the relevant criteria evidence array. Record the actual native read in that shared string, never fabricate it. Use formatVersion 1 and execution_complete with all required fields. Do not do anything after completing.'}` } }));
   f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: f.storage.getGlobalConfiguration().etag, changes: {}, body: { changes: {}, profile_changes: profileChanges } });
   const host = withWindowsTerminalJobs({ maestriExecutable: process.env.FACTORY_MAESTRI_EXE!, ompExecutable: process.env.FACTORY_OMP_EXE!,
     powershellExecutable: join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), inheritedEnvironment: process.env }, f.directory);
@@ -78,6 +84,7 @@ it('continues both real OMP conversations over three versions with native proces
     } });
   }
   const execution = createMaestriOmp({ dataDirectory: f.directory, persistence: f.persistence, host,
+    projectStorageRootForAttempt: resolveAttemptRoot,
     validateReviewerResult: async binding => {
       const review = f.storage.getReview(binding.deliveryVersion)!;
       await shared(f.storage.getDelivery(binding.deliveryVersion).delivery, review.id);
@@ -102,12 +109,12 @@ it('continues both real OMP conversations over three versions with native proces
   execution.startPassage = (...args) => { authorizePassage(); return startPassage(...args); };
   execution.continuePassage = (...args) => { authorizePassage(); return continuePassage(...args); };
   Object.assign(f.execution, execution);
-  const prepare = createWorkspacePreparer(f.directory, git);
+  const prepare = createWorkspacePreparer(f.directory, git, undefined, resolveAttemptRoot);
   f.workspaces.prepareAttempt.mockImplementation(input => prepare({ ...input, source: { ...input.source, kind: 'local', location: seed } }));
   Object.assign(f.workspaces, {
-    captureDelivery: createCapturer(f.directory, git),
+    captureDelivery: createCapturer(f.directory, git, undefined, resolveAttemptRoot),
     materializeReview: shared,
-    getDeliveryDiff: createDeliveryDiff(f.directory, git),
+    getDeliveryDiff: createDeliveryDiff(f.directory, git, undefined, resolveAttemptRoot),
   });
   const watchdog = setTimeout(() => { void f.pipeline.close(); }, Math.max(0, deadline - Date.now()));
   let attemptId: string | undefined;

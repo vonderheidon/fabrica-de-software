@@ -5,7 +5,7 @@ import { createApp } from '../../http/app.js';
 import { loadConfiguration } from '../../config.js';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyMigrations, loadMigrations } from './migrations.js';
+import { applyMigrations, loadMigrations } from '../../../../../tests/fixtures/historical-schema.js';
 import { seedSettings } from './settings.js';
 import { configurationETag, digest, readConfiguration, readProject } from './configuration-reads.js';
 import { registerProject, saveConfiguration, saveSettings } from './configuration-writes.js';
@@ -83,7 +83,7 @@ describe('durable project deletion acceptance and shared authorization barrier',
       prepareAttempts: (ids, id) => f.pipeline.prepareProjectDeletion(ids, id) });
     await coordinator.schedule(operationId);
     expect(f.execution.cancelAttempt).toHaveBeenCalledWith(started.resource.id, operationId);
-    expect(removeReference).toHaveBeenCalled();
+    expect(removeReference).not.toHaveBeenCalled();
     expect(f.storage.getProjectDeletion(operationId)).toEqual({ operation_id: operationId, state: 'succeeded' });
     expect(f.db.prepare('SELECT id FROM projects WHERE id=?').get(f.projectId)).toBeUndefined();
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -349,12 +349,9 @@ describe('durable project deletion acceptance and shared authorization barrier',
       }
       const paths = f.storage.getProjectDeletionPaths(f.projectId);
       const ownershipBlockers = paths.blockers.filter(b => b.reason === 'O pertencimento de um ambiente não pôde ser comprovado.');
-      expect(ownershipBlockers).toHaveLength(['relative', 'absolute', 'unowned-planned'].includes(referenceKind) ? 0 : 1);
-      expect(paths.targets).toContainEqual(expect.objectContaining({
-        kind: 'exclusive_workspace', path: resolve(f.directory, 'work', attemptId), ownerId: attemptId,
-      }));
-      expect(f.storage.getProjectDeletionPaths(f.register()).protectedPaths)
-        .toContain(resolve(f.directory, 'work', attemptId, 'implementation'));
+      expect(ownershipBlockers).toHaveLength(['relative', 'unowned-planned'].includes(referenceKind) ? 0 : 1);
+      expect(paths.targets.map(target => target.path)).not.toContain(resolve(f.directory, 'work', attemptId));
+      expect(paths.targets.map(target => target.path)).not.toContain(resolve(f.directory, 'git', `${attemptId}.git`));
     },
   );
 

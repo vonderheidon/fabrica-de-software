@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
-import { applyMigrations, loadMigrations } from './migrations.js';
+import { applyMigrations, loadMigrations } from '../../../../../tests/fixtures/historical-schema.js';
 import { seedSettings } from './settings.js';
 import { readConfiguration } from './configuration-reads.js';
 import { insertRevision, registerProject } from './configuration-writes.js';

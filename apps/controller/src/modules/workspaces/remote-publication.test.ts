@@ -24,13 +24,13 @@ async function fixture() {
     if (args.includes('push')) { remote = sha; if (lost) throw new Error('PRIVATE_RESPONSE_LOSS'); return { exitCode: 0,stdout: '' }; }
     return f.run(cwd,args,input);
   });
-  const publisher = createRemotePublisher(root,git,{ accountId: 'A',repositoryIds: ['R'] },async p => p);
+  const publisher = createRemotePublisher(root,git,{ accountId: 'A',repositoryIds: ['R'] },async p => p, undefined, async () => root);
   return { ...f,d,effect,sha,git,publisher,remote: (sha: string | null) => { remote = sha; },lose: () => { lost = true; },config: () => { config = true; },wrongParent: () => { wrongParent = true; } };
 }
 
 it('publishes a confirmed attempt without a static repository grant and rechecks revocation', async () => {
   const f = await fixture();
-  const publisher = createRemotePublisher(f.root,f.git,undefined,async p => p,{ kind: 'confirmed_attempt' });
+  const publisher = createRemotePublisher(f.root,f.git,undefined,async p => p,{ kind: 'confirmed_attempt' }, async () => f.root);
   expect(await publisher.pushApproved(f.d,f.effect,'A',async () => { throw new Error('REVOKED'); })).toMatchObject({ state: 'failed_known' });
   expect(f.git.mock.calls.some(([,args]) => args.includes('push'))).toBe(false);
   const authorize = vi.fn(async () => {});
@@ -58,7 +58,7 @@ it.each([true,false])('updates an existing remote branch only for a fast-forward
     if (args.includes('merge-base')) return { exitCode:ancestor ? 0 : 1,stdout:'' };
     return f.git(cwd,args,input);
   };
-  const publisher = createRemotePublisher(f.root,git,{ accountId:'A',repositoryIds:['R'] },async path => path);
+  const publisher = createRemotePublisher(f.root,git,{ accountId:'A',repositoryIds:['R'] },async path => path, undefined, async () => f.root);
   const effect = { ...f.effect,expectedIdentity:{ ...f.effect.expectedIdentity,branchKind:'existing' as const } };
   const result = await publisher.pushApproved(f.d,effect,'A',async () => {});
   expect(result.state).toBe(ancestor ? 'confirmed' : 'failed_known');
@@ -79,7 +79,7 @@ it.each(['host','account','ref','parent','rewrite','callback','unknown'] as cons
   if (kind === 'ref') f.remote('f'.repeat(40));
   if (kind === 'parent') f.wrongParent();
   if (kind === 'rewrite') f.config();
-  const publisher = kind === 'host' ? createRemotePublisher(f.root,f.git,undefined,async p => p) : f.publisher;
+  const publisher = kind === 'host' ? createRemotePublisher(f.root,f.git,undefined,async p => p, undefined, async () => f.root) : f.publisher;
   const r = await publisher.pushApproved(f.d,kind === 'unknown' ? { ...f.effect,state: 'unknown' } : f.effect,kind === 'account' ? 'OTHER' : 'A',async () => { if (kind === 'callback') throw new Error('REVOKED'); });
   expect(r.state).not.toBe('confirmed'); expect(f.git.mock.calls.some(([,args]) => args.includes('push'))).toBe(false);
   expect(JSON.stringify(r)).not.toContain('PRIVATE_');

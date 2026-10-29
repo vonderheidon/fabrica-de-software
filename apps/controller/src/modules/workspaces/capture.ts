@@ -4,7 +4,7 @@ import { isAbsolute, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { GitObjectId, OperationId, Delivery, type CaptureWarning } from '#contracts';
 import type { GitInput, GitReader } from './git.js';
-import type { AttemptRootResolver } from './project-storage.js';
+import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 
 export class CaptureError extends Error { constructor(readonly code: string) { super(code); } }
 export interface CaptureInput { attemptId: string; passageId: string; deliveryId: string; baseSha: string; declaredFiles: string[] }
@@ -78,7 +78,7 @@ export function createCapturer(dataDirectory?: string, git?: GitReader, canonica
       const r = await git(cwd, args, options); if (r.exitCode !== 0) throw new CaptureError('CAPTURE_GIT_FAILED'); return r.stdout;
     };
     try {
-      const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(input.attemptId) : dataDirectory, canonicalize);
+      const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(input.attemptId), canonicalize);
       const work = resolve(data, 'work'); const attempt = resolve(work, input.attemptId); const implementation = resolve(attempt, 'implementation');
       for (const path of [work, attempt, implementation, resolve(implementation, '.git')]) await plainDirectory(path, canonicalize);
       const metadata = resolve(implementation, '.git'); await noBorrowedObjects(metadata);
@@ -211,6 +211,7 @@ export function createCapturer(dataDirectory?: string, git?: GitReader, canonica
       const args = [`--git-dir=${repository}`, '-c', 'core.bare=true', '-c', `core.hooksPath=${hooks}`, '-c', 'core.attributesFile=', '-c', 'core.fsync=all', '-c', 'gc.auto=0', '-c', 'maintenance.auto=false'];
       const retained = (tail: string[], options?: GitInput) => run(repository, [...args, ...tail], options);
       await retained(['init', '--bare', '--template=', `--object-format=${base.length === 64 ? 'sha256' : 'sha1'}`, repository]);
+      if (process.platform === 'win32') await retained(['config', 'core.longpaths', 'true']);
       await noBorrowedObjects(repository);
       // Fetch into owned storage; no alternates/hardlinks and no references to the removable checkout.
       await retained(['-c', 'protocol.file.allow=always', 'fetch', '--no-tags', '--no-write-fetch-head', '--no-recurse-submodules', '--', implementation, base]);

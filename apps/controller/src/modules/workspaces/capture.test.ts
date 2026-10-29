@@ -27,7 +27,7 @@ describe('capture with controlled Git and real filesystem', () => {
       if (args.includes('--raw')) return { exitCode: 0, stdout: `:100644 100644 ${oldOid} ${newOid} M\0tracked.txt\0` };
       if (args.includes('--numstat')) return { exitCode: 0, stdout: '1\t1\ttracked.txt\0' };
       return { exitCode: 0, stdout: '-changed tracked bytes\n+second review version\n' };
-    }, async path => path);
+    }, async path => path, async () => f.root);
     const page = await diff(current, {}, previous);
     expect(page.baseSha).toBe(previous.commitSha);
     expect(page.entries).toMatchObject([{ path: 'tracked.txt', patch: expect.stringContaining('second review version') }]);
@@ -62,7 +62,7 @@ describe('capture with controlled Git and real filesystem', () => {
     const f = await captureFixture(); const captured = await f.capture(f.input);
     const diff = createDeliveryDiff(f.root, async (cwd, args, input) => {
       if (args.includes('--unified=3')) throw new Error('GIT_ENCODING_UNSUPPORTED'); return f.run(cwd, args, input);
-    }, async path => path);
+    }, async path => path, async () => f.root);
     const result = await diff(delivery(f.input, captured), {});
     expect(result.entries.filter(e => !e.binary).every(e => e.unsupported === 'NON_UTF8_CONTENT' && e.patch === null)).toBe(true);
   });

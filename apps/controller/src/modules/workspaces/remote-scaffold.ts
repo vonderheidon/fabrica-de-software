@@ -18,7 +18,7 @@ export function createScaffoldRemoteGit(git?: GitReader, authorization?: Scaffol
         effect.scopeKey !== effect.creationId || !['associate_origin','baseline_push'].includes(effect.kind) || !['running','unknown','confirmed'].includes(effect.state) ||
         !i.repositoryId || !i.commitSha || !i.branchRef || i.branchRef !== `refs/heads/${plan.input.baseBranch}` || i.ownerId !== remote.ownerId || i.repositoryName !== remote.name ||
         i.repositoryOwner !== plan.ownerLogin || i.visibility !== remote.visibility || !/^[A-Za-z0-9-]{1,100}$/.test(i.repositoryOwner ?? '') ||
-        !/^[A-Za-z0-9_.-]{1,100}$/.test(remote.name) || /^\.+$/.test(remote.name) || i.planHash !== scaffoldOwnership(plan) || (effect.kind === 'baseline_push' && plan.input.creationMode !== 'remote_push')) throw new ScaffoldWorkspaceError('CREATION_EFFECT_INVALID');
+        !/^[A-Za-z0-9_.-]{1,100}$/.test(remote.name) || /^\.+$/.test(remote.name) || i.planHash !== scaffoldOwnership(plan)) throw new ScaffoldWorkspaceError('CREATION_EFFECT_INVALID');
       if (write && (effect.state !== 'running' || !effect.authorized || !authorization || accountId !== plan.account.id ||
         !('kind' in authorization && authorization.kind === 'confirmed_plan') &&
         !('accountId' in authorization && authorization.accountId === accountId && authorization.targets.some(t => t.ownerId === remote.ownerId && t.name === remote.name && t.visibility === remote.visibility && (effect.kind !== 'baseline_push' || t.allowPush))))) return fail('CREATION_TARGET_NOT_AUTHORIZED','failed_known');

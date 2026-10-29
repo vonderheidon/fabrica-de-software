@@ -26,7 +26,7 @@ export type { LocalCommitResult } from './publication.js';
 export { ScaffoldWorkspaceError, validateScaffoldBranch } from './scaffold.js';
 export type { EnvironmentObservation } from './recovery.js';
 export { CaptureError, captureLimits, type CaptureInput, type CapturedContent } from './capture.js';
-export { ProjectStorageError, projectStorageRootRelative } from './project-storage.js';
+export { ProjectStorageError, projectStorageRootRelative, requireAttemptRootResolver } from './project-storage.js';
 export { createProjectStorageTransitionWorkspace } from './project-storage-transition.js';
 export type { AttemptRootResolver, ProjectStoragePersistence } from './project-storage.js';
 import { resolve } from 'node:path';

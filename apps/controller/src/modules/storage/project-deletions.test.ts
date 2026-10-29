@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage, type Storage } from './index.js';
-import { applyMigrations, loadMigrations } from './migrations.js';
+import { applyMigrations, loadMigrations } from '../../../../../tests/fixtures/historical-schema.js';
 import { seedSettings } from './settings.js';
 import { registerProject } from './configuration-writes.js';
 

@@ -5,19 +5,18 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
 import type { DeliveryMode, GitHubProjectDetails, GitHubQueryResult, IssueContext, OriginInspection, PreparedWorkspace, StartAttempt, ToolObservation } from '#contracts';
-import { openStorage, openStorageAtMigrationVersionForTests } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createPreparations, type PreparationDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { createPipeline, type PipelineDependencies } from '../../apps/controller/src/modules/pipeline/index.js';
 import type { Execution, PassageRequest } from '../../apps/controller/src/modules/execution/index.js';
 import { digest, loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
 
 export const complete = <T>(data: T): GitHubQueryResult<T> => ({ state: 'complete', data, diagnostics: [], retryAtMs: null });
-export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high', directoryName?: 'factory', migrationVersionForTest?: number, recordInitialStorage = false) {
+export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high', directoryName?: 'factory' | 'var/factory', recordInitialStorage = false) {
   const directory = directoryName ? join(temporaryRoot,directoryName) : mkdtempSync(join(temporaryRoot, 'factory-attempt-'));
-  if (directoryName) mkdirSync(directory);
+  if (directoryName) mkdirSync(directory, { recursive: true });
   const storageOptions = { dataDirectory: directory, busyTimeoutMs: 10 };
-  const storage = migrationVersionForTest === undefined ? openStorage(storageOptions)
-    : openStorageAtMigrationVersionForTests(storageOptions, migrationVersionForTest);
+  const storage = openStorage(storageOptions);
   const db = new Database(join(directory, 'factory.sqlite')); db.pragma('foreign_keys = ON');
   const cleanInitialization = recordInitialStorage ? {
     schemaVersion: storage.getDiagnostics().schemaVersion,

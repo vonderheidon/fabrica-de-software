@@ -10,7 +10,7 @@ afterEach(async () => { for (const path of paths.splice(0)) await rm(path, { rec
 it('shares one checkout across checks and review without another clone or Git write', async () => {
   const f = await captureFixture(); paths.push(f.root);
   const version = delivery(f.input, await f.capture(f.input));
-  const materialize = createAttemptMaterializer(f.root, f.run, async path => path);
+  const materialize = createAttemptMaterializer(f.root, f.run, async path => path, async () => f.root);
   const before = f.calls.length;
   expect(await materialize(version, randomUUID())).toBe(f.implementation);
   expect(await materialize(version, randomUUID())).toBe(f.implementation);
@@ -20,7 +20,7 @@ it('shares one checkout across checks and review without another clone or Git wr
 it('refuses tracked, binary and new-file changes after capture without changing the retained version', async () => {
   const f = await captureFixture(); paths.push(f.root);
   const version = delivery(f.input, await f.capture(f.input));
-  const materialize = createAttemptMaterializer(f.root, f.run, async path => path);
+  const materialize = createAttemptMaterializer(f.root, f.run, async path => path, async () => f.root);
   await writeFile(join(f.implementation, 'binary.bin'), Buffer.from([0, 255, 9]));
   await expect(materialize(version, randomUUID())).rejects.toThrow('DELIVERY_INTEGRITY_FAILED');
   await writeFile(join(f.implementation, 'binary.bin'), Buffer.from([0, 255, 1, 2]));

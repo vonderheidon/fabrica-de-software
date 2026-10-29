@@ -7,7 +7,7 @@ import { Delivery, DeliveryTarget, type DeliveryTarget as SealedTarget, EffectVi
 import type { GitHub } from '../github/index.js';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory } from './capture.js';
 import type { GitReader } from './git.js';
-import type { AttemptRootResolver } from './project-storage.js';
+import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 import { githubReference } from './inspect.js';
 
 export interface DeliveryTaskInput {
@@ -150,7 +150,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
   async function inspectDeliveryTarget(path: string,task: DeliveryTaskInput,approved: { approvedRef: string; contentIdentity: string; baseSha: string }): Promise<DeliveryTargetInspection> {
     if (!dataDirectory) targetError('CONTEXT_UNAVAILABLE');
     const found = await observe(path,task,approved);
-    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(task.attemptId) : dataDirectory!,canonicalize);
+    const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(task.attemptId),canonicalize);
     const retained = resolve(data,'git',task.attemptId + '.git');
     await plainDirectory(retained,canonicalize);
     const diff = await isolated!(retained,['--git-dir=' + retained,'diff-tree','--no-commit-id','--name-only','--no-renames','-r','-z',task.baseSha,approved.approvedRef]);
@@ -223,7 +223,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         compareWorkingState && (expected.head !== target.local_identity.observed_head || expected.observedBranchRef !== target.local_identity.observed_branch_ref ||
           expected.workingStateHash !== target.local_identity.working_state_hash || expected.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
     const repository = expected.root;
-    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory!,canonicalize);
+    const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId),canonicalize);
     const retained = resolve(data,'git',`${delivery.attemptId}.git`);
     await plainDirectory(retained,canonicalize); await noBorrowedObjects(retained);
     if ((await metadataBytes(resolve(retained,'factory-owner'),36)).toString('utf8') !== delivery.attemptId) targetError('RETAINED_REPOSITORY_INVALID');

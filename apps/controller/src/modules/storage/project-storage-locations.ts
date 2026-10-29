@@ -56,7 +56,7 @@ export function createProjectStorageLocations(db: Database.Database) {
       managed_root: current.find(location => location.location_key === 'managed')?.root_relative ?? null,
       original_path: project.source.kind === 'local' ? project.source.location : null,
       locations: all.map(mapLocation), transition_plan: null, active_transition_operation_id: null,
-      state: current.length ? 'current' as const : 'legacy' as const, cause: null, recovery: null,
+      state: 'current' as const, cause: null, recovery: null,
     };
     if (!Value.Check(ProjectStorageView, value)) throw new Error('PROJECT_STORAGE_DATA_INVALID');
     return value;

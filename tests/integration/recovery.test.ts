@@ -9,8 +9,8 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(start = true, migrationVersionForTest?: number) {
-  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f);
+async function fixture(start = true) {
+  const f = await attemptFixture(); fixtures.push(f);
   const prepared = await f.prepare();
   const op = start ? await f.pipeline.startAttempt(prepared.body, prepared.context) : null;
   if (start) await f.pipeline.drain();

@@ -26,7 +26,7 @@ it('materializes only the retained commit in an exclusively reserved checkout, i
     if (args.includes('status')) return { exitCode: 0, stdout: '' };
     return f.run(cwd, args, options);
   };
-  const materialize = createPublicationMaterializer(root, git, async p => p); const id = randomUUID(); const path = await materialize(d, id);
+  const materialize = createPublicationMaterializer(root, git, async p => p, async () => root); const id = randomUUID(); const path = await materialize(d, id);
   expect(path).toContain(join('publication', id, 'checkout'));
   expect((await readFile(join(path, 'tracked.txt'), 'utf8'))).toBe('changed tracked bytes\n');
   expect(calls.every(c => c.cwd !== f.implementation)).toBe(true);

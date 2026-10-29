@@ -5,7 +5,7 @@ import { Value } from '@sinclair/typebox/value';
 import { OperationId, type Delivery } from '#contracts';
 import type { GitReader } from './git.js';
 import { CaptureError, captureLimits, gitPath, managedRoot, metadataBytes, noBorrowedObjects, nul, plainDirectory, verifyRetained } from './capture.js';
-import type { AttemptRootResolver } from './project-storage.js';
+import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 
 export interface EnvironmentObservation { exists: boolean; stamp: string; contentSafe: boolean; reason: string | null; fileCount: number; bytes: number }
 interface Entry { path: string; directory: boolean; identity: string }
@@ -18,7 +18,7 @@ export function createEnvironmentRecovery(dataDirectory?: string, git?: GitReade
   resolveAttemptRoot?: AttemptRootResolver) {
   async function target(attemptId: string): Promise<string> {
     if (!Value.Check(OperationId, attemptId) || !dataDirectory) throw new CaptureError('RESOURCE_PATH_INVALID');
-    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(attemptId) : dataDirectory, canonicalize);
+    const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(attemptId), canonicalize);
     let path = data;
     for (const part of ['work', attemptId, 'implementation']) { path = resolve(path, part); await plainDirectory(path, canonicalize); }
     const suffix = relative(resolve(data, 'work'), path);
@@ -45,7 +45,7 @@ export function createEnvironmentRecovery(dataDirectory?: string, git?: GitReade
   }
   async function retained(root: string, attemptId: string, deliveries: Delivery[]): Promise<boolean> {
     if (!git || !deliveries.length || deliveries.some(d => d.captureState !== 'captured' || d.attemptId !== attemptId)) return false;
-    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(attemptId) : dataDirectory!, canonicalize); const repository = resolve(data, 'git', `${attemptId}.git`);
+    const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(attemptId), canonicalize); const repository = resolve(data, 'git', `${attemptId}.git`);
     await plainDirectory(resolve(data, 'git'), canonicalize); await plainDirectory(repository, canonicalize); await noBorrowedObjects(repository);
     if ((await metadataBytes(resolve(repository, 'factory-owner'), 36)).toString('utf8') !== attemptId) throw new CaptureError('RETAINED_CONTENT_AT_RISK');
     const metadata = resolve(root, '.git'); await plainDirectory(metadata, canonicalize); await noBorrowedObjects(metadata);

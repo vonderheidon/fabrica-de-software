@@ -58,7 +58,7 @@ function observeContentIO(directory: string) {
     assertNoContentIO() {
       const accessed = readers.some(reader => reader.mock.calls.some(args => {
         const path = String(args[0]).replaceAll('\\', '/').toLowerCase();
-        return ['work', 'git'].some(part => path === `${root}/${part}` || path.startsWith(`${root}/${part}/`));
+        return ['work', 'git', 'projects'].some(part => path === `${root}/${part}` || path.startsWith(`${root}/${part}/`));
       }));
       expect(accessed, 'project list, event history and deletion polling must not read work/Git content').toBe(false);
     },
@@ -148,9 +148,15 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
   it('preserves the complete sibling registration tree through HTTP acceptance and native removal', async () => {
     const cacheRoot = resolve(process.cwd(), '.cache');
     await mkdir(cacheRoot, { recursive: true });
-    const f = await attemptFixture(cacheRoot);
+    const installRoot = await mkdtemp(join(cacheRoot, 'deletion-current-'));
+    cleanup.push(async () => {
+      if (!installRoot.startsWith(cacheRoot + sep + 'deletion-current-')) throw new Error('UNSAFE_TEST_CLEANUP');
+      await rm(installRoot, { recursive: true, force: true });
+    });
+    await mkdir(join(installRoot, 'var'));
+    const f = await attemptFixture(join(installRoot, 'var'), 'a'.repeat(40), 'high', 'factory');
     cleanup.push(() => f.close());
-    const history = projectDeletionHistory(f.db, () => {}, false, false, f.directory);
+    const history = projectDeletionHistory(f.db, () => {}, false, false, f.directory, true);
     const selectedId = history.selected.projectId;
     const otherId = history.other.projectId;
     const selectedConfiguration = f.storage.getConfiguration(selectedId).view.configuration;
@@ -159,6 +165,9 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
     expect(selectedConfiguration.source.kind).toBe('github');
 
     const dataDirectory = resolve(f.directory);
+    const managedRoot = resolve(installRoot, ...projectStorageRootRelative(selectedId, 'managed').split('/'));
+    await mkdir(managedRoot, { recursive: true });
+    f.storage.recordProjectStorageLocation(await createProjectStorageInspector(dataDirectory).inspectProjectStorageRoot(selectedId, 'managed'));
     const input = f.storage.getProjectDeletionPaths(selectedId);
     expect(input.blockers).toEqual([]);
     for (const target of input.targets) {
@@ -211,10 +220,12 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
     expect(accepted.statusCode).toBe(202);
     expect(accepted.json()).toMatchObject({ operation_id: operationId, state: 'accepted' });
 
-    const workRoot = join(dataDirectory, 'work', history.selected.attemptId);
+    const workRoot = join(managedRoot, 'work', history.selected.attemptId);
     const cacheDirectory = join(workRoot, 'implementation', 'node_modules', '.cache');
     const cachePath = join(cacheDirectory, 'ignored.bin');
-    expect(input.targets.some(target => resolve(target.path) === resolve(workRoot))).toBe(true);
+    expect(input.targets.some(target => resolve(target.path) === managedRoot)).toBe(true);
+    await mkdir(workRoot, { recursive: true });
+    await writeFile(join(workRoot, 'root.bin'), Buffer.from([0, 17, 127, 255]));
     await writeFile(join(workRoot, '.gitignore'), '/implementation/node_modules/\n');
     await mkdir(cacheDirectory, { recursive: true });
 
@@ -275,7 +286,8 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
         databaseBytes: files.find(file => file.path === 'factory.sqlite')?.sizeBytes ?? 0,
         walBytes: files.find(file => file.path === 'factory.sqlite-wal')?.sizeBytes ?? 0,
         sharedMemoryBytes: files.find(file => file.path === 'factory.sqlite-shm')?.sizeBytes ?? 0,
-        workBytes: files.filter(file => file.path.startsWith('work/')).reduce((sum, file) => sum + file.sizeBytes, 0),
+        workBytes: files.filter(file => file.path.startsWith(relative(dataDirectory, workRoot).replaceAll('\\', '/') + '/'))
+          .reduce((sum, file) => sum + file.sizeBytes, 0),
         projectDeletionTargetRows: targetRows,
         databaseAudit,
         measurements: measured,

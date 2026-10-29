@@ -24,7 +24,7 @@ async function fixture() {
     return f.run(cwd, args, options);
   };
   const open = vi.fn(async () => {});
-  const recovery = createEnvironmentRecovery(root, run, open, async p => p);
+  const recovery = createEnvironmentRecovery(root, run, open, async p => p, async () => root);
   return { ...f, root, retained, run, open, recovery };
 }
 describe('bounded environment recovery with real fixture files and controlled Git', () => {
@@ -65,7 +65,7 @@ describe('bounded environment recovery with real fixture files and controlled Gi
   it('opens only the fixed registered path, rechecks existence and reports unsupported native context', async () => {
     const f = await fixture(); await f.recovery.openEnvironment(f.input.attemptId);
     expect(f.open).toHaveBeenCalledExactlyOnceWith(f.implementation);
-    const unsupported = createEnvironmentRecovery(f.root, f.run, undefined, async p => p);
+    const unsupported = createEnvironmentRecovery(f.root, f.run, undefined, async p => p, async () => f.root);
     expect(await unsupported.folderCapability(f.input.attemptId)).toEqual({ available: false, reason: 'NATIVE_OPEN_UNAVAILABLE' });
     await expect(unsupported.openEnvironment(f.input.attemptId)).rejects.toMatchObject({ code: 'NATIVE_OPEN_UNAVAILABLE' });
     expect((await unsupported.folderCapability(randomUUID())).available).toBe(false);
@@ -73,7 +73,7 @@ describe('bounded environment recovery with real fixture files and controlled Gi
   it('rejects controlled canonical redirection without touching a neighboring manual directory', async () => {
     const f = await fixture(); const outside = resolve(f.root, 'manual'); await mkdir(outside); await writeFile(resolve(outside, 'keep.txt'), 'keep');
     const redirected = resolve(f.implementation, 'redirect'); await mkdir(redirected);
-    const recovery = createEnvironmentRecovery(f.root, f.run, undefined, async p => p === redirected ? outside : p);
+    const recovery = createEnvironmentRecovery(f.root, f.run, undefined, async p => p === redirected ? outside : p, async () => f.root);
     await expect(recovery.inspectEnvironment(f.input.attemptId, [f.retained])).rejects.toMatchObject({ code: 'MANAGED_PATH_INVALID' });
     expect(await readFile(resolve(outside, 'keep.txt'), 'utf8')).toBe('keep');
   });

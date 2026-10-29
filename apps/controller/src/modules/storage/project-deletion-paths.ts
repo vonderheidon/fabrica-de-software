@@ -26,16 +26,6 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   const blockers = inventory.blockers.map(({ reason, recovery }) => ({ reason, recovery }));
   const targets: { key: string; kind: 'original_directory' | 'exclusive_workspace';
     path: string; ownerKind: 'project' | 'attempt'; ownerId: string }[] = [];
-  const addAttempt = (id: string): void => {
-    if (!Value.Check(OperationId, id)) {
-      blockers.push({ reason: 'Um recurso não tem identidade válida.', recovery: 'Corrija o inventário antes de tentar excluir o projeto.' });
-      return;
-    }
-    for (const [key, path, kind] of [
-      ['work', resolve(dataDirectory, 'work', id), 'exclusive_workspace'],
-      ['git', resolve(dataDirectory, 'git', `${id}.git`), 'exclusive_workspace'],
-    ] as const) targets.push({ key: `${key}:${id}`, kind, path, ownerKind: 'attempt', ownerId: id });
-  };
   if (project.source.kind === 'local') targets.push({ key: `original:${projectId}`, kind: 'original_directory',
     path: project.source.location, ownerKind: 'project', ownerId: projectId });
   const installationRoot = resolve(dataDirectory, '..', '..');
@@ -68,7 +58,6 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     }
   }
   const attempts = db.prepare<[string], { id: string }>('SELECT id FROM attempts WHERE project_id=? ORDER BY id').all(projectId);
-  for (const attempt of attempts) addAttempt(attempt.id);
   const passages = db.prepare<[string], { id: string; attempt_id: string }>(
     'SELECT id,attempt_id FROM passages WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
   ).all(projectId);
@@ -78,11 +67,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
       blockers.push({ reason: 'O recurso de implementação da passagem está ausente.', recovery: 'Confira o inventário de recursos da tentativa antes de excluir o projeto.' });
     } else if (workspace.reference === `projects/${projectId}/v1/managed/work/${passage.attempt_id}/implementation`) {
       // The project root is an authorized target and already contains this bootstrap.
-    } else if (workspace.reference === `work/${passage.attempt_id}/implementation` && Value.Check(OperationId, passage.id)) {
-      targets.push({ key: `bootstrap:${passage.id}`, kind: 'exclusive_workspace',
-        path: resolve(dataDirectory, 'execution-bootstrap', passage.id), ownerKind: 'attempt', ownerId: passage.attempt_id });
-    }
-    else blockers.push({ reason: 'Uma passagem não tem identidade válida.', recovery: 'Corrija o inventário antes de tentar excluir o projeto.' });
+    } else blockers.push({ reason: 'Uma passagem não tem identidade válida.', recovery: 'Corrija o inventário antes de tentar excluir o projeto.' });
   }
   const resources = db.prepare<[string], { id: string; owned: number; reference: string; attempt_id: string; kind: string; launch_state: string }>(
     'SELECT id,owned,reference,attempt_id,kind,launch_state FROM resources WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
@@ -99,12 +84,8 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   }
   for (const resource of resources) {
     if (!resource.owned && resource.launch_state === 'planned') continue;
-    // Attempt registration stores this exact relative reference. Keep accepting
-    // the absolute form, but never normalize arbitrary input into ownership.
     const implementationReferences = [
-      `work/${resource.attempt_id}/implementation`,
       `projects/${projectId}/v1/managed/work/${resource.attempt_id}/implementation`,
-      resolve(dataDirectory, 'work', resource.attempt_id, 'implementation'),
     ];
     if (!resource.owned || (resource.kind === 'implementation' && !implementationReferences.includes(resource.reference))) {
       blockers.push({ reason: 'O pertencimento de um ambiente não pôde ser comprovado.',
@@ -118,12 +99,6 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   const creations = db.prepare<[], { id: string; project_id: string | null; destination: string }>(
     'SELECT id,project_id,destination FROM project_creations ORDER BY id',
   ).all();
-  const others = db.prepare<[string], { id: string }>('SELECT id FROM attempts WHERE project_id<>? ORDER BY id').all(projectId);
-  const otherPassages = db.prepare<[string], { id: string }>(
-    'SELECT id FROM passages WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id<>?) ORDER BY id',
-  ).all(projectId);
-  const otherResources = db.prepare<[string], { reference: string; attempt_id: string }>(`SELECT reference,attempt_id FROM resources
-    WHERE kind='implementation' AND attempt_id IN (SELECT id FROM attempts WHERE project_id<>?) ORDER BY id`).all(projectId);
   const otherStorageLocations = db.prepare<[string], { project_id: string; root_relative: string }>(`SELECT project_id,root_relative FROM project_storage_locations
     WHERE project_id<>? ORDER BY project_id,location_key,revision`).all(projectId);
   const validOtherStorageLocations = otherStorageLocations.filter(location => {
@@ -139,24 +114,16 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
   const protectedPaths = [...otherOrigins.map(o => o.path), ...selectedTargets.map(t => t.local_path), ...otherDeliveryTargets.map(t => t.local_path),
     ...creations.filter(c => c.project_id !== projectId || project.source.kind !== 'local' || c.destination !== project.source.location).map(c => c.destination),
-    ...others.flatMap(a => [resolve(dataDirectory, 'work', a.id), resolve(dataDirectory, 'git', `${a.id}.git`)]),
-    ...otherPassages.map(p => resolve(dataDirectory, 'execution-bootstrap', p.id)),
-    ...otherResources.flatMap(r => [resolve(dataDirectory, r.reference), resolve(dataDirectory, 'work', r.attempt_id, 'implementation')]),
     ...validOtherStorageLocations.map(location => resolve(installationRoot, ...location.root_relative.split('/'))),
     resolve(dataDirectory, 'factory.sqlite'), resolve(dataDirectory, 'controller-lock.sqlite')];
   const settings = readSettings(db);
   const schema = db.prepare<[], { version: number; checksum: string }>('SELECT version,checksum FROM schema_migrations ORDER BY version').all();
-  if (schema.length !== 53 || schema.at(-1)?.version !== 53) blockers.push({
-    reason: 'A versão do inventário de recursos não é suportada nesta conferência.',
-    recovery: 'Atualize a política de conferência para o schema instalado.' });
-  // Data and install containers cannot themselves be removed. Exclusive leaves
-  // below work/git remain eligible; no shared container is a target.
+  // Data and install containers cannot themselves be removed.
   const containers = [resolve(dataDirectory), resolve(dataDirectory, '..'), resolve(dataDirectory, '../..'),
-    resolve(dataDirectory, 'work'), resolve(dataDirectory, 'git'),
-    resolve(dataDirectory, 'execution-bootstrap'), resolve(dataDirectory, 'projects'),
+    resolve(dataDirectory, 'projects'),
     ...(settings.projects_root ? [settings.projects_root] : [])];
   const inventoryVersion = digest({ version: 1, schema, project, keys: inventory.keys, storageLocations, otherStorageLocations,
-    resources, passages, otherPassages, otherResources, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations, others,
+    resources, passages, attempts, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations,
     installation: settings.installation_id, account: settings.account_id, containers });
   const originalProtectedPaths = [resolve(dataDirectory), resolve(dataDirectory, '../..')];
   return { projectId, projectName: project.name, projectRevision: project.revision, sourceKind: project.source.kind,

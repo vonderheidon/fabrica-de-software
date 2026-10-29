@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -19,6 +19,7 @@ import { createAttemptMaterializer } from '../../dist/apps/controller/src/module
 import { createDeliveryDiff } from '../../dist/apps/controller/src/modules/workspaces/diff.js';
 import { createRetainedVerifier } from '../../dist/apps/controller/src/modules/workspaces/retention.js';
 import { createEnvironmentRecovery } from '../../dist/apps/controller/src/modules/workspaces/recovery.js';
+import { createProjectStorageInspector } from '../../dist/apps/controller/src/modules/workspaces/project-storage.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createPreparations } from '../../apps/controller/src/modules/projects/index.js';
 
@@ -30,8 +31,9 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
   const priorBudget = sessionsOnly && process.env.FACTORY_REAL_RECOVERY_PRIOR_BUDGET ? JSON.parse(readFileSync(resolve(process.env.FACTORY_REAL_RECOVERY_PRIOR_BUDGET), 'utf8')) as { passages: number; deadline: number } : null;
   if (priorBudget && (priorBudget.passages !== 2 || priorBudget.deadline <= Date.now())) throw new Error('PRIOR_AUTHORIZATION_EXHAUSTED');
   const maximumPassages = stopsOnly ? 2 : sessionsOnly ? 4 : 6;
-  const evidence = resolve('.cache', `session-recovery-${Date.now()}`);
-  mkdirSync(evidence, { recursive: true });
+  mkdirSync(resolve('.cache'), { recursive: true });
+  // Keep disposable installation paths below Git for Windows' subprocess path limit.
+  const evidence = mkdtempSync(join(resolve('.cache'), 'r-'));
   const seed = join(evidence, 'seed'); mkdirSync(seed);
   const gitExecutable = process.env.FACTORY_GIT_EXE!;
   const gitCommand = (...args: string[]) => {
@@ -45,17 +47,20 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
   writeFileSync(join(seed, 'hold.cjs'), "const fs=require('node:fs');const {spawn}=require('node:child_process');fs.mkdirSync('.factory-evidence',{recursive:true});const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync('.factory-evidence/active.json',JSON.stringify([process.pid,child.pid]));setInterval(()=>{},1000);");
   gitCommand('add', '--', 'value.txt', '.gitignore', 'hold.cjs');
   gitCommand('-c', 'user.name=Factory proof', '-c', 'user.email=proof@factory.invalid', 'commit', '-m', 'Native recovery proof baseline');
-  const f = await attemptFixture(evidence, gitCommand('rev-parse', 'HEAD'));
+  const f = await attemptFixture(evidence, gitCommand('rev-parse', 'HEAD'), 'high', 'var/factory');
   await f.pipeline.close();
   const git = createGitReader({ kind: 'windows_keyring', executable: gitExecutable });
-  const shared = createAttemptMaterializer(f.directory, git);
-  const prepare = createWorkspacePreparer(f.directory, git);
+  let projectStorage = createProjectStorageInspector(f.directory, undefined, f.storage);
+  const resolveAttemptRoot = (id: string, allocate?: boolean) => projectStorage.resolveAttemptRoot(id, allocate);
+  const shared = createAttemptMaterializer(f.directory, git, undefined, resolveAttemptRoot);
+  const prepare = createWorkspacePreparer(f.directory, git, undefined, resolveAttemptRoot);
   const rawHost = { maestriExecutable: process.env.FACTORY_MAESTRI_EXE!, ompExecutable: process.env.FACTORY_OMP_EXE!,
     powershellExecutable: join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), inheritedEnvironment: process.env };
   let host = withWindowsTerminalJobs(rawHost, f.directory);
   const handshakes: { sessionId: string; terminalId: string; workspaceId: string; cwd: string; provider: string; model: string; effort: string | null }[] = [];
   const channels: { callbacks: ChannelCallbacks; channel: PassageChannel }[] = [];
   const createAdapter = () => createMaestriOmp({ dataDirectory: f.directory, persistence: f.persistence, host,
+    projectStorageRootForAttempt: resolveAttemptRoot,
     validateReviewerResult: async binding => {
       const review = f.storage.getReview(binding.deliveryVersion)!;
       await shared(f.storage.getDelivery(binding.deliveryVersion).delivery, review.id);
@@ -99,8 +104,8 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     } };
   const workspaces = { ...f.workspaces,
     prepareAttempt: (input: Parameters<typeof prepare>[0]) => prepare({ ...input, source: { ...input.source, kind: 'local', location: seed } }),
-    captureDelivery: createCapturer(f.directory, git), materializeReview: shared, getDeliveryDiff: createDeliveryDiff(f.directory, git),
-    verifyRetainedDelivery: createRetainedVerifier(f.directory, git), folderCapability: createEnvironmentRecovery(f.directory, git).folderCapability };
+    captureDelivery: createCapturer(f.directory, git, undefined, resolveAttemptRoot), materializeReview: shared, getDeliveryDiff: createDeliveryDiff(f.directory, git, undefined, resolveAttemptRoot),
+    verifyRetainedDelivery: createRetainedVerifier(f.directory, git, undefined, resolveAttemptRoot), folderCapability: createEnvironmentRecovery(f.directory, git, undefined, undefined, resolveAttemptRoot).folderCapability };
   const createController = () => createPipeline({ ...f.dependencies, github, workspaces, publication: { github, workspaces } });
   let pipeline = createController();
   const watchdog = setTimeout(() => { void pipeline.close(); }, Math.max(0, deadline - Date.now()));
@@ -145,7 +150,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
       for (const handle of firstHandles) await execution.preparePassageHandoff(handle);
       setProfiles(true);
       const interrupted = await startAttempt();
-      const marker = join(f.directory, 'work', interrupted, 'implementation', '.factory-evidence', 'active.json');
+      const marker = join(await resolveAttemptRoot(interrupted, true), 'work', interrupted, 'implementation', '.factory-evidence', 'active.json');
       await until('restart-active-writers', () => existsSync(marker));
       const pids = JSON.parse(readFileSync(marker, 'utf8')) as number[];
       const oldPassage = { passageId: f.storage.getAttempt(interrupted).passageId };
@@ -159,6 +164,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
       const priorController = f.storage.controllerInstanceId;
       f.storage.close();
       f.storage = openStorage({ dataDirectory: f.directory });
+      projectStorage = createProjectStorageInspector(f.directory, undefined, f.storage);
       f.persistence = f.storage.executionPersistence();
       f.preparations = createPreparations({ storage: f.storage, github: f.github, workspaces: f.workspaces });
       f.dependencies.storage = f.storage; f.dependencies.preparations = f.preparations;
@@ -201,9 +207,9 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     expect(one).toHaveLength(2); expect(two).toHaveLength(2);
     expect(new Set([...one, ...two].map(row => row.omp_session_id)).size).toBe(4);
     expect(new Set(two.map(row => row.managed_terminal_id))).toEqual(new Set(one.map(row => row.managed_terminal_id)));
+    const finalPassages = f.db.prepare('SELECT id AS passageId FROM passages WHERE attempt_id=?').all(second) as { passageId: string }[];
+    for (const handle of finalPassages) await execution.preparePassageHandoff(handle);
     if (sessionsOnly) {
-      const finalPassages = f.db.prepare('SELECT id AS passageId FROM passages WHERE attempt_id=?').all(second) as { passageId: string }[];
-      for (const handle of finalPassages) await execution.preparePassageHandoff(handle);
       expect(f.db.prepare("SELECT COUNT(*) AS count FROM resources WHERE kind='terminal' AND stop_state<>'confirmed'").get()).toEqual({ count: 0 });
       expect(passages).toBe(4); expect(handshakes).toHaveLength(4);
       expect(handshakes.every(x => x.provider === 'openai-codex' && x.model === 'gpt-6-luna' && x.effort === 'high')).toBe(true);
@@ -214,7 +220,8 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     }
     setProfiles(true);
     const cancellation = await startAttempt();
-    const marker = (id: string) => join(f.directory, 'work', id, 'implementation', '.factory-evidence', 'active.json');
+    const managedRoot = await resolveAttemptRoot(cancellation, true);
+    const marker = (id: string) => join(managedRoot, 'work', id, 'implementation', '.factory-evidence', 'active.json');
     await until('cancel-native-command-active', () => existsSync(marker(cancellation)));
     const cancelPids = JSON.parse(readFileSync(marker(cancellation), 'utf8')) as number[];
     expect(cancelPids.every(alive)).toBe(true);
@@ -232,8 +239,11 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     const lostSession = f.persistence.getAttemptSession({ passageId: lostStatus.passageId });
     const lostReference = { workspaceId: lostSession.workspaceId!, terminalId: lostSession.terminalId!, terminalName: lostSession.terminalName, generation: lostSession.generation };
     channels.at(-1)!.callbacks.lost('CHANNEL_EOF'); await channels.at(-1)!.channel.close();
-    expect(lostPids.every(alive)).toBe(true);
-    expect(await host.confirmStoppedTerminal!(lostReference)).toBe(false);
+    const liveImmediatelyAfterLoss = lostPids.every(alive);
+    const automaticStopConfirmed = await host.confirmStoppedTerminal!(lostReference);
+    // Loss starts owned-process cleanup concurrently. Compare the confirmation
+    // with process liveness after awaiting it, not with an earlier observation.
+    expect(automaticStopConfirmed && lostPids.some(alive)).toBe(false);
     expect(f.persistence.getAttemptSession({ passageId: lostStatus.passageId }).terminalState).not.toBe('available');
     await execution.cancelAttempt(lost, randomUUID());
     await until('loss-owned-processes-stopped', async () => await host.confirmStoppedTerminal!(lostReference) && lostPids.every(pid => !alive(pid)));
@@ -241,7 +251,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     expect(handshakes.every(x => x.provider === 'openai-codex' && x.model === 'gpt-6-luna' && x.effort === 'high')).toBe(true);
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
     writeFileSync(join(evidence, 'result.json'), JSON.stringify({ ok: true, scope: stopsOnly ? 'stops_only' : 'full', passages, firstSessions: one, secondSessions: two, nativeActiveNotStopped: true,
-      cancellation: { attemptId: cancellation, pids: cancelPids, stopped: true }, trackingLoss: { attemptId: lost, pids: lostPids, liveAfterLoss: true, stoppedAfterExplicitCleanup: true },
+      cancellation: { attemptId: cancellation, pids: cancelPids, stopped: true }, trackingLoss: { attemptId: lost, pids: lostPids, liveImmediatelyAfterLoss, automaticStopConfirmed, stoppedAfterExplicitCleanup: true },
       limits: ['GitHub authority/status/comments are controlled ports, never real remote writes.', 'Tracking loss is injected at the real channel callback boundary; it is not an accidental provider/network outage.', 'Active physical processes and non-available occupation are checked; this does not exercise every allocation race.'], dataDirectory: f.directory }, null, 2));
   } finally {
     clearTimeout(watchdog); await pipeline.close(); f.storage.close(); f.db.close();

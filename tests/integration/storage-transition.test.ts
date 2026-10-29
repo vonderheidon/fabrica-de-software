@@ -60,6 +60,32 @@ afterEach(async () => {
 });
 
 describe('project storage transition', () => {
+  it('resolves the native proof fixture through persisted project storage after reopen', async () => {
+    const installation = mkdtempSync(join(process.cwd(), '.cache', 'native-proof-layout-'));
+    roots.push(installation);
+    const f = await attemptFixture(installation, 'a'.repeat(40), 'high', 'var/factory');
+    let reopened: Storage | undefined;
+    try {
+      const prepared = await f.prepare();
+      const operation = await f.pipeline.startAttempt(prepared.body, prepared.context);
+      await f.pipeline.drain();
+      const inspector = createProjectStorageInspector(f.directory, undefined, f.storage);
+      await expect(inspector.resolveAttemptRoot(operation.resource.id)).rejects.toThrow('PROJECT_STORAGE_ROOT_UNAVAILABLE');
+      const managed = await inspector.resolveAttemptRoot(operation.resource.id, true);
+      expect(managed).toBe(join(f.directory, 'projects', f.projectId, 'v1', 'managed'));
+      expect(existsSync(join(f.directory, 'work'))).toBe(false);
+      await f.pipeline.close();
+      f.storage.close();
+      reopened = openStorage({ dataDirectory: f.directory });
+      const recovered = createProjectStorageInspector(f.directory, undefined, reopened);
+      expect(await recovered.resolveAttemptRoot(operation.resource.id)).toBe(managed);
+      expect(reopened.getAttemptWorkspaceReference(operation.resource.id)).toBe(`projects/${f.projectId}/v1/managed/work/${operation.resource.id}/implementation`);
+    } finally {
+      reopened?.close();
+      await f.close();
+    }
+  });
+
   it('refuses an in-use project before authorizing any filesystem movement', async () => {
     const f = await attemptFixture(join(process.cwd(), '.cache'));
     try {

@@ -94,7 +94,7 @@ export async function captureFixture(directory?: string, identities?: Partial<Ca
     }
     throw new Error(`Unexpected controlled command: ${command}`);
   };
-  const capture = createCapturer(root, run, async path => path); const diff = createDeliveryDiff(root, run, async path => path);
+  const capture = createCapturer(root, run, async path => path, async () => root); const diff = createDeliveryDiff(root, run, async path => path, async () => root);
   return { root, input, implementation, blobs, trees, treeModes, refs, calls, untracked, base, capture, diff, run,
     setExecutable: (path: string) => { modes.set(path, '100755'); },
     removeTrackingAndIgnore: (path: string) => { removedFromTracking.add(path); ignoredPaths.add(path); },

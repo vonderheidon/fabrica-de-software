@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
+import { loadMigrations } from './historical-schema.js';
 import { removeManagedTerminalSchema } from './managed-terminal-schema.js';
 
 /** Disposable fixtures only; never used to downgrade an installation. */

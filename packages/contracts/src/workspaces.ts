@@ -61,7 +61,7 @@ export const ProjectStorageView = Type.Object({
   managed_root: Type.Union([storagePath, Type.Null()]), original_path: Type.Union([storagePath, Type.Null()]),
   locations: Type.Array(ProjectStorageLocation, { maxItems: 100 }), transition_plan: Type.Union([StorageTransitionPlan, Type.Null()]),
   active_transition_operation_id: Type.Union([OperationId, Type.Null()]),
-  state: Type.Union([Type.Literal('current'), Type.Literal('legacy'), Type.Literal('transitioning'), Type.Literal('uncertain'), Type.Literal('blocked')]),
+  state: Type.Union([Type.Literal('current'), Type.Literal('transitioning'), Type.Literal('uncertain'), Type.Literal('blocked')]),
   cause: Type.Union([storagePath, Type.Null()]), recovery: Type.Union([storagePath, Type.Null()]),
 }, closed);
 export type ProjectStorageView = Static<typeof ProjectStorageView>;

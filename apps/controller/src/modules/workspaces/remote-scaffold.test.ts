@@ -13,7 +13,7 @@ function fixture(mode = '') {
   mkdirSync(resolve('.cache'),{ recursive: true }); const root = mkdtempSync(resolve('.cache/scaffold-git-')); directories.push(root);
   const destination = join(root,'new'); mkdirSync(join(destination,'.git'),{ recursive: true });
   const plan: ScaffoldPlan = { formatVersion: 1,installationId: randomUUID(),settingsETag: 'settings',projectsRoot: root,destination,parentIdentity: 'a'.repeat(64),templateDigest: 'b'.repeat(64),
-    input: { name: 'Local name',templateId: 'engineering',templateDigest: 'b'.repeat(64),destinationRelative: 'new',creationMode: 'remote_push',baseBranch: 'release/base',triageEnabled: false,remote: { ownerId: 'OWNER_test',name: 'repo',visibility: 'private' } },
+    input: { name: 'Local name',boardName: 'Project board',templateId: 'engineering',templateDigest: 'b'.repeat(64),destinationRelative: 'new',creationMode: 'remote_push',baseBranch: 'release/base',triageEnabled: false,remote: { ownerId: 'OWNER_test',name: 'repo',visibility: 'private' } },
     files: [{ path: 'README.md',bytes: 1,sha256: 'c'.repeat(64) }],engineering: { tracker: 'github',domain: 'single-context',instructionFile: 'AGENTS.md',triageEnabled: false,installsSkills: false,createsLabels: false },
     account: { state: 'complete',id: 'ACCOUNT_test',login: 'test-user' },ownerId: 'OWNER_test',ownerLogin: 'test-org',effects: ['create_repository','associate_origin','baseline_push'] };
   writeFileSync(join(destination,'.git','factory-scaffold-owner'),scaffoldOwnership(plan),'utf8');
@@ -84,7 +84,7 @@ describe('scaffold Git origin and baseline push with controlled Git/canonicaliza
     expect((await f.api.reconcileScaffoldGit(f.plan,{ ...f.effect('baseline_push'),state: 'unknown' })).reason).toBe('SCAFFOLD_OWNERSHIP_INVALID');
   });
   it('never publishes in remote_no_push, even with an altered effect request',async () => {
-    const f = fixture(); const plan = { ...f.plan,input: { ...f.plan.input,creationMode: 'remote_no_push' as const } };
+    const f = fixture(); const plan = { ...f.plan,input: { ...f.plan.input,creationMode: 'remote_no_push' } } as unknown as ScaffoldPlan;
     expect((await f.api.executeScaffoldGit(plan,f.effect('baseline_push'),'ACCOUNT_test',async () => {})).reason).toBe('CREATION_EFFECT_INVALID'); expect(f.calls).toEqual([]);
   });
 });

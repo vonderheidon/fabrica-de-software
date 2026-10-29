@@ -54,7 +54,7 @@ async function fixture() {
     }
     return f.run(cwd,args,input);
   };
-  const publisher = createLocalPublisher(root,git,async p => p);
+  const publisher = createLocalPublisher(root,git,async p => p, async () => root);
   return { ...f,d,effect,publisher,calls,commits,lose: () => { loseResponse = true; },forge: () => { forge = true; },noDelta: () => { noDelta = true; d.hasDelta = false; } };
 }
 

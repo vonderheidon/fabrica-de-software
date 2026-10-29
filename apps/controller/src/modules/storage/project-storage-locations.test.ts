@@ -7,19 +7,16 @@ import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HttpDelivery } from '#contracts';
 import { createProjectStorageInspector, projectStorageRootRelative } from '../workspaces/project-storage.js';
-import { openStorage, openStorageAtMigrationVersionForTests } from './index.js';
-import { applyMigrations, loadMigrations } from './migrations.js';
-import { seedSettings } from './settings.js';
+import { openStorage } from './index.js';
 
 const directories: string[] = [];
 const stores: { close(): void }[] = [];
-function fixture(migrationVersionForTest?: number) {
+function fixture() {
   const installationRoot = mkdtempSync(join(tmpdir(), 'factory-project-storage-'));
   directories.push(installationRoot);
   const dataDirectory = resolve(installationRoot, 'var', 'factory');
   mkdirSync(dataDirectory, { recursive: true });
-  const storage = migrationVersionForTest === undefined ? openStorage({ dataDirectory })
-    : openStorageAtMigrationVersionForTests({ dataDirectory }, migrationVersionForTest);
+  const storage = openStorage({ dataDirectory });
   stores.push(storage);
   const project = (name: string) => {
     const source = { kind: 'local' as const, location: installationRoot };
@@ -82,18 +79,18 @@ describe('project storage location identity and reads', () => {
     expect(f.storage.getProjectStorageLocations(firstId)[0]?.id).toBe(stored.id);
   });
 
-  it('reads repository_relative legacy references without inventing an observed location', () => {
+  it('preserves an unallocated project and refuses repository access without persistence', async () => {
     const f = fixture(); const projectId = f.project('Legacy project'); const attemptId = randomUUID();
     const inspector = createProjectStorageInspector(f.dataDirectory);
     const delivery = { id: randomUUID(), attempt_id: attemptId, producer_passage_id: randomUUID(), round: 1,
       base_sha: 'a'.repeat(40), capture_state: 'pending', git_ref: null, repository_relative: `git/${attemptId}.git`,
       content_identity: null, commit_sha: null, has_delta: null, diagnostic: null, captured_at_ms: null, revision: 1, warnings: [] };
     expect(Value.Check(HttpDelivery, delivery)).toBe(true);
-    expect(inspector.resolveLegacyRepositoryReference(attemptId, delivery.repository_relative))
-      .toBe(resolve(f.dataDirectory, 'git', `${attemptId}.git`));
-    expect(f.storage.getProjectStorageView(projectId)).toMatchObject({ managed_root: null, state: 'legacy', locations: [] });
-    expect(() => inspector.resolveLegacyRepositoryReference(randomUUID(), delivery.repository_relative))
-      .toThrow('LEGACY_REPOSITORY_REFERENCE_INVALID');
+    await expect(inspector.resolveRepositoryReference(attemptId, delivery.repository_relative))
+      .rejects.toThrow('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
+    expect(f.storage.getProjectStorageView(projectId)).toMatchObject({ managed_root: null, state: 'current', locations: [] });
+    await expect(inspector.resolveRepositoryReference(randomUUID(), delivery.repository_relative))
+      .rejects.toThrow('PROJECT_STORAGE_REFERENCE_INVALID');
   });
 
   it('includes locations in the project deletion inventory', async () => {
@@ -110,7 +107,7 @@ describe('project storage location identity and reads', () => {
     }));
   });
 
-  it('allocates the managed root after intent and resolves new and legacy attempts independently', async () => {
+  it('allocates the managed root after intent and refuses old references without global fallback', async () => {
     const f = fixture(); const projectId = f.project('Managed allocation');
     const newAttempt = randomUUID(); const legacyAttempt = randomUUID();
     const persistence = {
@@ -122,35 +119,15 @@ describe('project storage location identity and reads', () => {
       assertProjectStorageLocation: (observation: import('#contracts').ProjectStorageRootObservation) => f.storage.assertProjectStorageLocation(observation),
     };
     const workspace = createProjectStorageInspector(f.dataDirectory, undefined, persistence);
+    await expect(workspace.resolveAttemptRoot(newAttempt)).rejects.toThrow('PROJECT_STORAGE_ROOT_UNAVAILABLE');
     const root = await workspace.resolveAttemptRoot(newAttempt, true);
     expect(root).toBe(resolve(f.installationRoot, ...projectStorageRootRelative(projectId, 'managed').split('/')));
     expect(f.storage.getProjectStorageView(projectId)).toMatchObject({ managed_root: projectStorageRootRelative(projectId, 'managed'), state: 'current' });
     expect(await workspace.resolveAttemptRoot(newAttempt)).toBe(root);
-    expect(await workspace.resolveAttemptRoot(legacyAttempt)).toBe(f.dataDirectory);
+    await expect(workspace.resolveAttemptRoot(legacyAttempt)).rejects.toThrow('PROJECT_STORAGE_REFERENCE_INVALID');
     expect(await workspace.resolveRepositoryReference(newAttempt, `git/${newAttempt}.git`)).toBe(resolve(root, 'git', `${newAttempt}.git`));
-    expect(await workspace.resolveRepositoryReference(legacyAttempt, `git/${legacyAttempt}.git`)).toBe(resolve(f.dataDirectory, 'git', `${legacyAttempt}.git`));
+    await expect(workspace.resolveRepositoryReference(legacyAttempt, `git/${legacyAttempt}.git`)).rejects.toThrow('PROJECT_STORAGE_REFERENCE_INVALID');
     expect(f.storage.getProjectStorageLocations(projectId)).toHaveLength(1);
-  });
-
-  it('upgrades schema 27 without synthesizing locations', () => {
-    const installationRoot = mkdtempSync(join(tmpdir(), 'factory-project-storage-upgrade-'));
-    directories.push(installationRoot);
-    const dataDirectory = resolve(installationRoot, 'var', 'factory');
-    mkdirSync(dataDirectory, { recursive: true });
-    const filename = join(dataDirectory, 'factory.sqlite');
-    const db = new Database(filename); db.pragma('foreign_keys = ON');
-    applyMigrations(db, loadMigrations().slice(0, 27), () => seedSettings(db));
-    expect(db.pragma('user_version', { simple: true })).toBe(27);
-    expect(db.prepare("SELECT count(*) AS count FROM sqlite_schema WHERE type='table' AND name='project_storage_locations'").get())
-      .toEqual({ count: 0 });
-    db.close();
-    const storage = openStorage({ dataDirectory }); stores.push(storage);
-    ;
-    const reopened = new Database(filename);
-    try {
-      expect(reopened.prepare('SELECT * FROM project_storage_locations').all()).toEqual([]);
-      expect(reopened.pragma('foreign_key_check')).toEqual([]);
-    } finally { reopened.close(); }
   });
 
   it('preserves verified locations across reopen without inventing transitions', async () => {

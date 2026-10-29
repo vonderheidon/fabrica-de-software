@@ -58,9 +58,17 @@ describe('project deletion HTTP boundary', () => {
       const otherId = f.register();
       const preserved = f.storage.getConfiguration(otherId).view.configuration;
       f.db.prepare("UPDATE project_deletions SET state=?,reason='Interrupção de teste',recovery='Retome a mesma operação' WHERE operation_id=?").run(state, accepted.id);
-      f.db.exec("CREATE TRIGGER fail_integrated_receipt BEFORE INSERT ON project_deletion_receipts BEGIN SELECT RAISE(ABORT,'INJECTED_RECEIPT_FAILURE'); END");
       await f.app.close();
       const reopened = openStorage({ dataDirectory: f.directory });
+      const finalize = reopened.finalizeProjectDeletion;
+      let failReceipt = true;
+      reopened.finalizeProjectDeletion = command => {
+        if (failReceipt) {
+          failReceipt = false;
+          throw new Error('INJECTED_RECEIPT_FAILURE');
+        }
+        return finalize(command);
+      };
       const coordinator = createDeletionCoordinator({ storage: reopened, workspaces: f.deletionWorkspaces, logFailure: vi.fn() });
       cleanup.push(async () => { await coordinator.close(); reopened.close(); });
       coordinator.recover(); await coordinator.drain();
@@ -68,7 +76,6 @@ describe('project deletion HTTP boundary', () => {
       expect(reopened.getProject(f.projectId).view.project.id).toBe(f.projectId);
       expect(f.db.prepare('SELECT * FROM project_deletion_receipts').all()).toEqual([]);
       expect(reopened.getConfiguration(otherId).view.configuration).toEqual(preserved);
-      f.db.exec('DROP TRIGGER fail_integrated_receipt');
       await coordinator.resume(accepted.id); await coordinator.drain();
       expect(reopened.getProjectDeletion(accepted.id)).toEqual({ operation_id: accepted.id, state: 'succeeded' });
       expect(reopened.getConfiguration(otherId).view.configuration).toEqual(preserved);

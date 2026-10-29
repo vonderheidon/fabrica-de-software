@@ -10,7 +10,7 @@ import type { Workspaces } from '../../apps/controller/src/modules/workspaces/in
 
 export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
   options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean } = {}) {
-  const f = await attemptFixture(options.temporaryRoot, options.baseSha, undefined, undefined, undefined, options.recordCleanInitialization ?? false); await f.pipeline.close();
+  const f = await attemptFixture(options.temporaryRoot, options.baseSha, undefined, undefined, options.recordCleanInitialization ?? false); await f.pipeline.close();
   if (options.correctionLimit !== undefined || options.deliveryBranch !== undefined) {
     const current = f.storage.getConfiguration(f.projectId);
     const { id: _id, project_id: _project, revision: _revision, created_at_ms: _time, ...configuration } = current.view.configuration;

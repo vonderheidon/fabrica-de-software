@@ -24,6 +24,11 @@ export interface ProjectStoragePersistence {
 
 export type AttemptRootResolver = (attemptId: string, allocate?: boolean) => Promise<string>;
 
+export function requireAttemptRootResolver(resolver: AttemptRootResolver | undefined): AttemptRootResolver {
+  if (!resolver) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
+  return resolver;
+}
+
 const keyPattern = /^[a-z][a-z0-9._-]{0,255}$/;
 const safeRelative = (value: string): boolean => value.length > 0 && value.length <= 32768 && !isAbsolute(value) &&
   !value.includes('\\') && !value.includes(':') && !/[\x00-\x1f\x7f]/.test(value) &&
@@ -139,13 +144,18 @@ export function createProjectStorageInspector(dataDirectory: string, canonicaliz
     ...inspector,
     ensureProjectStorageRoot,
     async resolveAttemptRoot(attemptId: string, allocate = false): Promise<string> {
-      if (!persistence) return dataDirectory;
+      if (!persistence) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
       const projectId = persistence.getAttemptProjectId(attemptId);
       const reference = persistence.getAttemptWorkspaceReference(attemptId);
-      if (reference !== `projects/${projectId}/v1/managed/work/${attemptId}/implementation`) return dataDirectory;
+      if (!Value.Check(OperationId, attemptId) || reference !== `projects/${projectId}/v1/managed/work/${attemptId}/implementation`) {
+        throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      }
       const view = persistence.getProjectStorageView(projectId);
       const current = view.locations.find(item => item.location_key === 'managed' && item.current);
-      if (!current) return allocate ? ensureProjectStorageRoot(projectId) : dataDirectory;
+      if (!current) {
+        if (allocate) return ensureProjectStorageRoot(projectId);
+        throw new ProjectStorageError('PROJECT_STORAGE_ROOT_UNAVAILABLE');
+      }
       try {
         const observation = await inspector.inspectProjectStorageRoot(projectId, current.location_key, current.layout_version);
         persistence.assertProjectStorageLocation(observation);
@@ -171,16 +181,10 @@ export function createProjectStorageInspector(dataDirectory: string, canonicaliz
     },
     async resolveRepositoryReference(attemptId: string, repositoryRelative: string): Promise<string> {
       if (!Value.Check(OperationId, attemptId) || repositoryRelative !== `git/${attemptId}.git`) {
-        throw new ProjectStorageError('LEGACY_REPOSITORY_REFERENCE_INVALID');
+        throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
       }
       const root = await this.resolveAttemptRoot(attemptId);
       return resolve(root, 'git', `${attemptId}.git`);
-    },
-    resolveLegacyRepositoryReference(attemptId: string, repositoryRelative: string): string {
-      if (!Value.Check(OperationId, attemptId) || repositoryRelative !== `git/${attemptId}.git`) {
-        throw new ProjectStorageError('LEGACY_REPOSITORY_REFERENCE_INVALID');
-      }
-      return resolve(dataDirectory, 'git', `${attemptId}.git`);
     },
   };
 }

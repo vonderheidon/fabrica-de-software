@@ -4,7 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { Delivery, OperationId } from '#contracts';
 import type { GitReader } from './git.js';
 import { CaptureError, createCapturer, ensureDirectory, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
-import type { AttemptRootResolver } from './project-storage.js';
+import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 
 /** Review borrows the one owned checkout only after the pipeline stops its prior role. */
 export function createAttemptMaterializer(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath,
@@ -14,7 +14,7 @@ export function createAttemptMaterializer(dataDirectory?: string, git?: GitReade
     if (!Value.Check(Delivery, delivery) || !Value.Check(OperationId, operationId)) throw new CaptureError('DELIVERY_NOT_CAPTURED');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
     await validate({ attemptId: delivery.attemptId, passageId: delivery.producerPassageId, deliveryId: delivery.id, baseSha: delivery.baseSha, declaredFiles: [] }, delivery);
-    const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory, canonicalize);
+    const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId), canonicalize);
     return resolve(data, 'work', delivery.attemptId, 'implementation');
   };
 }
@@ -26,7 +26,7 @@ export function createPublicationMaterializer(dataDirectory?: string, git?: GitR
     if (!Value.Check(Delivery, delivery) || !Value.Check(OperationId, operationId) || delivery.captureState !== 'captured') throw new CaptureError('DELIVERY_NOT_CAPTURED');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
     try {
-      const data = await managedRoot(resolveAttemptRoot ? await resolveAttemptRoot(delivery.attemptId) : dataDirectory, canonicalize);
+      const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId), canonicalize);
       const repositories = resolve(data, 'git'); const repository = resolve(repositories, `${delivery.attemptId}.git`);
       for (const path of [repositories, repository]) await plainDirectory(path, canonicalize);
       await noBorrowedObjects(repository);

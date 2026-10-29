@@ -160,7 +160,8 @@ describe('native CLI invocation with fake processes', () => {
     expect(response).toEqual({ exitCode: 0, stdout: 'head-sha\n' });
     const invocation = commands.execFile.mock.calls[0];
     expect(invocation?.[0]).toBe(executable);
-    expect(invocation?.[1]).toEqual(['--no-optional-locks', '--no-lazy-fetch', '-c', 'core.fsmonitor=false', 'status', '--porcelain=v2', '-z']);
+    expect(invocation?.[1]).toEqual(['--no-optional-locks', '--no-lazy-fetch', '-c', 'core.fsmonitor=false',
+      ...(process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : []), 'status', '--porcelain=v2', '-z']);
     const options = invocation?.[2] as { shell: boolean; windowsHide: boolean; env: NodeJS.ProcessEnv };
     expect({ shell: options.shell, windowsHide: options.windowsHide, optionalLocks: options.env.GIT_OPTIONAL_LOCKS,
       noLazyFetch: options.env.GIT_NO_LAZY_FETCH, prompt: options.env.GIT_TERMINAL_PROMPT, noReplace: options.env.GIT_NO_REPLACE_OBJECTS })

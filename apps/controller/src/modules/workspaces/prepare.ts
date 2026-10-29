@@ -4,7 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { WorkspacePreparation, type PreparedWorkspace } from '#contracts';
 import type { GitReader } from './git.js';
 import { githubReference } from './inspect.js';
-import type { AttemptRootResolver } from './project-storage.js';
+import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 
 export class WorkspacePreparationError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -29,7 +29,7 @@ export function createWorkspacePreparer(dataDirectory?: string, git?: GitReader,
     if (!git) return failure('CONTEXT_UNAVAILABLE');
     let stage = 'WORKSPACE_PATH_UNAVAILABLE';
     try {
-      const data = await canonicalize(resolveAttemptRoot ? await resolveAttemptRoot(input.attemptId, true) : dataDirectory);
+      const data = await canonicalize(await requireAttemptRootResolver(resolveAttemptRoot)(input.attemptId, true));
       implementation = resolve(data, 'work', input.attemptId, 'implementation');
       if (!isAbsolute(data)) return failure('WORKSPACE_ROOT_INVALID');
       const work = resolve(data, 'work');
@@ -67,7 +67,9 @@ export function createWorkspacePreparer(dataDirectory?: string, git?: GitReader,
       await mkdir(hooks);
       stage = 'CLONE_FAILED';
       const clone = await git(attempt, ['-c', `core.hooksPath=${hooks}`, '-c', 'init.templateDir=', '-c', 'protocol.ext.allow=never',
-        'clone', '--no-local', '--no-hardlinks', '--no-checkout', '--no-recurse-submodules', '--template=', '--', source, implementation]);
+        'clone', '--no-local', '--no-hardlinks', '--no-checkout', '--no-recurse-submodules', '--template=',
+        // Local upload-pack does not inherit the caller's per-command config.
+        ...(process.platform === 'win32' ? ['--config', 'core.longpaths=true'] : []), '--', source, implementation]);
       if (clone.exitCode !== 0) return failure(stage);
       if ((await lstat(implementation)).isSymbolicLink() || await canonicalize(implementation) !== implementation) return failure('WORKSPACE_PATH_INVALID');
       const metadata = resolve(implementation, '.git');

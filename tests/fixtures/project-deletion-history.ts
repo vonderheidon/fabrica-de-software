@@ -3,7 +3,10 @@ import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import type Database from 'better-sqlite3';
 import { insertRevision, registerProject } from '../../apps/controller/src/modules/storage/configuration-writes.js';
-import { readConfiguration } from '../../apps/controller/src/modules/storage/configuration-reads.js';
+import { digest, readConfiguration } from '../../apps/controller/src/modules/storage/configuration-reads.js';
+import { readSettings } from '../../apps/controller/src/modules/storage/settings.js';
+import { serializeCapture, serializePreparationChoices } from '../../apps/controller/src/modules/storage/historical-configuration.js';
+import { loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
 
 interface ProjectHistoryRecord {
   projectId: string;
@@ -42,7 +45,7 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
 export function projectDeletionHistory(db: Database.Database, beforeAuthorization: () => void, automationEnabled: boolean,
   includePendingDeletion: false, fixtureDirectory?: string, managedSelected?: boolean, includeReviews?: boolean): ProjectDeletionHistoryBase;
 export function projectDeletionHistory(db: Database.Database, beforeAuthorization: () => void = () => {}, automationEnabled = false,
-  includePendingDeletion = true, fixtureDirectory = tmpdir(), managedSelected = false, includeReviews = true): ProjectDeletionHistoryBase & { command?: ProjectDeletionCommand } {
+  includePendingDeletion = true, fixtureDirectory = tmpdir(), managedSelected = true, includeReviews = true): ProjectDeletionHistoryBase & { command?: ProjectDeletionCommand } {
   const uuid = (): string => randomUUID();
   const hash = 'a'.repeat(64);
   const sha = 'b'.repeat(40);
@@ -104,25 +107,44 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
     })();
     return { projectId, projectRevisionId, currentRevisionId };
   }
-  function history(existing?: ReturnType<typeof project>, managed = false) {
+  function history(existing?: ReturnType<typeof project>, managed = true) {
     const { projectId, projectRevisionId, currentRevisionId } = existing ?? project();
     const issueId = existing ? `fixture-issue-${uuid()}` : 'shared-issue';
     const preparationId = uuid(); const attemptId = uuid();
+    const choices = serializePreparationChoices({ issue_id: issueId, delivery_mode: 'icr', guidance: '', overrides: {} });
     db.transaction(() => {
       insert('preparations', { id: preparationId, project_id: projectId, account_id: accountId, revision: 2, created_at_ms: 0, updated_at_ms: 0 });
       insert('preparation_revisions', { preparation_id: preparationId, revision: 1, project_id: projectId,
-        project_revision_id: projectRevisionId, choices_json: '{"formatVersion":1,"choices":{}}', created_at_ms: 0 });
+        project_revision_id: projectRevisionId, choices_json: choices, created_at_ms: 0 });
       insert('preparation_revisions', { preparation_id: preparationId, revision: 2, project_id: projectId,
-        project_revision_id: currentRevisionId, choices_json: '{"formatVersion":1,"choices":{}}', created_at_ms: 0 });
+        project_revision_id: currentRevisionId, choices_json: choices, created_at_ms: 0 });
     })();
     const attemptOperation = operation('attempt', attemptId, 'attempt.start');
     const hasSearchHeaders = db.prepare<[], { present: number}>(
       "SELECT 1 AS present FROM pragma_table_info('attempts') WHERE name='issue_number'",
     ).get() !== undefined;
+    const settings = readSettings(db);
+    const { id: _revisionId, project_id: _projectId, revision: _revision, created_at_ms: _createdAt, ...configuration } = readConfiguration(db, projectId).configuration;
+    const capture = serializeCapture({ formatVersion: 1, preparationId, preparationRevision: 1, summaryHash: hash,
+      accountId, baseSha: sha, criteriaDigest: hash,
+      issue: { id: issueId, number: 17, title: 'Historical issue', url: 'https://github.com/fixture/shared/issues/17',
+        body: '', state: 'OPEN', repository: { id: 'shared-repository', owner: { id: accountId, login: 'fixture' },
+          name: 'shared', url: 'https://github.com/fixture/shared', defaultBranch: 'main', isArchived: false, isPrivate: true },
+        assignees: [], comments: [], blockers: [], memberships: [], references: [] },
+      configuration: { configuration, project_revision_id: projectRevisionId, settings_revision: settings.revision,
+        implementer_profile: { id: profileId, revision: 1, created_at_ms: 0, updated_at_ms: 0,
+          name: 'Shared', executor: 'maestri-omp', provider: 'fixture', model: 'fixture', effort: null, guidance: '' },
+        reviewer_profile: null, time_defaults: settings.time_defaults, artifact_policy: settings.artifact_policy, guidance: '',
+        origins: { base_branch: 'project', implementer_profile: 'project', reviewer_profile: 'project', correction_limit: 'project',
+          time_defaults: 'global', artifact_policy: 'global', guidance: 'project', delivery_mode: 'project' } },
+      criteria: [{ id: 'ac-1', occurrence_index: 1, explicit: true, text: 'Criterion' }],
+      roleResources: [...loadRoleResources().values()].map(value => value.reference),
+      tools: ['node', 'git', 'gh', 'maestri', 'omp'].map(tool => ({ tool: tool as 'node' | 'git' | 'gh' | 'maestri' | 'omp',
+        state: 'unavailable', version: null, cause: 'Fixture', affectedRequirements: [], observedAtMs: 0 })) });
     insert('attempts', { id: attemptId, operation_id: attemptOperation, project_id: projectId, project_revision_id: projectRevisionId,
       preparation_id: preparationId, preparation_revision: 1, account_id: accountId, repository_id: 'shared-repository', issue_id: issueId,
       ...(hasSearchHeaders ? { issue_number: 17, issue_title: 'Historical issue' } : {}),
-      capture_json: JSON.stringify({ formatVersion: 1, issue: { number: 17, title: 'Historical issue' }, configuration: { implementerProfile: { id: profileId } } }),
+      capture_json: capture,
       phase: 'implementing', result: null, source: 'manual', created_at_ms: 0, updated_at_ms: 0 });
     const attemptSessions = new Map<'implementer' | 'reviewer', string>();
     const sessionGenerations = new Map<'implementer' | 'reviewer', number>();
@@ -227,8 +249,27 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
     insert('queue_consumptions', { id: uuid(), account_id: accountId, project_id: projectId, repository_id: 'shared-repository',
       issue_id: issueId, observed_cycle: 1, consumed_at_ms: 0, attempt_id: attemptId });
     const creationId = uuid();
+    const creationPlan = {
+      formatVersion: 1,
+      installationId,
+      settingsETag: '"fixture"',
+      projectsRoot: resolve(fixtureDirectory),
+      destination: resolve(fixtureDirectory, 'fixture', creationId),
+      parentIdentity: hash,
+      templateDigest: hash,
+      files: [{ path: 'README.md', bytes: 1, sha256: hash }],
+      engineering: { tracker: 'github', domain: 'single-context', instructionFile: 'AGENTS.md', triageEnabled: false,
+        installsSkills: false, createsLabels: false },
+      account: { state: 'observed', id: accountId, login: 'fixture' },
+      ownerId: accountId,
+      effects: [],
+      input: { name: 'Fixture project', templateId: 'plain', templateDigest: hash, destinationRelative: 'fixture',
+        creationMode: 'remote_push', baseBranch: 'main', triageEnabled: false,
+        remote: { ownerId: 'OWNER_fixture', name: 'fixture-repository', visibility: 'private' }, boardName: 'Fixture board' },
+    };
     insert('project_creations', { id: creationId, operation_id: operation('creation', creationId, 'scaffold.create'), installation_id: installationId,
-      account_id: accountId, project_id: projectId, plan_hash: hash, plan_json: '{}', destination: resolve(fixtureDirectory, 'fixture', creationId), state: 'completed',
+      account_id: accountId, project_id: projectId, plan_hash: digest(creationPlan), plan_json: JSON.stringify(creationPlan),
+      destination: resolve(fixtureDirectory, 'fixture', creationId), state: 'completed',
       baseline_sha: sha, baseline_ref: 'fixture', created_at_ms: 0 });
     insert('creation_steps', { creation_id: creationId, step: 'registration', state: 'confirmed' });
     insert('creation_reconciliations', { operation_id: operation('creation', creationId, 'scaffold.reconcile'), creation_id: creationId, state: 'succeeded' });

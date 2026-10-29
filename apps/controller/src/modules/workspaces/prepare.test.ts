@@ -40,7 +40,7 @@ async function fixture(options: { fail?: 'clone' | 'checkout'; dependency?: bool
     if (args[0] === 'rev-parse') return { exitCode: 0, stdout: `${options.changedHead && args.at(-1) === 'HEAD' ? 'b'.repeat(40) : sha}\n` };
     throw new Error('Unexpected controlled Git invocation');
   };
-  return { data, source, input, git, calls, prepare: createWorkspacePreparer(data, git, async (path) => path) };
+  return { data, source, input, git, calls, prepare: createWorkspacePreparer(data, git, async (path) => path, async () => data) };
 }
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 describe('independent owned attempt workspace with controlled Git', () => {
@@ -86,13 +86,20 @@ describe('independent owned attempt workspace with controlled Git', () => {
   });
   it('refuses a managed root that canonicalizes outside its configured path', async () => {
     const f = await fixture();
-    const prepare = createWorkspacePreparer(f.data, f.git, async (path) => path === join(f.data, 'work') ? f.source : path);
+    const prepare = createWorkspacePreparer(f.data, f.git, async (path) => path === join(f.data, 'work') ? f.source : path, async () => f.data);
     expect(await prepare(f.input)).toMatchObject({ state: 'failed', resource: { owned: false }, diagnostic: { code: 'MANAGED_ROOT_INVALID' } });
     expect(f.calls.some((call) => call.args.includes('clone'))).toBe(false);
   });
   it('requires an authorized context before creating a resource', async () => {
-    const f = await fixture(); const prepare = createWorkspacePreparer(f.data, undefined, async (path) => path);
+    const f = await fixture(); const prepare = createWorkspacePreparer(f.data, undefined, async (path) => path, async () => f.data);
     expect(await prepare(f.input)).toMatchObject({ state: 'failed', resource: { owned: false }, diagnostic: { code: 'CONTEXT_UNAVAILABLE' } });
+    expect(f.calls).toHaveLength(0);
+  });
+  it('refuses a missing project resolver before cloning into the global directory', async () => {
+    const f = await fixture();
+    const prepare = createWorkspacePreparer(f.data, f.git, async path => path);
+    expect(await prepare(f.input)).toMatchObject({ state: 'failed', resource: { owned: false },
+      diagnostic: { code: 'WORKSPACE_PATH_UNAVAILABLE' } });
     expect(f.calls).toHaveLength(0);
   });
   it.each([{ dependency: true, code: 'CLONE_DEPENDENCY_UNSUPPORTED' }, { submodule: true, code: 'SUBMODULE_UNSUPPORTED' }, { changedHead: true, code: 'WORKSPACE_VERIFICATION_FAILED' }, { filtered: true, code: 'FILTERED_CONTENT_UNSUPPORTED' }])('rejects incomplete or dependent clones: $code', async ({ code, ...options }) => {
