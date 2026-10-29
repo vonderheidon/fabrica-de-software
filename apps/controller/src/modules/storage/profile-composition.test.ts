@@ -1,59 +1,66 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadRoleResources } from '../execution/roles.js';
-import { applyMigrations, loadMigrations } from './migrations.js';
+import { openStorage } from './index.js';
 import { readSettingsView } from './configuration-reads.js';
-import { seedSettings } from './settings.js';
 
-const databases: Database.Database[] = [];
-afterEach(() => { for (const db of databases.splice(0)) db.close(); });
+const directories: string[] = [];
+const connections: Array<{ close(): void }> = [];
 
-function beforeCompositionMigration(): Database.Database {
-  const db = new Database(':memory:'); databases.push(db);
+function track(connection: { close(): void }): () => void {
+  let open = true;
+  const close = () => {
+    if (!open) return;
+    open = false;
+    connection.close();
+  };
+  connections.push({ close });
+  return close;
+}
+
+function fixture() {
+  const directory = mkdtempSync(join(tmpdir(), 'factory-profile-restart-'));
+  directories.push(directory);
+  const storage = openStorage({ dataDirectory: directory });
+  const db = new Database(join(directory, 'factory.sqlite'));
   db.pragma('foreign_keys = ON');
-  applyMigrations(db, loadMigrations().slice(0, 31), () => seedSettings(db));
-  return db;
+  return { directory, storage, db, closeStorage: track(storage), closeDb: track(db) };
 }
 
-function insertLegacyProfile(db: Database.Database, input: { id: string; role: 'implementer' | 'reviewer'; guidance: string; revision?: number }): void {
-  const now = 1_800_000_000_000;
-  db.prepare(`INSERT INTO execution_profiles(id,name,profile_type,name_key,executor,provider,model,effort,guidance,revision,created_at_ms,updated_at_ms,deleted_at_ms)
-    VALUES (?, ?, ?, ?, 'maestri-omp', 'provider', 'model', NULL, ?, ?, ?, ?, NULL)`)
-    .run(input.id, input.id, input.role, input.id, input.guidance, input.revision ?? 1, now, now);
-}
+afterEach(() => {
+  for (const connection of connections.splice(0).reverse()) connection.close();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true });
+});
 
-describe('effective profile composition migration', () => {
-  it('moves legacy behavior into guidance once, preserves authored guidance, and remains idempotent', () => {
-    const db = beforeCompositionMigration();
-    const role = loadRoleResources().get('implementer')!;
-    const reviewerRole = loadRoleResources().get('reviewer')!;
-    insertLegacyProfile(db, { id: '00000000-0000-4000-8000-000000000001', role: 'implementer', guidance: 'Keep our naming convention.' });
-    insertLegacyProfile(db, { id: '00000000-0000-4000-8000-000000000002', role: 'implementer', guidance: `Existing copy:\n${role.instructions}` });
-    insertLegacyProfile(db, { id: '00000000-0000-4000-8000-000000000004', role: 'reviewer', guidance: 'Reviewer priorities.' });
+describe('current execution profile composition', () => {
+  it('keeps nullable composition and authored profile values unchanged across reads and restart', () => {
+    const { directory, db, closeStorage, closeDb } = fixture();
+    const ids = [randomUUID(), randomUUID()];
+    const insert = db.prepare(`INSERT INTO execution_profiles(
+      id,name,profile_type,name_key,executor,provider,model,effort,guidance,composition_version,revision,
+      created_at_ms,updated_at_ms,deleted_at_ms
+    ) VALUES (?,?,?,?,?,?,?,?,?,NULL,7,10,25,NULL)`);
+    insert.run(ids[0], 'Implementer Current', 'implementer', 'implementer current', 'maestri-omp', 'provider-a', 'model-a', null,
+      'Authored guidance with historical notes.');
+    insert.run(ids[1], 'Reviewer Current', 'reviewer', 'reviewer current', 'maestri-omp', 'provider-b', 'model-b', 'high',
+      'Reviewer guidance remains exactly as stored.');
+    const before = db.prepare(`SELECT id,provider,model,effort,guidance,composition_version,revision,created_at_ms,updated_at_ms
+      FROM execution_profiles ORDER BY id`).all();
+    expect(readSettingsView(db).profiles.map(profile => profile.composition_version)).toEqual([null, null]);
 
-    const migrations = loadMigrations();
-    applyMigrations(db, migrations, () => { throw new Error('existing storage must not be seeded'); });
-    const migrated = db.prepare<[], { id: string; guidance: string; composition_version: number | null; revision: number }>(
-      'SELECT id,guidance,composition_version,revision FROM execution_profiles ORDER BY id',
-    ).all();
-    expect(migrated).toEqual([
-      { id: '00000000-0000-4000-8000-000000000001', guidance: `Keep our naming convention.\n\n${role.instructions}`, composition_version: 1, revision: 2 },
-      { id: '00000000-0000-4000-8000-000000000002', guidance: `Existing copy:\n${role.instructions}`, composition_version: 1, revision: 2 },
-      { id: '00000000-0000-4000-8000-000000000004', guidance: `Reviewer priorities.\n\n${reviewerRole.instructions}`, composition_version: 1, revision: 2 },
-    ]);
-    applyMigrations(db, migrations, () => { throw new Error('migration replay must not reseed'); });
-    expect(db.prepare('SELECT id,guidance,composition_version,revision FROM execution_profiles ORDER BY id').all()).toEqual(migrated);
-    expect(readSettingsView(db).profiles.map(profile => profile.composition_version)).toEqual([1, 1, 1]);
-  });
+    closeStorage();
+    closeDb();
+    const reopened = openStorage({ dataDirectory: directory });
+    const closeReopened = track(reopened);
+    expect(reopened.getGlobalConfiguration().view.profiles.map(profile => profile.composition_version)).toContain(null);
+    closeReopened();
 
-  it('preserves an over-limit legacy profile unchanged and keeps its composition explicitly unavailable', () => {
-    const db = beforeCompositionMigration();
-    const original = 'x'.repeat(8192);
-    insertLegacyProfile(db, { id: '00000000-0000-4000-8000-000000000003', role: 'reviewer', guidance: original });
-    applyMigrations(db, loadMigrations(), () => { throw new Error('existing storage must not be seeded'); });
-    expect(db.prepare<[string], { guidance: string; composition_version: number | null; revision: number }>(
-      'SELECT guidance,composition_version,revision FROM execution_profiles WHERE id=?',
-    ).get('00000000-0000-4000-8000-000000000003')).toEqual({ guidance: original, composition_version: null, revision: 2 });
-    expect(readSettingsView(db).profiles[0]?.composition_version).toBeNull();
+    const afterDb = new Database(join(directory, 'factory.sqlite'));
+    track(afterDb);
+    expect(afterDb.prepare(`SELECT id,provider,model,effort,guidance,composition_version,revision,created_at_ms,updated_at_ms
+      FROM execution_profiles ORDER BY id`).all()).toEqual(before);
   });
 });

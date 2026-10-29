@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttemptCapture, ProfileChanges, ProjectConfiguration } from '#contracts';
-import { loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
+import { loadMigrations } from '../fixtures/historical-schema.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { ExecutionError } from '../../apps/controller/src/modules/execution/index.js';
 import { attemptFixture } from '../fixtures/attempt.js';
@@ -429,7 +429,7 @@ describe('execution profile lifecycle and serialized references', () => {
       expect(db.pragma('foreign_key_check')).toEqual([]);
       db.close(); db = undefined;
       const before = createHash('sha256').update(readFileSync(join(directory, 'factory.sqlite'))).digest('hex');
-      expect(() => openStorage({ dataDirectory: directory })).toThrowError(expect.objectContaining({ code: 'PROFILE_SCHEMA_INCOMPATIBLE' }));
+      expect(() => openStorage({ dataDirectory: directory })).toThrowError(expect.objectContaining({ code: 'DATABASE_SCHEMA_INCOMPATIBLE' }));
       const after = createHash('sha256').update(readFileSync(join(directory, 'factory.sqlite'))).digest('hex');
       expect(after).toBe(before);
     } finally {
