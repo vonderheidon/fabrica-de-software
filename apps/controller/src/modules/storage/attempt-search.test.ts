@@ -23,7 +23,7 @@ function database(): Database.Database {
     CREATE TABLE events (seq INTEGER, operation_id TEXT);
     CREATE TABLE attempts (
       id TEXT, account_id TEXT, project_id TEXT, issue_id TEXT, issue_number INTEGER, issue_title TEXT,
-      phase TEXT, result TEXT, suspension TEXT, revision INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER
+      phase TEXT, result TEXT, suspension TEXT, diagnostic TEXT, revision INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER
     );
   `);
   db.prepare(`INSERT INTO factory_settings VALUES (

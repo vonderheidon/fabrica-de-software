@@ -1,320 +1,312 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
+import { Value } from '@sinclair/typebox/value';
+import { ProjectRevision, ScaffoldPlanV3 } from '#contracts';
+import { readQueueOrderJson, readStatusOptionIds } from './configuration-json.js';
+import { digest } from './configuration-reads.js';
 import { StorageError } from './errors.js';
 import { readSettings } from './settings.js';
-import { Value } from '@sinclair/typebox/value';
-import { readCapturedConfiguration, retiredCostDefaults } from './historical-configuration.js';
+import { readCapturedConfiguration, readPreparationChoices } from './historical-configuration.js';
 
 export const applicationId = 0x4e465331;
 
-export interface Migration {
+export interface HistoricalLedgerEntry {
   readonly version: number;
   readonly name: string;
-  readonly sql: string;
   readonly checksum: string;
-  readonly requiresForeignKeysOff?: boolean;
 }
 
-interface ProfileColumn { name: string; notnull: number }
-
-function backfillAttemptSearchHeaders(db: Database.Database): void {
-  const firstBatch = db.prepare<[number], { rowid: number; id: string; capture_json: string }>(
-    'SELECT rowid,id,capture_json FROM attempts ORDER BY rowid LIMIT ?',
-  );
-  const followingBatches = db.prepare<[number, number], { rowid: number; id: string; capture_json: string }>(
-    'SELECT rowid,id,capture_json FROM attempts WHERE rowid>? ORDER BY rowid LIMIT ?',
-  );
-  const update = db.prepare<[number, string, string]>(
-    'UPDATE attempts SET issue_number=?,issue_title=? WHERE id=? AND issue_number IS NULL AND issue_title IS NULL',
-  );
-  let lastRowId: number | null = null;
-  while (true) {
-    const rows: Array<{ rowid: number; id: string; capture_json: string }> = lastRowId === null
-      ? firstBatch.all(100) : followingBatches.all(lastRowId, 100);
-    if (rows.length === 0) break;
-    for (const row of rows) {
-      lastRowId = row.rowid;
-      let capture: ReturnType<typeof readCapturedConfiguration>;
-      try {
-        capture = readCapturedConfiguration(JSON.parse(row.capture_json));
-      } catch {
-        // Invalid historical captures remain explicitly unavailable to search.
-        continue;
-      }
-      update.run(capture.issue.number, capture.issue.title, row.id);
-    }
-    if (rows.length < 100) break;
-  }
+export interface SchemaRecognitionResources {
+  readonly applicationId: number;
+  readonly directInstallUserVersion: number;
+  readonly currentLedgerUserVersion: number;
+  readonly currentSchemaSha256: string;
+  readonly schemaSql: string;
+  readonly historicalLedger: readonly HistoricalLedgerEntry[];
 }
 
-function profileColumns(db: Database.Database): readonly ProfileColumn[] {
-  return db.prepare<[], ProfileColumn>("PRAGMA table_info('execution_profiles')").all();
+export interface DatabaseRecognition {
+  readonly kind: 'empty' | 'direct' | 'historical-ledger';
+  readonly schemaVersion: number;
 }
 
-function hasProfileLifecycleColumns(columns: readonly ProfileColumn[]): boolean {
-  const names = new Set(columns.map((column) => column.name));
-  return ['profile_type', 'name_key', 'deleted_at_ms'].every((name) => names.has(name));
+interface SchemaRecognitionDocument {
+  readonly format_version: 1;
+  readonly application_id: number;
+  readonly direct_install_user_version: number;
+  readonly current_ledger_user_version: number;
+  readonly current_schema_sha256: string;
+  readonly schema_sql_sha256: string;
+  readonly historical_ledger: readonly HistoricalLedgerEntry[];
 }
 
-function profileEffortIsNullable(columns: readonly ProfileColumn[]): boolean {
-  return columns.find((column) => column.name === 'effort')?.notnull === 0;
+interface SchemaObject {
+  readonly type: string;
+  readonly name: string;
+  readonly tbl_name: string;
+  readonly sql: string | null;
 }
 
-function assertVerificationRetirementIsEmpty(db: Database.Database, migrations: readonly Migration[], version: number): void {
-  const retirement = migrations.find((migration) => migration.name === '053_retire_manual_verification.sql');
-  if (!retirement || version >= retirement.version) return;
-  const tables = new Set(db.prepare<[], { name: string }>("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map((row) => row.name));
-  for (const table of ['verification_runs', 'checks', 'artifacts'] as const) {
-    if (tables.has(table) && db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) throw new StorageError('MIGRATION_FAILED');
-  }
-  if (tables.has('project_deletion_targets') && db.prepare("SELECT 1 FROM project_deletion_targets WHERE target_kind='exclusive_artifact' LIMIT 1").get()) {
-    throw new StorageError('MIGRATION_FAILED');
-  }
+interface HistoricalRow extends HistoricalLedgerEntry {
+  readonly applied_at_ms: number;
 }
 
-function hasProfileLifecycleObjects(db: Database.Database): boolean {
-  const index = db.prepare<[], { unique: number; partial: number }>(
-    "SELECT \"unique\", partial FROM pragma_index_list('execution_profiles') WHERE name='execution_profiles_live_name'",
-  ).get();
-  if (index?.unique !== 1 || index.partial !== 1) return false;
-  const triggerNames = new Set(db.prepare<[], { name: string }>(`SELECT name FROM sqlite_schema WHERE type='trigger'
-    AND name IN ('execution_profiles_lifecycle_insert_valid', 'execution_profiles_lifecycle_update_valid', 'execution_profiles_physical_delete_forbidden')`).all().map((row) => row.name));
-  return ['execution_profiles_lifecycle_insert_valid', 'execution_profiles_lifecycle_update_valid', 'execution_profiles_physical_delete_forbidden']
-    .every((name) => triggerNames.has(name));
+interface ProjectRevisionRow {
+  readonly id: string;
+  readonly project_id: string;
+  readonly revision_number: number;
+  readonly source_kind: string;
+  readonly source_location: string;
+  readonly repository_id: string | null;
+  readonly repository_url: string | null;
+  readonly base_branch: string;
+  readonly github_project_id: string | null;
+  readonly github_project_owner_id: string | null;
+  readonly status_field_id: string | null;
+  readonly status_options_json: string;
+  readonly implementer_profile_id: string | null;
+  readonly reviewer_profile_id: string | null;
+  readonly correction_limit: number;
+  readonly default_delivery_mode: string;
+  readonly automation_enabled: number;
+  readonly queue_order_json: string;
+  readonly guidance: string;
+  readonly created_at_ms: number;
+  readonly delivery_branch_json: string | null;
 }
 
-function profileLifecycleConstraints(sql: string): string {
-  const start = sql.indexOf('CREATE UNIQUE INDEX IF NOT EXISTS execution_profiles_live_name');
-  if (start < 0) throw new StorageError('MIGRATION_RESOURCES_INVALID');
-  return sql.slice(start);
+interface CreationPlanRow {
+  readonly plan_hash: string;
+  readonly plan_json: string;
 }
 
-function capturedProfileIndexes(sql: string): string {
-  const start = sql.indexOf('CREATE INDEX IF NOT EXISTS attempts_active_implementer_profile');
-  if (start < 0) throw new StorageError('MIGRATION_RESOURCES_INVALID');
-  return sql.slice(start);
+const resourceDirectory = new URL('../../../../../resources/storage/', import.meta.url);
+const digestPattern = /^[a-f0-9]{64}$/u;
+const migrationNamePattern = /^\d{3}_[a-z0-9_]+\.sql$/u;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function freshProfileLifecycleTable(sql: string): string {
-  return `DROP TABLE execution_profiles;
-    CREATE TABLE execution_profiles (
-      id TEXT PRIMARY KEY,
-      name TEXT NOT NULL CHECK(length(trim(name)) > 0),
-      profile_type TEXT NOT NULL CHECK(profile_type IN ('implementer', 'reviewer')),
-      name_key TEXT NOT NULL CHECK(length(trim(name_key)) > 0),
-      executor TEXT NOT NULL CHECK(executor = 'maestri-omp'),
-      provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
-      model TEXT NOT NULL CHECK(length(trim(model)) > 0),
-      effort TEXT CHECK(effort IS NULL OR length(trim(effort)) > 0),
-      guidance TEXT NOT NULL,
-      revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
-      created_at_ms INTEGER NOT NULL CHECK(created_at_ms >= 0),
-      updated_at_ms INTEGER NOT NULL CHECK(updated_at_ms >= created_at_ms),
-      deleted_at_ms INTEGER CHECK(deleted_at_ms IS NULL OR deleted_at_ms >= created_at_ms)
-    ) STRICT;
-    ${profileLifecycleConstraints(sql)}`;
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
-export function loadMigrations(): readonly Migration[] {
-  const directory = new URL('./migrations/', import.meta.url);
-  const files = ['001_initial_settings.sql', '002_operations_events.sql', '003_projects_configuration.sql', '004_preparations.sql', '005_attempts.sql', '006_deliveries.sql', '007_verification.sql', '008_reviews.sql', '009_questions_limits.sql', '010_recovery.sql', '011_publication_queries.sql', '012_queue_cycles.sql', '013_scaffold.sql', '014_local_publication.sql', '015_pr_upgrades.sql', '016_queue_scheduler.sql', '017_remote_scaffold.sql', '018_context_diagnostics.sql', '019_initial_configuration_facts.sql', '020_local_installation.sql', '021_inference_limits.sql', '022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql', '024_diagnostic_configuration_results.sql', '025_project_deletions.sql', '026_project_deletion_finalization.sql', '027_event_context.sql', '028_project_storage_locations.sql', '029_project_storage_transitions.sql', '030_tool_preferences.sql', '031_creation_board_operations.sql', '032_profile_composition.sql', '033_managed_terminals.sql', '034_session_continuity.sql', '035_correction_package.sql', '036_review_approval.sql', '037_finding_progress.sql', '038_finding_disputes.sql', '039_attempt_decisions.sql', '040_publication_targets.sql', '041_delivery_targets.sql', '042_local_commit_reconciliation.sql', '043_integration_rounds.sql', '044_storage_deletion_authority.sql', '045_attempt_search_headers.sql', '046_attempt_stage_intervals.sql', '047_notification_dispatches.sql', '048_shutdown_barriers.sql', '049_shutdown_resume.sql', '050_branch_choices.sql', '051_creation_destination_recovery.sql', '052_review_producer.sql', '053_retire_manual_verification.sql'];
+function parseJson(value: string, code: 'PROJECT_DATA_INVALID' | 'OPERATION_DATA_INVALID'): unknown {
   try {
-    const actual = readdirSync(directory).filter((name) => name.endsWith('.sql')).sort();
-    if (JSON.stringify(files) !== JSON.stringify(actual)) {
+    return JSON.parse(value) as unknown;
+  } catch (error) {
+    throw new StorageError(code, { cause: error });
+  }
+}
+
+function readRecognitionDocument(value: unknown): SchemaRecognitionDocument {
+  if (!isRecord(value) || value.format_version !== 1 || value.application_id !== applicationId ||
+      !Number.isSafeInteger(value.direct_install_user_version) ||
+      !Number.isSafeInteger(value.current_ledger_user_version) ||
+      typeof value.current_schema_sha256 !== 'string' || !digestPattern.test(value.current_schema_sha256) ||
+      typeof value.schema_sql_sha256 !== 'string' || !digestPattern.test(value.schema_sql_sha256) ||
+      !Array.isArray(value.historical_ledger)) {
+    throw new StorageError('MIGRATION_RESOURCES_INVALID');
+  }
+  const entries: HistoricalLedgerEntry[] = [];
+  for (const [index, entry] of value.historical_ledger.entries()) {
+    if (!isRecord(entry) || entry.version !== index + 1 || typeof entry.name !== 'string' ||
+        !migrationNamePattern.test(entry.name) || typeof entry.checksum !== 'string' || !digestPattern.test(entry.checksum)) {
       throw new StorageError('MIGRATION_RESOURCES_INVALID');
     }
-    return files.map((name, index) => {
-      const sql = readFileSync(new URL(name, directory), 'utf8');
-      return { version: index + 1, name, sql, checksum: createHash('sha256').update(sql).digest('hex'),
-        ...(['022_nullable_profile_effort.sql', '023_execution_profile_lifecycle.sql', '051_creation_destination_recovery.sql', '052_review_producer.sql', '053_retire_manual_verification.sql'].includes(name) ? { requiresForeignKeysOff: true } : {}) };
-    });
+    entries.push({ version: entry.version, name: entry.name, checksum: entry.checksum });
+  }
+  if (entries.length === 0 || value.current_ledger_user_version !== entries.length ||
+      value.direct_install_user_version !== entries.length + 1 ||
+      new Set(entries.map(entry => entry.name)).size !== entries.length) {
+    throw new StorageError('MIGRATION_RESOURCES_INVALID');
+  }
+  return {
+    format_version: 1,
+    application_id: applicationId,
+    direct_install_user_version: value.direct_install_user_version as number,
+    current_ledger_user_version: value.current_ledger_user_version as number,
+    current_schema_sha256: value.current_schema_sha256,
+    schema_sql_sha256: value.schema_sql_sha256,
+    historical_ledger: entries,
+  };
+}
+
+export function loadSchemaRecognitionResources(): SchemaRecognitionResources {
+  try {
+    const document = readRecognitionDocument(JSON.parse(
+      readFileSync(new URL('schema-recognition.v1.json', resourceDirectory), 'utf8'),
+    ) as unknown);
+    const schemaSql = readFileSync(new URL('initial-schema.v54.sql', resourceDirectory), 'utf8');
+    if (sha256(schemaSql) !== document.schema_sql_sha256) throw new StorageError('MIGRATION_RESOURCES_INVALID');
+    return {
+      applicationId: document.application_id,
+      directInstallUserVersion: document.direct_install_user_version,
+      currentLedgerUserVersion: document.current_ledger_user_version,
+      currentSchemaSha256: document.current_schema_sha256,
+      schemaSql,
+      historicalLedger: document.historical_ledger,
+    };
   } catch (error) {
+    if (error instanceof StorageError) throw error;
     throw new StorageError('MIGRATION_RESOURCES_INVALID', { cause: error });
   }
 }
 
-/** Read-only compatibility check; also repeated under the write lock before migration. */
-export function inspectHistory(db: Database.Database, migrations: readonly Migration[]): number {
-  if (db.pragma('quick_check', { simple: true }) !== 'ok') {
-    throw new StorageError('STORAGE_INTEGRITY_FAILED');
+function schemaDigest(db: Database.Database): string {
+  const objects = db.prepare<[], SchemaObject>(
+    "SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE substr(name,1,7)<>'sqlite_' ORDER BY type,name",
+  ).all();
+  return sha256(JSON.stringify(objects));
+}
+
+function inspectProjectRevisions(db: Database.Database): void {
+  const rows = db.prepare<[], ProjectRevisionRow>(`SELECT id,project_id,revision_number,source_kind,source_location,
+    repository_id,repository_url,base_branch,github_project_id,github_project_owner_id,status_field_id,status_options_json,
+    implementer_profile_id,reviewer_profile_id,correction_limit,default_delivery_mode,automation_enabled,queue_order_json,
+    guidance,created_at_ms,delivery_branch_json FROM project_revisions ORDER BY rowid`).all();
+  for (const row of rows) {
+    const source = {
+      kind: row.source_kind,
+      location: row.source_location,
+      ...(row.repository_id && row.repository_url
+        ? { repository_id: row.repository_id, repository_url: row.repository_url }
+        : {}),
+    };
+    const githubProject = row.github_project_id === null ? null : {
+      id: row.github_project_id,
+      owner_id: row.github_project_owner_id,
+      status_field_id: row.status_field_id,
+      status_option_ids: readStatusOptionIds(parseJson(row.status_options_json, 'PROJECT_DATA_INVALID')),
+    };
+    const revision: unknown = {
+      id: row.id,
+      project_id: row.project_id,
+      revision: row.revision_number,
+      created_at_ms: row.created_at_ms,
+      source,
+      base_branch: row.base_branch,
+      ...(row.delivery_branch_json === null
+        ? {}
+        : { delivery_branch: parseJson(row.delivery_branch_json, 'PROJECT_DATA_INVALID') }),
+      github_project: githubProject,
+      implementer_profile_id: row.implementer_profile_id,
+      reviewer_profile_id: row.reviewer_profile_id,
+      correction_limit: row.correction_limit,
+      default_delivery_mode: row.default_delivery_mode,
+      automation_enabled: row.automation_enabled === 1,
+      queue_order: readQueueOrderJson(parseJson(row.queue_order_json, 'PROJECT_DATA_INVALID')),
+      guidance: row.guidance,
+    };
+    if (!Value.Check(ProjectRevision, revision)) throw new StorageError('PROJECT_DATA_INVALID');
   }
+}
+
+function inspectCreationPlans(db: Database.Database): void {
+  const rows = db.prepare<[], CreationPlanRow>(
+    'SELECT plan_hash,plan_json FROM project_creations ORDER BY rowid',
+  ).all();
+  for (const row of rows) {
+    const plan = parseJson(row.plan_json, 'OPERATION_DATA_INVALID');
+    if (!Value.Check(ScaffoldPlanV3, plan) || digest(plan) !== row.plan_hash) {
+      throw new StorageError('OPERATION_DATA_INVALID');
+    }
+  }
+}
+
+function inspectCurrentDomainData(db: Database.Database): void {
+  readSettings(db);
+  inspectProjectRevisions(db);
+  inspectCreationPlans(db);
+  for (const row of db.prepare<[], { capture_json: string }>('SELECT capture_json FROM attempts').iterate()) {
+    readCapturedConfiguration(parseJson(row.capture_json, 'OPERATION_DATA_INVALID'));
+  }
+  for (const row of db.prepare<[], { choices_json: string }>('SELECT choices_json FROM preparation_revisions').iterate()) {
+    readPreparationChoices(parseJson(row.choices_json, 'OPERATION_DATA_INVALID'));
+  }
+  for (const row of db.prepare<[], { attempt_id: string; project_id: string; reference: string }>(
+    `SELECT r.attempt_id,a.project_id,r.reference FROM resources r JOIN attempts a ON a.id=r.attempt_id WHERE r.kind='implementation'`,
+  ).iterate()) {
+    if (row.reference !== `projects/${row.project_id}/v1/managed/work/${row.attempt_id}/implementation`) {
+      throw new StorageError('OPERATION_DATA_INVALID');
+    }
+  }
+}
+
+/** Recognizes only a provably empty database or one of the two current schema representations. */
+export function inspectHistory(
+  db: Database.Database,
+  resources: SchemaRecognitionResources = loadSchemaRecognitionResources(),
+): DatabaseRecognition {
+  if (db.pragma('quick_check', { simple: true }) !== 'ok') throw new StorageError('STORAGE_INTEGRITY_FAILED');
   const version: unknown = db.pragma('user_version', { simple: true });
   const identity: unknown = db.pragma('application_id', { simple: true });
   if (typeof version !== 'number' || !Number.isSafeInteger(version) || version < 0) {
     throw new StorageError('MIGRATION_HISTORY_INVALID');
   }
-  if (version > migrations.length) throw new StorageError('DATABASE_NEWER_THAN_APPLICATION');
+  if (identity !== 0 && identity !== resources.applicationId) throw new StorageError('DATABASE_UNKNOWN');
 
   const objects = db.prepare<[], { name: string }>(
-    "SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY name",
+    "SELECT name FROM sqlite_schema WHERE substr(name,1,7)<>'sqlite_' ORDER BY name",
   ).all();
-  if (!objects.some((object) => object.name === 'schema_migrations')) {
-    if (version !== 0 || identity !== 0 || objects.length !== 0) throw new StorageError('DATABASE_UNKNOWN');
-    return 0;
+  if (objects.length === 0 && identity === 0 && version === 0) {
+    return { kind: 'empty', schemaVersion: 0 };
   }
-  if (identity !== applicationId) throw new StorageError('DATABASE_UNKNOWN');
-  const rows = db.prepare<[], { version: number; name: string; checksum: string }>(
-    'SELECT version, name, checksum FROM schema_migrations ORDER BY version',
+  if (identity !== resources.applicationId) throw new StorageError('DATABASE_UNKNOWN');
+  if (version > resources.directInstallUserVersion) throw new StorageError('DATABASE_NEWER_THAN_APPLICATION');
+  if (schemaDigest(db) !== resources.currentSchemaSha256) throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
+
+  const rows = db.prepare<[], HistoricalRow>(
+    'SELECT version,name,checksum,applied_at_ms FROM schema_migrations ORDER BY version',
   ).all();
-  if (rows.length > migrations.length || rows.some((row) => row.version > migrations.length)) {
+  if (rows.some(row => row.version > resources.currentLedgerUserVersion)) {
     throw new StorageError('DATABASE_NEWER_THAN_APPLICATION');
   }
-  if (version !== rows.length || rows.length === 0) throw new StorageError('MIGRATION_HISTORY_INVALID');
+  if (version === resources.directInstallUserVersion) {
+    if (rows.length !== 0) throw new StorageError('MIGRATION_HISTORY_INVALID');
+    inspectCurrentDomainData(db);
+    const violations: unknown = db.pragma('foreign_key_check');
+    if (!Array.isArray(violations) || violations.length !== 0) throw new StorageError('STORAGE_INTEGRITY_FAILED');
+    return { kind: 'direct', schemaVersion: version };
+  }
+  if (rows.length !== version || rows.length === 0) throw new StorageError('MIGRATION_HISTORY_INVALID');
   rows.forEach((row, index) => {
-    const expected = migrations[index];
-    if (!expected || row.version !== expected.version || row.name !== expected.name) {
+    const expected = resources.historicalLedger[index];
+    if (!expected || row.version !== expected.version || row.name !== expected.name ||
+        !Number.isSafeInteger(row.applied_at_ms) || row.applied_at_ms < 0) {
       throw new StorageError('MIGRATION_HISTORY_INVALID');
     }
     if (row.checksum !== expected.checksum) throw new StorageError('MIGRATION_CHECKSUM_MISMATCH');
   });
-  const profileSchemaMigration = migrations.find((migration) => migration.name === '023_execution_profile_lifecycle.sql');
-  if (profileSchemaMigration && version < profileSchemaMigration.version &&
-    objects.some((object) => object.name === 'execution_profiles')) {
-    const columns = profileColumns(db);
-    const compatibleSchema = hasProfileLifecycleColumns(columns) && profileEffortIsNullable(columns);
-    if (!compatibleSchema && db.prepare<[], { present: number }>(
-      'SELECT 1 AS present FROM execution_profiles LIMIT 1',
-    ).get()) {
-      throw new StorageError('PROFILE_SCHEMA_INCOMPATIBLE');
-    }
-  }
-  // Reject incompatible configuration before opening a writable connection or applying any delta.
-  // Repeat under the migration transaction so a concurrent change cannot bypass this check.
-  if (objects.some((object) => object.name === 'factory_settings')) {
-    readSettings(db);
-    if (version < 21) {
-      const row = db.prepare<[], { cost_defaults_json: string }>('SELECT cost_defaults_json FROM factory_settings').get();
-      try {
-        if (!row || !Value.Check(retiredCostDefaults, JSON.parse(row.cost_defaults_json))) throw new StorageError('SETTINGS_INVALID');
-      } catch (error) { throw new StorageError('SETTINGS_INVALID', { cause: error }); }
-    }
-    // Validate retired fields only in historical schemas, without exporting or using their paths.
-    if (version < 20) {
-      const legacy = db.prepare<[], { data_root: string; maestri_settings_json: string }>('SELECT data_root, maestri_settings_json FROM factory_settings').get();
-      if (!legacy || !legacy.data_root.trim()) throw new StorageError('SETTINGS_INVALID');
-      try {
-        const value: unknown = JSON.parse(legacy.maestri_settings_json);
-        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new StorageError('SETTINGS_INVALID');
-        const settings = value as Record<string, unknown>;
-        if (settings.formatVersion !== 1 || Object.keys(settings).some(key => !['formatVersion', 'workspaceId'].includes(key)) ||
-          (settings.workspaceId !== undefined && settings.workspaceId !== null && (typeof settings.workspaceId !== 'string' || !settings.workspaceId.trim() || settings.workspaceId.length > 256))) throw new StorageError('SETTINGS_INVALID');
-      } catch (error) { throw new StorageError('SETTINGS_INVALID', { cause: error }); }
-    }
-  }
-  assertVerificationRetirementIsEmpty(db, migrations, version);
+  if (version !== resources.currentLedgerUserVersion) throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
+
+  inspectCurrentDomainData(db);
   const violations: unknown = db.pragma('foreign_key_check');
   if (!Array.isArray(violations) || violations.length !== 0) throw new StorageError('STORAGE_INTEGRITY_FAILED');
-  return rows.length;
+  return { kind: 'historical-ledger', schemaVersion: version };
 }
 
-export function applyMigrations(
+export function initializeSchema(
   db: Database.Database,
-  migrations: readonly Migration[],
   initializeSettings: () => void,
-): void {
-  const applyThrough = (maximumVersion: number, disableForeignKeys: boolean): void => {
-    const restoreForeignKeys = disableForeignKeys && db.pragma('foreign_keys', { simple: true }) === 1;
-    if (disableForeignKeys) db.pragma('foreign_keys = OFF');
-    try {
-      db.transaction(() => {
-        const applied = inspectHistory(db, migrations);
-        if (applied === 0) {
-          db.exec(`CREATE TABLE schema_migrations (
-            version INTEGER PRIMARY KEY CHECK(version >= 1),
-            name TEXT NOT NULL UNIQUE,
-            checksum TEXT NOT NULL CHECK(length(checksum) = 64),
-            applied_at_ms INTEGER NOT NULL CHECK(applied_at_ms >= 0)
-          ) STRICT`);
-        }
-        const insert = db.prepare<[number, string, string, number]>(
-          'INSERT INTO schema_migrations(version, name, checksum, applied_at_ms) VALUES (?, ?, ?, ?)',
-        );
-        for (const migration of migrations.slice(applied).filter((item) => item.version <= maximumVersion)) {
-          const profileTableExists = db.prepare<[], { present: number }>(
-            "SELECT 1 AS present FROM sqlite_schema WHERE type='table' AND name='execution_profiles'",
-          ).get() !== undefined;
-          const columns = profileTableExists ? profileColumns(db) : [];
-          if (migration.name === '022_nullable_profile_effort.sql' && profileEffortIsNullable(columns)) {
-            // The database already has the target column shape; retain its typed profile rows.
-          } else if (migration.name === '023_execution_profile_lifecycle.sql' && hasProfileLifecycleColumns(columns)) {
-            if (!hasProfileLifecycleObjects(db)) throw new StorageError('PROFILE_SCHEMA_INCOMPATIBLE');
-            // A complete profile schema can be recognized while repairing its additive capture indexes.
-            db.exec(capturedProfileIndexes(migration.sql));
-          } else if (migration.name === '023_execution_profile_lifecycle.sql' && profileTableExists &&
-            (db.prepare<[], { count: number }>('SELECT count(*) AS count FROM execution_profiles').get()?.count ?? 0) === 0) {
-            db.exec(freshProfileLifecycleTable(migration.sql));
-          } else {
-            db.exec(migration.sql);
-          }
-          if (migration.name === '032_profile_composition.sql') migrateLegacyProfileComposition(db);
-          if (migration.name === '045_attempt_search_headers.sql') backfillAttemptSearchHeaders(db);
-          insert.run(migration.version, migration.name, migration.checksum, Date.now());
-          db.pragma(`user_version = ${migration.version}`);
-        }
-        const violations: unknown = db.pragma('foreign_key_check');
-        if (!Array.isArray(violations) || violations.length !== 0) throw new StorageError('STORAGE_INTEGRITY_FAILED');
-        db.pragma(`application_id = ${applicationId}`);
-        if (applied === 0) initializeSettings();
-      }).immediate();
-    } finally {
-      if (restoreForeignKeys) db.pragma('foreign_keys = ON');
-    }
-  };
+  resources: SchemaRecognitionResources = loadSchemaRecognitionResources(),
+): DatabaseRecognition {
   try {
-    const applied = inspectHistory(db, migrations);
-    const special = migrations.slice(applied).find((migration) => migration.requiresForeignKeysOff);
-    const latestVersion = migrations.at(-1)?.version ?? 0;
-    if (!special || applied === 0) applyThrough(latestVersion, false);
-    else {
-      if (applied < special.version - 1) applyThrough(special.version - 1, false);
-      applyThrough(latestVersion, true);
-    }
+    if (inspectHistory(db, resources).kind !== 'empty') throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
+    db.transaction(() => {
+      db.exec(resources.schemaSql);
+      db.pragma(`application_id = ${resources.applicationId}`);
+      db.pragma(`user_version = ${resources.directInstallUserVersion}`);
+      initializeSettings();
+      const recognized = inspectHistory(db, resources);
+      if (recognized.kind !== 'direct') throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
+      return recognized;
+    }).immediate();
+    return { kind: 'direct', schemaVersion: resources.directInstallUserVersion };
   } catch (error) {
     if (error instanceof StorageError) throw error;
     throw new StorageError('MIGRATION_FAILED', { cause: error });
-  }
-}
-
-interface LegacyRoleResource { id: string; role: 'implementer' | 'reviewer'; version: number; instructions: string }
-function legacyRoleInstructions(role: 'implementer' | 'reviewer'): string {
-  try {
-    const resource: unknown = JSON.parse(readFileSync(new URL(`../../../../../resources/roles/${role}.v1.json`, import.meta.url), 'utf8'));
-    if (!resource || typeof resource !== 'object' || Array.isArray(resource)) throw new Error('invalid role resource');
-    const value = resource as Partial<LegacyRoleResource>;
-    if (value.id !== `factory.${role}` || value.role !== role || value.version !== 1 || typeof value.instructions !== 'string' ||
-      !value.instructions.trim() || value.instructions.length > 8192) throw new Error('invalid role resource');
-    return value.instructions;
-  } catch (error) {
-    throw new StorageError('MIGRATION_RESOURCES_INVALID', { cause: error });
-  }
-}
-
-function migrateLegacyProfileComposition(db: Database.Database): void {
-  const instructions = {
-    implementer: legacyRoleInstructions('implementer'),
-    reviewer: legacyRoleInstructions('reviewer'),
-  };
-  const profiles = db.prepare<[], { id: string; profile_type: 'implementer' | 'reviewer'; guidance: string; revision: number; updated_at_ms: number }>(
-    `SELECT id, profile_type, guidance, revision, updated_at_ms FROM execution_profiles
-     WHERE deleted_at_ms IS NULL AND composition_version IS NULL ORDER BY id`,
-  ).all();
-  const update = db.prepare<[string, number | null, number, number, string]>(`UPDATE execution_profiles
-    SET guidance = ?, composition_version = ?, revision = ?, updated_at_ms = ?
-    WHERE id = ? AND composition_version IS NULL`);
-  const now = Date.now();
-  for (const profile of profiles) {
-    if (profile.profile_type !== 'implementer' && profile.profile_type !== 'reviewer') {
-      throw new StorageError('PROFILE_SCHEMA_INCOMPATIBLE');
-    }
-    const behavior = instructions[profile.profile_type];
-    const guidance = profile.guidance.includes(behavior)
-      ? profile.guidance
-      : profile.guidance.length === 0 ? behavior : `${profile.guidance}\n\n${behavior}`;
-    // Keep incompatible legacy content byte-for-byte and visibly uncomposed; never truncate it.
-    if (profile.revision >= Number.MAX_SAFE_INTEGER) continue;
-    const composed = guidance.length <= 8192;
-    update.run(composed ? guidance : profile.guidance, composed ? 1 : null,
-      profile.revision + 1, Math.max(now, profile.updated_at_ms), profile.id);
   }
 }

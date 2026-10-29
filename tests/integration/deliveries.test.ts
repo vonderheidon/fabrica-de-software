@@ -16,8 +16,8 @@ import { createProjectDeletionPersistence } from '../../apps/controller/src/modu
 
 const fixtures: AttemptFixture[] = []; const apps: ReturnType<typeof createApp>[] = [];
 afterEach(async () => { for (const app of apps.splice(0)) await app.close(); for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(http = false, migrationVersionForTest?: number) {
-  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f);
+async function fixture(http = false) {
+  const f = await attemptFixture(); fixtures.push(f);
   createProjectDeletionPersistence(f.db);
   const app = http ? createApp(loadConfiguration({ FACTORY_DATA_DIR: f.directory, FACTORY_LOG_LEVEL: 'silent' }, f.directory), f.storage,
     undefined, undefined, { github: f.github, workspaces: f.workspaces }, f.pipeline) : null;

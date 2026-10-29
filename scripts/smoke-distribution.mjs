@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, mkdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -12,6 +12,8 @@ const packagedFavicon = join(directory, 'dist', 'web', 'favicon.ico');
 mkdirSync(join(root, '.cache'), { recursive: true });
 const data = mkdtempSync(join(root, '.cache', 'distribution dados-'));
 assert(!existsSync(join(directory, 'apps/controller/src')));
+assert(!existsSync(join(directory, 'dist/apps/controller/src/modules/storage/migrations')));
+assert.deepEqual(readdirSync(join(directory, 'dist/resources/storage')).sort(), ['initial-schema.v54.sql', 'schema-recognition.v1.json']);
 assert(!existsSync(join(directory, '.agents')));
 assert(!existsSync(join(directory, 'node_modules/typescript')));
 const main = pathToFileURL(join(directory, 'dist/apps/controller/src/main.js')).href;

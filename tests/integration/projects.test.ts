@@ -1212,27 +1212,6 @@ describe('global and aggregate configuration', () => {
     expect(r.statusCode).toBe(200); expect(r.json<ConfigurationView>().configuration.source.repository_id).toBeUndefined();
     expect(f.inspectOrigin).toHaveBeenLastCalledWith({ source: { kind: 'local', location: f.directory }, baseBranch: 'release' });
   });
-  it('preserves configuration and receipts when upgrading an actual version-two database', async () => {
-    const f = fixture(); await f.app.close(); f.db.close();
-    // A historical fixture is constructed from the unmodified first two migrations.
-    const old = join(f.directory, 'old.sqlite'); const db = new Database(old);
-    const { applyMigrations, loadMigrations } = await import('../../apps/controller/src/modules/storage/migrations.js');
-    const { seedLegacySettings: seedSettings } = await import('../fixtures/legacy-settings.js');
-    const { readSettings } = await import('../../apps/controller/src/modules/storage/settings.js');
-    const { saveTimeDefaults, settingsETag, readOperation } = await import('../../apps/controller/src/modules/storage/operations.js');
-    try {
-      applyMigrations(db, loadMigrations().slice(0, 2), () => seedSettings(db, f.directory));
-      expect(db.pragma('user_version', { simple: true })).toBe(2);
-      const settings = readSettings(db);
-      const accepted = saveTimeDefaults(db, { operationId: randomUUID(), expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
-      const identity = db.prepare('SELECT installation_id FROM factory_settings').get();
-      applyMigrations(db, loadMigrations(), () => { throw new Error('Must not reseed'); });
-      expect(db.prepare('SELECT installation_id FROM factory_settings').get()).toEqual(identity);
-      expect(db.prepare('SELECT * FROM projects').all()).toEqual([]); expect(db.prepare('SELECT * FROM execution_profiles').all()).toEqual([]);
-      expect(db.pragma('foreign_key_check')).toEqual([]);
-      expect(readOperation(db, accepted.operation_id)).toEqual(accepted);
-    } finally { db.close(); }
-  });
   it('returns a sanitized unavailable response under a finite SQLite write lock', async () => {
     const f = fixture(); const headers = await session(f); const id = (await register(f, headers)).json<ProjectDetail>().project.id;
     const before = f.storage.getConfiguration(id); const key = randomUUID();

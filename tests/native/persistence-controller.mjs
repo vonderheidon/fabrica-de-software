@@ -69,8 +69,9 @@ const lock = acquireControllerLock(directory);
 const storage = openStorage({ dataDirectory: directory });
 storage.checkHealth();
 const github = createGitHub();
-const workspaces = { ...createWorkspaces({ github }), ...createEnvironmentRecovery(directory, git, undefined, canonicalize),
-  getDeliveryDiff: createDeliveryDiff(directory, git, canonicalize) };
+const resolveFixtureRoot = async () => directory;
+const workspaces = { ...createWorkspaces({ github }), ...createEnvironmentRecovery(directory, git, undefined, canonicalize, resolveFixtureRoot),
+  getDeliveryDiff: createDeliveryDiff(directory, git, canonicalize, resolveFixtureRoot) };
 const preparations = createPreparations({ storage, github, workspaces });
 const execution = createExecution({ dataDirectory: directory, persistence: storage.executionPersistence() });
 const failures = /** @type {string[]} */ ([]);
@@ -150,7 +151,7 @@ async function handle(action) {
   }
   if (action === 'stored-state') return { delivery: storage.getDelivery(deliveryId).delivery, review: storage.getReview(deliveryId), producerResult: storage.getProducerResult(deliveryId) };
   if (action === 'snapshot') {
-    await createRetainedVerifier(directory, git, canonicalize)(storage.getDelivery(deliveryId).delivery);
+    await createRetainedVerifier(directory, git, canonicalize, resolveFixtureRoot)(storage.getDelivery(deliveryId).delivery);
     const response = await app.inject({ url: `/api/v1/deliveries/${deliveryId}`, headers });
     assert.equal(response.statusCode, 200);
     const diagnostics = storage.getDiagnostics();

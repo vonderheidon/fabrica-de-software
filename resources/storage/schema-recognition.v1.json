@@ -1,0 +1,275 @@
+{
+  "format_version": 1,
+  "application_id": 1313231665,
+  "direct_install_user_version": 54,
+  "current_ledger_user_version": 53,
+  "current_schema_sha256": "50f95af7949906e7590beebbd93b23a845dccfeae599371f159e575ffed25738",
+  "historical_ledger": [
+    {
+      "version": 1,
+      "name": "001_initial_settings.sql",
+      "checksum": "9b7c65d450156dfb163853eb2d4c28d76c3761926d08d9bbd4f1d6b438c7f0ab"
+    },
+    {
+      "version": 2,
+      "name": "002_operations_events.sql",
+      "checksum": "1c77a3b92f3036e080f8d645bd4e0583c4234c6ebd1ad555a3bc1e1bc1899b3a"
+    },
+    {
+      "version": 3,
+      "name": "003_projects_configuration.sql",
+      "checksum": "21f42dafbc8e834801e2f3e302844ab6dceda00f8fc85877ca00ef8804d2fb44"
+    },
+    {
+      "version": 4,
+      "name": "004_preparations.sql",
+      "checksum": "1375525e6ad5607e8d6f5817c50aee48dbf775fe1aa545553fb743651bd345a5"
+    },
+    {
+      "version": 5,
+      "name": "005_attempts.sql",
+      "checksum": "0ac56a3e6355a1084545c2d177bf590367b673eceb701106d7af64fc0ded3717"
+    },
+    {
+      "version": 6,
+      "name": "006_deliveries.sql",
+      "checksum": "b6802ef42ff54163e960e4e8f1188d6935cfaf8e781b9fde3e6981c1d1a8007b"
+    },
+    {
+      "version": 7,
+      "name": "007_verification.sql",
+      "checksum": "c013af8fc14a8d3eb20dae4b0e577db0fd3b3533e92810ebaaa40595efe7067e"
+    },
+    {
+      "version": 8,
+      "name": "008_reviews.sql",
+      "checksum": "63f0ad04266edb2e559be1d9c95f24ccae89a2843672d5617eeb3e4a4bc1edd5"
+    },
+    {
+      "version": 9,
+      "name": "009_questions_limits.sql",
+      "checksum": "6775e2069616da6ee202e350005ac6f288574461d88cef53c4f4eab85572768b"
+    },
+    {
+      "version": 10,
+      "name": "010_recovery.sql",
+      "checksum": "10488f940d2b11f8b90852ca6446f323c194834ed588d4c98965fe4e766f03ed"
+    },
+    {
+      "version": 11,
+      "name": "011_publication_queries.sql",
+      "checksum": "e96c7ce5bda049adc5e59a6575d619a983713605250a1a24ab2bed4ec99b3d31"
+    },
+    {
+      "version": 12,
+      "name": "012_queue_cycles.sql",
+      "checksum": "718fc37cc706cf968004e1ac3aff026699d7fc6f3cd796452c7083353dd5fb4d"
+    },
+    {
+      "version": 13,
+      "name": "013_scaffold.sql",
+      "checksum": "2534b505fb31c2b50430d456b15602958d6ab7761239e7761824c82972ef1620"
+    },
+    {
+      "version": 14,
+      "name": "014_local_publication.sql",
+      "checksum": "11ee9002e1248acd59a8f088faae3679aa784881e94a7bc9d8d8ab4d7bb9d225"
+    },
+    {
+      "version": 15,
+      "name": "015_pr_upgrades.sql",
+      "checksum": "7aba6b8fb1adac4cc311f5747da31f94a171d319dc4c81f293f022593bb48890"
+    },
+    {
+      "version": 16,
+      "name": "016_queue_scheduler.sql",
+      "checksum": "f224400eccb46e87a1f71af11579370e46bed39eca0d5c4c36c09a5b6caf4449"
+    },
+    {
+      "version": 17,
+      "name": "017_remote_scaffold.sql",
+      "checksum": "3f9c8b97b1d0c317f19bb4abeb99a4d7b09823d4428975e239775835030a813a"
+    },
+    {
+      "version": 18,
+      "name": "018_context_diagnostics.sql",
+      "checksum": "08a177028d9a9eca76b7a67bc943cb1bf47bfade8b483e69bae95cc97bf1d1b7"
+    },
+    {
+      "version": 19,
+      "name": "019_initial_configuration_facts.sql",
+      "checksum": "d31378c42e9234389d5ec50accc073f42ed0e211003174869fdd84293d93a1bd"
+    },
+    {
+      "version": 20,
+      "name": "020_local_installation.sql",
+      "checksum": "80660c78a09810e5873e7301fc6c695cbab6454865e1f60ccbd0df8323eb4651"
+    },
+    {
+      "version": 21,
+      "name": "021_inference_limits.sql",
+      "checksum": "3b16ed8b6b5b0d03f53c3ac50f3c1368b9d796a1e78c22c044d96dafdef12cc2"
+    },
+    {
+      "version": 22,
+      "name": "022_nullable_profile_effort.sql",
+      "checksum": "3eb7b7d469cdff9f9b1b0e3fed0a0cf8c3300e7ba1179d41520a7c9b1fd7d16d"
+    },
+    {
+      "version": 23,
+      "name": "023_execution_profile_lifecycle.sql",
+      "checksum": "50021a9142f6022e83958decbfffe0bc521a8f43fabdc8bcb900f68212e5b0d9"
+    },
+    {
+      "version": 24,
+      "name": "024_diagnostic_configuration_results.sql",
+      "checksum": "47ba72ae87409f86aba77fedb5f685010506f50a21c21bd51ceb9143b7e7b61a"
+    },
+    {
+      "version": 25,
+      "name": "025_project_deletions.sql",
+      "checksum": "ea6c3f1b0793287103619af8967b826490a256a429d392b78d2a7827f4597c95"
+    },
+    {
+      "version": 26,
+      "name": "026_project_deletion_finalization.sql",
+      "checksum": "042ef55beebe86dc47ed855129ee3f448cd738dbae88bc5439ff55639e401dec"
+    },
+    {
+      "version": 27,
+      "name": "027_event_context.sql",
+      "checksum": "da181f29b558349b87e3c599dccf8fd2b471843f37f984504eedbaf7ffba916a"
+    },
+    {
+      "version": 28,
+      "name": "028_project_storage_locations.sql",
+      "checksum": "b6c0fc25524c4a1eccb146d1adbaf2f7bf6dc7e6475dd45e7c1aa2b433e1e174"
+    },
+    {
+      "version": 29,
+      "name": "029_project_storage_transitions.sql",
+      "checksum": "7456220e95b796ac84b63669de541cc747126b253300132a5e2f322d921a25e2"
+    },
+    {
+      "version": 30,
+      "name": "030_tool_preferences.sql",
+      "checksum": "f3ec4b4898356c19eeeba046cd424c81b7594820422dd911142abc4628432ef9"
+    },
+    {
+      "version": 31,
+      "name": "031_creation_board_operations.sql",
+      "checksum": "5971a616d09f0912014c643d9c3e5fa3a2c9ca0ec6a77034e2d073c470a4ff62"
+    },
+    {
+      "version": 32,
+      "name": "032_profile_composition.sql",
+      "checksum": "89cf7b7b373e4fe8c419e3911fd5176e8bc787bf0b788e58bb4ba4e00bf43f14"
+    },
+    {
+      "version": 33,
+      "name": "033_managed_terminals.sql",
+      "checksum": "81407beb74977900f79907dde24fb3762ada140445d14b8b0bb1417703c4c5f9"
+    },
+    {
+      "version": 34,
+      "name": "034_session_continuity.sql",
+      "checksum": "ec6ba788586f82f8af18e17cac69c2f8b76ed2a68f06a69683c7593b956ed215"
+    },
+    {
+      "version": 35,
+      "name": "035_correction_package.sql",
+      "checksum": "b9eefc1f872b1aa243a7851db2f69e99fa1314484f883834d54fd08b2ff9c0c6"
+    },
+    {
+      "version": 36,
+      "name": "036_review_approval.sql",
+      "checksum": "b21a9030996ab89f3349daacc2182d969dc41a803983b6771f4420db2ae60f6c"
+    },
+    {
+      "version": 37,
+      "name": "037_finding_progress.sql",
+      "checksum": "5b74171eff2409487a35fa8e08b368fe762d011f69f828e8a9c05bf6ce8850a8"
+    },
+    {
+      "version": 38,
+      "name": "038_finding_disputes.sql",
+      "checksum": "bb996ab15ef484c30d71b4d4d64b98c7cb82d19398ed0dca48d65acb1b262b10"
+    },
+    {
+      "version": 39,
+      "name": "039_attempt_decisions.sql",
+      "checksum": "f6d41dbf4351a0f375cb5fe72ad060122f873aca617316ad718cb1b71a11cfe6"
+    },
+    {
+      "version": 40,
+      "name": "040_publication_targets.sql",
+      "checksum": "69625c2b09aef9ca123b8a2456a1dbf9273fa45e9262709ef4e33d50d19b71e3"
+    },
+    {
+      "version": 41,
+      "name": "041_delivery_targets.sql",
+      "checksum": "7e94cf47dd46b284d7223cf109da59cedfcca29165764a98a28291d1899fadc7"
+    },
+    {
+      "version": 42,
+      "name": "042_local_commit_reconciliation.sql",
+      "checksum": "2126c26e1b325e9df6488021a2d4163397634b6527e2ebad4595f47d649df493"
+    },
+    {
+      "version": 43,
+      "name": "043_integration_rounds.sql",
+      "checksum": "507f60666ae7eb66a19f8134d55830c28ecad6dc5cd1d0a39004fc92dc39ea53"
+    },
+    {
+      "version": 44,
+      "name": "044_storage_deletion_authority.sql",
+      "checksum": "1daffb9ba94fbef9fd358f25ebbe3e91f1a307174b10febc4e17cbf1f03820b3"
+    },
+    {
+      "version": 45,
+      "name": "045_attempt_search_headers.sql",
+      "checksum": "8f3710778e1bf7582d156ec73e72e1f55a2ad4e420faa625abd849365a82b8ee"
+    },
+    {
+      "version": 46,
+      "name": "046_attempt_stage_intervals.sql",
+      "checksum": "2af81eefca6518838125ec7440b8adb831906180a0ed9824a210c1e9d4502e9f"
+    },
+    {
+      "version": 47,
+      "name": "047_notification_dispatches.sql",
+      "checksum": "9c1319c5f31cce1791b7a8739bceb7db659372f6f88d29b85decce10aa92271a"
+    },
+    {
+      "version": 48,
+      "name": "048_shutdown_barriers.sql",
+      "checksum": "47791e8095b36e88da3fdfd1e85f0da1c36525f82de2803871a8d71ed083edf7"
+    },
+    {
+      "version": 49,
+      "name": "049_shutdown_resume.sql",
+      "checksum": "831b0290877e5b4f4676ccc7161dea5c881fe26e04a0cab048fb20f11e8b8b58"
+    },
+    {
+      "version": 50,
+      "name": "050_branch_choices.sql",
+      "checksum": "ca8d484866f926db77212e6675223827b9efe76e6a893e03e95b36becec818db"
+    },
+    {
+      "version": 51,
+      "name": "051_creation_destination_recovery.sql",
+      "checksum": "de8a38f57023bdadfbaaf3dee784f773b2720eb7cfd11010e1f5119a92728395"
+    },
+    {
+      "version": 52,
+      "name": "052_review_producer.sql",
+      "checksum": "2728d10e90cda87cdd65d756241f58b9fa4fd70ac31d3fcc0d514a2b9d9f2eba"
+    },
+    {
+      "version": 53,
+      "name": "053_retire_manual_verification.sql",
+      "checksum": "105994a272deaf84657e9ad20f2477c2b8235aa041b7916e405e141c7d12d44d"
+    }
+  ],
+  "schema_sql_sha256": "bc36c6f6d6f73d8389464b829dd58f9133c5d0be6c29d935b29bf080e440cca8"
+}

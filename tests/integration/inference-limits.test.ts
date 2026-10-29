@@ -1,15 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { TimeDefaults, type PreparationCreated, type SessionResponse } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
-import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
 import { attemptFixture, complete } from '../fixtures/attempt.js';
-import { removeInferenceLimitsSchema } from '../fixtures/inference-limits-schema.js';
 
 const resources: { close(): unknown }[] = [];
 afterEach(async () => { for (const resource of resources.splice(0).reverse()) await resource.close(); });
@@ -125,28 +120,5 @@ describe('exact internal times without inference limits', () => {
     expect(JSON.stringify([persisted, choices, f.storage.getMeasurements(operation.resource.id)]))
       .not.toMatch(/costDefaults|costLimit|tokenLimit|maxTokens/);
     expect(f.storage.getMeasurements(operation.resource.id).cost).toMatchObject({ state: 'unavailable', reason: 'EXECUTOR_COST_NOT_OBSERVED' });
-  });
-});
-describe('non-destructive removal of persisted inference ceilings', () => {
-  it('rolls back the delta when the retired column has an incompatible dependency', async () => {
-    const f = await attemptFixture(); resources.push(f); await f.pipeline.close(); f.storage.close();
-    removeInferenceLimitsSchema(f.db);
-    f.db.exec('CREATE TRIGGER fixture_cost_dependency BEFORE UPDATE ON factory_settings BEGIN SELECT NEW.cost_defaults_json; END;');
-    const before = f.db.prepare('SELECT * FROM factory_settings').get();
-    expect(() => applyMigrations(f.db, loadMigrations(), () => { throw new Error('Must not reseed'); }))
-      .toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
-    expect(f.db.pragma('user_version', { simple: true })).toBe(20);
-    expect(f.db.prepare('SELECT * FROM factory_settings').get()).toEqual(before);
-    expect(f.db.prepare('SELECT count(*) AS n FROM schema_migrations').get()).toEqual({ n: 20 });
-  });
-
-  it('refuses invalid historical configuration before changing the database', async () => {
-    const f = await attemptFixture(); resources.push(f); await f.pipeline.close(); f.storage.close();
-    removeInferenceLimitsSchema(f.db);
-    f.db.exec(`UPDATE factory_settings SET cost_defaults_json='{"formatVersion":99}';`);
-    f.db.close();
-    const filename = join(f.directory, 'factory.sqlite'); const before = readFileSync(filename);
-    expect(() => openStorage({ dataDirectory: f.directory })).toThrowError(expect.objectContaining({ code: 'SETTINGS_INVALID' }));
-    expect(readFileSync(filename)).toEqual(before);
   });
 });

@@ -6,8 +6,6 @@ import Database from 'better-sqlite3';
 import { createProjectDeletionPersistence } from './project-deletions.js';
 import { afterEach, describe, expect, it } from 'vitest';
 import { acquireControllerLock, openStorage, type Storage } from './index.js';
-import { applyMigrations, loadMigrations } from './migrations.js';
-import { seedLegacySettings as seedSettings } from '../../../../../tests/fixtures/legacy-settings.js';
 
 const directories: string[] = [];
 const resources: { close(): void }[] = [];
@@ -62,26 +60,6 @@ describe('operations and local ownership', () => {
       expect(storage.getEvents({}).items).toEqual([]);
       expect(db.prepare('SELECT * FROM operation_requests').all()).toEqual([]);
     } finally { db.close(); }
-  });
-  it('migrates a real version-one database while preserving its identity and settings', () => {
-    const { directory, storage } = fixture();
-    storage.close();
-    const oldDirectory = join(directory, 'version-one');
-    // Only this fixture is created through the historical first migration and its real seed.
-    const { close: release } = acquireControllerLock(oldDirectory);
-    release();
-    const db = new Database(join(oldDirectory, 'factory.sqlite'));
-    const first = loadMigrations()[0]!;
-    try { applyMigrations(db, [first], () => seedSettings(db, oldDirectory)); } finally { db.close(); }
-    const snapshot = new Database(join(oldDirectory, 'factory.sqlite'), { readonly: true });
-    let identity: unknown;
-    try { identity = snapshot.prepare('SELECT installation_id FROM factory_settings').get(); } finally { snapshot.close(); }
-    const upgraded = openStorage({ dataDirectory: oldDirectory });
-    resources.push(upgraded);
-    ;
-    expect({ installation_id: upgraded.getSettings().installation_id }).toEqual(identity);
-    expect(upgraded.getSettings().revision).toBe(1);
-    expect(save(upgraded).state).toBe('succeeded');
   });
   it('excludes another controller independently of port and releases ownership on close', () => {
     const { directory } = fixture();

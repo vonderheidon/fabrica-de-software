@@ -85,10 +85,10 @@ export function assertPhysicalRecovery(recovery) {
         counts.passageResults === 4 && counts.reviews === 2 && typeof counts.findings === 'number' && counts.findings >= 1 &&
         typeof counts.findingResolutions === 'number' && counts.findingResolutions >= 1;
     });
-  if (!clean || !cleanCounts || clean.openedByNormalStoragePath !== true || clean.directoryCreatedExclusive !== true || clean.schemaVersion !== 53 ||
+  if (!clean || !cleanCounts || clean.openedByNormalStoragePath !== true || clean.directoryCreatedExclusive !== true || clean.schemaVersion !== 54 ||
     clean.integrityCheck !== 'ok' || !Array.isArray(clean.foreignKeyViolations) || clean.foreignKeyViolations.length !== 0 ||
     clean.accountId !== null || cleanCounts.accounts !== 0 || cleanCounts.profiles !== 0 || cleanCounts.projects !== 0 || cleanCounts.preparations !== 0 || cleanCounts.attempts !== 0 ||
-    integrity.length !== 3 || integrity.some(item => !isRecord(item) || item.schemaVersion !== 53 || item.integrityCheck !== 'ok' ||
+    integrity.length !== 3 || integrity.some(item => !isRecord(item) || item.schemaVersion !== 54 || item.integrityCheck !== 'ok' ||
       item.foreignKeyViolations !== 0 || !Array.isArray(item.retiredTables) || item.retiredTables.length !== 0) || !referencesValid) {
     throw new Error('PROOF_PERSISTENCE_REFERENCES_MISSING');
   }
@@ -177,7 +177,7 @@ async function main() {
   await writeFile(join(directory, 'report.md'), '# Prova de persistência e manutenção modular\n\n' +
     'Validações locais e recuperação após encerramento físico concluídas.\n\n' +
     'O JSON contém massa 0/16/64 MiB, tamanhos, payloads, latências, identidade ref/tree/base, diagnósticos e hashes dos arquivos selecionados.\n\n' +
-    'A prova inicializa SQLite vazio pelo openStorage normal, valida o schema 53, integrity_check e foreign_key_check, e registra a referência dos dados. ' +
+    'A prova inicializa SQLite vazio pelo openStorage normal, valida o schema direto 54, integrity_check e foreign_key_check, e registra a referência dos dados. ' +
     'Ela conserva duas rodadas (uma rejeitada e a seguinte aprovada), capturas, resultados, recibos, pareceres e evidências estruturadas em três controladores compilados em PIDs distintos, ' +
     'dois processos Node com saída observada, SIGKILL dos controladores e Git CLI somente leitura em objetos válidos no disco. ' +
     'Hashes de referência e contagens são comparados após cada reinício; após a remoção elegível do ambiente temporário, outro controlador recupera as refs/tree/base, aprovação, diff e evidência. ' +

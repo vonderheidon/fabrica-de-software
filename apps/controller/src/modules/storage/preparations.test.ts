@@ -5,10 +5,6 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage, type PreparationCommand } from './index.js';
-import { applyMigrations, loadMigrations } from './migrations.js';
-import { readSettings } from './settings.js';
-import { seedLegacySettings as seedSettings } from '../../../../../tests/fixtures/legacy-settings.js';
-import { saveTimeDefaults, settingsETag } from './operations.js';
 
 const resources: { close(): unknown }[] = []; const directories: string[] = [];
 function directory() { const path = mkdtempSync(join(tmpdir(), 'factory-preparation-storage-')); directories.push(path); return path; }
@@ -26,22 +22,7 @@ afterEach(async () => {
   for (const r of resources.splice(0).reverse()) await r.close();
   for (const path of directories.splice(0)) rmSync(path, { recursive: true });
 });
-describe('preparation storage durability and migration', () => {
-  it('upgrades version three without reseeding identity, settings or historical receipts', () => {
-    const path = directory(); const old = new Database(join(path, 'factory.sqlite'));
-    let operationId: string; let installationId: string;
-    try {
-      old.pragma('foreign_keys = ON'); applyMigrations(old, loadMigrations().slice(0, 3), () => seedSettings(old, path));
-      const settings = readSettings(old); installationId = settings.installation_id; operationId = randomUUID();
-      saveTimeDefaults(old, { operationId, expectedRevision: settingsETag(settings.installation_id, settings.revision), timeDefaults: settings.time_defaults });
-    } finally { old.close(); }
-    const storage = openStorage({ dataDirectory: path }); resources.push(storage);
-    ; expect(storage.getSettings().installation_id).toBe(installationId);
-    expect(storage.getOperation(operationId)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
-    const db = new Database(join(path, 'factory.sqlite')); resources.push(db);
-    expect(db.prepare('SELECT count(*) AS n FROM preparations').get()).toEqual({ n: 0 });
-    expect(db.pragma('foreign_key_check')).toEqual([]);
-  });
+describe('preparation storage durability', () => {
   it.each(['operation', 'event', 'revision'] as const)('rolls back every component when the %s write fails', (target) => {
     const f = fixture(); const table = { operation: 'operation_requests', event: 'events', revision: 'preparation_revisions' }[target];
     f.db.exec(`CREATE TRIGGER fail_preparation BEFORE INSERT ON ${table} BEGIN SELECT RAISE(ABORT, 'fixture'); END`);

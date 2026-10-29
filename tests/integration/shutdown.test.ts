@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { ShutdownView, OperationView } from '#contracts';
-import { openStorage, openStorageAtMigrationVersionForTests, shutdownETag } from '../../apps/controller/src/modules/storage/index.js';
+import { openStorage, shutdownETag } from '../../apps/controller/src/modules/storage/index.js';
 import { assertStartsAllowed } from '../../apps/controller/src/modules/storage/shutdown.js';
 import { createShutdownCoordinator } from '../../apps/controller/src/modules/shutdown/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -18,11 +18,10 @@ import { publicationFixture } from '../fixtures/publication.js';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { vi.useRealTimers(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-function setup(migrationVersionForTest?: number) {
+function setup() {
   const directory = mkdtempSync(join(tmpdir(), 'factory-shutdown-'));
   const storageOptions = { dataDirectory: directory };
-  let storage = migrationVersionForTest === undefined ? openStorage(storageOptions)
-    : openStorageAtMigrationVersionForTests(storageOptions, migrationVersionForTest);
+  let storage = openStorage(storageOptions);
   const db = new Database(join(directory, 'factory.sqlite'));
   db.pragma('foreign_keys=ON');
   cleanups.push(() => { storage.close(); db.close(); rmSync(directory, { recursive: true, force: true }); });
@@ -371,18 +370,4 @@ it('revalidates final commitment if resume wins after the worker read its view',
   const coordinator = createShutdownCoordinator({ storage, close, reportFailure: vi.fn() }); cleanups.push(() => coordinator.stop());
   coordinator.follow(drain.operationId); await vi.advanceTimersByTimeAsync(1000);
   expect(close).not.toHaveBeenCalled(); expect(f.storage.getShutdown().starts_paused).toBe(false);
-});
-
-it('upgrades schema 48 without rewriting accepted receipts and offers resume in the restored instance', () => {
-  const f = setup(52), pause = command(f); f.storage.acceptShutdown(pause);
-  const before = f.db.prepare('SELECT receipt_json FROM operation_requests WHERE operation_id=?').get(pause.operationId);
-  f.db.exec('DROP TRIGGER shutdown_start_barrier; DROP TRIGGER shutdown_final_barrier; DROP TRIGGER shutdown_receipt_immutable; DROP INDEX shutdown_control_order;');
-  f.db.exec(readFileSync(new URL('../../apps/controller/src/modules/storage/migrations/048_shutdown_barriers.sql', import.meta.url), 'utf8'));
-  f.db.exec('DROP INDEX delivery_targets_existing_branch_base; DROP INDEX delivery_targets_repository_branch; CREATE UNIQUE INDEX delivery_targets_repository_branch ON delivery_targets(repository_id,branch_ref); ALTER TABLE project_revisions DROP COLUMN delivery_branch_json; DELETE FROM schema_migrations WHERE version>=49; PRAGMA user_version=48;');
-  f.reopen();
-  ;
-  expect(f.db.prepare('SELECT receipt_json FROM operation_requests WHERE operation_id=?').get(pause.operationId)).toEqual(before);
-  expect(f.storage.getShutdown().resume_starts_capability.available).toBe(true);
-  f.storage.acceptShutdown(command(f, 'resume_starts'));
-  expect(f.storage.getShutdown()).toMatchObject({ state: 'running', starts_paused: false, automation_enabled: false });
 });

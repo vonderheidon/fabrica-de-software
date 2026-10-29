@@ -9,8 +9,8 @@ import { loadConfiguration } from '../../apps/controller/src/config.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(ttl: number | null = null, active = 100_000, migrationVersionForTest?: number) {
-  const f = await attemptFixture(undefined, undefined, undefined, undefined, migrationVersionForTest); fixtures.push(f);
+async function fixture(ttl: number | null = null, active = 100_000) {
+  const f = await attemptFixture(); fixtures.push(f);
   const settings = f.storage.getGlobalConfiguration();
   f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag,
     changes: { time_defaults: { passage_active_time_ms: active,

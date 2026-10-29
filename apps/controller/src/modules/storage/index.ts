@@ -36,7 +36,8 @@ import { resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import type { CatalogQuery, ConfigurationView, EventPage, EventQuery, FactorySettings, ProjectDetail, ProjectPage, SettingsView } from '#contracts';
 import { StorageError } from './errors.js';
-import { applyMigrations, inspectHistory, loadMigrations } from './migrations.js';
+import { assertDatabaseSnapshotUnchanged, assertNoOrphanedDatabaseSidecars, captureDatabaseSnapshot, inspectExistingDatabase, type DatabaseSnapshot } from './database-inspection.js';
+import { initializeSchema, inspectHistory, loadSchemaRecognitionResources, type DatabaseRecognition } from './migrations.js';
 import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, recordToolPreferenceValidation, seedSettings } from './settings.js';
 import { hasUncertainAccountCleanup, OperationError, readOperation, readCompletedProjectDeletion, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
 import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceReference, readCapture, recordImplementationBlocked, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
@@ -257,34 +258,40 @@ export interface StorageOptions {
 }
 
 export function openStorage(options: StorageOptions): Storage {
-  return openStorageWithMigrations(options, loadMigrations());
+  return openStorageWithSchema(options);
 }
 
-/** Builds a database at a historical migration boundary for forward-migration tests. */
-export function openStorageAtMigrationVersionForTests(options: StorageOptions, version: number): Storage {
-  const migrations = loadMigrations();
-  const latest = migrations.at(-1)?.version ?? 0;
-  if (!Number.isSafeInteger(version) || version < 1 || version >= latest) throw new StorageError('STORAGE_CONFIGURATION_INVALID');
-  return openStorageWithMigrations(options, migrations.filter((migration) => migration.version <= version));
-}
-
-function openStorageWithMigrations(options: StorageOptions, migrations: readonly ReturnType<typeof loadMigrations>[number][]): Storage {
+function openStorageWithSchema(options: StorageOptions): Storage {
   const timeout = options.busyTimeoutMs ?? 5000;
   if (!options.dataDirectory.trim() || !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 60_000) {
     throw new StorageError('STORAGE_CONFIGURATION_INVALID');
   }
   const directory = resolve(options.dataDirectory);
   const filename = resolve(directory, 'factory.sqlite');
+  const resources = loadSchemaRecognitionResources();
   let db: Database.Database | undefined;
   try {
-    // Incompatible existing files are inspected without changing their journal or content.
+    let snapshot: DatabaseSnapshot | null = null;
+    let preflight: DatabaseRecognition | null = null;
     if (existsSync(filename)) {
-      const probe = new Database(filename, { readonly: true, fileMustExist: true, timeout });
-      try { inspectHistory(probe, migrations); } finally { probe.close(); }
-    }
+      snapshot = captureDatabaseSnapshot(filename);
+      preflight = inspectExistingDatabase(filename, timeout, resources);
+      assertDatabaseSnapshotUnchanged(filename, snapshot);
+    } else assertNoOrphanedDatabaseSidecars(filename);
     mkdirSync(directory, { recursive: true });
     db = new Database(filename, { timeout });
     db.pragma('foreign_keys = ON');
+    const connection = db;
+    let recognition = connection.transaction(() => {
+      const current = inspectHistory(connection, resources);
+      if (preflight && (current.kind !== preflight.kind || current.schemaVersion !== preflight.schemaVersion)) {
+        throw new StorageError('DATABASE_CHANGED_DURING_OPEN');
+      }
+      return current;
+    }).immediate();
+    if (recognition.kind === 'empty') {
+      recognition = initializeSchema(connection, () => seedSettings(connection), resources);
+    }
     db.pragma('journal_mode = WAL');
     db.pragma('synchronous = FULL');
     const foreignKeys: unknown = db.pragma('foreign_keys', { simple: true });
@@ -294,26 +301,16 @@ function openStorageWithMigrations(options: StorageOptions, migrations: readonly
     if (foreignKeys !== 1 || journalMode !== 'wal' || synchronous !== 2 || busyTimeout !== timeout) {
       throw new StorageError('STORAGE_PRAGMA_MISMATCH');
     }
-    const connection = db;
     const projectDeletions = createProjectDeletionPersistence(connection);
-      const projectStorageLocations = createProjectStorageLocations(connection);
+    const projectStorageLocations = createProjectStorageLocations(connection);
     const resultListeners = new Set<(binding: PassageBinding) => void>();
-    applyMigrations(connection, migrations, () => seedSettings(connection));
     const controllerInstanceId = randomUUID();
     initializeShutdown(connection, controllerInstanceId);
     interruptNotificationDispatches(connection);
     interruptStorageTransitions(connection);
     connection.prepare("UPDATE publication_target_selections SET state='unknown',revision=revision+1,reason='TARGET_INTERRUPTED',updated_at_ms=max(updated_at_ms,?) WHERE state='running'").run(Date.now());
-    const tables = connection.prepare<[], { name: string; strict: number }>(
-      "SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND type='table' AND name NOT LIKE 'sqlite_%'",
-    ).all();
-    const foreignKeyViolations: unknown = connection.pragma('foreign_key_check');
-    if (tables.some((table) => table.strict !== 1) || !Array.isArray(foreignKeyViolations) || foreignKeyViolations.length !== 0) {
-      throw new StorageError('STORAGE_INTEGRITY_FAILED');
-    }
-    readSettings(connection);
     const diagnostics: StorageDiagnostics = Object.freeze({
-      foreignKeys, journalMode, synchronous, busyTimeoutMs: timeout, schemaVersion: migrations.length,
+      foreignKeys, journalMode, synchronous, busyTimeoutMs: timeout, schemaVersion: recognition.schemaVersion,
     });
     return {
       controllerInstanceId,

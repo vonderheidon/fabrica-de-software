@@ -1,13 +1,20 @@
-import { copyFileSync, mkdirSync, readdirSync, cpSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, cpSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const source = new URL('../apps/controller/src/modules/storage/migrations/', import.meta.url);
-const target = new URL('../dist/apps/controller/src/modules/storage/migrations/', import.meta.url);
-mkdirSync(target, { recursive: true });
-for (const name of readdirSync(source).filter((file) => file.endsWith('.sql'))) {
-  copyFileSync(new URL(name, source), new URL(name, target));
+const oldMigrationTarget = new URL('../dist/apps/controller/src/modules/storage/migrations/', import.meta.url);
+if (existsSync(oldMigrationTarget)) rmSync(oldMigrationTarget, { recursive: true, force: true });
+const storageResources = new URL('../resources/storage/', import.meta.url);
+const distributedStorageResources = new URL('../dist/resources/storage/', import.meta.url);
+const storageResourceNames = ['initial-schema.v54.sql', 'schema-recognition.v1.json'];
+if (JSON.stringify(readdirSync(storageResources).sort()) !== JSON.stringify(storageResourceNames.slice().sort())) {
+  throw new Error('STORAGE_RESOURCES_INVALID');
+}
+if (existsSync(distributedStorageResources)) rmSync(distributedStorageResources, { recursive: true, force: true });
+mkdirSync(distributedStorageResources, { recursive: true });
+for (const name of storageResourceNames) {
+  copyFileSync(new URL(name, storageResources), new URL(name, distributedStorageResources));
 }
 
 const roles = new URL('../resources/roles/', import.meta.url);

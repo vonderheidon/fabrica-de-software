@@ -1,12 +1,10 @@
-import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage, StorageError, type Storage } from './index.js';
-import { applicationId, applyMigrations, loadMigrations, type Migration } from './migrations.js';
-import { seedSettings } from './settings.js';
+import { applicationId, loadSchemaRecognitionResources } from './migrations.js';
 
 const directories: string[] = [];
 const stores: Storage[] = [];
@@ -46,10 +44,11 @@ describe('initial storage', () => {
     inspect(path, (db) => {
       const tables = db.prepare("SELECT name, strict FROM pragma_table_list WHERE schema = 'main' AND type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all();
       expect(tables).toEqual(['accounts', 'attempt_authority', 'attempt_blocks', 'attempt_criteria', 'attempt_decisions', 'attempt_sessions', 'attempt_stage_intervals', 'attempts', 'cancellation_requests', 'capture_runs', 'capture_warnings', 'controller_authority', 'creation_board_operations', 'creation_reconciliations', 'creation_steps', 'criterion_results', 'deliveries', 'delivery_targets', 'diagnostic_runs', 'effects', 'events', 'execution_profiles', 'execution_questions', 'factory_settings', 'finding_assessments', 'finding_disputes', 'finding_resolutions', 'findings', 'managed_terminals', 'native_open_requests', 'notification_dispatches', 'operation_requests', 'passage_events', 'passage_measurements', 'passage_results', 'passages', 'preparation_revisions', 'preparations', 'project_creations', 'project_deletion_receipts', 'project_deletion_targets', 'project_deletions', 'project_revisions', 'project_storage_locations', 'project_storage_transitions', 'projects', 'publication_requests', 'publication_target_selections', 'publication_upgrades', 'queue_consumptions', 'queue_cycles', 'resource_removals', 'resources', 'reviews', 'rounds', 'schema_migrations', 'terminal_occupancies'].map((name) => ({ name, strict: 1 })));
-      expect(db.prepare('SELECT max(version) AS version FROM schema_migrations').get()).toEqual({ version: 53 });
+      expect(db.prepare('SELECT count(*) AS count FROM schema_migrations').get()).toEqual({ count: 0 });
+      expect(Number(db.pragma('user_version', { simple: true }))).toBe(loadSchemaRecognitionResources().directInstallUserVersion);
       expect(db.prepare('SELECT * FROM accounts').all()).toEqual([]);
       expect(db.pragma('application_id', { simple: true })).toBe(applicationId);
-      expect(db.prepare('SELECT version, name, checksum FROM schema_migrations').all()).toEqual(loadMigrations().map(({ version, name, checksum }) => ({ version, name, checksum })));
+      expect(db.prepare('SELECT version, name, checksum FROM schema_migrations').all()).toEqual([]);
       const deletionTargets = db.prepare("SELECT sql FROM sqlite_schema WHERE type='table' AND name='project_deletion_targets'").get() as { sql: string };
       expect(deletionTargets.sql).not.toContain('exclusive_artifact');
       const projectRevisionColumns = db.prepare<[], { name: string }>("PRAGMA table_info('project_revisions')").all().map(column => column.name);
@@ -59,65 +58,6 @@ describe('initial storage', () => {
     });
     store.close();
     expect(open(path).getSettings()).toEqual(settings);
-  });
-
-  it('refuses to migrate verification data and leaves the old schema intact', () => {
-    const path = directory();
-    const db = new Database(join(path, 'factory.sqlite'));
-    const migrations = loadMigrations();
-    try {
-      applyMigrations(db, migrations.filter(migration => migration.version <= 52), () => seedSettings(db));
-      db.pragma('foreign_keys = OFF');
-      db.prepare(`INSERT INTO verification_runs(id,delivery_id,attempt_id,content_identity,run_number,state,started_at_ms,ended_at_ms)
-        VALUES ('legacy-run','legacy-delivery','legacy-attempt','tree',1,'passed',1,1)`).run();
-      const schemaBefore = db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
-
-      expect(() => applyMigrations(db, migrations, () => seedSettings(db))).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
-
-      expect(db.pragma('user_version', { simple: true })).toBe(52);
-      expect(db.prepare("SELECT id FROM verification_runs WHERE id='legacy-run'").get()).toEqual({ id: 'legacy-run' });
-      expect(db.prepare("SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all()).toEqual(schemaBefore);
-    } finally {
-      db.close();
-    }
-  });
-
-  it('refuses a populated retired schema during the read-only startup probe without changing database bytes', () => {
-    const path = directory();
-    const filename = join(path, 'factory.sqlite');
-    const db = new Database(filename);
-    try {
-      const migrations = loadMigrations();
-      applyMigrations(db, migrations.filter(migration => migration.version <= 52), () => seedSettings(db));
-      db.pragma('foreign_keys = OFF');
-      db.prepare(`INSERT INTO verification_runs(id,delivery_id,attempt_id,content_identity,run_number,state,started_at_ms,ended_at_ms)
-        VALUES ('legacy-run','legacy-delivery','legacy-attempt','tree',1,'passed',1,1)`).run();
-    } finally { db.close(); }
-    const before = readFileSync(filename);
-
-    expect(() => openStorage({ dataDirectory: path })).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
-
-    expect(readFileSync(filename)).toEqual(before);
-  });
-
-  it('refuses to retain an accepted exclusive artifact deletion path', () => {
-    const path = directory();
-    const db = new Database(join(path, 'factory.sqlite'));
-    try {
-      const migrations = loadMigrations();
-      applyMigrations(db, migrations.filter(migration => migration.version <= 52), () => seedSettings(db));
-      db.pragma('foreign_keys = OFF');
-      db.prepare(`INSERT INTO project_deletion_targets(operation_id,target_key,target_kind,authorized_path,normalized_path,resolved_path,
-        object_kind,identity_json,owner_kind,owner_id,state) VALUES ('old-operation','artifact','exclusive_artifact','C:/old.log','c:/old.log',
-        'C:/old.log','file','{}','attempt','old-attempt','pending')`).run();
-
-      expect(() => applyMigrations(db, migrations, () => seedSettings(db))).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
-
-      expect(db.pragma('user_version', { simple: true })).toBe(52);
-      expect(db.prepare("SELECT target_kind FROM project_deletion_targets WHERE target_key='artifact'").get()).toEqual({ target_kind: 'exclusive_artifact' });
-    } finally {
-      db.close();
-    }
   });
 
   it('enforces singleton, STRICT columns, JSON, booleans and foreign keys in SQLite', () => {
@@ -171,28 +111,6 @@ describe('initial storage', () => {
 });
 
 describe('migration safety', () => {
-  it.each([
-    ['checksum', "UPDATE schema_migrations SET checksum = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'", 'MIGRATION_CHECKSUM_MISMATCH'],
-    ['name', "UPDATE schema_migrations SET name = 'unknown.sql' WHERE version = 1", 'MIGRATION_HISTORY_INVALID'],
-    ['gap', 'UPDATE schema_migrations SET version = 999 WHERE version = 2', 'DATABASE_NEWER_THAN_APPLICATION'],
-    ['newer pragma', 'PRAGMA user_version = 999', 'DATABASE_NEWER_THAN_APPLICATION'],
-    ['missing ledger row', 'DELETE FROM schema_migrations', 'MIGRATION_HISTORY_INVALID'],
-    ['mismatched pragma', 'PRAGMA user_version = 0', 'MIGRATION_HISTORY_INVALID'],
-    ['foreign identity', 'PRAGMA application_id = 1', 'DATABASE_UNKNOWN'],
-  ])('refuses %s without changing the existing bytes', (_name, sql, code) => {
-    const path = directory();
-    open(path).close();
-    inspect(path, (db) => {
-      db.prepare("INSERT INTO accounts VALUES ('fixture-id', 'fixture-login', 1, 1, 1, 1)").run();
-      db.exec(sql);
-    });
-    const filename = join(path, 'factory.sqlite');
-    const before = readFileSync(filename);
-    expect(() => open(path)).toThrowError(expect.objectContaining({ code }));
-    expect(readFileSync(filename)).toEqual(before);
-    inspect(path, (db) => expect(db.prepare('SELECT login FROM accounts').get()).toEqual({ login: 'fixture-login' }));
-  });
-
   it('refuses an unknown database without replacing it', () => {
     const path = directory();
     inspect(path, (db) => db.exec("CREATE TABLE legacy_data(value TEXT); INSERT INTO legacy_data VALUES ('preserve me')"));
@@ -211,39 +129,4 @@ describe('migration safety', () => {
     expect(readFileSync(filename)).toEqual(bytes);
   });
 
-  function migration(version: number, sql: string): Migration {
-    return { version, name: `${version}.sql`, sql, checksum: createHash('sha256').update(sql).digest('hex') };
-  }
-
-  it('applies known migrations in order and never reapplies committed migrations', () => {
-    const db = new Database(':memory:');
-    try {
-      const migrations = [migration(1, 'CREATE TABLE fixture (value TEXT) STRICT'), migration(2, "INSERT INTO fixture VALUES ('second')")];
-      let seeds = 0;
-      applyMigrations(db, migrations, () => { seeds += 1; });
-      applyMigrations(db, migrations, () => { seeds += 1; });
-      expect(seeds).toBe(1);
-      expect(db.prepare('SELECT * FROM fixture').all()).toEqual([{ value: 'second' }]);
-      expect(db.prepare('SELECT version FROM schema_migrations ORDER BY version').all()).toEqual([{ version: 1 }, { version: 2 }]);
-      expect(db.pragma('user_version', { simple: true })).toBe(2);
-    } finally { db.close(); }
-  });
-
-  it('rolls back schema, ledger and seed together on migration failure', () => {
-    const db = new Database(':memory:');
-    try {
-      const migrations = [migration(1, 'CREATE TABLE fixture (value TEXT) STRICT'), migration(2, 'INVALID SQL')];
-      expect(() => applyMigrations(db, migrations, () => { throw new Error('seed must not run'); })).toThrowError(expect.objectContaining({ code: 'MIGRATION_FAILED' }));
-      expect(db.prepare("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all()).toEqual([]);
-      expect(db.pragma('user_version', { simple: true })).toBe(0);
-    } finally { db.close(); }
-  });
-
-  it('rolls back migrations when initial configuration cannot be persisted', () => {
-    const db = new Database(':memory:');
-    try {
-      expect(() => applyMigrations(db, [migration(1, 'CREATE TABLE fixture (value TEXT) STRICT')], () => { throw new Error('write failed'); })).toThrow(StorageError);
-      expect(db.prepare("SELECT name FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").all()).toEqual([]);
-    } finally { db.close(); }
-  });
 });

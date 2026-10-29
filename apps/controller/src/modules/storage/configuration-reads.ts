@@ -123,7 +123,6 @@ export function prerequisites(config: Pick<ProjectConfiguration, 'source' | 'imp
     add('CODE_NOT_PUBLISHED', 'O commit da branch-base ainda não está confirmado no remoto GitHub.', 'Publique o commit da branch-base no repositório configurado e confira novamente a origem.');
   }
   if (!config.github_project) add('PROJECT_REQUIRED', 'O quadro GitHub e o mapeamento de Status ainda não foram configurados.', 'Selecione o quadro pelo nome e mapeie os valores de Status na configuração do projeto.');
-  else if (!('backlog' in config.github_project.status_option_ids)) add('STATUS_MAPPING_LEGACY', 'O quadro salvo usa um mapeamento histórico de quatro valores.', 'Selecione o campo Status e configure também Backlog para liberar novos inícios.');
   if (!config.implementer_profile_id || !config.reviewer_profile_id) add('PROFILES_REQUIRED', 'Falta associar perfis aos papéis de Implementador e Revisor.', 'Selecione um perfil ativo para cada papel na configuração do projeto.');
   for (const code of notes) {
     if (['REMOTE_MISSING', 'REMOTE_UNCONFIRMED', 'BRANCH_NOT_FOUND', 'BASE_UNCONFIRMED', 'REMOTE_MISMATCH'].includes(code)) continue;
@@ -180,18 +179,16 @@ export function readConfiguration(db: Database.Database, projectId: string): Con
     automation_enabled: r.automation_enabled === 1, queue_order: readQueueOrderJson(JSON.parse(String(r.queue_order_json)) as unknown), guidance: r.guidance,
   };
   if (!Value.Check(ProjectRevision, configuration)) throw new StorageError('PROJECT_DATA_INVALID');
-  const hasLocations = Boolean(db.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type='table' AND name='project_storage_locations'").get());
-  const locations = hasLocations ? db.prepare<[string], { id: string; location_key: string; layout_version: number; root_relative: string; is_current: number; verified_at_ms: number }>(
+  const locations = db.prepare<[string], { id: string; location_key: string; layout_version: number; root_relative: string; is_current: number; verified_at_ms: number }>(
     `SELECT id,location_key,layout_version,root_relative,is_current,verified_at_ms FROM project_storage_locations WHERE project_id=? ORDER BY location_key,revision,id`).all(projectId)
     .map(location => ({ id: location.id, location_key: location.location_key, layout_version: location.layout_version,
-      path: location.root_relative, current: location.is_current === 1, verified_at_ms: location.verified_at_ms })) : [];
-  const hasTransitions = Boolean(db.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type='table' AND name='project_storage_transitions'").get());
-  const activeTransition = hasTransitions ? db.prepare<[string], { operation_id: string; state: string; reason: string | null }>(
-    `SELECT operation_id,state,reason FROM project_storage_transitions WHERE project_id=? AND state IN ('planned','running','uncertain','blocked') ORDER BY created_at_ms DESC LIMIT 1`).get(projectId) : undefined;
+      path: location.root_relative, current: location.is_current === 1, verified_at_ms: location.verified_at_ms }));
+  const activeTransition = db.prepare<[string], { operation_id: string; state: string; reason: string | null }>(
+    `SELECT operation_id,state,reason FROM project_storage_transitions WHERE project_id=? AND state IN ('planned','running','uncertain','blocked') ORDER BY created_at_ms DESC LIMIT 1`).get(projectId);
   const current = locations.filter(location => location.current);
   const transitionState: ProjectStorageView['state'] = activeTransition
     ? activeTransition.state === 'planned' || activeTransition.state === 'running' ? 'transitioning' : activeTransition.state as ProjectStorageView['state']
-    : current.length ? 'current' : 'legacy';
+    : 'current';
   const storage: ProjectStorageView = { managed_root: current.find(location => location.location_key === 'managed')?.path ?? null,
     original_path: project.project.source.kind === 'local' ? project.project.source.location : null, locations,
     transition_plan: null, active_transition_operation_id: activeTransition?.operation_id ?? null,

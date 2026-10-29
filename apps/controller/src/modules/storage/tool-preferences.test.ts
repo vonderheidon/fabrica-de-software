@@ -1,11 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStorage } from './index.js';
-import { applyMigrations, loadMigrations } from './migrations.js';
-import { seedSettings } from './settings.js';
 import type { SettingsUpdate, ToolPreferences } from '#contracts';
 
 const directories: string[] = [];
@@ -27,24 +24,6 @@ const emptyPreferences = (): ToolPreferences => ({
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
 describe('persisted local tool preferences', () => {
-  it('adds the settings JSON through migration 30 without changing existing settings', () => {
-    const directory = temporaryDirectory();
-    const database = new Database(join(directory, 'factory.sqlite'));
-    database.pragma('foreign_keys = ON');
-    const migrations = loadMigrations();
-    applyMigrations(database, migrations.slice(0, 29), () => seedSettings(database));
-    const before = database.prepare<[], { installation_id: string; account_id: string | null; gh_executable_path: string | null }>(
-      "SELECT installation_id,account_id,gh_executable_path FROM factory_settings WHERE id='local'").get();
-    if (!before) throw new Error('settings row missing');
-
-    applyMigrations(database, migrations, () => { throw new Error('existing installation must not be reseeded'); });
-
-    ;
-    expect(database.prepare("SELECT installation_id,account_id,gh_executable_path,tool_preferences_json FROM factory_settings WHERE id='local'").get())
-      .toEqual({ ...before, tool_preferences_json: JSON.stringify(emptyPreferences()) });
-    expect(database.pragma('foreign_key_check')).toEqual([]);
-    database.close();
-  });
 
   it('persists validated paths independently from GH and recovers the same command despite changed timestamps', () => {
     const directory = temporaryDirectory();

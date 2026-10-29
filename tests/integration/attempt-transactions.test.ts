@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -8,10 +8,8 @@ import type { ProjectItem } from '#contracts';
 import { createQueue } from '../../apps/controller/src/modules/projects/queue.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { applyMigrations, loadMigrations } from '../../apps/controller/src/modules/storage/migrations.js';
-import { readSettings } from '../../apps/controller/src/modules/storage/settings.js';
+import { applyHistoricalSchemaFixture, loadHistoricalSchemaFixtures } from '../fixtures/historical-schema.js';
 import { seedLegacySettings as seedSettings } from '../fixtures/legacy-settings.js';
-import { saveTimeDefaults, settingsETag } from '../../apps/controller/src/modules/storage/operations.js';
 import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
 
 const fixtures: AttemptFixture[] = [];
@@ -174,23 +172,19 @@ describe('atomic attempt acceptance', () => {
     await expect(f.pipeline.startAttempt(c.body, c.context)).rejects.toMatchObject({ code: 'CAPTURE_INVALID' });
     expect(f.storage.getOperation(c.context.operationId)).toBeNull(); expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
   });
-  it('migrates a real version-four database without modifying identity, configuration or historical operations', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'factory-attempt-upgrade-'));
-    const db = new Database(join(directory, 'factory.sqlite'));
-    let identity: string; const operationId = randomUUID();
+  it('refuses a partial historical schema without changing the database bytes', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'factory-attempt-partial-schema-'));
+    const filename = join(directory, 'factory.sqlite');
+    const db = new Database(filename);
+    db.pragma('foreign_keys=ON');
+    applyHistoricalSchemaFixture(db, loadHistoricalSchemaFixtures().slice(0, 4), () => seedSettings(db, directory));
+    db.close();
+    const before = readFileSync(filename);
     try {
-      db.pragma('foreign_keys=ON'); applyMigrations(db, loadMigrations().slice(0, 4), () => seedSettings(db, directory));
-      const s = readSettings(db); identity = s.installation_id;
-      saveTimeDefaults(db, { operationId, expectedRevision: settingsETag(s.installation_id, s.revision), timeDefaults: s.time_defaults });
-    } finally { db.close(); }
-    const storage = openStorage({ dataDirectory: directory });
-    try {
-    ; expect(storage.getSettings()).toMatchObject({ installation_id: identity, revision: 2 });
-      expect(storage.getOperation(operationId)).toMatchObject({ state: 'succeeded', receipt: { revision: 2 } });
-      const probe = new Database(join(directory, 'factory.sqlite'));
-      try {
-        expect(probe.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 }); expect(probe.pragma('foreign_key_check')).toEqual([]);
-      } finally { probe.close(); }
-    } finally { storage.close(); rmSync(directory, { recursive: true }); }
+      expect(() => openStorage({ dataDirectory: directory })).toThrowError(
+        expect.objectContaining({ code: 'DATABASE_SCHEMA_INCOMPATIBLE' }),
+      );
+      expect(readFileSync(filename)).toEqual(before);
+    } finally { rmSync(directory, { recursive: true }); }
   });
 });

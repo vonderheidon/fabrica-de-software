@@ -32,6 +32,7 @@ describe('durable Ready cycles', () => {
 
   it('consumes one ready cycle once and preserves the linked attempt identity', () => {
     database = new Database(':memory:');
+    database.exec('CREATE TABLE project_storage_transitions(project_id TEXT,operation_id TEXT,state TEXT)');
     database.exec(`CREATE TABLE attempts(id TEXT PRIMARY KEY,account_id TEXT NOT NULL,project_id TEXT NOT NULL,issue_id TEXT NOT NULL,repository_id TEXT DEFAULT 'repo');
       CREATE TABLE project_deletions(project_id TEXT PRIMARY KEY,operation_id TEXT NOT NULL);
       CREATE TABLE queue_consumptions(id TEXT,account_id TEXT,project_id TEXT,repository_id TEXT,issue_id TEXT,observed_cycle INTEGER,ready_exit_observed_at_ms INTEGER,ready_return_observed_at_ms INTEGER,consumed_at_ms INTEGER,attempt_id TEXT);
