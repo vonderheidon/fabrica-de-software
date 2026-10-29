@@ -20,6 +20,38 @@ import { createRetainedVerifier } from '../../apps/controller/src/modules/worksp
 import type { GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
 
 const markers = ['changed tracked bytes\n', 'IMPLEMENTATION_INDEX_UNCHANGED', 'EXCLUDED_IGNORED_BYTES_987', 'EXCLUDED_SECRET_BYTES_123', 'CACHE_CONTENT_AC29_76543210', 'diff --git'];
+
+async function observeQueryPlans<T>(read: () => Promise<T>) {
+  const prepare = Database.prototype.prepare;
+  const plans = new Map<string, { sqlSha256: string; plan: unknown[] }>();
+  const spy = vi.spyOn(Database.prototype, 'prepare').mockImplementation(function (this: Database.Database, sql: string) {
+    const statement = prepare.call(this, sql);
+    const database = this;
+    return new Proxy(statement, {
+      get(target, property) {
+        const value: unknown = Reflect.get(target, property, target);
+        if (['all', 'get', 'iterate'].includes(String(property)) && /^\s*SELECT\b/iu.test(sql)) {
+          return (...bindings: unknown[]) => {
+            const sqlSha256 = sha256(sql);
+            if (!plans.has(sqlSha256)) {
+              const explained = prepare.call(database, `EXPLAIN QUERY PLAN ${sql}`);
+              const plan = Reflect.apply(explained.all, explained, bindings) as unknown[];
+              plans.set(sqlSha256, { sqlSha256, plan });
+            }
+            return Reflect.apply(value as (...args: unknown[]) => unknown, target, bindings);
+          };
+        }
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  });
+  try {
+    const result = await read();
+    expect(plans.size).toBeGreaterThan(0);
+    return { result, statements: [...plans.values()] };
+  } finally { spy.mockRestore(); }
+}
+
 function observeContentIO(directory: string) {
   const readers = [vi.spyOn(fs, 'readFileSync'), vi.spyOn(fs, 'openSync'), vi.spyOn(fs, 'readdirSync'), vi.spyOn(fs, 'statSync'), vi.spyOn(fs, 'lstatSync'),
     vi.spyOn(fsPromises, 'readFile'), vi.spyOn(fsPromises, 'open'), vi.spyOn(fsPromises, 'readdir'), vi.spyOn(fsPromises, 'stat'), vi.spyOn(fsPromises, 'lstat')];
@@ -103,6 +135,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains producer/reviewer
         try { for (let i = 0; i < cacheBytes / chunk.length; i++) await file.writeFile(chunk); await file.sync(); } finally { await file.close(); }
       }
       const measured = [];
+      const queryPlans: { surface: string; statements: { sqlSha256: string; plan: unknown[] }[] }[] = [];
       const probeHashes: { surface: string; payloadSha256: string }[] = [];
       const contentIO = observeContentIO(f.directory);
       try {
@@ -112,7 +145,13 @@ it('measures final HTTP projections at 0/16/64 MiB and retains producer/reviewer
         const elapsed: number[] = []; const payloadBytes: number[] = [];
         // One warm-up per surface, then twenty sequential samples including HTTP serialization.
         for (let sample = -1; sample < 20; sample++) {
-          const start = performance.now(); const response = await app.inject({ url, headers }); const duration = performance.now() - start;
+          const start = performance.now();
+          // Reuse the existing warm-up so instrumentation does not change request
+          // counts/rate limits. Bindings and SQL text never enter the report.
+          const observation = sample === -1 ? await observeQueryPlans(() => app!.inject({ url, headers })) : null;
+          const response = observation ? observation.result : await app.inject({ url, headers });
+          const duration = performance.now() - start;
+          if (observation) queryPlans.push({ surface: name, statements: observation.statements });
           expect(response.statusCode, name).toBe(200);
           let body = response.body;
           if (name === 'listings') {
@@ -182,10 +221,11 @@ it('measures final HTTP projections at 0/16/64 MiB and retains producer/reviewer
         assertNoContent(await readFile(join(f.directory, file.path)), markers);
          expect(['factory.sqlite', 'factory.sqlite-wal', 'factory.sqlite-shm'].includes(file.path)).toBe(true);
       }
-      stages.push({ generatedCacheBytes: cacheBytes, sizes: sizes(files), measurements: measured, probes: probeHashes, audit: auditDatabase(f.db, markers) });
+      stages.push({ generatedCacheBytes: cacheBytes, sizes: sizes(files), measurements: measured, queryPlans, probes: probeHashes, audit: auditDatabase(f.db, markers) });
     }
     // Compare official logical data and retained producer/reviewer records, not a zero-growth SQLite SLA.
     expect(stages.map(s => s.audit)).toEqual([stages[0]!.audit, stages[0]!.audit, stages[0]!.audit]);
+    expect(stages.map(s => s.queryPlans)).toEqual([stages[0]!.queryPlans, stages[0]!.queryPlans, stages[0]!.queryPlans]);
     for (const stage of stages) {
       expect(stage.sizes.operationalWorkBytes - stages[0]!.sizes.operationalWorkBytes).toBe(stage.generatedCacheBytes);
       expect(stage.sizes.otherAuxiliaryBytes).toBe(0);
@@ -216,7 +256,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains producer/reviewer
       if (args.includes('ls-files')) return { exitCode: 0, stdout: [...new Set([...captured.base.keys(), ...captured.untracked])].map(p => p + '\0').join('') };
       return captured.run(cwd, args, options);
     };
-    const recovery = createEnvironmentRecovery(f.directory, run, undefined, async p => p);
+    const recovery = createEnvironmentRecovery(f.directory, run, undefined, async p => p, async () => f.directory);
     const workspaces = { ...f.workspaces, ...recovery };
     recoveryPipeline = createPipeline({ ...f.dependencies, storage: restarted, workspaces });
     const resource = restarted.getResources(f.attemptId).entries.find(r => r.kind === 'implementation')!;
@@ -228,12 +268,12 @@ it('measures final HTTP projections at 0/16/64 MiB and retains producer/reviewer
      expect((await inventory(f.directory)).some(file => file.path.startsWith('artifacts/'))).toBe(false);
     const afterRemovalSizes = sizes(await inventory(f.directory));
     const eventsAfterRemoval = restartedAudit.prepare('SELECT max(seq) AS seq FROM events').get();
-    const verify = createRetainedVerifier(f.directory, captured.run, async p => p);
+    const verify = createRetainedVerifier(f.directory, captured.run, async p => p, async () => f.directory);
     await verify(approvedDelivery);
     const diff = await captured.diff(approvedDelivery, {});
     expect(diff.entries.some(entry => entry.patch?.includes('changed tracked bytes'))).toBe(true);
     const unavailable: GitReader = async (cwd, args, options) => args.includes('fsck') ? { exitCode: 1, stdout: '' } : captured.run(cwd, args, options);
-    await expect(createRetainedVerifier(f.directory, unavailable, async p => p)(approvedDelivery)).rejects.toMatchObject({ code: 'DELIVERY_GIT_UNAVAILABLE' });
+    await expect(createRetainedVerifier(f.directory, unavailable, async p => p, async () => f.directory)(approvedDelivery)).rejects.toMatchObject({ code: 'DELIVERY_GIT_UNAVAILABLE' });
     expect(restarted.getDelivery(deliveryId).delivery).toEqual(approvedDelivery);
     auditDatabase(restartedAudit, markers);
     console.log('AC29_REPORT ' + JSON.stringify({ formatVersion: 1, level: 'real_sqlite_filesystem_http_inject_controlled_git_review_canonicalization',
