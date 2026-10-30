@@ -44,6 +44,10 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
   const refreshing = operation.loading || operation.refreshing || active.loading || active.refreshing || projectsLoad.loading || queue.load.status === 'loading';
   const queueObservation = queue.load.observation;
   const candidates = upcomingCandidates(queueObservation?.page.items ?? []);
+  const readyCount = queueObservation?.page.items.filter((item) => item.ready).length ?? 0;
+  const emptyCandidatesMessage = readyCount > 0
+    ? `${readyCount} ${readyCount === 1 ? 'issue' : 'issues'} em Ready nesta página, mas nenhum próximo candidato disponível. Abra a fila para consultar os motivos.`
+    : 'Nenhum próximo candidato disponível nesta página da fila.';
   const queueFailure = queue.load.status === 'error' ? { message: queue.load.message, requestId: queue.load.requestId }
     : queue.load.status === 'loading' ? queue.load.previousError : null;
   const onboardingView = onboarding.load.snapshot?.settings.onboarding;
@@ -89,7 +93,7 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
 
       <section className="card dashboard-queue">
         <div className="line panel-title"><div><span className="eyebrow">A seguir</span><h2>Próximos candidatos</h2></div><a href="#principal/fila">Abrir fila</a></div>
-        <RequestNote loading={queue.load.status === 'loading' && !queueObservation && !queueFailure} refreshing={queue.load.status === 'loading' && Boolean(queueObservation)} error={queueFailure?.message ?? null} stale={Boolean(queueObservation) && (queue.load.status === 'error' || Boolean(queueFailure))} empty={queueObservation?.complete && candidates.length === 0 ? 'Nenhuma issue pronta nesta página da fila.' : undefined} label="candidatos" />
+        <RequestNote loading={queue.load.status === 'loading' && !queueObservation && !queueFailure} refreshing={queue.load.status === 'loading' && Boolean(queueObservation)} error={queueFailure?.message ?? null} stale={Boolean(queueObservation) && (queue.load.status === 'error' || Boolean(queueFailure))} empty={queueObservation?.complete && candidates.length === 0 ? emptyCandidatesMessage : undefined} label="candidatos" />
         {queueObservation && <>{queueObservation.complete !== true && <p className="notice compact-notice">A consulta está incompleta; a lista não confirma ausência de candidatos.</p>}{queue.pageNotice && <p className="stale-note" role="status">{queue.pageNotice}</p>}<ul className="dashboard-candidates">{candidates.map((candidate) => { const status = operatorState(candidate.status); return <li key={`${candidate.project_id}:${candidate.item_id}`}><div><b>{candidate.title ?? `Issue #${candidate.number ?? 'sem número'}`}</b><small>{candidate.project_name} · {status.label} · {candidate.eligible ? 'elegível nesta consulta' : 'Issue pronta · automação do projeto desabilitada'}</small>{!status.known && <UnknownState value={candidate.status ?? ''} />}</div>{candidate.issue_id && <button type="button" onClick={(event) => onPrepare(candidate.project_id, candidate.issue_id!, event.currentTarget)}>Preparar</button>}</li>; })}</ul><small className="muted">Elegíveis na fila: {queueObservation.eligible_total ?? 'não confirmado'} · Última atualização {queueObservation.observed_at_ms ? new Date(queueObservation.observed_at_ms).toLocaleTimeString('pt-BR') : 'não realizada'}</small></>}
       </section>
 
