@@ -6,7 +6,7 @@ import { UnknownState } from '../../app/OperatorSupport.js';
 import { isPortugueseOperatorText, operatorCodeLabel } from '../../app/operator-language.js';
 
 type QuestionSummary = Pick<Question, 'id' | 'state'>;
-type Props = { attemptId: string; summary: QuestionSummary };
+type Props = { attemptId: string; summary: QuestionSummary; onStateChange?: (state: Question['state']) => void };
 
 const stateLabels: Record<QuestionSummary["state"], string> = {
   pending: 'Pendente', answer_recorded: 'Resposta gravada', sending: 'Enviando', delivered: 'Entregue',
@@ -16,10 +16,11 @@ const operationStateLabels: Record<NonNullable<ReturnType<typeof useDecision>['o
   accepted: 'Aceita', running: 'Em processamento', succeeded: 'Resposta registrada', failed: 'Falhou', unknown: 'Incerta',
 };
 
-export function QuestionDecisionCard({ attemptId, summary }: Props) {
+export function QuestionDecisionCard({ attemptId, summary, onStateChange }: Props) {
   const decision = useDecision(attemptId, summary.id);
   const [now, setNow] = useState(Date.now());
   const question = decision.question;
+  useEffect(() => { if (question) onStateChange?.(question.state); }, [question?.state, onStateChange]);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
@@ -58,9 +59,8 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
     </section>}
 
     {question.state === 'pending' ? <form className="decision-answer" onSubmit={(event) => { event.preventDefault(); void decision.submit(); }}>
-      <label htmlFor={`answer-${question.id}`}>Sua resposta
-        <textarea id={`answer-${question.id}`} value={decision.draft} onChange={(event) => decision.setDraft(event.currentTarget.value)} maxLength={8192} required aria-describedby={`answer-help-${question.id}`} />
-      </label>
+      <label htmlFor={`answer-${question.id}`}>Sua resposta</label>
+      <textarea id={`answer-${question.id}`} value={decision.draft} onChange={(event) => decision.setDraft(event.currentTarget.value)} maxLength={8192} required aria-describedby={`answer-help-${question.id}`} />
       <small id={`answer-help-${question.id}`}>A resposta em texto segue para o agente continuar. Para impedir novas etapas, use Encerrar tentativa.</small>
       <button type="submit" className="primary" disabled={!canAnswer}>{decision.submitting ? 'Gravando resposta…' : 'Enviar resposta e continuar'}</button>
       <button type="button" className="danger-button" disabled={decision.submitting || decision.submissionLocked || decision.etag === null} onClick={() => void decision.submit('end_attempt')}>Encerrar tentativa</button>
@@ -72,7 +72,7 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
 
     {decision.error && <div className="error" role="alert"><p>{decision.error}</p></div>}
     {decision.notice && <p className="decision-notice" role="status">{decision.notice}</p>}
-    <dl className="decision-timing">
+    <details className="decision-metadata"><summary>Estado, prazos e recibo</summary><dl className="decision-timing">
       <div><dt>Pergunta criada</dt><dd>{new Date(question.raised_at_ms).toLocaleString('pt-BR')}</dd></div>
       <div><dt>Espera observada</dt><dd>{formatDuration(Math.max(0, (question.answered_at_ms ?? now) - question.raised_at_ms))}</dd></div>
       <div><dt>TTL configurado</dt><dd>{question.ttl.state === 'configured' ? formatDuration(question.ttl.value) : 'Não configurado'}</dd></div>
@@ -81,12 +81,12 @@ export function QuestionDecisionCard({ attemptId, summary }: Props) {
     </dl>
     {!Object.hasOwn(stateLabels, question.state) && <UnknownState value={String(question.state)} />}
     {decision.operation && <div className="decision-operation"><p>Estado da resposta: {operationStateLabels[decision.operation.state]}</p></div>}
+    <button type="button" className="decision-refresh" onClick={() => void decision.refresh()} disabled={decision.loading}>{decision.loading ? 'Consultando…' : 'Consultar estado e recibo'}</button></details>
 
     {question.delivery_receipt && question.state === 'delivered' ? <div className="decision-receipt" role="status"><p>A resposta foi entregue à passagem original em {new Date(question.delivery_receipt.received_at_ms).toLocaleString('pt-BR')}. A suspensão desta pergunta foi resolvida.</p></div>
       : question.state === 'expired' ? <p className="notice" role="status">A pergunta expirou. A passagem continua suspensa até a coordenação encerrar ou resolver esse estado.</p>
         : question.state === 'cancelled' ? <p className="notice" role="status">A pergunta foi cancelada; a passagem não é reaberta por este diálogo.</p>
           : question.state === 'delivery_unknown' ? <p className="notice" role="status">A resposta foi gravada, mas a entrega ainda não foi confirmada. Consultar o recibo não envia a resposta novamente.</p>
             : question.state === 'answer_recorded' || question.state === 'sending' ? <p className="muted" role="status">Resposta persistida; aguardando recibo de entrega da mesma passagem.</p> : null}
-    <button type="button" className="decision-refresh" onClick={() => void decision.refresh()} disabled={decision.loading}>{decision.loading ? 'Consultando…' : 'Consultar estado e recibo'}</button>
   </article>;
 }

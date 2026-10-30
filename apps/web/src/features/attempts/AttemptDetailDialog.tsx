@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { HttpAttemptDetail as AttemptDetail, HttpAttemptResource as AttemptResource, HttpDeliveryDiff as DeliveryDiff, HttpDetailItem as DetailItem, HttpDetailPage as DetailPage, HttpDetailSection as DetailSection, HttpProducerResult as ProducerResult, HttpQuestion as Question } from '#contracts';
 import { HttpError, requestJsonWithMetadata } from '../../api/http.js';
 import { QuestionDecisionCard } from './QuestionDecisionCard.js';
+import { openPendingDecision } from './DecisionNotification.js';
 import { useAttempt } from './useAttempt.js';
 import { AttemptStageSummary } from './AttemptStageSummary.js';
 import { useAttemptActions } from './useAttemptActions.js';
@@ -269,7 +270,9 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
           {section === 'findings' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">A revisão desta versão não registrou achados.</p>}
           {section === 'criteria' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'Critérios indisponíveis: esta versão ainda não foi capturada.' : 'Nenhum critério foi retornado para esta versão.'}</p>}
           {sectionState.page && sectionState.page.items.length > 0 && <div className="attempt-record-list">{sectionState.page.items.map((item, index) => section === 'questions'
-            ? <QuestionDecisionCard key={String(asRecord(item).id ?? index)} attemptId={attemptId} summary={item as { id: string; state: Question["state"] }} />
+            ? asRecord(item).state === 'pending'
+              ? <button key={String(asRecord(item).id ?? index)} type="button" onClick={() => openPendingDecision(attemptId, String(asRecord(item).id))}>Responder decisão pendente</button>
+              : <QuestionDecisionCard key={String(asRecord(item).id ?? index)} attemptId={attemptId} summary={item as { id: string; state: Question["state"] }} />
             : renderRecord(section, item, index, actions.producerResult))}</div>}
           {sectionState.page?.has_more && <div className="attempt-section-pagination"><span>Mais registros nesta seção</span><button type="button" onClick={() => loadMore(section)} disabled={sectionState.loading}>{sectionState.loading ? 'Carregando…' : 'Carregar continuação'}</button></div>}
         </details>;

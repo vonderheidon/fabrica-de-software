@@ -25,6 +25,7 @@ import { useOnboarding } from '../features/onboarding/useOnboarding.js';
 import { InitialSetupDialog } from '../features/onboarding/InitialSetupDialog.js';
 import { trackProjectDeletions } from '../features/projects/project-deletion-observer.js';
 import { ShutdownDialog } from '../features/shutdown/ShutdownDialog.js';
+import { DecisionNotification } from '../features/attempts/DecisionNotification.js';
 
 type DialogState = { status: 'ready'; message: string } | { status: 'action-error'; message: string };
 
@@ -403,6 +404,7 @@ export function AppShell() {
   }
 
   return <>
+    <DecisionNotification />
     <div className="app" ref={appRef} onClickCapture={interceptWizardNavigation}>
       <aside className="sidebar">
         <div className="brand"><span className="mark" aria-hidden="true">nf</span> Nova Fábrica</div>

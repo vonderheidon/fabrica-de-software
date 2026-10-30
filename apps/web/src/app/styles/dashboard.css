@@ -36,6 +36,7 @@
 .result-delivered { color: #286348; background: #eaf4ed; }
 .result-failed, .result-rejected { color: #9b3933; background: #fbeeea; }
 .result-interrupted { color: #835f22; background: #faf1df; }
+.pill.result-blocked { color: #835f22; background: #faf1df; }
 .result-cancelled { color: #626871; background: #eef0f3; }
 .dashboard-projects .event { display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 14px 0; font-size: 13px; }
 .dashboard-projects .event p { font-size: 12px; }
