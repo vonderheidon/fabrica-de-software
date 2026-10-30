@@ -1,7 +1,7 @@
 import { Value } from '@sinclair/typebox/value';
 import { HttpControllerEventFrame, type HttpEventPage as EventPage } from '#contracts';
 
-export type EventConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
+export type EventConnectionState = 'connecting' | 'connected' | 'applying' | 'reconnecting' | 'unavailable';
 export type ControllerEventNotice = HttpControllerEventFrame & { seq: string };
 export type ControllerEventSignal = 'factory-controller-event' | 'factory-controller-resync';
 

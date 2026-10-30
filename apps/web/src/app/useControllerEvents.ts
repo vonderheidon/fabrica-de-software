@@ -46,6 +46,6 @@ export function useControllerEvents(): EventConnectionState {
   }), []);
 
   if (state === 'unavailable' || applied === 'failed') return 'unavailable';
-  if (state === 'connected' && applied === 'pending') return 'reconnecting';
+  if (state === 'connected' && applied === 'pending') return 'applying';
   return state;
 }

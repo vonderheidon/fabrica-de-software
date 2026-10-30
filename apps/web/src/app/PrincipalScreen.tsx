@@ -247,11 +247,11 @@ export function PrincipalScreen({ route, onOpenDialog, onOpenProfileDialog, onOp
       <p className="muted">Ajustes compartilhados por todos os projetos desta instalação. Para configurar um projeto, <a href="#principal/projetos">abra o catálogo de projetos</a> e selecione-o.</p>
       <ProjectConfigurationForm projectId={null} notificationSettings={notificationSettings} onSaveIssue={(issue, identity) => setSaveIssues((current) => issue ? [...current.filter((item) => item.identity !== issue.identity), issue] : current.filter((item) => item.identity !== identity))} />
     </>}
-    {route.tab === 'fila' && <QueuePanel load={queue.load} pageNotice={queue.pageNotice} pauseNotice={pauseNotice} pauseUncertain={pauseUncertain} onConsultPause={() => void consultPause()} onRefresh={queue.resetPages} onNextPage={queue.nextPage} onPreviousPage={queue.previousPage} canGoBack={queue.canGoBack} pausing={pausing}
+    {route.tab === 'fila' && <QueuePanel load={queue.load} linkedAccountId={onboarding.load.snapshot?.settings.settings.account_id} pageNotice={queue.pageNotice} pauseNotice={pauseNotice} pauseUncertain={pauseUncertain} retryAtMs={queue.retryAtMs} canRefresh={queue.canRefresh} onConsultPause={() => void consultPause()} onRefresh={queue.resetPages} onNextPage={queue.nextPage} onPreviousPage={queue.previousPage} canGoBack={queue.canGoBack} pausing={pausing}
       onEnable={(trigger) => onOpenDialog('enable-queue', trigger)} onPause={() => {
         const observation = queue.load.observation;
         const etag = queue.load.etag;
-        if (pausing || pauseUncertain || !observation || !etag || !observation.enabled) return;
+        if (queue.load.status !== 'ready' || pausing || pauseUncertain || !observation || !etag || !observation.enabled) return;
         const command = pauseCommand.current ?? { operationId: crypto.randomUUID(), scope: observation.scope, etag };
         pauseCommand.current = command;
         setPausing(true);

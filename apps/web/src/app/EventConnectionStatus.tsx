@@ -3,6 +3,7 @@ import type { EventConnectionState } from './controller-events.js';
 const labels: Record<EventConnectionState, string> = {
   connecting: 'Conectando atualizações',
   connected: 'Atualizações conectadas',
+  applying: 'Aplicando atualizações',
   reconnecting: 'Reconectando atualizações',
   unavailable: 'Falha nas atualizações',
 };

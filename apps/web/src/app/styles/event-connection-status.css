@@ -8,6 +8,7 @@
   color: #234b35;
 }
 .pill.event-connection-status-connected { border-color: #a8c5b1; background: #f3f7f4; color: #234b35; }
+.pill.event-connection-status-applying { border-color: #bfd1e1; background: #f2f7fb; color: #315675; }
 
 .event-connection-indicator {
   width: 7px;

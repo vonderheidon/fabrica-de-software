@@ -15,6 +15,7 @@
 .queue-panel .queue-list-card { padding: 0; overflow: hidden; }
 .queue-list-card > .panel-title { padding: 22px 24px; margin: 0; align-items: center; flex-wrap: wrap; }
 .queue-updated-at { font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.queue-updated-at-stale { color: #754400; font-weight: 600; }
 .queue-list-card > .queue-page-notice, .queue-list-card > .diagnostic-record { margin: 16px 24px; }
 .queue-panel .queue-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; }
 .queue-panel .queue-table th { padding: 14px 16px; background: #f6f7f8; font-size: 10px; font-weight: 650; }
@@ -54,6 +55,7 @@
 @media (max-width: 600px) {
   .queue-panel .queue-summary-card { padding: 20px; }
   .queue-list-card > .panel-title { padding: 20px; gap: 8px; }
+  .queue-updated-at { white-space: normal; text-align: right; }
   .queue-panel .queue-heading { flex-direction: row; align-items: center; }
   .queue-panel .queue-actions { align-items: stretch; flex-direction: column; }
   .queue-panel .queue-actions button { width: 100%; }

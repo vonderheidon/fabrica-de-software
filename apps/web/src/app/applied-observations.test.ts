@@ -27,13 +27,13 @@ function Surface({ pending, failed, revision }: { pending: boolean; failed: bool
   return createElement('div', {}, createElement(EventConnectionStatus, { state }), createElement('p', {}, `Revisão aplicada: ${revision}`));
 }
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); sources.length = 0; vi.unstubAllGlobals(); });
-it('keeps red on read failure and requires an applied update after stream recovery before turning green', async () => {
+it('distinguishes applying recovered data from reconnecting the event stream', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubGlobal('EventSource', Source);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   const render = async (pending: boolean, failed: boolean, revision: number) => act(async () => root!.render(createElement(Surface, { pending, failed, revision })));
   await render(true, false, 0);
   await act(async () => sources[0]!.open());
-  expect(host.textContent).toContain('Reconectando atualizações');
+  expect(host.textContent).toContain('Aplicando atualizações');
   await render(false, false, 1); expect(host.textContent).toContain('Atualizações conectadas');
   await render(false, true, 2); expect(host.textContent).toContain('Falha nas atualizações');
   await act(async () => window.dispatchEvent(new CustomEvent('health-http-success')));
@@ -41,7 +41,7 @@ it('keeps red on read failure and requires an applied update after stream recove
   await render(true, false, 3); expect(host.textContent).toContain('Falha nas atualizações');
   await render(false, false, 4); expect(host.textContent).toContain('Atualizações conectadas');
   await act(async () => sources[0]!.fail()); expect(host.textContent).toContain('Falha nas atualizações');
-  await act(async () => sources[0]!.open()); expect(host.textContent).toContain('Reconectando atualizações');
+  await act(async () => sources[0]!.open()); expect(host.textContent).toContain('Aplicando atualizações');
   await render(false, false, 5); expect(host.textContent).toContain('Atualizações conectadas');
   expect(host.textContent).toContain('Revisão aplicada: 5');
 });
@@ -52,15 +52,15 @@ it('keeps confirmed health during background reads but waits for applied data af
   const render = async (pending: boolean, failed: boolean, revision: number) => act(async () => root!.render(createElement(Surface, { pending, failed, revision })));
   await render(true, false, 0);
   await act(async () => sources[0]!.open());
-  expect(host.textContent).toContain('Reconectando atualizações');
+  expect(host.textContent).toContain('Aplicando atualizações');
   await render(false, false, 1);
   await render(true, false, 2);
   expect(host.textContent).toContain('Atualizações conectadas');
   await render(false, false, 3);
   await act(async () => sources[0]!.open());
-  expect(host.textContent).toContain('Reconectando atualizações');
+  expect(host.textContent).toContain('Aplicando atualizações');
   await render(true, false, 4);
-  expect(host.textContent).toContain('Reconectando atualizações');
+  expect(host.textContent).toContain('Aplicando atualizações');
   await render(false, false, 5);
   expect(host.textContent).toContain('Atualizações conectadas');
   await render(false, true, 6);
