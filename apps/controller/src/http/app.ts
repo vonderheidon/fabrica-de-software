@@ -117,7 +117,8 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
     logFailure: code => app.log.error({ code }, 'Scaffold creation stopped') });
   installScaffoldRoutes(app,scaffold,storage);
   const pipeline = providedPipeline ?? createPipeline({ storage, preparations, execution: execution!,
-    workspaces: attemptWorkspaces, github: preparationDependencies?.github ?? defaultGitHub, queue: { observe: projects.getQueue },
+    workspaces: attemptWorkspaces, github: preparationDependencies?.github ?? defaultGitHub,
+    queue: { observe: projects.observeQueue, revalidateForDispatch: projects.revalidateQueueForDispatch },
     publication: { github: defaultGitHub, workspaces: attemptWorkspaces },
     observeTools: async () => {
       const now = Date.now();

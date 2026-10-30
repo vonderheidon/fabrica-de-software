@@ -1,15 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { Value } from '@sinclair/typebox/value';
-import { QueueCommand, QueueQuery, QueueReason, type GitHubAccount, type GitHubQueryResult, type IssueContext, type ProjectItem, type QueueItem, type QueueObservation, type QueueQuery as QueueQueryType } from '#contracts';
+import { QueueCommand, QueueQuery, QueueReason, type GitHubAccount, type GitHubQueryResult, type ProjectItem, type QueueItem, type QueueObservation, type QueueQuery as QueueQueryType } from '#contracts';
 import type { Static } from '@sinclair/typebox';
 import { OperationError, type Storage } from '../storage/index.js';
-import { assessIssueReadiness, type GitHub } from '../github/index.js';
+import { assessIssueReadiness, type GitHub, type GitHubRateLimitSnapshot, type IssueQueueContext } from '../github/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import { matchesObservedV3StatusMapping } from './status-mapping.js';
 import { interpretIssue } from '../pipeline/index.js';
 
-type QueueGitHub = Pick<GitHub, 'getIdentity' | 'getProject' | 'listProjectItems' | 'getIssueContextById'>;
+type QueueGitHub = Pick<GitHub, 'getIdentity' | 'getProject' | 'listProjectItems' | 'getIssueContextById'> & Partial<Pick<GitHub, 'getRateLimitSnapshot'>>;
 type QueueDependencies = { storage: Storage; github: QueueGitHub; workspaces: Pick<Workspaces, 'inspectOrigin'>; hostName?: string };
 export interface QueueResult { observation: QueueObservation; etag: string; items: readonly QueueItem[] }
 export class QueueSummaryChanged extends OperationError {
@@ -17,15 +17,63 @@ export class QueueSummaryChanged extends OperationError {
 }
 const hash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const problem = (status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never => { throw new OperationError(status, code, message); };
+function effectivePollingInterval(intervalMs: number, maximumMs: number, rateLimit: GitHubRateLimitSnapshot | null, nowMs: number): number {
+  if (!rateLimit || rateLimit.limit < 1 || (rateLimit.resetAtMs !== null && rateLimit.resetAtMs <= nowMs)) return intervalMs;
+  const ratio = rateLimit.remaining / rateLimit.limit;
+  const pressure = Math.max(0, Math.min(1, (0.25 - ratio) / 0.15));
+  if (pressure === 0) return intervalMs;
+  const cap = Math.min(Math.max(intervalMs, maximumMs), intervalMs * 4);
+  return Math.round(intervalMs + (cap - intervalMs) * pressure);
+}
 type QueueCommandBody = Static<typeof QueueCommand>;
+type DispatchBoundary = { expectedItems: readonly QueueItem[]; candidate: Pick<QueueItem, 'projectId' | 'itemId'> };
+const compareId = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
+const compareNumber = (a: number | null, b: number | null): number => a === null ? (b === null ? 0 : 1) : b === null ? -1 : a - b;
+
+function queueScope(query: QueueQueryType): QueueQueryType {
+  if (!Value.Check(QueueQuery, query)) problem(400, 'QUEUE_QUERY_INVALID', 'Queue query is invalid.');
+  if (query.projectId && query.projectIds) problem(400, 'QUEUE_SCOPE_INVALID', 'Select one project scope.');
+  const ids = query.projectId ? [query.projectId] : query.projectIds?.split(',').sort();
+  if (ids && (ids.length > 100 || new Set(ids).size !== ids.length)) problem(400, 'QUEUE_SCOPE_INVALID', 'Select up to 100 distinct projects.');
+  return ids ? { projectIds: ids.join(',') } : {};
+}
+
+function queuePage(result: QueueResult, query: QueueQueryType): QueueResult {
+  const { observation, items: rows } = result;
+  const pageScope = hash([observation.summaryHash, observation.scope.kind === 'project' ? observation.scope.projectIds : null]);
+  let offset = 0;
+  if (query.cursor) {
+    try {
+      const decoded: unknown = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8'));
+      const candidate = decoded && typeof decoded === 'object' ? decoded as { scope?: unknown; offset?: unknown } : null;
+      if (!candidate || candidate.scope !== pageScope || typeof candidate.offset !== 'number' || !Number.isSafeInteger(candidate.offset) || candidate.offset < 0 || candidate.offset >= rows.length) {
+        throw new OperationError(409, 'QUEUE_CHANGED', 'The observed queue changed. Reload the first page.');
+      }
+      offset = candidate.offset;
+    } catch (error) {
+      if (error instanceof OperationError) throw error;
+      problem(400, 'QUEUE_CURSOR_INVALID', 'Queue cursor is invalid.');
+    }
+  }
+  const limit = Number(query.limit ?? '25');
+  const hasMore = offset + limit < rows.length;
+  return structuredClone({ ...result, observation: { ...observation, page: {
+    ...observation.page, items: rows.slice(offset, offset + limit), has_more: hasMore,
+    next_cursor: hasMore ? Buffer.from(JSON.stringify({ scope: pageScope, offset: offset + limit })).toString('base64url') : null,
+  } } });
+}
 
 export function createQueue({ storage, github, workspaces, hostName = hostname() }: QueueDependencies) {
-  // Display observations never grant authority: save and scheduler still call observe directly.
+  // Only overlapping observations share work; completed display reads never grant authority.
+  const observations = new Map<string, Promise<QueueResult>>();
   const displayReads = new Map<string, { expires: number; promise: Promise<QueueResult> }>();
   let retryAtMs = 0;
   let failureDelayMs = 0;
   const projectBackoff = new Map<string, { retryAtMs: number; delayMs: number; etag: string }>();
-  async function observe(query: QueueQueryType): Promise<QueueResult> {
+  function observeFresh(query: QueueQueryType): Promise<QueueResult>;
+  function observeFresh(query: QueueQueryType, boundary: DispatchBoundary): Promise<QueueResult | null>;
+  function observeFresh(query: QueueQueryType, boundary: undefined, issueReadLimit: number): Promise<QueueResult>;
+  async function observeFresh(query: QueueQueryType, boundary?: DispatchBoundary, issueReadLimit = 3): Promise<QueueResult | null> {
     if (!Value.Check(QueueQuery, query)) problem(400, 'QUEUE_QUERY_INVALID', 'Queue query is invalid.');
     if (query.projectId && query.projectIds) problem(400, 'QUEUE_SCOPE_INVALID', 'Select one project scope.');
     const selectedIds = query.projectId ? [query.projectId] : query.projectIds?.split(',').sort();
@@ -40,6 +88,9 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     }
     if (allProjects.length > 100) problem(503, 'QUEUE_SCOPE_LIMIT', 'Queue observation supports at most 100 configured projects. Select one project.');
     const settings = storage.getGlobalConfiguration();
+    const configuredIntervalMs = settings.view.settings.time_defaults.polling_interval_ms;
+    const configuredBackoffMaxMs = settings.view.settings.time_defaults.polling_backoff_max_ms ?? Math.max(configuredIntervalMs, 60_000);
+    const pollingIntervalMs = () => effectivePollingInterval(configuredIntervalMs, configuredBackoffMaxMs, github.getRateLimitSnapshot?.() ?? null, Date.now());
     const configurations = new Map(allProjects.map((project) => [project.id, storage.getConfiguration(project.id)]));
     const scope = { kind: selectedIds ? 'project' as const : 'account' as const, projectIds: allProjects.map(project => project.id).sort() };
     const etag = storage.getQueueETag(scope);
@@ -62,6 +113,8 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     const blockedProjects: string[] = [];
     const sortValues = new Map<QueueItem, { board: number | null; useBoardPosition: boolean }>();
     let boardAvailable = false;
+    const boardReads = new Map<string, Promise<[Awaited<ReturnType<QueueGitHub['listProjectItems']>>, Awaited<ReturnType<QueueGitHub['getProject']>>]>>();
+    const issueReads = new Map<string, Promise<GitHubQueryResult<IssueQueueContext | ProjectItem>>>();
 
     for (const projectSummary of allProjects) {
       const configured = configurations.get(projectSummary.id)!;
@@ -72,7 +125,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
           recovery: 'Acompanhe a exclusão deste projeto e aguarde sua conclusão.' });
         continue;
       }
-      if (!selectedIds && !configuration.automation_enabled) continue;
+      if ((!selectedIds || boundary) && !configuration.automation_enabled) continue;
       modesByProject.push({ projectId: projectSummary.id, mode: configuration.default_delivery_mode });
       if (!configuration.github_project) {
         complete = false;
@@ -115,9 +168,13 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
       const firstRow = rows.length;
       let projectComplete = true;
       let projectRetryAtMs = 0;
-      const [items, projectDetails] = await Promise.all([
-        github.listProjectItems(configuration.github_project.id), github.getProject(configuration.github_project.id),
-      ]);
+      const boardId = configuration.github_project.id;
+      let boardRead = boardReads.get(boardId);
+      if (!boardRead) {
+        boardRead = Promise.all([github.listProjectItems(boardId), github.getProject(boardId)]);
+        boardReads.set(boardId, boardRead);
+      }
+      const [items, projectDetails] = await boardRead;
       projectRetryAtMs = Math.max(items.retryAtMs ?? 0, projectDetails.retryAtMs ?? 0);
       diagnostics.push(...[...items.diagnostics, ...projectDetails.diagnostics].map(({ code, message, recovery }) => ({ code, message: `${projectSummary.name}: ${message}`, recovery })));
       if (items.state !== 'complete' || projectDetails.state !== 'complete' || !projectDetails.data) projectComplete = false;
@@ -127,19 +184,40 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         projectComplete = false;
         diagnostics.push({ code: 'PROJECT_MAPPING_INVALID', message: `${projectSummary.name}: o quadro, proprietário ou mapeamento de Status diverge da configuração.`, recovery: 'Abra a configuração deste projeto e confirme o quadro e os valores de Status.' });
       }
-      const projectItems = items.data ?? [];
+      let projectItems = items.data ?? [];
       const useBoardPosition = configuration.queue_order.use_board_position && items.state === 'complete' && items.data !== null &&
         projectItems.every((item) => typeof item.position === 'number');
       boardAvailable ||= useBoardPosition;
       if (configuration.queue_order.use_board_position && !useBoardPosition) diagnostics.push({ code: 'BOARD_POSITION_UNAVAILABLE', message: 'A leitura não fornece posição documentada dos itens.', recovery: 'A ordem usa número crescente e ID.' });
       if (activeAttempt) diagnostics.push({ code: 'QUEUE_OCCUPIED', message: 'Já existe uma tentativa ativa. Os demais candidatos permanecem visíveis e não serão descartados.', recovery: 'A fila pode consumir o próximo candidato quando a tentativa terminar.' });
+      if (boundary?.candidate.projectId === projectSummary.id) {
+        const expectedRows = boundary.expectedItems.filter((row) => row.projectId === projectSummary.id);
+        const expectedIds = expectedRows.map((row) => row.itemId).sort(compareId);
+        const currentIds = projectItems.map((item) => item.id).sort(compareId);
+        if (expectedIds.length !== currentIds.length || expectedIds.some((id, index) => id !== currentIds[index])) return null;
+        const expectedById = new Map(expectedRows.map((row) => [row.itemId, row]));
+        projectItems = [...projectItems].sort((a, b) => {
+          const boardOrder = useBoardPosition ? (a.position ?? 0) - (b.position ?? 0) : 0;
+          const aRow = expectedById.get(a.id)!;
+          const bRow = expectedById.get(b.id)!;
+          return boardOrder || compareNumber(aRow.number, bRow.number) || compareId(aRow.issueId ?? a.id, bRow.issueId ?? b.id);
+        });
+        const candidateIndex = projectItems.findIndex((item) => item.id === boundary.candidate.itemId);
+        if (candidateIndex < 0) return null;
+        projectItems = projectItems.slice(0, candidateIndex + 1);
+      }
       const issueItems = projectItems.filter(item => item.kind === 'issue' && item.contentId);
-      const issues = new Map<string, GitHubQueryResult<IssueContext | ProjectItem>>();
+      const issues = new Map<string, GitHubQueryResult<IssueQueueContext | ProjectItem>>();
       let nextIssue = 0;
-      await Promise.all(Array.from({ length: Math.min(3, issueItems.length) }, async () => {
+      await Promise.all(Array.from({ length: Math.min(issueReadLimit, issueItems.length) }, async () => {
         while (nextIssue < issueItems.length) {
           const item = issueItems[nextIssue++]!;
-          issues.set(item.id, await github.getIssueContextById(item.contentId!, { purpose: 'queue' }));
+          let issueRead = issueReads.get(item.contentId!);
+          if (!issueRead) {
+            issueRead = github.getIssueContextById(item.contentId!, { purpose: 'queue' });
+            issueReads.set(item.contentId!, issueRead);
+          }
+          issues.set(item.id, await issueRead);
         }
       }));
       for (const item of projectItems) {
@@ -224,8 +302,8 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
       } else {
         complete = false;
         blockedProjects.push(projectSummary.id);
-        const interval = settings.view.settings.time_defaults.polling_interval_ms;
-        const maximum = settings.view.settings.time_defaults.polling_backoff_max_ms ?? Math.max(interval, 60_000);
+        const interval = pollingIntervalMs();
+        const maximum = configuredBackoffMaxMs;
         const delayMs = Math.min(maximum, Math.max(interval, (pending?.delayMs ?? 0) * 2));
         projectBackoff.set(projectSummary.id, { retryAtMs: Math.max(Date.now() + delayMs, projectRetryAtMs), delayMs, etag: configured.etag });
         diagnostics.push({ code: 'PROJECT_QUEUE_BLOCKED', message: `${projectSummary.name}: leitura incompleta; somente este projeto está bloqueado.`, recovery: 'Confira o acesso ao quadro e o mapeamento de Status na configuração deste projeto. A consulta será repetida automaticamente.' });
@@ -263,8 +341,6 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     }
     const order = { criterion: boardAvailable ? 'project-position' : 'issue-number',
       description: 'Projetos por ID; posição do quadro; número crescente e ID.' };
-    const compareId = (a: string, b: string): number => a < b ? -1 : a > b ? 1 : 0;
-    const compareNumber = (a: number | null, b: number | null): number => a === null ? (b === null ? 0 : 1) : b === null ? -1 : a - b;
     rows.sort((a, b) => {
       const projectOrder = compareId(a.projectId, b.projectId);
       if (projectOrder) return projectOrder;
@@ -274,7 +350,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     });
     rows.forEach((row, index) => { row.order.position = index + 1; });
     const sharedValid = !configurationChanged && !accountChanged && identity.state === 'complete' && Boolean(identity.data) && settings.view.settings.account_id !== null && settings.view.settings.account_id === identity.data?.id;
-    const valid = sharedValid && (selectedIds ? complete : safeProjects > 0);
+    const valid = sharedValid && (selectedIds && !boundary ? complete : safeProjects > 0);
     if (!sharedValid) for (const row of rows) {
       row.eligible = false;
       row.readyEligible = false;
@@ -286,8 +362,8 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
       expectedAccountId: settings.view.settings.account_id, host: currentHost, complete, valid, eligibleTotal,
       candidates: rows.map(({ projectId, itemId, kind, issueId, ready, readyEligible, eligible, reasons, status, assignees, order: itemOrder }) =>
         [projectId, itemId, kind, issueId, ready, readyEligible, eligible, reasons, status, assignees.map((assignee) => assignee.id).sort(), itemOrder]), order });
-    const intervalMs = settings.view.settings.time_defaults.polling_interval_ms;
-    const backoffMaxMs = settings.view.settings.time_defaults.polling_backoff_max_ms ?? Math.max(intervalMs, 60_000);
+    const intervalMs = pollingIntervalMs();
+    const backoffMaxMs = configuredBackoffMaxMs;
     if (!deferred) {
       failureDelayMs = sharedValid ? 0 : Math.min(backoffMaxMs, Math.max(intervalMs, failureDelayMs * 2));
       retryAtMs = sharedValid ? 0 : Math.max(Date.now() + failureDelayMs, remoteRetryAtMs);
@@ -298,34 +374,37 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     });
     const observationRetryAtMs = retryAtMs || (safeProjects === 0 && projectDeadlines.length ? Math.min(...projectDeadlines) : 0);
     const observationId = randomUUID();
-    const pageScope = hash([summaryHash, selectedIds ?? null]);
-    let offset = 0;
-    if (query.cursor) {
-      try {
-        const decoded: unknown = JSON.parse(Buffer.from(query.cursor, 'base64url').toString('utf8'));
-        const candidate = decoded && typeof decoded === 'object' ? decoded as { scope?: unknown; offset?: unknown } : null;
-        if (!candidate || candidate.scope !== pageScope || typeof candidate.offset !== 'number' || !Number.isSafeInteger(candidate.offset) || candidate.offset < 0 || candidate.offset >= rows.length) {
-          throw new OperationError(409, 'QUEUE_CHANGED', 'The observed queue changed. Reload the first page.');
-        }
-        offset = candidate.offset;
-      } catch (error) {
-        if (error instanceof OperationError) throw error;
-        problem(400, 'QUEUE_CURSOR_INVALID', 'Queue cursor is invalid.');
-      }
-    }
-    const limit = Number(query.limit ?? '25');
-    const pageItems = rows.slice(offset, offset + limit);
-    const hasMore = offset + limit < rows.length;
     const observation: QueueObservation = {
       scope, enabled: queueEnabled, valid, complete, observationId, summaryHash, observedAtMs: now,
       eligibleTotal,
       modesByProject, account: { id: identity.data?.id ?? null, login: identity.data?.login ?? null },
       host: { expected: currentHost, observed: currentHost, matches: true },
-      order, page: { items: pageItems, has_more: hasMore, next_cursor: hasMore ? Buffer.from(JSON.stringify({ scope: pageScope, offset: offset + limit })).toString('base64url') : null, event_cursor: settings.view.event_cursor },
+      order, page: { items: [], has_more: false, next_cursor: null, event_cursor: settings.view.event_cursor },
       diagnostics: [...new Map(diagnostics.map((entry) => [JSON.stringify(entry), entry])).values()].slice(0, 100), eventCursor: settings.view.event_cursor,
       polling: { intervalMs, backoffMaxMs, retryAtMs: observationRetryAtMs || null, nextPollAtMs: Math.max(Date.now() + intervalMs, observationRetryAtMs) },
     };
-    return { observation, etag, items: rows };
+    return queuePage({ observation, etag, items: rows }, query);
+  }
+
+  async function revalidateForDispatch(scan: QueueResult, candidate: QueueItem, expectedEventCursor = scan.observation.eventCursor): Promise<QueueResult | null> {
+    if (scan.observation.scope.kind !== 'account' || !scan.observation.valid || !scan.observation.enabled || !candidate.issueId) return null;
+    const projectIds: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = storage.listProjects({ limit: '100', ...(cursor ? { cursor } : {}) });
+      projectIds.push(...page.items.map((project) => project.id));
+      cursor = page.next_cursor;
+    } while (cursor);
+    const expectedProjectIds = [...scan.observation.scope.projectIds].sort(compareId);
+    if (projectIds.length !== expectedProjectIds.length || projectIds.sort(compareId).some((id, index) => id !== expectedProjectIds[index])) return null;
+    if (storage.getGlobalConfiguration().view.event_cursor !== expectedEventCursor) return null;
+    const prefixIds = expectedProjectIds.filter((id) => compareId(id, candidate.projectId) <= 0 &&
+      storage.getConfiguration(id).view.configuration.automation_enabled);
+    if (!prefixIds.includes(candidate.projectId)) return null;
+    const current = await observeFresh({ projectIds: prefixIds.join(','), limit: '100' }, { expectedItems: scan.items, candidate });
+    if (!current?.observation.valid || !current.observation.enabled || current.observation.account.id !== scan.observation.account.id ||
+        current.observation.eventCursor !== expectedEventCursor || storage.getGlobalConfiguration().view.event_cursor !== expectedEventCursor) return null;
+    return current;
   }
 
   async function save(command: QueueCommandBody, context: { operationId: string; expectedRevision: string | undefined }) {
@@ -337,39 +416,60 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     if (!operation) {
       if (context.expectedRevision === undefined) problem(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
       if (command.enabled) {
-        const fresh = await observe(query);
+        const fresh = await observeFresh(query);
         if (!fresh.observation.valid || fresh.observation.summaryHash !== command.authorizedSummaryHash ||
           fresh.etag !== context.expectedRevision || hash(fresh.observation.scope.projectIds) !== hash([...command.scope.projectIds].sort()) ||
           (command.scope.kind === 'project' && !storage.getSettings().automation_enabled)) throw new QueueSummaryChanged(fresh);
       }
       try { operation = storage.saveQueueChange(change); }
       catch (error) {
-        if (command.enabled && error instanceof OperationError && ['REVISION_CONFLICT', 'QUEUE_SCOPE_CHANGED', 'QUEUE_AUTHORITY_REQUIRED'].includes(error.code)) throw new QueueSummaryChanged(await observe(query));
+        if (command.enabled && error instanceof OperationError && ['REVISION_CONFLICT', 'QUEUE_SCOPE_CHANGED', 'QUEUE_AUTHORITY_REQUIRED'].includes(error.code)) throw new QueueSummaryChanged(await observeFresh(query));
         throw error;
       }
     }
     const receipt = operation.receipt;
     if (!receipt) return problem(503, 'QUEUE_RECEIPT_UNAVAILABLE', 'The queue change was not confirmed.');
-    const latest = await observe({ ...query, limit: '25' });
+    const latest = await observeFresh({ ...query, limit: '25' });
     return { queue: latest.observation, operationId: operation.operation_id, receipt, etag: latest.etag };
   }
 
-  async function read(query: QueueQueryType): Promise<QueueResult> {
-    if (!Value.Check(QueueQuery, query)) problem(400, 'QUEUE_QUERY_INVALID', 'Queue query is invalid.');
+  function observeShared(scope: QueueQueryType, issueReadLimit: number): Promise<QueueResult> {
     const settings = storage.getGlobalConfiguration();
-    const key = JSON.stringify([settings.etag, settings.view.event_cursor, query.projectId, query.projectIds, query.cursor, query.limit]);
+    const key = JSON.stringify([settings.etag, settings.view.event_cursor, scope]);
+    let pending = observations.get(key);
+    if (!pending) {
+      if (observations.size >= 8) observations.delete(observations.keys().next().value!);
+      pending = observeFresh({ ...scope, limit: '100' }, undefined, issueReadLimit);
+      observations.set(key, pending);
+      const current = pending;
+      const release = () => { if (observations.get(key) === current) observations.delete(key); };
+      void current.then(release, release);
+    }
+    return pending;
+  }
+
+  async function observe(query: QueueQueryType): Promise<QueueResult> {
+    const scope = queueScope(query);
+    return queuePage(await observeShared(scope, 3), query);
+  }
+
+  async function read(query: QueueQueryType): Promise<QueueResult> {
+    const scope = queueScope(query);
+    const settings = storage.getGlobalConfiguration();
+    const key = JSON.stringify([settings.etag, settings.view.event_cursor, scope]);
     const now = Date.now();
     let entry = displayReads.get(key);
     if (!entry || entry.expires <= now) {
       if (displayReads.size >= 8) displayReads.delete(displayReads.keys().next().value!);
-      entry = { expires: Infinity, promise: observe(query) };
+      entry = { expires: Infinity, promise: observeShared(scope, 2) };
       displayReads.set(key, entry);
       const current = entry;
       void current.promise.then(result => {
         current.expires = result.observation.complete ? Date.now() + Math.min(10_000, settings.view.settings.time_defaults.polling_interval_ms) : 0;
       }, () => { if (displayReads.get(key) === current) displayReads.delete(key); });
     }
-    return structuredClone(await entry.promise);
+    return queuePage(await entry.promise, query);
   }
-  return { observe, read, save };
+  return { observe, read, save, revalidateForDispatch };
 }
+export type Queue = ReturnType<typeof createQueue>;

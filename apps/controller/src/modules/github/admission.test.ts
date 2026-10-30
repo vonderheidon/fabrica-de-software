@@ -25,6 +25,25 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 describe('GitHub operation admission', () => {
+  it('shares the rate-limit window, keeps the lowest remaining count, and discards it after reset', async () => {
+    let now = 1_000;
+    const replies = [
+      http({ data: { viewer: { id: 'U_test' } } }, 200, { 'x-ratelimit-limit': '1000', 'x-ratelimit-remaining': '250', 'x-ratelimit-reset': '50' }),
+      http({ data: { viewer: { id: 'U_test' } } }, 200, { 'x-ratelimit-limit': '1000', 'x-ratelimit-remaining': '400', 'x-ratelimit-reset': '50' }),
+      http({ data: { viewer: { id: 'U_test' } } }, 200, { 'x-ratelimit-limit': '1000', 'x-ratelimit-remaining': '900', 'x-ratelimit-reset': '100' }),
+    ];
+    const reader = new GraphQLReader(async (_input, onSend) => { onSend?.(); return replies.shift()!; }, () => now);
+
+    await reader.query('query First', {});
+    expect(reader.getRateLimitSnapshot()).toEqual({ limit: 1000, remaining: 250, resetAtMs: 50_000 });
+    await reader.scope().query('query SameWindow', {});
+    expect(reader.getRateLimitSnapshot()).toEqual({ limit: 1000, remaining: 250, resetAtMs: 50_000 });
+    await reader.query('query NewWindow', {});
+    expect(reader.getRateLimitSnapshot()).toEqual({ limit: 1000, remaining: 900, resetAtMs: 100_000 });
+    now = 100_001;
+    expect(reader.getRateLimitSnapshot()).toBeNull();
+  });
+
   it('reserves the remaining response bytes across concurrent queries and releases unused capacity', async () => {
     const first = deferred<CommandResponse>();
     const second = deferred<CommandResponse>();

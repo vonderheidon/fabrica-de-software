@@ -1,4 +1,5 @@
 import { createClient } from './client.js';
+import type { IssueQueueContext } from './client.js';
 import { createEffectWriter, type GitHubMutationAuthorization, type AttemptEffectAuthorization } from './effects.js';
 export type { GitHubMutationAuthorization, GitHubEffectRequest } from './effects.js';
 export type { AttemptEffectAuthorization } from './effects.js';
@@ -12,7 +13,8 @@ export type { ScaffoldAuthorization } from './scaffold.js';
 
 export { assessIssueReadiness } from './client.js';
 export type { IssueReference, ProjectSelection, ReadinessReason } from './client.js';
-export type { IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext } from './client.js';
+export type { GitHubRateLimitSnapshot } from './transport.js';
+export type { IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext, IssueQueueContext } from './client.js';
 export type { GitHubContext, GitHubHostAccess } from './transport.js';
 export type { GitHubBeforeSendContext } from './transport.js';
 
@@ -86,7 +88,8 @@ export function createGitHub(options: GitHubOptions = {}) {
   };
 }
 export type GitHubClient = ReturnType<typeof createGitHub>;
-/** Existing workflows keep the complete/queue contract until they opt into purpose projections. */
+/** Complete reads remain separate from the queue projection and effect-specific projections. */
 export type GitHub = Omit<GitHubClient, 'getIssueContextById'> & {
-  getIssueContextById(id: string, options?: { purpose?: 'queue' }): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
+  getIssueContextById(id: string, options: { purpose: 'queue' }): Promise<GitHubQueryResult<IssueQueueContext | ProjectItem>>;
+  getIssueContextById(id: string, options?: { purpose?: undefined }): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
 };

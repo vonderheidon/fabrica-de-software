@@ -28,6 +28,7 @@ export class BackendMeasurement {
   private readonly responseBytes = new Map<string, number | null>();
   private readonly unknownConsumptionBytes = new Map<string, number>();
   private readonly admissionWaitMs = new Map<string, number>();
+  private readonly admissionWindows: { observation: string; start: number; end: number }[] = [];
   private readonly providerSimulatedMs = new Map<string, number>();
   private readonly cooldownBlocks = new Map<string, number>();
   constructor(private readonly now: () => number = () => performance.now()) {}
@@ -103,8 +104,30 @@ export class BackendMeasurement {
   }
   noteAdmissionWaitMs(durationMs: number): void {
     const context = this.context.getStore();
-    if (context) this.admissionWaitMs.set(context.observation,
-      (this.admissionWaitMs.get(context.observation) ?? 0) + Math.max(0, durationMs));
+    if (context) {
+      const end = this.now();
+      this.admissionWindows.push({ observation: context.observation, start: end - Math.max(0, durationMs), end });
+      this.admissionWaitMs.set(context.observation,
+        (this.admissionWaitMs.get(context.observation) ?? 0) + Math.max(0, durationMs));
+    }
+  }
+  timingBreakdown(observation: string) {
+    const journey = this.spans.find(span => span.observation === observation && span.operation === 'scenario' && span.end !== null);
+    if (!journey || journey.end === null) throw new Error('COMPLETED_SCENARIO_REQUIRED');
+    const union = (windows: { start: number; end: number }[]) => {
+      const clipped = windows.map(window => ({ start: Math.max(journey.start, window.start), end: Math.min(journey.end!, window.end) }))
+        .filter(window => window.end > window.start).sort((a, b) => a.start - b.start);
+      let total = 0; let end = journey.start;
+      for (const window of clipped) { total += Math.max(0, window.end - Math.max(end, window.start)); end = Math.max(end, window.end); }
+      return total;
+    };
+    const sends = this.spans.filter(span => span.observation === observation && span.layer === 'graphql' && span.end !== null)
+      .map(span => ({ start: span.start, end: span.end! }));
+    const admission = this.admissionWindows.filter(window => window.observation === observation);
+    const totalMs = journey.end - journey.start;
+    const waitingWindowMs = union([...sends, ...admission]);
+    return { totalMs, sendWindowMs: union(sends), admissionWindowMs: union(admission), waitingWindowMs,
+      outsideWaitingWindowMs: Math.max(0, totalMs - waitingWindowMs) };
   }
   noteProviderSimulatedMs(durationMs: number): void {
     const context = this.context.getStore();

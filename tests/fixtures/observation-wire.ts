@@ -34,7 +34,8 @@ export interface ObservationSelectionProfile {
 export function observationWire(input: {
   issues: Map<string, IssueContext>; items: Map<string, ProjectItem[]>;
   projects: Map<string, GitHubProjectDetails>; pages: number; account: () => string; latencyMs?: number; largeCommentBytes?: number;
-}, meter: BackendMeasurement, controls: ObservationWireControls = {}, path: 'client' | 'composed' = 'client') {
+}, meter: BackendMeasurement, controls: ObservationWireControls = {}, path: 'client' | 'composed' = 'client',
+runtime = { createClient, GraphQLReader }) {
   let oversizedGroupedResponseRepetition: number | null = null;
   function page(nodes: unknown[], cursor: unknown, items = false) {
     const split = Math.ceil(nodes.length / input.pages);
@@ -104,7 +105,12 @@ export function observationWire(input: {
       repository: { id: issue.repository.id }, projectItems: page(issue.memberships.map(m => ({
         id: m.itemId, isArchived: m.archived, project: { id: m.projectId },
       })), cursor) } };
-    else if (request.query.includes('query FactoryQueueIssue(') && issue) data = { node: { ...issue, __typename: 'Issue',
+    else if (request.query.includes('query FactoryQueueIssue(') && issue) data = { node: {
+      id: issue.id, number: issue.number, title: issue.title, body: issue.body, state: issue.state, url: issue.url, __typename: 'Issue',
+      ...(/\bassignees\s*\(/u.test(request.query) ? { assignees: page(issue.assignees, undefined) } : {}),
+      ...(/\bblockedBy\s*\(/u.test(request.query) ? { blockedBy: page(issue.blockers, undefined) } : {}),
+      ...(/\bprojectItems\s*\(/u.test(request.query) ? { projectItems: page(issue.memberships.map(m => ({ id: m.itemId,
+        isArchived: m.archived, project: { id: m.projectId } })), undefined) } : {}),
       repository: { ...issue.repository, defaultBranchRef: { name: issue.repository.defaultBranch } } } };
     else if (request.query.includes('query FactoryIssueReference(') && issue) data = { node: { __typename: 'Issue', id: issue.id, number: issue.number,
       repository: { name: issue.repository.name, owner: { login: issue.repository.owner.login } } } };
@@ -184,7 +190,7 @@ export function observationWire(input: {
     client = createGitHub({ context, resolver, savedExecutablePath: () => context.executable,
       runnerFactory: () => measuredRunner, observeAdmissionWaitMs: durationMs => meter.noteAdmissionWaitMs(durationMs) });
   } else {
-    const reader = new GraphQLReader(measuredRunner, Date.now, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    const reader = new runtime.GraphQLReader(measuredRunner, Date.now, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
       durationMs => meter.noteAdmissionWaitMs(durationMs));
     if (controls.legacyValues) {
       const scope = reader.scope.bind(reader);
@@ -203,7 +209,7 @@ export function observationWire(input: {
         return scoped;
       };
     }
-    client = createClient(reader);
+    client = runtime.createClient(reader);
   }
   return client;
 }

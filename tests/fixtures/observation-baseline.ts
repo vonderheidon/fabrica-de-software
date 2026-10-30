@@ -5,6 +5,7 @@ import type { GitHubQueryResult, IssueContext, ProjectItem, QueueQuery } from '#
 import type { BackendMeasurement } from './backend-measurement.js';
 import { observationWire, type ObservationWireControls } from './observation-wire.js';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
+import type { IssueQueueContext } from '../../apps/controller/src/modules/github/index.js';
 import { attemptFixture, complete } from './attempt.js';
 
 // Private test protocol. No query, argv, response body or environment is retained.
@@ -112,14 +113,19 @@ export async function observationFixture(scenario: ObservationScenario, meter?: 
       ? meter.measure('logical', operation, run, result => result.state === 'complete' ? 'success' : 'failure') : run();
     const remote = wire && meter ? observationWire({ issues, items, projects, pages: scenario.pages,
       account: () => accountId, latencyMs: scenario.latencyMs, largeCommentBytes: scenario.largeCommentBytes }, meter, controls, path) : null;
+    function getIssueContextById(id: string): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
+    function getIssueContextById(id: string, options: { purpose: 'queue' }): Promise<GitHubQueryResult<IssueQueueContext | ProjectItem>>;
+    function getIssueContextById(id: string, options?: { purpose: 'queue' }): Promise<GitHubQueryResult<IssueContext | IssueQueueContext | ProjectItem>> {
+      return traced('issue', () => {
+        if (remote) return options ? remote.getIssueContextById(id, options) : remote.getIssueContextById(id);
+        const value = issues.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_ISSUE'); return response(value, scenario.pages);
+      });
+    }
     const github = {
       getIdentity: () => traced('identity', () => remote ? remote.getIdentity() : response({ id: accountId, login: 'synthetic-user' })),
       getProject: (id: string) => traced('project', () => { if (remote) return remote.getProject(id); const value = projects.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_PROJECT'); return response(value); }),
       listProjectItems: (id: string) => traced('items', () => { if (remote) return remote.listProjectItems(id); const value = items.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_PROJECT'); return response(value, scenario.pages); }),
-      getIssueContextById: (id: string, options?: { purpose: 'queue' }) => traced('issue', () => {
-        if (remote) return remote.getIssueContextById(id, options ?? { purpose: 'queue' });
-        const value = issues.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_ISSUE'); return response(value, scenario.pages);
-      }),
+      getIssueContextById,
     };
     const readFullIssueContext = (id: string) => traced('issue.full-context', () => {
       if (remote) return remote.getIssueContextById(id);
@@ -127,7 +133,7 @@ export async function observationFixture(scenario: ObservationScenario, meter?: 
     });
     const queue = createQueue({ storage: f.storage, github, workspaces: f.workspaces, hostName: 'synthetic-host' });
     return {
-      storage: f.storage, directory: f.directory, projectIds, samples, queue, issues, projects, pipeline: f.pipeline, purposeGitHub: remote,
+      storage: f.storage, directory: f.directory, projectIds, samples, queue, issues, projects, items, pipeline: f.pipeline, purposeGitHub: remote,
       github: { ...f.github, ...github }, workspaces: f.workspaces, readFullIssueContext,
       scenario,
       advance(ms: number) { if (!Number.isSafeInteger(ms) || ms < 0) throw new Error('INVALID_CLOCK_ADVANCE'); now += ms; },

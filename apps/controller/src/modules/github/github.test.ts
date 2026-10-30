@@ -3,7 +3,7 @@ import { Value } from '@sinclair/typebox/value';
 import { GitHubQueryResult, IssueContext, type GitHubAccount, type GitHubProjectDetails, type GitHubQueryResult as GitHubQueryResultType, type ProjectItem } from '#contracts';
 import { assessIssueReadiness, createClient } from './client.js';
 import { createGitHub } from './index.js';
-import type { GitHubClient, IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext } from './index.js';
+import type { GitHubClient, IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext, IssueQueueContext } from './index.js';
 import { GraphQLReader, collect, result, type CommandResponse, type GhRunner } from './transport.js';
 
 const account = { id: 'U_900719925474099312345', login: 'operator' };
@@ -32,7 +32,8 @@ function assertIssueProjectionTypes(client: Pick<GitHubClient, 'getIssueContextB
   const comment = client.getIssueContextById('I_exact', { purpose: 'comment_confirmation' });
   const status = client.getIssueContextById('I_exact', { purpose: 'status_confirmation' });
   expectTypeOf(complete).toEqualTypeOf<Promise<GitHubQueryResultType<IssueContext | ProjectItem>>>();
-  expectTypeOf(queue).toEqualTypeOf<Promise<GitHubQueryResultType<IssueContext | ProjectItem>>>();
+  expectTypeOf(queue).toEqualTypeOf<Promise<GitHubQueryResultType<IssueQueueContext | ProjectItem>>>();
+  expectTypeOf<IssueQueueContext>().not.toMatchTypeOf<IssueContext>();
   expectTypeOf(authority).toEqualTypeOf<Promise<GitHubQueryResultType<IssueAuthorityContext>>>();
   expectTypeOf(comment).toEqualTypeOf<Promise<GitHubQueryResultType<IssueCommentConfirmationContext>>>();
   expectTypeOf(status).toEqualTypeOf<Promise<GitHubQueryResultType<IssueStatusConfirmationContext>>>();
@@ -194,10 +195,9 @@ describe('GitHub identity and query diagnostics', () => {
     expect(f.calls.every(call => call.query.startsWith('query FactoryBranches') && call.query.includes('refPrefix:"refs/heads/"'))).toBe(true);
   });
   it('groups queue field pages by identity, retaining status pagination and failures without numeric values', async () => {
-    const header = http({ data: { node: { __typename: 'Issue', id: 'I_group', number: 17, title: 'Title', body: 'Objective', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository } } });
     const ids = ['item-a', 'item-b', 'item-c'];
-    const prefix = () => [header, http({ data: { node: { assignees: page([]) } } }), http({ data: { node: { blockedBy: page([]) } } }),
-      http({ data: { node: { projectItems: page(ids.map(id => ({ id, isArchived: false, project: { id: 'PVT_1' } }))) } } })];
+    const prefix = () => [http({ data: { node: { __typename: 'Issue', id: 'I_group', number: 17, title: 'Title', body: 'Objective', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/17', repository: wireRepository,
+      assignees: page([]), blockedBy: page([]), projectItems: page(ids.map(id => ({ id, isArchived: false, project: { id: 'PVT_1' } }))) } } })];
     const value = (id: string, number: number) => ({ __typename: 'ProjectV2ItemFieldNumberValue', id, number, field: { id: 'number' } });
     const nodes = ids.map((id, index) => ({ id, __typename: 'ProjectV2Item', fieldValues: page([value(id, index)], `${id}-cursor`) }));
     const valid = fixture([...prefix(), http({ data: { nodes: [...nodes].reverse() } }), ...ids.map((id, index) => http({ data: { node: { fieldValues: page([value(`${id}-next`, 100 + index)]) } } }))]);
@@ -205,16 +205,16 @@ describe('GitHub identity and query diagnostics', () => {
     expect(response.state).toBe('complete');
     expect((response.data as IssueContext).memberships.map(m => m.statusValues)).toEqual(ids.map(() => []));
     expect((response.data as IssueContext).memberships[0]).not.toHaveProperty('numberValues');
-    expect(valid.calls.slice(5).map(call => call.variables)).toEqual(ids.map(id => ({ id, cursor: `${id}-cursor` })));
-    expect(valid.calls[4]?.query).toContain('ProjectV2ItemFieldNumberValue { id }');
-    expect(valid.calls[4]?.query).not.toContain('number field');
+    expect(valid.calls.slice(2).map(call => call.variables)).toEqual(ids.map(id => ({ id, cursor: `${id}-cursor` })));
+    expect(valid.calls[1]?.query).toContain('ProjectV2ItemFieldNumberValue { id }');
+    expect(valid.calls[1]?.query).not.toContain('number field');
     for (const broken of [null, { ...nodes[1], id: 'item-a' }, { ...nodes[1], __typename: 'Issue' }]) {
       const failed = fixture([...prefix(), http({ data: { nodes: [nodes[0], broken, nodes[2]] } }), http({ data: { node: { fieldValues: page([]) } } }), http({ data: { node: { fieldValues: page([]) } } })]);
       expect(await failed.client.getIssueContextById('I_group', { purpose: 'queue' })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'RESPONSE_INVALID' }] });
     }
     const partial = fixture([...prefix(), http({ data: { nodes }, errors: [{ type: 'FORBIDDEN' }] })]);
     expect(await partial.client.getIssueContextById('I_group', { purpose: 'queue' })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'REFERENCE_INACCESSIBLE' }] });
-    expect(partial.calls).toHaveLength(5);
+    expect(partial.calls).toHaveLength(2);
     const continuationFailure = fixture([...prefix(), http({ data: { nodes } }), http({}, 403), http({ data: { node: { fieldValues: page([]) } } }), http({ data: { node: { fieldValues: page([]) } } })]);
     expect(await continuationFailure.client.getIssueContextById('I_group', { purpose: 'queue' })).toMatchObject({ state: 'partial', diagnostics: [{ code: 'ACCESS_DENIED' }] });
   });
@@ -427,16 +427,43 @@ function issueResponses() {
   ];
 }
 describe('issue preparation context', () => {
+  it.each(['assignees', 'blockedBy', 'projectItems'] as const)('does not treat a missing inline %s connection as a complete empty list', async connection => {
+    const node = { __typename: 'Issue', id: 'I_1', number: 1, title: 'Implement', body: 'Goal', state: 'OPEN',
+      url: 'https://github.com/operator/actual-repo/issues/1', repository: wireRepository,
+      assignees: page([]), blockedBy: page([]), projectItems: page([]), [connection]: null };
+    const f = fixture([http({ data: { node } })]);
+    const response = await f.client.getIssueContextById('I_1', { purpose: 'queue' });
+    expect(response.state).toBe('partial');
+    expect(response.diagnostics.length).toBeGreaterThan(0);
+    expect(f.calls).toHaveLength(1);
+  });
+
+  it.each(['assignees', 'blockedBy', 'projectItems'] as const)('retains failure of the independent %s continuation', async connection => {
+    const nodes = { assignees: account, blockedBy: { id: 'I2', number: 2, title: 'Dependency', url: 'https://github.com/o/r/issues/2', state: 'OPEN' },
+      projectItems: { id: 'ITEM', isArchived: false, project: { id: 'PVT_1' } } };
+    const node = { __typename: 'Issue', id: 'I_1', number: 1, title: 'Implement', body: 'Goal', state: 'OPEN',
+      url: 'https://github.com/operator/actual-repo/issues/1', repository: wireRepository,
+      assignees: page([]), blockedBy: page([]), projectItems: page([]), [connection]: page([nodes[connection]], 'next') };
+    const f = fixture([http({ data: { node } }), http({}, 403), http({ data: { node: { fieldValues: page([]) } } })]);
+    const response = await f.client.getIssueContextById('I_1', { purpose: 'queue' });
+    expect(response.state).toBe('partial');
+    expect(response.diagnostics.some(diagnostic => diagnostic.code === 'ACCESS_DENIED')).toBe(true);
+    expect(f.calls[1]!.variables).toEqual({ id: 'I_1', cursor: 'next' });
+  });
+
   it('reads queue eligibility without fetching comments or references, retaining nested pagination', async () => {
     const responses = issueResponses();
-    responses.splice(3, 2);
-    responses.shift();
-    const header = http({ data: { node: { __typename: 'Issue', id: 'I_1', number: 1, title: 'Implement', body: '## What to build\nImplement feature. See #2\n## Acceptance criteria\n- Works', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/1', repository: wireRepository } } });
-    const { client, calls } = fixture([header, ...responses]);
+    const header = http({ data: { node: { __typename: 'Issue', id: 'I_1', number: 1, title: 'Implement', body: '## What to build\nImplement feature. See #2\n## Acceptance criteria\n- Works', state: 'OPEN', url: 'https://github.com/operator/actual-repo/issues/1', repository: wireRepository,
+      assignees: page([account], 'a2'), blockedBy: page([{ id: 'I2', number: 2, title: 'Dependency', url: 'https://github.com/o/r/issues/2', state: 'OPEN' }], 'b2'),
+      projectItems: page([{ id: 'ITEM', isArchived: false, project: { id: 'PVT_1' } }], 'p2') } } });
+    const { client, calls } = fixture([header, ...[2, 6, 8, 9, 10].map(index => responses[index]!)]);
     const response = await client.getIssueContextById('I_1', { purpose: 'queue' });
     expect((response.data as IssueContext).body).toContain('What to build');
     expect(calls[0]!.query).toContain('title body state');
-    expect(response).toMatchObject({ state: 'complete', data: { id: 'I_1', comments: [], references: [], blockers: [{ state: 'OPEN' }, { state: 'CLOSED' }], memberships: [{ statusValues: [{ optionId: 'READY' }] }] } });
+    expect(response).toMatchObject({ state: 'complete', data: { id: 'I_1', blockers: [{ state: 'OPEN' }, { state: 'CLOSED' }], memberships: [{ statusValues: [{ optionId: 'READY' }] }] } });
+    expect(response.data).not.toHaveProperty('comments');
+    expect(response.data).not.toHaveProperty('references');
+    expect(calls.slice(1, 4).map(call => call.variables.cursor)).toEqual(['a2', 'b2', 'p2']);
     expect(calls.some(call => call.query.includes('FactoryComments'))).toBe(false);
   });
   it('does not read numeric values while preserving fieldValues pagination', async () => {

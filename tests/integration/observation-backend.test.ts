@@ -162,7 +162,7 @@ it.each([['TimeoutError', 'timeout'], ['AbortError', 'cancelled']] as const)(
   },
 );
 
-it('keeps queue GraphQL work and its drain attributable after a controlled HTTP consumer abort', async () => {
+it('keeps the two-worker display read and its drain attributable after a controlled HTTP consumer abort', async () => {
   const meter = new BackendMeasurement();
   const gate = deferred(); const reached = deferred();
   let blocked = 0;
@@ -179,16 +179,16 @@ it('keeps queue GraphQL work and its drain attributable after a controlled HTTP 
       const before = meter.spans.filter(span => span.layer === 'graphql').map(span => span.id);
       aborter.abort(); meter.abort('queue-abort');
       await expect(consumer).rejects.toMatchObject({ name: 'AbortError' });
-      expect(meter.spans.filter(span => span.layer === 'graphql' && span.completion === 'pending')).toHaveLength(3);
+      expect(meter.spans.filter(span => span.layer === 'graphql' && span.completion === 'pending')).toHaveLength(2);
       gate.resolve();
       expect((await remote).observation.eligibleTotal).toBe(20);
       expect(meter.spans.filter(span => span.layer === 'graphql').map(span => span.id)).toEqual(expect.arrayContaining(before));
       expect(meter.report().counts.pending).toBe(0);
-      expect(meter.report().drainedAfterAbort).toBe(3);
+      expect(meter.report().drainedAfterAbort).toBe(2);
       expect(meter.report().sendsAfterAbort).toBeGreaterThan(0);
     } finally { gate.resolve(); await remote; }
   }, { meter, wire: true, controls: { afterSend: async operation => {
-    if (operation === 'QueueIssue') { if (++blocked === 3) reached.resolve(); await gate.promise; }
+    if (operation === 'QueueIssue') { if (++blocked === 2) reached.resolve(); await gate.promise; }
   } } });
 });
 
@@ -229,7 +229,7 @@ it('separates elapsed HTTP critical path from accumulated concurrent dependency 
   expect(meter.report()).toMatchObject({ httpMs: [10], dependencyWorkMs: 20, dependencyWindowMs: 10, peak: 2 });
 });
 
-it('caps six issue workers from overlapping observations at three shared sends', async () => {
+it('shares overlapping observations with three issue workers and three sends', async () => {
   const meter = new BackendMeasurement();
   const gate = deferred(); const reached = deferred();
   let blocked = 0;
@@ -243,8 +243,8 @@ it('caps six issue workers from overlapping observations at three shared sends',
       expect(meter.report(undefined, 'logical', 'issue').peak).toBe(3);
       expect(meter.report().counts.pending).toBeGreaterThan(0);
     } finally { gate.resolve(); await Promise.all([first, second]); }
-    expect(meter.report('second', 'logical', 'issue').peak).toBe(3);
-    expect(meter.report(undefined, 'logical', 'issue').peak).toBe(6);
+    expect(meter.report('second', 'logical', 'issue').peak).toBe(0);
+    expect(meter.report(undefined, 'logical', 'issue').peak).toBe(3);
     expect(meter.report().counts.pending).toBe(0);
   }, { meter, wire: true, controls: { afterSend: async operation => {
     if (operation === 'QueueIssue') { blocked++; if (blocked === 3) reached.resolve(); await gate.promise; }

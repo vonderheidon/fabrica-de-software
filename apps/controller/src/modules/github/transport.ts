@@ -30,6 +30,8 @@ export interface GitHubQueryOptions {
   signal?: AbortSignal;
   deadlineMonotonicMs?: number;
 }
+export interface GitHubRateLimitSnapshot { limit: number; remaining: number; resetAtMs: number | null }
+type GitHubThrottleState = { retryAtMs: number; rateLimit?: GitHubRateLimitSnapshot };
 export type GhRunner = (input: string, onSend?: () => void, responseBytes?: number, control?: GitHubRunnerControl) => Promise<CommandResponse>;
 interface PreparedRunner { run: GhRunner; assertCurrent(): void }
 type GhRunnerPreparer = (context: GitHubBeforeSendContext, input: string) => Promise<PreparedRunner>;
@@ -469,7 +471,7 @@ export function boolean(value: unknown): boolean {
 
 export class GraphQLReader {
   constructor(private readonly run: GhRunner | undefined, private readonly now: () => number = Date.now,
-    private readonly throttle = { retryAtMs: 0 }, private readonly budget?: { queries: number; bytes: number },
+    private readonly throttle: GitHubThrottleState = { retryAtMs: 0 }, private readonly budget?: { queries: number; bytes: number },
     private readonly physicalRuns: Set<GitHubRunnerLifecycle> = new Set(), private readonly monotonicNow: () => number = () => performance.now(),
     private readonly admission = new GraphQLAdmission(monotonicNow), private readonly prepareRunner?: GhRunnerPreparer,
     private readonly operationDeadline?: OperationDeadline,
@@ -484,6 +486,21 @@ export class GraphQLReader {
   /** @internal Sent children remain counted until their physical close event arrives. */
   get pendingPhysicalSends(): number {
     return [...this.physicalRuns].filter(lifecycle => lifecycle.sent && !lifecycle.physicallyClosed).length;
+  }
+
+  getRateLimitSnapshot(): GitHubRateLimitSnapshot | null {
+    const snapshot = this.throttle.rateLimit;
+    return snapshot?.resetAtMs !== null && snapshot?.resetAtMs !== undefined && snapshot.resetAtMs <= this.now() ? null : snapshot ?? null;
+  }
+
+  private recordRateLimit(limitValue: unknown, remainingValue: unknown, resetAtMs: number | null): void {
+    const limit = Number(limitValue);
+    const remaining = Number(remainingValue);
+    if (!Number.isSafeInteger(limit) || limit <= 0 || !Number.isSafeInteger(remaining) || remaining < 0 || remaining > limit) return;
+    const previous = this.throttle.rateLimit;
+    if (previous?.resetAtMs !== null && previous?.resetAtMs !== undefined && resetAtMs !== null && resetAtMs < previous.resetAtMs) return;
+    const sameWindow = previous?.resetAtMs === resetAtMs;
+    this.throttle.rateLimit = { limit, remaining: sameWindow ? Math.min(previous.remaining, remaining) : remaining, resetAtMs };
   }
 
   private createStage(options: GitHubQueryOptions | undefined, operationDeadline: OperationDeadline): QueryStage {
@@ -777,6 +794,9 @@ export class GraphQLReader {
           const at = line.indexOf(':');
           return [line.slice(0, at).toLowerCase(), line.slice(at + 1).trim()] as const;
         }));
+        const headerResetSeconds = Number(headers.get('x-ratelimit-reset'));
+        const headerResetAtMs = Number.isSafeInteger(headerResetSeconds) && headerResetSeconds > 0 ? headerResetSeconds * 1000 : null;
+        this.recordRateLimit(headers.get('x-ratelimit-limit'), headers.get('x-ratelimit-remaining'), headerResetAtMs);
         if (status === 401) return result('authentication_invalid', null, ['AUTHENTICATION_INVALID']);
         let body: Record<string, unknown> = {};
         try { body = object(JSON.parse(match[3] ?? '')); }
@@ -792,6 +812,7 @@ export class GraphQLReader {
           const reset = Number(headers.get('x-ratelimit-reset') ?? 0) * 1000;
           const rate = record(body.data) ? body.data.rateLimit : null;
           const graphReset = record(rate) && typeof rate.resetAt === 'string' ? Date.parse(rate.resetAt) : 0;
+          if (record(rate)) this.recordRateLimit(rate.limit, rate.remaining, Number.isSafeInteger(graphReset) && graphReset > 0 ? graphReset : null);
           const hints = [retryTime, reset, graphReset].filter((time) => Number.isSafeInteger(time) && time > now);
           this.throttle.retryAtMs = Math.max(this.throttle.retryAtMs, hints.length ? Math.max(...hints) : now + 60_000);
           return result('rate_limited', null, ['RATE_LIMITED'], this.throttle.retryAtMs);

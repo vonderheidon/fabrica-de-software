@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { HttpQueueObservation, QueueCommand, QueueObservation } from '#contracts';
+import type { HttpQueueObservation, ProjectItem, QueueCommand, QueueObservation } from '#contracts';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
@@ -36,12 +36,30 @@ async function fixture(enabled = true) {
   f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue });
   return { f, queue, automation };
 }
+it('slows automatic queue polling as the reported GitHub quota approaches its reserve', async () => {
+  const { f, queue } = await fixture(false);
+  const settings = f.storage.getGlobalConfiguration().view.settings.time_defaults;
+  const interval = settings.polling_interval_ms;
+  const maximum = settings.polling_backoff_max_ms ?? Math.max(interval, 60_000);
+  const quota = vi.spyOn(f.github, 'getRateLimitSnapshot').mockReturnValue({
+    limit: 1_000, remaining: 100, resetAtMs: Date.now() + 60_000,
+  });
+
+  const pressured = await queue.observe({});
+  expect(pressured.observation.polling.intervalMs).toBe(Math.min(Math.max(interval, maximum), interval * 4));
+  quota.mockReturnValue({ limit: 1_000, remaining: 250, resetAtMs: Date.now() + 60_000 });
+  const aboveReserve = await queue.observe({});
+  expect(aboveReserve.observation.polling.intervalMs).toBe(interval);
+});
+
 it('shows invalid ticket content in the queue and avoids repeated automatic preparations', async () => {
   const { f, queue } = await fixture();
+  const observe = vi.spyOn(queue, 'observe');
   f.issue.body = '## Parent\n#23\n## Acceptance criteria\n- Observable result';
   const observed = await queue.read({});
   expect(observed.items[0]).toMatchObject({ ready: true, eligible: false, reasons: ['ISSUE_OBJECTIVE_REQUIRED'] });
   await f.pipeline.tick(); await f.pipeline.drain();
+  expect(observe).toHaveBeenCalledOnce();
   expect(f.db.prepare('SELECT count(*) AS n FROM preparations').get()).toEqual({ n: 0 });
   expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
   f.issue.body = '## Parent\n#23\n## What to build\nConfigure installation.\n## Acceptance criteria\n- Settings persist.';
@@ -65,8 +83,8 @@ it('observes an enabled registered source using the real origin request validato
 });
 
 describe('authorized queue changes', () => {
-  it.each(['none', 'account', 'assignee', 'status', 'criteria', 'configuration'] as const)(
-    'keeps two fresh dispatch observations after grouped display and revalidates %s before effects', async change => {
+  it.each(['none', 'account', 'assignee', 'status', 'blockers', 'criteria', 'configuration'] as const)(
+    'revalidates the ordered candidate prefix after grouped display and blocks %s before effects', async change => {
       const { f, automation } = await fixture(); await f.pipeline.close();
       f.issue.memberships.push(...['extra-a', 'extra-b'].map(itemId => ({ ...structuredClone(f.issue.memberships[0]!), itemId, projectId: itemId })));
       const meter = new BackendMeasurement();
@@ -79,26 +97,147 @@ describe('authorized queue changes', () => {
       const record = f.storage.recordQueueObservations.bind(f.storage);
       vi.spyOn(f.storage, 'recordQueueObservations').mockImplementation(input => { trace.push('record'); return record(input); });
       const observe = vi.fn(async (query: Parameters<typeof queue.observe>[0]) => { trace.push('observe'); return queue.observe(query); });
+      const revalidateForDispatch = vi.fn(async (...args: Parameters<typeof queue.revalidateForDispatch>) => {
+        trace.push('revalidate'); return queue.revalidateForDispatch(...args);
+      });
       const mutate = () => {
         if (change === 'account') vi.mocked(f.github.getIdentity).mockResolvedValue(complete({ id: 'OTHER', login: 'other' }));
         if (change === 'assignee') f.issue.assignees = [];
         if (change === 'status') f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
+        if (change === 'blockers') f.issue.blockers = [{ id: 'I_blocker', number: 1, url: `${f.issue.repository.url}/issues/1`, title: 'Open blocker', state: 'OPEN' }];
         if (change === 'criteria') f.issue.body += '\n- Newly added acceptance criterion';
         if (change === 'configuration') automation(f.projectId, false);
       };
       const preparations = { ...f.preparations, getPreparation: async (id: string) => {
         const prepared = await f.preparations.getPreparation(id); mutate(); return prepared;
       } };
-      f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue: { observe } });
+      f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue: { observe, revalidateForDispatch } });
       await f.pipeline.tick(); await f.pipeline.drain();
-      expect(trace.slice(0, 3)).toEqual(['observe', 'record', 'observe']);
-      expect(observe).toHaveBeenCalledTimes(2);
+      expect(trace.slice(0, 4)).toEqual(['observe', 'record', 'revalidate', 'record']);
+      expect(observe).toHaveBeenCalledOnce();
+      expect(revalidateForDispatch).toHaveBeenCalledTimes(change === 'none' ? 2 : 1);
       expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(change === 'none' ? 1 : 0);
       expect(f.execution.startPassage).toHaveBeenCalledTimes(change === 'none' ? 1 : 0);
       expect(f.storage.listAttempts({}).items).toHaveLength(change === 'none' ? 1 : 0);
       expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: change === 'none' ? 1 : 0 });
     },
   );
+  it('revalidates only the ordered prefix through the first candidate', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const items: ProjectItem[] = Array.from({ length: 20 }, (_, index) => ({
+      id: index === 0 ? 'ITEM_test' : `ITEM_${index}`,
+      archived: false,
+      kind: 'issue' as const,
+      contentId: index === 0 ? f.issue.id : `I_${index}`,
+      title: `Issue ${index + 1}`,
+      url: `${f.issue.repository.url}/issues/${index + 1}`,
+      executable: true,
+      position: index + 1,
+    }));
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete(items));
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    const observe = vi.spyOn(queue, 'observe');
+    f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue });
+    await f.pipeline.tick(); await f.pipeline.drain();
+    const queueReads = vi.mocked(f.github.getIssueContextById).mock.calls.filter((call) => call[1]?.purpose === 'queue');
+    expect(observe).toHaveBeenCalledOnce();
+    expect(queueReads).toHaveLength(items.length + 2);
+    expect(f.storage.listAttempts({}).items.map(item => item.issueId)).toEqual([f.issue.id]);
+  });
+  it('reselects according to current board positions from the fresh prefix', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const secondId = 'I_second';
+    const secondIssue = structuredClone(f.issue);
+    secondIssue.id = secondId; secondIssue.number = 18; secondIssue.url = `${f.issue.repository.url}/issues/18`;
+    secondIssue.title = 'Second eligible issue';
+    secondIssue.memberships = secondIssue.memberships.map((membership) => ({ ...membership, itemId: 'ITEM_second' }));
+    vi.mocked(f.github.getIssueContextById).mockImplementation(async id => complete(structuredClone(id === secondId ? secondIssue : f.issue)));
+    const firstItem: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title,
+      url: f.issue.url, executable: true, position: 2, status: { fieldId: 'FIELD_test', optionId: 'READY' } };
+    const secondItem: ProjectItem = { id: 'ITEM_second', archived: false, kind: 'issue', contentId: secondId, title: secondIssue.title,
+      url: secondIssue.url, executable: true, position: 1, status: { fieldId: 'FIELD_test', optionId: 'READY' } };
+    expect(f.storage.getConfiguration(f.projectId).view.configuration.queue_order.use_board_position).toBe(true);
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([secondItem, firstItem]));
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    let moved = false;
+    const record = f.storage.recordQueueObservations.bind(f.storage);
+    vi.spyOn(f.storage, 'recordQueueObservations').mockImplementation(input => {
+      record(input);
+      if (!moved) { moved = true; vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([
+        { ...firstItem, position: 1 }, { ...secondItem, position: 2 },
+      ])); }
+    });
+    f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue });
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(f.storage.listAttempts({}).items.map(item => item.issueId)).toEqual([f.issue.id]);
+    expect(f.workspaces.prepareAttempt).toHaveBeenCalledOnce();
+  });
+
+  it('defers when the queue order changes during preparation and selects the new first item on the next poll', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const secondId = 'I_second';
+    const secondIssue = structuredClone(f.issue);
+    secondIssue.id = secondId; secondIssue.number = 18; secondIssue.url = `${f.issue.repository.url}/issues/18`;
+    secondIssue.title = 'Second eligible issue';
+    secondIssue.memberships = secondIssue.memberships.map((membership) => ({ ...membership, itemId: 'ITEM_second' }));
+    vi.mocked(f.github.getIssueContextById).mockImplementation(async id => complete(structuredClone(id === secondId ? secondIssue : f.issue)));
+    const firstItem: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title,
+      url: f.issue.url, executable: true, position: 1, status: { fieldId: 'FIELD_test', optionId: 'READY' } };
+    const secondItem: ProjectItem = { id: 'ITEM_second', archived: false, kind: 'issue', contentId: secondId, title: secondIssue.title,
+      url: secondIssue.url, executable: true, position: 2, status: { fieldId: 'FIELD_test', optionId: 'READY' } };
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([firstItem, secondItem]));
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    let preparationReads = 0;
+    const preparations = { ...f.preparations, getPreparation: async (id: string) => {
+      const result = await f.preparations.getPreparation(id);
+      if (++preparationReads === 1) vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([
+        { ...secondItem, position: 1 }, { ...firstItem, position: 2 },
+      ]));
+      return result;
+    } };
+    const interval = f.storage.getSettings().time_defaults.polling_interval_ms;
+    const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue });
+    try {
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(f.storage.listAttempts({}).items).toHaveLength(0);
+      clock.mockReturnValue(base + interval + 1);
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(f.storage.listAttempts({}).items.map(item => item.issueId)).toEqual([secondId]);
+    } finally { await f.pipeline.close(); clock.mockRestore(); }
+  });
+
+  it('waits for the next queue poll when the selected candidate loses Ready, then starts the next eligible item in order', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const secondId = 'I_second';
+    const secondIssue = structuredClone(f.issue);
+    secondIssue.id = secondId; secondIssue.number = 18; secondIssue.url = `${f.issue.repository.url}/issues/18`;
+    secondIssue.title = 'Second eligible issue';
+    secondIssue.memberships = secondIssue.memberships.map((membership) => ({ ...membership, itemId: 'ITEM_second' }));
+    vi.mocked(f.github.getIssueContextById).mockImplementation(async id => complete(structuredClone(id === secondId ? secondIssue : f.issue)));
+    const items: ProjectItem[] = [
+      { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true },
+      { id: 'ITEM_second', archived: false, kind: 'issue', contentId: secondId, title: secondIssue.title, url: secondIssue.url, executable: true },
+    ];
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete(items));
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    const interval = f.storage.getSettings().time_defaults.polling_interval_ms;
+    const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    let changed = false;
+    const record = f.storage.recordQueueObservations.bind(f.storage);
+    vi.spyOn(f.storage, 'recordQueueObservations').mockImplementation(input => {
+      record(input);
+      if (!changed) { changed = true; f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG'; }
+    });
+    f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue });
+    try {
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(f.storage.listAttempts({}).items).toHaveLength(0);
+      clock.mockReturnValue(base + interval + 1);
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(f.storage.listAttempts({}).items.map(item => item.issueId)).toEqual([secondId]);
+    } finally { await f.pipeline.close(); clock.mockRestore(); }
+  });
   it('explains a global pause and authorizes only confirmed projects while another enabled project is incomplete', async () => {
     const { f, queue, automation } = await fixture(false);
     const other = f.storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
@@ -109,8 +248,8 @@ describe('authorized queue changes', () => {
     expect(observed.observation).toMatchObject({ complete: false, valid: true, enabled: false, eligibleTotal: null });
     const noop = () => {};
     const html = renderToStaticMarkup(createElement(QueuePanel, {
-      load: { status: 'ready', observation: toHttpQueueObservation(observed.observation), etag: observed.etag },
-      pageNotice: '', pauseNotice: '', pauseUncertain: false, onConsultPause: noop, onRefresh: noop,
+      load: { status: 'ready', observation: toHttpQueueObservation(observed.observation), etag: observed.etag }, linkedAccountId: 'ACCOUNT_test',
+      pageNotice: '', pauseNotice: '', pauseUncertain: false, retryAtMs: null, canRefresh: true, onConsultPause: noop, onRefresh: noop,
       onNextPage: noop, onPreviousPage: noop, canGoBack: false, pausing: false, onEnable: noop, onPause: noop, onAuthority: noop,
     }));
     expect(html).toContain('Fila global pausada');
@@ -147,7 +286,7 @@ describe('authorized queue changes', () => {
     await queue.read({});
     expect(identity).toHaveBeenCalledTimes(6);
   });
-  it('bounds simultaneous issue reads and preserves every row in board order', async () => {
+  it('keeps action queue reads at three workers and preserves every row in board order', async () => {
     const { f, queue } = await fixture();
     vi.mocked(f.github.listProjectItems).mockResolvedValue(complete(Array.from({ length: 7 }, (_, i) => ({ id: `ITEM_${i}`, contentId: `I_${i}`, archived: false, kind: 'issue' as const, title: 'Issue', url: f.issue.url, executable: true }))));
     let active = 0; let peak = 0;
@@ -161,6 +300,20 @@ describe('authorized queue changes', () => {
     expect(peak).toBe(3);
     expect(result.items).toHaveLength(7);
     expect(f.github.getIssueContextById).toHaveBeenCalledWith(expect.any(String), { purpose: 'queue' });
+  });
+  it('caps display queue reads at two issue workers so action reads retain one admission slot', async () => {
+    const { f, queue } = await fixture();
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete(Array.from({ length: 7 }, (_, i) => ({ id: `ITEM_${i}`, contentId: `I_${i}`, archived: false, kind: 'issue' as const, title: 'Issue', url: f.issue.url, executable: true }))));
+    let active = 0; let peak = 0;
+    vi.mocked(f.github.getIssueContextById).mockImplementation(async (id) => {
+      peak = Math.max(peak, ++active);
+      await new Promise(resolve => setTimeout(resolve, 1));
+      active--;
+      return complete({ ...structuredClone(f.issue), id });
+    });
+    const result = await queue.read({});
+    expect(peak).toBe(2);
+    expect(result.items).toHaveLength(7);
   });
   it('requires the precondition and a current summary, then recovers the exact durable operation before another enable', async () => {
     const { f, queue } = await fixture(false); const before = await queue.observe({});
@@ -434,13 +587,15 @@ describe('durable scheduler', () => {
     expect(f.storage.getQueueCycle('ACCOUNT_test', f.projectId, f.issue.id)?.consumedAttemptId).toBeNull();
   });
 
-  it('rejects a degraded second observation and honors the supplied backoff deadline', async () => {
+  it('rejects a degraded queue observation and honors the supplied backoff deadline', async () => {
     const { f, queue } = await fixture(); await f.pipeline.close(); const observe = vi.fn(queue.observe);
     const first = await queue.observe({}); const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
-    observe.mockResolvedValueOnce(first).mockResolvedValue({ ...first, observation: { ...first.observation, complete: false, valid: false, polling: { ...first.observation.polling, nextPollAtMs: base + 120_000 } } });
-    f.pipeline = createPipeline({ ...f.dependencies, queue: { observe } });
-    await f.pipeline.tick(); await f.pipeline.drain(); expect(observe).toHaveBeenCalledTimes(2);
-    clock.mockReturnValue(base + 60_000); await f.pipeline.tick(); expect(observe).toHaveBeenCalledTimes(2);
+    observe.mockResolvedValue({ ...first, observation: { ...first.observation, complete: false, valid: false, polling: { ...first.observation.polling, nextPollAtMs: base + 120_000 } } });
+    const revalidateForDispatch = vi.fn(queue.revalidateForDispatch);
+    f.pipeline = createPipeline({ ...f.dependencies, queue: { observe, revalidateForDispatch } });
+    await f.pipeline.tick(); await f.pipeline.drain(); expect(observe).toHaveBeenCalledOnce();
+    expect(revalidateForDispatch).not.toHaveBeenCalled();
+    clock.mockReturnValue(base + 60_000); await f.pipeline.tick(); expect(observe).toHaveBeenCalledOnce();
     expect(f.storage.listAttempts({}).items).toHaveLength(0); expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
   });
 

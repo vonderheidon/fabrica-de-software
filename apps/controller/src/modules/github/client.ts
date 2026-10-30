@@ -1,4 +1,5 @@
 import { Value } from '@sinclair/typebox/value';
+import { Type } from '@sinclair/typebox';
 import type { Static, TSchema } from '@sinclair/typebox';
 import {
   GitHubAccount, GitHubBranch, GitHubProject, GitHubProjectDetails, GitHubRepository,
@@ -49,6 +50,8 @@ export type ProjectSelection = GitHubProjectSelection;
 export type IssueReference = GitHubIssueReference;
 
 export type IssueAuthorityContext = Pick<IssueContext, 'id' | 'state' | 'repository' | 'assignees' | 'blockers' | 'memberships'>;
+const QueueIssueContext = Type.Omit(IssueContext, ['comments', 'references']);
+export type IssueQueueContext = Static<typeof QueueIssueContext>;
 export interface IssueCommentConfirmationContext {
   id: IssueContext['id'];
   repository: Pick<GitHubRepository, 'id'>;
@@ -273,7 +276,9 @@ export function createClient(rootReader: GraphQLReader) {
   async function getIssueContext(reference: IssueReference): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
     return readIssueContext(reference, rootReader.scope());
   }
-  async function readIssueContext(reference: IssueReference, reader: GraphQLReader, queueHeader?: GitHubQueryResult<Record<string, unknown>>): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
+  function readIssueContext(reference: IssueReference, reader: GraphQLReader): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
+  function readIssueContext(reference: IssueReference, reader: GraphQLReader, queueHeader: GitHubQueryResult<Record<string, unknown>>): Promise<GitHubQueryResult<IssueQueueContext | ProjectItem>>;
+  async function readIssueContext(reference: IssueReference, reader: GraphQLReader, queueHeader?: GitHubQueryResult<Record<string, unknown>>): Promise<GitHubQueryResult<IssueContext | IssueQueueContext | ProjectItem>> {
     if (!Value.Check(GitHubIssueReference, reference)) return invalid();
     const header = queueHeader ?? await reader.query(queries.issueQuery, { owner: reference.owner, name: reference.name, number: reference.number });
     if (!header.data) return { ...header, data: null };
@@ -287,13 +292,14 @@ export function createClient(rootReader: GraphQLReader) {
       checked(IssueContext, { ...baseIssue(issue), assignees: [], comments: [], blockers: [], memberships: [], references: [] });
     } catch { return result('unavailable', null, ['RESPONSE_INVALID']); }
     const id = string(issue.id);
+    const connectionHeader = queueHeader ? { ...queueHeader, data: { node: issue } } : undefined;
     // Each nested connection has its own cursor. Never rely on a top-level --paginate to cover nested pages.
-    const assignees = await collect(reader, queries.assigneesQuery, { id }, (data) => child(data, 'node', 'assignees'), (node) => checked(GitHubAccount, node));
+    const assignees = await collect(reader, queries.assigneesQuery, { id }, (data) => child(data, 'node', 'assignees'), (node) => checked(GitHubAccount, node), undefined, connectionHeader);
     const comments = queueHeader ? result<IssueComment[]>('complete', []) : await collect(reader, queries.commentsQuery, { id }, (data) => child(data, 'node', 'comments'), (node) => checked(IssueComment, node));
-    const blockers = await collect(reader, queries.blockersQuery, { id }, (data) => child(data, 'node', 'blockedBy'), (node) => checked(IssueBlocker, node));
+    const blockers = await collect(reader, queries.blockersQuery, { id }, (data) => child(data, 'node', 'blockedBy'), (node) => checked(IssueBlocker, node), undefined, connectionHeader);
     const memberships = await collect(reader, queries.membershipsQuery, { id }, (data) => child(data, 'node', 'projectItems'), (node) => checked(IssueMembership, {
       itemId: node.id, projectId: object(node.project).id, archived: node.isArchived, statusValues: [],
-    }));
+    }), undefined, connectionHeader);
     const parts: GitHubQueryResult<unknown>[] = [header, assignees, comments, blockers, memberships];
     const populated: IssueMembership[] = [];
     const firstPages = new Map<string, GitHubQueryResult<Record<string, unknown>>>();
@@ -327,15 +333,17 @@ export function createClient(rootReader: GraphQLReader) {
     }
     const bodies = queueHeader ? [] : [String(issue.body), ...(comments.data ?? []).map((comment) => comment.body)];
     const references = [...new Set(bodies.flatMap((body) => body.match(/https?:\/\/[^\s<>\)\]]+|(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#[1-9][0-9]*/g) ?? []))].filter((ref) => ref.length <= 4096);
-    const data = checked(IssueContext, { ...baseIssue(issue), assignees: assignees.data ?? [], comments: comments.data ?? [], blockers: blockers.data ?? [], memberships: populated, references });
+    const queueData = { ...baseIssue(issue), assignees: assignees.data ?? [], blockers: blockers.data ?? [], memberships: populated };
+    const data = queueHeader ? checked(QueueIssueContext, queueData) : checked(IssueContext, { ...queueData, comments: comments.data ?? [], references });
     return result(parts.every((part) => part.state === 'complete') ? 'complete' : 'partial', data,
       parts.flatMap((part) => part.diagnostics.map((entry) => entry.code)), Math.max(0, ...parts.map((part) => part.retryAtMs ?? 0)) || null);
   }
   function getIssueContextById(id: string, options: { purpose: 'authority' }): Promise<GitHubQueryResult<IssueAuthorityContext>>;
   function getIssueContextById(id: string, options: { purpose: 'comment_confirmation' }): Promise<GitHubQueryResult<IssueCommentConfirmationContext>>;
   function getIssueContextById(id: string, options: { purpose: 'status_confirmation' }): Promise<GitHubQueryResult<IssueStatusConfirmationContext>>;
-  function getIssueContextById(id: string, options?: { purpose?: 'queue' }): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
-  async function getIssueContextById(id: string, options?: { purpose?: 'queue' | 'authority' | 'comment_confirmation' | 'status_confirmation' }): Promise<GitHubQueryResult<unknown>> {
+  function getIssueContextById(id: string, options: { purpose: 'queue' }): Promise<GitHubQueryResult<IssueQueueContext | ProjectItem>>;
+  function getIssueContextById(id: string, options?: { purpose?: undefined }): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
+  async function getIssueContextById(id: string, options?: { purpose?: 'queue' | 'authority' | 'comment_confirmation' | 'status_confirmation' | undefined }): Promise<GitHubQueryResult<unknown>> {
     if (!Value.Check(GitHubId, id)) return invalid();
     const reader = rootReader.scope();
     if (options?.purpose === 'authority') return readIssueAuthority(reader, id);
@@ -352,11 +360,11 @@ export function createClient(rootReader: GraphQLReader) {
       reference = checked(GitHubIssueReference, { owner: object(repo.owner).login, name: repo.name, number: raw.number });
     } catch { return result('unavailable', null, ['RESPONSE_INVALID']); }
     const queueHeader = options?.purpose === 'queue' ? { ...header, data: { repository: { issueOrPullRequest: header.data.node } } } : undefined;
-    const context = await readIssueContext(reference, reader, queueHeader);
+    const context = queueHeader ? await readIssueContext(reference, reader, queueHeader) : await readIssueContext(reference, reader);
     if (context.data && context.data.id !== id) return result('unavailable', null, ['RESPONSE_INVALID']);
     return context;
   }
-  return { getIdentity, getProjectOwner, listRepositories, listBranches, getRepository, resolveBranch, listProjects, getProject, validateProjectSelection, listProjectItems, getIssueContext, getIssueContextById };
+  return { getRateLimitSnapshot: () => rootReader.getRateLimitSnapshot(), getIdentity, getProjectOwner, listRepositories, listBranches, getRepository, resolveBranch, listProjects, getProject, validateProjectSelection, listProjectItems, getIssueContext, getIssueContextById };
 }
 function baseIssue(issue: Record<string, unknown>) {
   return { id: issue.id, number: issue.number, url: issue.url, title: issue.title, body: issue.body, state: issue.state, repository: repository(issue.repository) };
@@ -366,7 +374,7 @@ export type GitHub = ReturnType<typeof createClient>;
 export type ReadinessReason = 'READ_INCOMPLETE' | 'ACCOUNT_CHANGED' | 'NOT_AN_ISSUE' | 'ISSUE_CLOSED' | 'REPOSITORY_MISMATCH' | 'ASSIGNEE_MISMATCH' | 'PROJECT_MEMBERSHIP_MISSING' | 'STATUS_MISMATCH' | 'OPEN_BLOCKERS';
 /** A current observation for preparation, never a durable grant to dispatch or publish. */
 export function assessIssueReadiness(input: {
-  identity: GitHubQueryResult<GitHubAccount>; issue: GitHubQueryResult<IssueContext | ProjectItem>;
+  identity: GitHubQueryResult<GitHubAccount>; issue: GitHubQueryResult<IssueQueueContext | ProjectItem>;
   project: GitHubQueryResult<GitHubProjectDetails>; expectedAccountId: string; repositoryId: string;
   projectId: string; statusFieldId: string; readyOptionId: string;
 }): { eligible: boolean; reasons: ReadinessReason[] } {

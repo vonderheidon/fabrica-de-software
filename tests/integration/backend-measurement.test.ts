@@ -166,14 +166,14 @@ describe('backend observation measurement', () => {
         Promise.all(['one', 'two'].map(id => meter.observe(id, 'scheduler', () =>
           fixture.read({ ...context, consumerId: id }))))));
       expect(meter.report('one', 'logical', 'issue').peak).toBe(3);
-      expect(meter.report('two', 'logical', 'issue').peak).toBe(3);
-      expect(meter.report(undefined, 'logical', 'issue').peak).toBe(6);
+      expect(meter.report('two', 'logical', 'issue').peak).toBe(0);
+      expect(meter.report(undefined, 'logical', 'issue').peak).toBe(3);
       expect(meter.report(undefined, 'graphql').peak).toBe(3);
       const record = meter.record(undefined, { scenario: `two-simultaneous-observations-${path}`, purpose: 'scheduler', repetition: 1,
-        result: 'complete;logical_issue_peak_per_observation=3;aggregate=6', equivalent: true });
-      expect(record).toMatchObject({ peak_in_flight: 3, peak_logical_in_flight: 6, physical_sends: expect.any(Number),
+        result: 'complete;shared_observation;logical_issue_peak=3', equivalent: true });
+      expect(record).toMatchObject({ peak_in_flight: 3, peak_logical_in_flight: 3, physical_sends: expect.any(Number),
         provider_simulated_ms: expect.any(Number), admission_wait_ms: expect.any(Number) });
-      console.log(`C12_MEASUREMENT ${JSON.stringify(record)} logical_peak_per_observation=3,3 aggregate=6`);
+      console.log(`C12_MEASUREMENT ${JSON.stringify(record)} logical_peak_per_observation=3,0 aggregate=3`);
     } finally { await fixture.close(); }
   });
 
@@ -360,8 +360,8 @@ describe('backend observation measurement', () => {
             fixture.github.getIssueContextById('I_synthetic_0_1', { purpose: 'queue' })));
           expect(result.state).toBe('complete');
           expect(result.data?.id).toBe('I_synthetic_0_1');
-          expect(issueContext(result.data)).toBe(true);
-          if (!issueContext(result.data)) throw new Error('SYNTHETIC_GROUPED_CONTEXT_FAILED');
+          expect(result.data && 'memberships' in result.data).toBe(true);
+          if (!result.data || !('memberships' in result.data)) throw new Error('SYNTHETIC_GROUPED_CONTEXT_FAILED');
           expect(result.data.memberships).toHaveLength(memberships);
           const ceiling = queryLimits.responseBytes * memberships;
           const groupedBytes = responseSizes.filter(bytes => bytes > queryLimits.responseBytes);

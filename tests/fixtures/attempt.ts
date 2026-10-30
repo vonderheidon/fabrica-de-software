@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { vi } from 'vitest';
 import type { DeliveryMode, GitHubProjectDetails, GitHubQueryResult, IssueContext, OriginInspection, PreparedWorkspace, StartAttempt, ToolObservation } from '#contracts';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
+import type { GitHub } from '../../apps/controller/src/modules/github/index.js';
 import { createPreparations, type PreparationDependencies } from '../../apps/controller/src/modules/projects/index.js';
 import { createPipeline, type PipelineDependencies } from '../../apps/controller/src/modules/pipeline/index.js';
 import type { Execution, PassageRequest } from '../../apps/controller/src/modules/execution/index.js';
@@ -76,10 +77,11 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const observation: OriginInspection = { state: 'identified', source: storage.getConfiguration(projectId).view.configuration.source,
     local: null, base: { branch: 'main', sha: baseSha, observedFrom: 'github' },
     remote: { name: null, url: repository.url, confirmed: true, repository, branch: { repositoryId: repository.id, name: 'main', sha: baseSha } }, diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false };
-  const github: PreparationDependencies['github'] = {
+  const github: PreparationDependencies['github'] & Pick<GitHub, 'getRateLimitSnapshot'> = {
     getIdentity: vi.fn(async () => complete({ id: 'ACCOUNT_test', login: 'test-user' })),
     getIssueContextById: vi.fn(async () => complete(structuredClone(issue))),
     getProject: vi.fn(async () => complete(structuredClone(project))), listProjectItems: vi.fn(async () => complete([])),
+    getRateLimitSnapshot: vi.fn(() => null),
   };
   const workspaces = { inspectOrigin: vi.fn(async () => structuredClone(observation)),
     prepareAttempt: vi.fn(async (input: Parameters<import('../../apps/controller/src/modules/workspaces/index.js').Workspaces['prepareAttempt']>[0]): Promise<PreparedWorkspace> => ({

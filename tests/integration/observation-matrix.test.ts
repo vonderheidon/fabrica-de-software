@@ -29,7 +29,7 @@ for (const [index, scenario] of observationScenarios.entries()) {
       }, { meter, wire: true, controls: { legacyValues, afterResponse: bytes => { wireBytes += bytes; } } });
     }
     expect(results[1]).toEqual(results[0]);
-    expect(sends).toEqual([[108, 108], [272, 232], [2612, 2212]][index]);
+    expect(sends).toEqual([[48, 48], [212, 172], [2012, 1612]][index]);
     console.info('GROUPED_COMPARISON ' + JSON.stringify({ scenario: scenario.id, sends, samples }));
   });
 }

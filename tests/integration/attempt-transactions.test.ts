@@ -71,7 +71,7 @@ describe('atomic attempt acceptance', () => {
     const item: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title, url: f.issue.url, executable: true };
     vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([item]));
     const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
-    f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe } });
+    f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe, revalidateForDispatch: queue.revalidateForDispatch } });
     const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
     try {
       await f.pipeline.tick(); await f.pipeline.drain();
@@ -126,7 +126,7 @@ describe('atomic attempt acceptance', () => {
     ]));
 
       const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
-    const dispatchPipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe } });
+    const dispatchPipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe, revalidateForDispatch: queue.revalidateForDispatch } });
     try {
       const observed = await queue.observe({ limit: '100' });
       expect(observed.observation.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'QUEUE_OCCUPIED' })]));
@@ -155,7 +155,7 @@ describe('atomic attempt acceptance', () => {
       retryAtMs: Date.now() + 60_000 });
 
     const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
-    const dispatchPipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe } });
+    const dispatchPipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe, revalidateForDispatch: queue.revalidateForDispatch } });
     try {
       const observed = await queue.observe({ limit: '100' });
       expect(observed.observation).toMatchObject({ complete: false, eligibleTotal: null,

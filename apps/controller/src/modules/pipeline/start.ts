@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueQuery, type QueueItem, type QueueObservation } from '#contracts';
+import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueItem } from '#contracts';
 import { isLocalAbsoluteTargetPath, OperationError, publicationTargetHash, publicationTargetPath, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import { interpretIssue, preparationDigest } from './criteria.js';
 import { ExecutionError, type Execution } from '../execution/index.js';
-import type { Preparations } from '../projects/index.js';
+import type { Preparations, Queue } from '../projects/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import { CaptureError } from '../workspaces/index.js';
 import type { DeliveryDiffQuery } from '#contracts';
@@ -16,7 +16,7 @@ import type { AuthorizeUpgrade, CompletePublication, ReconcilePublication, MakeA
 export interface PipelineDependencies {
   github?: Pick<GitHub, 'getIssueContextById'>;
   storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'createPreparation' | 'getPreparation' | 'prepareDecisionSuccessor'>; execution: Execution;
-  queue?: { observe: (query: QueueQuery) => Promise<{ observation: QueueObservation; etag: string; items: readonly QueueItem[] }> };
+  queue?: Pick<Queue, 'observe' | 'revalidateForDispatch'>;
   workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment' | 'importIntegrationBase'>>;
   observeTools: () => Promise<ToolObservation[]>;
   publication?: Pick<PublicationDependencies, 'github' | 'workspaces'>;
@@ -118,7 +118,9 @@ export function createPipeline(deps: PipelineDependencies) {
     })().finally(() => scopeReads.delete(binding.passageId));
     scopeReads.set(binding.passageId, reading); return reading;
   }
-  async function startAttempt(body: StartAttempt, context: Omit<AttemptCommand, 'body'>, queueCycle?: { accountId: string; projectId: string; issueId: string; cycleNumber: number }) {
+  async function startAttempt(body: StartAttempt, context: Omit<AttemptCommand, 'body'>,
+    queueCycle?: { accountId: string; projectId: string; issueId: string; cycleNumber: number },
+    queueSelection?: { scan: Awaited<ReturnType<Queue['observe']>>; candidate: QueueItem }) {
     if (!Value.Check(StartAttempt, body)) throw new OperationError(400, 'START_INVALID', 'The start request is invalid.');
     const command = { ...context, body };
     const recovered = storage.recoverAttempt(command); if (recovered) return recovered;
@@ -196,9 +198,31 @@ export function createPipeline(deps: PipelineDependencies) {
       }
       storage.reconcileTerminalAvailability(candidate, observation);
     }
+    if (queueSelection) {
+      if (!storage.getSettings().automation_enabled || !storage.getConfiguration(queueSelection.candidate.projectId).view.configuration.automation_enabled) {
+        throw new OperationError(409, 'QUEUE_PAUSED', 'The queue was paused before the new attempt could be accepted.');
+      }
+      const queue = deps.queue;
+      const latest = queue && await queue.revalidateForDispatch(queueSelection.scan, queueSelection.candidate, storage.getGlobalConfiguration().view.event_cursor);
+      if (latest) nextQueuePollAt = Math.max(nextQueuePollAt, latest.observation.polling.nextPollAtMs);
+      const first = latest ? firstDispatchCandidate(latest) : undefined;
+      if (!latest?.observation.valid || !latest.observation.enabled || latest.observation.account.id !== queueSelection.scan.observation.account.id ||
+          !first || first.projectId !== queueSelection.candidate.projectId || first.itemId !== queueSelection.candidate.itemId || first.issueId !== queueSelection.candidate.issueId) {
+        throw new OperationError(409, 'QUEUE_SELECTION_CHANGED', 'The first eligible queue item changed before attempt acceptance.');
+      }
+    }
     const accepted = storage.createAttempt({ command, capture, configurationETag: config.etag, preparationETag: current.etag, ...(queueCycle ? { queueCycle } : {}) });
     if (accepted.created) schedule(accepted.operation.resource.id);
     return accepted.operation;
+  }
+  function firstDispatchCandidate(result: Awaited<ReturnType<Queue['observe']>>) {
+    const accountId = result.observation.account.id;
+    if (!accountId) return undefined;
+    return result.items.find(item => {
+      if (!item.issueId || !item.readyEligible || item.reasons.includes('ATTEMPT_ACTIVE') || item.reasons.includes('AUTOMATION_DISABLED')) return false;
+      const cycle = storage.getQueueCycle(accountId, item.projectId, item.issueId);
+      return cycle?.ready === true && cycle.consumedAttemptId === null;
+    });
   }
   async function dispatchQueueCandidate(): Promise<void> {
     if (!deps.queue || queueDispatching || closed) return;
@@ -214,10 +238,16 @@ export function createPipeline(deps: PipelineDependencies) {
         accountId: scan.observation.account.id!, projectId: item.projectId, issueId: item.issueId!, ready: item.ready, eligible: item.readyEligible, existingAttemptId: item.attemptId,
       })));
       if (!scan.observation.enabled) return;
-      const current = await deps.queue.observe({ limit: '100' });
+      const observedCandidate = firstDispatchCandidate(scan);
+      if (!observedCandidate) return;
+      const current = await deps.queue.revalidateForDispatch(scan, observedCandidate);
+      if (!current) return;
       nextQueuePollAt = Math.max(nextQueuePollAt, current.observation.polling.nextPollAtMs);
       if (closed || !current.observation.enabled || !current.observation.valid || current.observation.account.id !== scan.observation.account.id) return;
-      const candidate = current.items.find(item => item.eligible && item.issueId !== null);
+      storage.recordQueueObservations(current.items.filter(item => item.kind === 'issue' && item.issueId !== null && !item.reasons.includes('PROJECT_MEMBERSHIP_MISSING') && !item.reasons.includes('READ_INCOMPLETE')).map(item => ({
+        accountId: current.observation.account.id!, projectId: item.projectId, issueId: item.issueId!, ready: item.ready, eligible: item.readyEligible, existingAttemptId: item.attemptId,
+      })));
+      const candidate = firstDispatchCandidate(current);
       if (!candidate?.issueId) return;
       const cycle = storage.getQueueCycle(current.observation.account.id, candidate.projectId, candidate.issueId);
       if (!cycle || cycle.consumedAttemptId !== null || !cycle.ready) return;
@@ -229,10 +259,13 @@ export function createPipeline(deps: PipelineDependencies) {
         { operationId: randomUUID(), expectedRevision: undefined });
       if (closed || !storage.getSettings().automation_enabled || !storage.getConfiguration(candidate.projectId).view.configuration.automation_enabled) return;
       const prepared = await preparations.getPreparation(preparation.view.preparation.id);
+      if (closed) return;
       await startAttempt({ preparationId: prepared.view.preparation.id, preparationRevision: prepared.view.preparation.revision,
         authorizedSummaryHash: prepared.view.preparation.summary_hash, authorized: true }, { operationId: randomUUID(), expectedRevision: prepared.etag },
-        { accountId: current.observation.account.id!, projectId: candidate.projectId, issueId: candidate.issueId, cycleNumber: cycle.cycleNumber });
+        { accountId: current.observation.account.id!, projectId: candidate.projectId, issueId: candidate.issueId, cycleNumber: cycle.cycleNumber },
+        { scan, candidate });
     } catch (error) {
+      if (error instanceof OperationError && error.code === 'QUEUE_SELECTION_CHANGED') return;
       deps.logFailure(error instanceof OperationError ? error.code : 'QUEUE_DISPATCH_FAILED');
     } finally {
       queueDispatching = false;

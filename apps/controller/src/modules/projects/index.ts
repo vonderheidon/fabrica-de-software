@@ -38,7 +38,7 @@ export interface ProjectDependencies {
   toolDetector?: ToolDetector;
 }
 export interface CommandContext { operationId: string; expectedRevision: string | undefined }
-export { createQueue, QueueSummaryChanged } from './queue.js';
+export { createQueue, QueueSummaryChanged, type Queue } from './queue.js';
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const selectionCloseConfirmationMs = 5_000;
@@ -534,6 +534,8 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       return operation;
     },
     getQueue: queue.read,
+    observeQueue: queue.observe,
+    revalidateQueueForDispatch: queue.revalidateForDispatch,
     listBranches: (source: import('#contracts').OriginSource) => workspaces.listBranches?.(source) ?? Promise.resolve({branches:[],state:'unavailable' as const,message:'A consulta de branches não está disponível neste host.'}),
     saveQueue: queue.save,
     async registerProject(body: ProjectRegistration, context: CommandContext) {
