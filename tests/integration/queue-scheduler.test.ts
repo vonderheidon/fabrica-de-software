@@ -16,6 +16,7 @@ import { QueuePanel } from '../../apps/web/src/features/queue/QueuePanel.js';
 import { observationWire } from '../fixtures/observation-wire.js';
 import { BackendMeasurement } from '../fixtures/backend-measurement.js';
 import { createInspector } from '../../apps/controller/src/modules/workspaces/inspect.js';
+import { withPublicationIssueProjections } from '../fixtures/publication.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) { await f.pipeline.close(); await f.close(); } });
@@ -159,6 +160,7 @@ describe('authorized queue changes', () => {
     const result = await queue.observe({});
     expect(peak).toBe(3);
     expect(result.items).toHaveLength(7);
+    expect(f.github.getIssueContextById).toHaveBeenCalledWith(expect.any(String), { purpose: 'queue' });
   });
   it('requires the precondition and a current summary, then recovers the exact durable operation before another enable', async () => {
     const { f, queue } = await fixture(false); const before = await queue.observe({});
@@ -355,7 +357,8 @@ describe('durable scheduler', () => {
     const github = { ...createGitHub(), ...f.github, getRepository: vi.fn(async () => complete(structuredClone(f.issue.repository))),
       mutateEffect: vi.fn(async () => ({ state: 'failed_known' as const, receipt: null, reason: 'TEST_PROJECTION_FAILED', retryAtMs: null })) };
     const workspaces = { ...createWorkspaces({ github }), ...f.workspaces };
-    f.pipeline = createPipeline({ ...f.dependencies, github, queue, workspaces, publication: { github, workspaces } });
+    const { github: publicationGithub } = withPublicationIssueProjections(github);
+    f.pipeline = createPipeline({ ...f.dependencies, github, queue, workspaces, publication: { github: publicationGithub, workspaces } });
     const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
     await f.pipeline.tick(); await f.pipeline.drain(); const first = f.storage.listAttempts({}).items[0]!;
     expect(first).toBeDefined(); expect(f.execution.startPassage).toHaveBeenCalledOnce();

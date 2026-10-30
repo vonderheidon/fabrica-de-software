@@ -3,13 +3,15 @@ import { PassThrough } from 'node:stream';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { collect, createGhRunner, GraphQLReader, observeGhVersion, queryLimits } from './transport.js';
+import { collect, createGhRunner, getGitHubRunnerLifecycle, GitHubRunnerError, GraphQLReader, observeGhVersion, queryLimits,
+  type GhRunner, type GitHubContext } from './transport.js';
 import { checked } from './client.js';
 import { IssueMembership } from '#contracts';
 import { valuesQuery } from './queries.js';
 import { createGitReader } from '../workspaces/git.js';
 import { createWorkspaces } from '../workspaces/index.js';
-import { createGitHub } from './index.js';
+import { createGitHub, type GitHubOptions } from './index.js';
+import { GitHubExecutableResolver } from './executable.js';
 
 const commands = vi.hoisted(() => ({
   spawn: vi.fn<(executable: string, args: readonly string[], options: unknown) => unknown>(),
@@ -22,9 +24,19 @@ class FakeChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
   killed = false;
-  kill() { this.killed = true; this.emit('close', null); return true; }
+  kill() { this.killed = true; return true; }
+  close(exitCode: number | null) { this.emit('close', exitCode); }
 }
 afterEach(() => { commands.spawn.mockReset(); commands.execFile.mockReset(); vi.useRealTimers(); vi.unstubAllEnvs(); });
+
+function composedGitHub(runnerFactory: (context: GitHubContext) => GhRunner, observeQuery?: GitHubOptions['observeQuery']) {
+  const context = { kind: 'windows_keyring' as const, cwd: join(tmpdir(), 'github'), executable: join(tmpdir(), 'gh.exe') };
+  const resolver = new GitHubExecutableResolver({ access: context, initialExecutable: context.executable,
+    environment: () => ({ PATH: '' }), stat: async () => ({ isFile: () => true }),
+    observeVersion: async () => ({ tool: 'gh', state: 'observed', version: 'synthetic', cause: null, affectedRequirements: [], observedAtMs: 1 }) });
+  return { context, github: createGitHub({ context, resolver, savedExecutablePath: () => context.executable, runnerFactory,
+    ...(observeQuery ? { observeQuery } : {}) }) };
+}
 
 describe('native CLI invocation with fake processes', () => {
   it('fixes delivery commit dates from the durable identity and isolates publication configuration', async () => {
@@ -93,6 +105,7 @@ describe('native CLI invocation with fake processes', () => {
     child.stdout.write(Buffer.alloc(queryLimits.responseBytes + 1));
     await expect(pending).rejects.toThrow('CLI_UNAVAILABLE');
     expect(child.killed).toBe(true);
+    child.close(null);
     vi.useFakeTimers();
     const timed = new FakeChild();
     commands.spawn.mockReturnValue(timed);
@@ -101,6 +114,79 @@ describe('native CLI invocation with fake processes', () => {
     await vi.advanceTimersByTimeAsync(queryLimits.timeoutMs);
     await assertion;
     expect(timed.killed).toBe(true);
+    timed.close(null);
+  });
+  it('keeps timeout, kill request and physical close as separate observations', async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild(); commands.spawn.mockReturnValue(child);
+    const onSend = vi.fn();
+    const pending = createGhRunner({ kind: 'windows_keyring', executable: join(tmpdir(), 'gh.exe'), cwd: tmpdir() })('{}', onSend);
+    const caught = pending.then(() => { throw new Error('EXPECTED_TIMEOUT'); }, value => value);
+    child.emit('spawn');
+    await vi.advanceTimersByTimeAsync(queryLimits.timeoutMs);
+    const error = await caught;
+    expect(error).toBeInstanceOf(GitHubRunnerError);
+    const lifecycle = getGitHubRunnerLifecycle(error);
+    if (!lifecycle) throw new Error('RUNNER_LIFECYCLE_MISSING');
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(child.killed).toBe(true);
+    expect(lifecycle).toMatchObject({ sent: true, killRequested: true, killFailed: false, physicallyClosed: false });
+    let completionObserved = false;
+    void lifecycle.completion.then(() => { completionObserved = true; });
+    await Promise.resolve();
+    expect(completionObserved).toBe(false);
+    child.close(null);
+    await lifecycle.completion;
+    expect(lifecycle.physicallyClosed).toBe(true);
+    expect(completionObserved).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('retains a pre-send failure as unsent while physical close is still unknown', async () => {
+    vi.useFakeTimers();
+    const child = new FakeChild(); commands.spawn.mockReturnValue(child);
+    const pending = createGhRunner({ kind: 'windows_keyring', executable: join(tmpdir(), 'gh.exe'), cwd: tmpdir() })('{}');
+    child.stdout.write(Buffer.alloc(queryLimits.responseBytes + 1));
+    const error = await pending.then(() => { throw new Error('EXPECTED_RESPONSE_LIMIT'); }, value => value);
+    const lifecycle = getGitHubRunnerLifecycle(error);
+    if (!lifecycle) throw new Error('RUNNER_LIFECYCLE_MISSING');
+    expect(child.killed).toBe(true);
+    expect(lifecycle).toMatchObject({ sent: false, killRequested: true, physicallyClosed: false });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('forwards the response ceiling through createGitHub and isolates observer failures', async () => {
+    const limits: Array<number | undefined> = [];
+    const successfulRun: GhRunner = async (_input, onSend, responseBytes) => {
+      limits.push(responseBytes); onSend?.();
+      return { exitCode: 0, stdout: 'HTTP/2.0 200 Response\r\ncontent-type: application/json\r\n\r\n{"data":{"viewer":{"id":"ACCOUNT_test","login":"synthetic-user"}}}' };
+    };
+    const observerFailure = () => { throw new Error('SYNTHETIC_OBSERVER_FAILURE'); };
+    const success = composedGitHub(() => successfulRun, observerFailure);
+    expect(await success.github.getIdentity()).toMatchObject({ state: 'complete', data: { id: 'ACCOUNT_test', login: 'synthetic-user' } });
+    expect(limits).toEqual([queryLimits.responseBytes]);
+
+    const beforeSend = vi.fn<GhRunner>(async () => { throw new GitHubRunnerError('CONTEXT_UNAVAILABLE'); });
+    const unavailable = composedGitHub(() => beforeSend, observerFailure);
+    expect(await unavailable.github.getIdentity()).toMatchObject({ state: 'context_unavailable', diagnostics: [{ code: 'CONTEXT_UNAVAILABLE' }] });
+    expect(beforeSend).toHaveBeenCalledOnce();
+
+    const afterSend = vi.fn<GhRunner>(async (_input, onSend) => { onSend?.(); throw new GitHubRunnerError('CLI_UNAVAILABLE'); });
+    const failed = composedGitHub(() => afterSend, observerFailure);
+    expect(await failed.github.getIdentity()).toMatchObject({ state: 'unavailable', diagnostics: [{ code: 'CLI_UNAVAILABLE' }] });
+    expect(afterSend).toHaveBeenCalledOnce();
+  });
+  it('refuses a simple oversized response through the composed native runner', async () => {
+    const child = new FakeChild(); commands.spawn.mockReturnValue(child);
+    const { github } = composedGitHub(current => createGhRunner(current));
+    const pending = github.getIdentity();
+    await vi.waitFor(() => expect(commands.spawn).toHaveBeenCalledOnce());
+    child.emit('spawn');
+    const body = JSON.stringify({ data: { viewer: { id: 'ACCOUNT_test', login: 'synthetic-user' } }, extensions: { usage: 'x'.repeat(queryLimits.responseBytes) } });
+    child.stdout.write(Buffer.from(`HTTP/2.0 200 Response\r\ncontent-type: application/json\r\n\r\n${body}`, 'utf8'));
+    expect(await pending).toMatchObject({ state: 'unavailable', diagnostics: [{ code: 'CLI_UNAVAILABLE' }] });
+    expect(child.killed).toBe(true);
+    expect(child.stdin.read()?.toString()).toContain('FactoryIdentity');
+    expect(commands.spawn.mock.calls[0]?.[0]).toBe(join(tmpdir(), 'gh.exe'));
+    child.close(null);
   });
   it('accepts three field pages with an explicit grouped ceiling and retains the default ceiling', async () => {
     const context = { kind: 'windows_keyring' as const, executable: join(tmpdir(), 'gh.exe'), cwd: tmpdir() };
@@ -136,6 +222,7 @@ describe('native CLI invocation with fake processes', () => {
     child.emit('spawn'); child.stdout.write(grouped);
     expect(await pending).toMatchObject({ state: 'unavailable', data: null, diagnostics: [{ code: 'CLI_UNAVAILABLE' }] });
     expect(child.killed).toBe(true);
+    child.close(null);
     const allowed = new FakeChild(); commands.spawn.mockReturnValue(allowed);
     const accepted = reader.query(groupedQuery, { ids: ['item-a', 'item-b', 'item-c'], cursor: null }, undefined, 3);
     allowed.emit('spawn'); allowed.stdout.write(grouped); allowed.emit('close', 0);
@@ -146,6 +233,7 @@ describe('native CLI invocation with fake processes', () => {
     oversized.emit('spawn'); oversized.stdout.write(Buffer.alloc(queryLimits.responseBytes * 3 + 1));
     expect(await rejected).toMatchObject({ state: 'unavailable', data: null });
     expect(oversized.killed).toBe(true);
+    oversized.close(null);
   });
   it('runs Git without optional index writes, lazy fetch, shell, prompts or redirected repository selectors', async () => {
     vi.stubEnv('GIT_DIR', 'synthetic-other-repository');

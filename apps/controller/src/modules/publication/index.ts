@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AuthorizeUpgrade, CompletePublication, EffectIdentity, EffectView, GitHubMutationResult, IssueContext, ReconcilePublication } from '#contracts';
-import type { GitHub, GitHubEffectRequest } from '../github/index.js';
+import type { AuthorizeUpgrade, CompletePublication, EffectIdentity, EffectView, GitHubMutationResult, ReconcilePublication } from '#contracts';
+import type { GitHub, GitHubBeforeSendContext, GitHubClient, GitHubEffectRequest } from '../github/index.js';
 import { OperationError, type AuthorityObservation, type PublicationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import { createTargetSelections, type TargetWorkspaces } from './targets.js';
@@ -10,10 +10,12 @@ import { CaptureError } from '../workspaces/index.js';
 type Stage = 'inProgress' | 'inReview' | 'delivered';
 const statusKey = (stage: Stage) => stage === 'inProgress' ? 'in_progress' : stage === 'inReview' ? 'in_review' : 'delivered';
 type Snapshot = ReturnType<Storage['getPublicationSnapshot']>;
+type PublicationGitHub = Pick<GitHubClient, 'getIdentity' | 'getIssueContextById' | 'getProject' | 'getRepository'> &
+  Partial<Pick<GitHub, 'reconcilePullRequest'>> & { mutateEffect: (input: GitHubEffectRequest) => Promise<GitHubMutationResult> };
 export interface PublicationDependencies {
   reconcileResources?: (attemptId: string) => Promise<void>;
   storage: Storage;
-  github: Pick<GitHub, 'getIdentity' | 'getIssueContextById' | 'getProject' | 'getRepository'> & Partial<Pick<GitHub,'reconcilePullRequest'>> & { mutateEffect: (input: GitHubEffectRequest) => Promise<GitHubMutationResult> };
+  github: PublicationGitHub;
   workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget' | 'inspectIntegrationTarget'>> & Partial<TargetWorkspaces>;
   cancelAttempt: (id: string) => Promise<void>;
   enqueue: (task: () => Promise<void>) => void;
@@ -23,6 +25,13 @@ export interface PublicationDependencies {
 }
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 const blocked = (code: string): never => { throw new OperationError(409, code, 'Current authority or publication prerequisites prevent this action.'); };
+function isGitHubUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'github.com' && url.port === '' &&
+      url.username === '' && url.password === '' && url.pathname.length > 1;
+  } catch { return false; }
+}
 function stageFor(s: Snapshot): Stage {
   return s.status.result === 'delivered' ? 'delivered' : ['reviewing','publishing'].includes(s.status.phase) ? 'inReview' : 'inProgress';
 }
@@ -31,15 +40,18 @@ export function createPublication(deps: PublicationDependencies) {
   const active = new Set<string>();
   const targets = createTargetSelections(storage,deps.workspaces,deps.enqueue,deps.isClosed);
   function supported() { if (deps.isClosed()) throw new OperationError(503, 'PUBLICATION_CLOSED', 'The controller is shutting down.'); }
-  async function observeAuthority(id: string, desired?: Stage): Promise<boolean> {
-    try { return await observeCurrentAuthority(id, desired); }
+  async function observeAuthority(id: string, desired?: Stage, context?: GitHubBeforeSendContext): Promise<boolean> {
+    context?.assertActive();
+    try { return await observeCurrentAuthority(id, desired, context); }
     catch (error) {
       if (!(error instanceof OperationError) || error.code !== 'AUTHORITY_OBSERVATION_STALE') throw error;
       // Only repeat reads: the discarded observation must never authorize a remote effect.
-      return observeCurrentAuthority(id, desired);
+      context?.assertActive();
+      return observeCurrentAuthority(id, desired, context);
     }
   }
-  async function observeCurrentAuthority(id: string, desired?: Stage): Promise<boolean> {
+  async function observeCurrentAuthority(id: string, desired?: Stage, context?: GitHubBeforeSendContext): Promise<boolean> {
+    context?.assertActive();
     supported(); const snapshot = storage.getPublicationSnapshot(id); const capture = snapshot.capture;
     const mapping = capture.configuration.configuration.github_project;
     const currentMapping = snapshot.configuration.configuration.github_project;
@@ -53,23 +65,29 @@ export function createPublication(deps: PublicationDependencies) {
     const deliveredBefore = snapshot.status.result === 'delivered' || snapshot.effects.some(effect =>
       effect.kind === 'project_status' && effect.state === 'confirmed' && effect.expectedIdentity.optionId === mapping?.status_option_ids.delivered);
     let observation: AuthorityObservation = { reason: null, observedAccountId: null, expectedStatusId, observedStatusId: null };
+    context?.assertActive();
     const identity = await github.getIdentity();
+    context?.assertActive();
     if (identity.state !== 'complete' || !identity.data) observation.reason = 'AUTHORITY_UNAVAILABLE';
     else {
       observation.observedAccountId = identity.data.id;
       if (identity.data.id !== capture.accountId || identity.data.id !== snapshot.settings.account_id) observation.reason = 'ACCOUNT_CHANGED';
     }
     if (!observation.reason) {
-      const issueResult = await github.getIssueContextById(capture.issue.id);
+      context?.assertActive();
+      const issueResult = await github.getIssueContextById(capture.issue.id, { purpose: 'authority' });
+      context?.assertActive();
       const issue = issueResult.data;
-      if (issueResult.state !== 'complete' || !issue || !('body' in issue)) observation.reason = 'AUTHORITY_UNAVAILABLE';
+      if (issueResult.state !== 'complete' || !issue) observation.reason = 'AUTHORITY_UNAVAILABLE';
       else if (issue.id !== capture.issue.id || issue.repository.id !== capture.issue.repository.id ||
         (issue.state !== 'OPEN' && !(issue.state === 'CLOSED' && deliveredBefore)) ||
         issue.repository.isArchived || issue.blockers.some(b => b.state === 'OPEN')) observation.reason = 'ISSUE_INELIGIBLE';
       else if (issue.assignees.length !== 1 || issue.assignees[0]?.id !== capture.accountId) observation.reason = 'ASSIGNEE_CHANGED';
       else if (!mapping || !mappingMatches || snapshot.configuration.configuration.source.repository_id !== capture.issue.repository.id) observation.reason = 'PUBLICATION_CONFIGURATION_CHANGED';
       else {
+        context?.assertActive();
         const [projectResult, repositoryResult] = await Promise.all([github.getProject(mapping.id), github.getRepository({ owner: capture.issue.repository.owner.login, name: capture.issue.repository.name })]);
+        context?.assertActive();
         const project = projectResult.data;
         const membership = issue.memberships.filter(m => m.projectId === mapping.id);
         const values = membership[0]?.statusValues.filter(v => v.fieldId === mapping.status_field_id) ?? [];
@@ -86,8 +104,13 @@ export function createPublication(deps: PublicationDependencies) {
         }
       }
     }
+    context?.assertActive();
     storage.recordAuthority(id, snapshot.stamp, observation);
-    if (observation.reason === 'ASSIGNEE_CHANGED' && !snapshot.status.result) await deps.cancelAttempt(id);
+    if (observation.reason === 'ASSIGNEE_CHANGED' && !snapshot.status.result) {
+      context?.assertActive();
+      await deps.cancelAttempt(id);
+      context?.assertActive();
+    }
     const suspension = storage.getAttempt(id).suspension;
     return observation.reason === null && suspension === null;
   }
@@ -123,21 +146,29 @@ export function createPublication(deps: PublicationDependencies) {
       if (result?.state === 'confirmed') storage.finishEffect(effect.operationId,effect.revision,'confirmed',result.receipt,null);
       return;
     }
-    if (!effect.expectedIdentity.issueId) return;
-    const response = await github.getIssueContextById(effect.expectedIdentity.issueId);
-    if (response.state !== 'complete' || !response.data || !('body' in response.data)) return;
-    const issue: IssueContext = response.data; const wanted = effect.expectedIdentity;
-    if (issue.id !== wanted.issueId || issue.repository.id !== wanted.repositoryId) return;
     if (effect.kind === 'issue_comment') {
+      if (!effect.expectedIdentity.issueId) return;
+      const response = await github.getIssueContextById(effect.expectedIdentity.issueId, { purpose: 'comment_confirmation' });
+      if (response.state !== 'complete' || !response.data) return;
+      const issue = response.data; const wanted = effect.expectedIdentity;
+      if (issue.id !== wanted.issueId || issue.repository.id !== wanted.repositoryId) return;
       const matches = issue.comments.filter(c => c.body.startsWith(wanted.marker + '\n'));
       if (matches.length !== 1) return;
       const comment = matches[0]!;
-      if (comment.author?.id !== capture.accountId || hash(comment.body) !== wanted.bodyHash || !/^https:\/\/github\.com\//.test(comment.url)) return;
+      if (comment.author?.id !== capture.accountId || hash(comment.body) !== wanted.bodyHash || !isGitHubUrl(comment.url)) return;
       storage.finishEffect(effect.operationId, effect.revision, 'confirmed', { id: comment.id, url: comment.url }, null);
-    } else {
-      const memberships = issue.memberships.filter(m => m.projectId === wanted.projectId && m.itemId === wanted.itemId && !m.archived);
-      const statuses = memberships[0]?.statusValues.filter(v => v.fieldId === wanted.fieldId) ?? [];
-      if (memberships.length === 1 && statuses.length === 1 && statuses[0]!.optionId === wanted.optionId) {
+      return;
+    }
+    if (effect.kind === 'project_status') {
+      if (!effect.expectedIdentity.issueId) return;
+      const response = await github.getIssueContextById(effect.expectedIdentity.issueId, { purpose: 'status_confirmation' });
+      if (response.state !== 'complete' || !response.data) return;
+      const issue = response.data; const wanted = effect.expectedIdentity;
+      if (issue.id !== wanted.issueId || issue.repository.id !== wanted.repositoryId) return;
+      const memberships = issue.memberships.filter(m => m.projectId === wanted.projectId && m.itemId === wanted.itemId);
+      if (memberships.length !== 1 || memberships[0]!.archived) return;
+      const statuses = memberships[0]!.statusValues.filter(v => v.fieldId === wanted.fieldId);
+      if (statuses.length === 1 && statuses[0]!.optionId === wanted.optionId) {
         storage.finishEffect(effect.operationId, effect.revision, 'confirmed', { id: wanted.itemId!, optionId: wanted.optionId! }, null);
       }
     }
@@ -160,13 +191,19 @@ export function createPublication(deps: PublicationDependencies) {
     if (!storage.claimEffect(effect.operationId, effect.revision, sourceOperationId)) return false;
     const running = storage.getEffect(effect.operationId);
     let result: GitHubMutationResult;
-    try { result = await github.mutateEffect({ effect: running, accountId: snapshot.capture.accountId, ...(body !== undefined ? { body } : {}),authorize: async () => {
-      supported(); if (!await observeAuthority(id)) blocked('PUBLICATION_BLOCKED'); storage.assertEffectAuthorized(running.operationId,sourceOperationId);
+    try { result = await github.mutateEffect({ effect: running, accountId: snapshot.capture.accountId, ...(body !== undefined ? { body } : {}),authorize: async context => {
+      context.assertActive(); supported(); if (!await observeAuthority(id, undefined, context)) blocked('PUBLICATION_BLOCKED');
+      context.assertActive(); storage.assertEffectAuthorized(running.operationId,sourceOperationId);
     } }); }
     catch { result = { state: 'unknown', receipt: null, reason: 'EFFECT_TRANSPORT_LOST', retryAtMs: null }; }
     if (!['confirmed','failed_known','unknown'].includes(result.state)) throw new OperationError(503,'EFFECT_RESPONSE_INVALID','The effect returned an invalid outcome.');
-    storage.finishEffect(running.operationId, running.revision, result.state === 'confirmed' ? 'confirmed' : result.state === 'failed_known' ? 'failed_known' : 'unknown', result.receipt, result.reason);
-    if (result.state === 'unknown' && kind === 'project_status') await reconcileEffect(storage.getEffect(effect.operationId));
+    const requiresReadback = kind === 'issue_comment' || kind === 'project_status';
+    const awaitingReadback = requiresReadback && result.state !== 'failed_known';
+    storage.finishEffect(running.operationId, running.revision,
+      awaitingReadback ? 'unknown' : result.state === 'confirmed' ? 'confirmed' : result.state === 'failed_known' ? 'failed_known' : 'unknown',
+      awaitingReadback ? null : result.receipt,
+      awaitingReadback ? result.reason ?? (kind === 'issue_comment' ? 'COMMENT_READBACK_REQUIRED' : 'STATUS_READBACK_REQUIRED') : result.reason);
+    if (awaitingReadback) await reconcileEffect(storage.getEffect(effect.operationId));
     return storage.getEffect(effect.operationId).state === 'confirmed';
   }
   async function projectStage(id: string, desired?: Stage, sourceOperationId?: string): Promise<boolean> {

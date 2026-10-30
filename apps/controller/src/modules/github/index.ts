@@ -2,20 +2,24 @@ import { createClient } from './client.js';
 import { createEffectWriter, type GitHubMutationAuthorization, type AttemptEffectAuthorization } from './effects.js';
 export type { GitHubMutationAuthorization, GitHubEffectRequest } from './effects.js';
 export type { AttemptEffectAuthorization } from './effects.js';
-import { GraphQLReader, createGhRunner, GitHubRunnerError, queryGhAuthentication, type GhRunner, type GitHubContext, type GitHubHostAccess } from './transport.js';
+import { GraphQLReader, createGhRunner, GitHubRunnerError, queryGhAuthentication, type GhRunner, type GitHubBeforeSendContext, type GitHubRunnerControl, type GitHubContext, type GitHubHostAccess } from './transport.js';
 import { GitHubExecutableResolver } from './executable.js';
 import { inspectPullRequest } from './pull-requests.js';
 import { createRemoteScaffolder, type ScaffoldAuthorization } from './scaffold.js';
 import { createBoardOperations } from './board.js';
-import type { GitHubExecutableObservation } from '#contracts';
+import type { GitHubExecutableObservation, GitHubQueryResult, IssueContext, ProjectItem } from '#contracts';
 export type { ScaffoldAuthorization } from './scaffold.js';
 
 export { assessIssueReadiness } from './client.js';
 export type { IssueReference, ProjectSelection, ReadinessReason } from './client.js';
+export type { IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext } from './client.js';
 export type { GitHubContext, GitHubHostAccess } from './transport.js';
+export type { GitHubBeforeSendContext } from './transport.js';
 
 export interface GitHubOptions {
   observeQuery?: (measurement: { operation: string; duration_ms: number }) => void;
+  /** @internal Test-only observation of the shared physical admission queue. */
+  observeAdmissionWaitMs?: (durationMs: number) => void;
   context?: GitHubContext;
   access?: GitHubHostAccess;
   savedExecutablePath?: () => string | null;
@@ -30,14 +34,34 @@ export function createGitHub(options: GitHubOptions = {}) {
   const access = options.access ?? (options.context ? { kind: options.context.kind, cwd: options.context.cwd } : undefined);
   const resolver = options.resolver ?? new GitHubExecutableResolver({ ...(access ? { access } : {}), ...(options.context ? { initialExecutable: options.context.executable } : {}) });
   const savedPath = options.savedExecutablePath ?? (() => null);
-  const runner = async (input: string, onSend?: () => void) => {
-    const started = performance.now();
-    const context = options.context && !access ? options.context : await resolver.contextForUse(savedPath());
-    if (!context) throw new GitHubRunnerError('CONTEXT_UNAVAILABLE');
-    try { return await (options.runnerFactory ?? createGhRunner)(context)(input, onSend); }
-    finally { options.observeQuery?.({ operation: (JSON.parse(input) as { query: string }).query.match(/^query\s+(\w+)/)?.[1] ?? 'other', duration_ms: Math.round(performance.now() - started) }); }
+  const observe = (input: string, started: number) => {
+    try {
+      options.observeQuery?.({ operation: (JSON.parse(input) as { query: string }).query.match(/^query\s+(\w+)/)?.[1] ?? 'other',
+        duration_ms: Math.round(performance.now() - started) });
+    } catch { /* Optional observation must not change the runner outcome. */ }
   };
-  const reader = new GraphQLReader(runner);
+  const prepareRunner = async (control: GitHubBeforeSendContext, input: string) => {
+    const started = performance.now();
+    control.assertActive();
+    const context = options.context && !access ? options.context : await resolver.contextForUse(savedPath());
+    control.assertActive();
+    if (!context) throw new GitHubRunnerError('CONTEXT_UNAVAILABLE');
+    let run: GhRunner;
+    try { run = (options.runnerFactory ?? createGhRunner)(context); }
+    catch (error) {
+      observe(input, started);
+      throw error;
+    }
+    const preparedRunner: GhRunner = async (input: string, onSend?: () => void, responseBytes?: number, runnerControl?: GitHubRunnerControl) => {
+      try { return await run(input, onSend, responseBytes, runnerControl); }
+      finally { observe(input, started); }
+    };
+    return { run: preparedRunner, assertCurrent: () => {
+      if (typeof resolver.currentContext === 'function' && resolver.currentContext() !== context) throw new GitHubRunnerError('CONTEXT_UNAVAILABLE');
+    } };
+  };
+  const reader = new GraphQLReader(undefined, Date.now, { retryAtMs: 0 }, undefined, new Set(), () => performance.now(), undefined, prepareRunner,
+    undefined, options.observeAdmissionWaitMs);
   return {
     ...createClient(reader), ...createRemoteScaffolder(reader, options.scaffoldAuthorization),
     ...createBoardOperations(reader, options.scaffoldAuthorization),
@@ -61,4 +85,8 @@ export function createGitHub(options: GitHubOptions = {}) {
     },
   };
 }
-export type GitHub = ReturnType<typeof createGitHub>;
+export type GitHubClient = ReturnType<typeof createGitHub>;
+/** Existing workflows keep the complete/queue contract until they opt into purpose projections. */
+export type GitHub = Omit<GitHubClient, 'getIssueContextById'> & {
+  getIssueContextById(id: string, options?: { purpose?: 'queue' }): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
+};

@@ -52,3 +52,25 @@ A inspeção somente leitura do código externo do LionClaw localizou os pontos 
 O README do LionClaw informa que não há API HTTP exposta em produção. Nesta sessão não há ferramenta LionClaw/IPC nem CLI `lionclaw`; Playwright MCP não fornece acesso ao renderer Electron já aberto por si só. Não foi tentado contornar isso por porta adivinhada, acesso ao banco do operador ou edição externa. O mecanismo IPC acima foi localizado estaticamente, mas não pôde ser invocado nesta sessão.
 
 Pendência concreta da camada LionClaw: aplicar D4 nos três caminhos de composição, atualizar os perfis selecionados pela interface suportada quando necessário e, na execução normal seguinte ou atualização suportada, registrar por executor o run/sprint/rodada, agentId, contexto encaminhado com D4/SPEC e configuração resolvida sanitizada. Não criar execução autônoma de certificação nem avançar fase para produzir essa evidência. **Os dois critérios de encaminhamento continuam não atendidos até existir essa evidência real.**
+
+## C12 — cargas de baseline do run 20261029_211418-4de31f
+
+Esta seção acrescenta o percurso GraphQL ao aparato histórico C4; não reinterpreta nem substitui a medição antiga no seam `QueueGitHub`.
+
+| Cenário | Issues por projeto | Memberships | Páginas | Comentário grande | Atraso sintético por envio |
+|---|---:|---:|---:|---:|---:|
+| `one-page-one-membership` | 10 | 1 | 1 | 0 bytes | 5 ms |
+| `two-page-two-memberships` | 10 | 2 | 2 | 0 bytes | 5 ms |
+| `two-page-three-memberships` | 10 | 3 | 2 | 0 bytes | 5 ms |
+| `large-comment-continuation` | 10 | 1 | 2 | 900.000 bytes em comentário separado | 5 ms |
+| `large-grouped-response` | 2 cadastradas por projeto; uma consultada | 3 | 2 | 0 bytes; envelope agrupado de 4.500.000 bytes adicionais | 5 ms |
+
+Cada carga principal usa dois projetos e observa os 20 issues da fila pelo consumidor real `createQueue`, com os IDs sintéticos associados à ordem UUID real do desempate, conta `ACCOUNT_test` e mesmos critérios da fixture. Em seguida lê o contexto completo de um issue. As cinco cargas principais são repetidas três vezes no percurso direto `createClient` e três vezes pela composição `createGitHub` com `runnerFactory`. A carga `large-grouped-response` é uma medição separada de um issue com três memberships, repetida três vezes por percurso. O teste registra rótulos fixos de operação/cursor, limites numéricos, contagens, bytes, durações e resultados; não retém nem imprime consulta, variáveis ou corpo.
+
+`observationWire` responde pelas queries reais de `GraphQLReader`, `scope`, `collect` e `createQueue`. A fila usa os três workers existentes e dispara a leitura completa dos 20 issues; o contexto de um issue e as confirmações rodam depois. Assignee, comentário, blocker, membership e valores têm cursores próprios. Em respostas de status de duas páginas, a página 1 contém um valor numérico dispensado e a página 2 contém Status. O comentário de 900.000 bytes está abaixo do limite contratual individual e a segunda página contém a confirmação exata. `sendOrder` conserva a sequência efetivamente disparada usando só nomes fixos `Factory*` e `page-1/page-2`.
+
+O teste de confirmação separa comentário exato, ausente, duplicado, divergente e exato na página seguinte; e Status exato, divergente e na página seguinte. Seu oráculo sintético confere Issue/repositório/URL, autor `ACCOUNT_test`, corpo e SHA-256 esperados, item `ITEM_synthetic_0_1`, projeto `PVT_synthetic_0`, campo `FIELD_test`, opção `READY` e membership única não arquivada. Verifica DTO `IssueContext` completo, sem executar mutação nem substituir a reconciliação durável de Publication. A rota pública de fila também valida `HttpQueueObservation`, cursor, ordem e elegibilidade pelos dois percursos.
+
+Cooldown usa resposta 429 sintética com `Retry-After: 60`; uma segunda consulta é bloqueada antes de novo `onSend`. Saturação dispara seis leituras juntas, sem espera de produção neste snapshot. Esse resultado é concorrência simulada: não é prova de subprocessos GH nem atende por si só ao teto de três envios físicos da implementação futura. Runner com falha após `onSend` marca bytes desconhecidos, não zero. O grupo de três memberships inclui envelope sintético JSON `extensions` para superar 4 MiB sem alterar os nós selecionados; a composição atual não encaminha `responseBytes` ao `runnerFactory`, então a falha esperada é registrada como limitação.
+
+Reprodução focada: `npm.cmd test -- tests/integration/backend-measurement.test.ts --reporter=verbose --no-color`. A medição de fila/DTO permanece também em `tests/integration/backend-measurement.test.ts`; seu teste de três workers por observação e seis agregados continua nomeado e reportado como concorrência **lógica**.

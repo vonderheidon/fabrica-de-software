@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { GitHubQueryResult, IssueContext, type GitHubAccount, type GitHubProjectDetails, type ProjectItem } from '#contracts';
+import { GitHubQueryResult, IssueContext, type GitHubAccount, type GitHubProjectDetails, type GitHubQueryResult as GitHubQueryResultType, type ProjectItem } from '#contracts';
 import { assessIssueReadiness, createClient } from './client.js';
 import { createGitHub } from './index.js';
+import type { GitHubClient, IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext } from './index.js';
 import { GraphQLReader, collect, result, type CommandResponse, type GhRunner } from './transport.js';
 
 const account = { id: 'U_900719925474099312345', login: 'operator' };
@@ -23,6 +24,167 @@ function fixture(responses: CommandResponse[]) {
   };
   return { client: createClient(new GraphQLReader(run)), calls };
 }
+
+function assertIssueProjectionTypes(client: Pick<GitHubClient, 'getIssueContextById'>): void {
+  const complete = client.getIssueContextById('I_exact');
+  const queue = client.getIssueContextById('I_exact', { purpose: 'queue' });
+  const authority = client.getIssueContextById('I_exact', { purpose: 'authority' });
+  const comment = client.getIssueContextById('I_exact', { purpose: 'comment_confirmation' });
+  const status = client.getIssueContextById('I_exact', { purpose: 'status_confirmation' });
+  expectTypeOf(complete).toEqualTypeOf<Promise<GitHubQueryResultType<IssueContext | ProjectItem>>>();
+  expectTypeOf(queue).toEqualTypeOf<Promise<GitHubQueryResultType<IssueContext | ProjectItem>>>();
+  expectTypeOf(authority).toEqualTypeOf<Promise<GitHubQueryResultType<IssueAuthorityContext>>>();
+  expectTypeOf(comment).toEqualTypeOf<Promise<GitHubQueryResultType<IssueCommentConfirmationContext>>>();
+  expectTypeOf(status).toEqualTypeOf<Promise<GitHubQueryResultType<IssueStatusConfirmationContext>>>();
+  expectTypeOf<IssueAuthorityContext>().not.toMatchTypeOf<IssueContext>();
+  expectTypeOf<IssueCommentConfirmationContext>().not.toMatchTypeOf<IssueContext>();
+  expectTypeOf<IssueStatusConfirmationContext>().not.toMatchTypeOf<IssueContext>();
+}
+void assertIssueProjectionTypes;
+
+describe('issue context projections by purpose', () => {
+  it('keeps every purpose inferred and separate from the complete issue context', () => {
+    expectTypeOf(assertIssueProjectionTypes).toBeFunction();
+  });
+
+  it('reads only authority fields and completes all required paginated connections', async () => {
+    const otherAccount = { id: 'U_other', login: 'other' };
+    const blockerA = { id: 'I_blocker_a', number: 2, title: 'Dependency A', url: 'https://github.com/operator/actual-repo/issues/2', state: 'OPEN' };
+    const blockerB = { id: 'I_blocker_b', number: 3, title: 'Dependency B', url: 'https://github.com/operator/actual-repo/issues/3', state: 'CLOSED' };
+    const membershipA = { id: 'ITEM_A', isArchived: false, project: { id: 'PVT_A' } };
+    const membershipB = { id: 'ITEM_B', isArchived: true, project: { id: 'PVT_B' } };
+    const statusValue = (id: string, optionId: string, name: string) => ({ id, __typename: 'ProjectV2ItemFieldSingleSelectValue', field: { id: 'FIELD_status' }, optionId, name });
+    const numberValue = { id: 'VALUE_number', __typename: 'ProjectV2ItemFieldNumberValue' };
+    const { client, calls } = fixture([
+      http({ data: { node: { __typename: 'Issue', id: 'I_authority', state: 'OPEN', repository: wireRepository } } }),
+      http({ data: { node: { assignees: page([account], 'assignee-next') } } }),
+      http({ data: { node: { assignees: page([otherAccount]) } } }),
+      http({ data: { node: { blockedBy: page([blockerA], 'blocker-next') } } }),
+      http({ data: { node: { blockedBy: page([blockerB]) } } }),
+      http({ data: { node: { projectItems: page([membershipA], 'membership-next') } } }),
+      http({ data: { node: { projectItems: page([membershipB]) } } }),
+      http({ data: { node: { fieldValues: page([statusValue('VALUE_status_a', 'OPTION_A', 'Ready'), numberValue], 'value-next') } } }),
+      http({ data: { node: { fieldValues: page([statusValue('VALUE_status_b', 'OPTION_B', 'Blocked')]) } } }),
+      http({ data: { node: { fieldValues: page([]) } } }),
+    ]);
+
+    const response = await client.getIssueContextById('I_authority', { purpose: 'authority' });
+    expect(response).toMatchObject({ state: 'complete', data: {
+      id: 'I_authority', state: 'OPEN', repository: { id: 'R_1' }, assignees: [account, otherAccount],
+      blockers: [blockerA, blockerB], memberships: [
+        { itemId: 'ITEM_A', projectId: 'PVT_A', archived: false, statusValues: [
+          { fieldId: 'FIELD_status', optionId: 'OPTION_A', name: 'Ready' },
+          { fieldId: 'FIELD_status', optionId: 'OPTION_B', name: 'Blocked' },
+        ] },
+        { itemId: 'ITEM_B', projectId: 'PVT_B', archived: true, statusValues: [] },
+      ],
+    } });
+    expect(calls.map((call) => call.query.match(/query Factory(\w+)/)?.[1])).toEqual([
+      'IssueAuthority', 'Assignees', 'Assignees', 'Blockers', 'Blockers', 'Memberships', 'Memberships', 'ItemValues', 'ItemValues', 'ItemValues',
+    ]);
+    expect(calls[0]?.query).not.toMatch(/title|body|comments|blockedBy|projectItems|references/i);
+    expect(calls.every((call) => !call.query.includes('FactoryComments'))).toBe(true);
+    expect(calls.every((call) => !call.query.includes('FactoryGroupedValues'))).toBe(true);
+    expect(calls[8]?.variables).toEqual({ id: 'ITEM_A', cursor: 'value-next' });
+  });
+
+  it('loads the full comment confirmation projection and no unrelated issue connections', async () => {
+    const first = { id: 'C_1', url: 'https://github.com/operator/actual-repo/issues/17#issuecomment-1', body: 'First', author: { id: account.id, login: account.login }, updatedAt: '2026-10-30T01:00:00Z' };
+    const second = { id: 'C_2', url: 'https://github.com/operator/actual-repo/issues/17#issuecomment-2', body: 'Second', author: null, updatedAt: '2026-10-30T02:00:00Z' };
+    const { client, calls } = fixture([
+      http({ data: { node: { __typename: 'Issue', id: 'I_comment', repository: { id: 'R_1' }, comments: page([first], 'comments-next') } } }),
+      http({ data: { node: { comments: page([second]) } } }),
+    ]);
+    const response = await client.getIssueContextById('I_comment', { purpose: 'comment_confirmation' });
+    expect(response).toEqual({ state: 'complete', data: { id: 'I_comment', repository: { id: 'R_1' }, comments: [first, second] }, diagnostics: [], retryAtMs: null });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.query).toContain('comments(first:100)');
+    expect(calls[0]?.query).not.toMatch(/assignees|blockedBy|projectItems|fieldValues|body\s+state/i);
+    expect(calls[1]?.query).toContain('FactoryComments');
+  });
+
+  it('loads all Status memberships and their individual value pages without comments or authority-only connections', async () => {
+    const membershipA = { id: 'ITEM_A', isArchived: false, project: { id: 'PVT_A' } };
+    const membershipB = { id: 'ITEM_B', isArchived: false, project: { id: 'PVT_B' } };
+    const statusA = { id: 'VALUE_A', __typename: 'ProjectV2ItemFieldSingleSelectValue', field: { id: 'FIELD_status' }, optionId: 'OPTION_A', name: 'Ready' };
+    const statusB = { id: 'VALUE_B', __typename: 'ProjectV2ItemFieldSingleSelectValue', field: { id: 'FIELD_status' }, optionId: 'OPTION_B', name: 'In progress' };
+    const { client, calls } = fixture([
+      http({ data: { node: { __typename: 'Issue', id: 'I_status', repository: { id: 'R_1' }, projectItems: page([membershipA], 'memberships-next') } } }),
+      http({ data: { node: { projectItems: page([membershipB]) } } }),
+      http({ data: { node: { fieldValues: page([statusA], 'status-next') } } }),
+      http({ data: { node: { fieldValues: page([{ id: 'VALUE_number', __typename: 'ProjectV2ItemFieldNumberValue' }]) } } }),
+      http({ data: { node: { fieldValues: page([statusB]) } } }),
+    ]);
+    const response = await client.getIssueContextById('I_status', { purpose: 'status_confirmation' });
+    expect(response).toMatchObject({ state: 'complete', data: { id: 'I_status', repository: { id: 'R_1' }, memberships: [
+      { itemId: 'ITEM_A', statusValues: [{ fieldId: 'FIELD_status', optionId: 'OPTION_A', name: 'Ready' }] },
+      { itemId: 'ITEM_B', statusValues: [{ fieldId: 'FIELD_status', optionId: 'OPTION_B', name: 'In progress' }] },
+    ] } });
+    expect(calls.map((call) => call.query.match(/query Factory(\w+)/)?.[1])).toEqual([
+      'IssueStatusConfirmation', 'Memberships', 'ItemValues', 'ItemValues', 'ItemValues',
+    ]);
+    expect(calls[0]?.query).not.toMatch(/comments|assignees|blockedBy|body|title/i);
+    expect(calls.every((call) => !call.query.includes('FactoryGroupedValues'))).toBe(true);
+    expect(calls[3]?.variables).toEqual({ id: 'ITEM_A', cursor: 'status-next' });
+  });
+
+  it('keeps missing, malformed, duplicate, and inaccessible required connections incomplete', async () => {
+    const header = http({ data: { node: { __typename: 'Issue', id: 'I_partial', state: 'OPEN', repository: wireRepository } } });
+    const authority = fixture([
+      header,
+      http({ data: { node: { assignees: page([account, account]) } } }),
+      http({ data: { node: { blockedBy: page([null]) } } }),
+      http({ data: { node: { projectItems: page([{ id: 'ITEM_A', isArchived: false, project: { id: 'PVT_A' } }]) } } }),
+      http({ data: { node: { fieldValues: page([{ id: 'VALUE_A', __typename: 'ProjectV2ItemFieldSingleSelectValue', field: null, optionId: 'OPTION_A', name: 'Ready' }]) } } }),
+    ]);
+    const response = await authority.client.getIssueContextById('I_partial', { purpose: 'authority' });
+    expect(response.state).toBe('unavailable');
+    expect(response.data?.id).toBe('I_partial');
+    expect(response.diagnostics.map(({ code }) => code)).toEqual(expect.arrayContaining(['PAGINATION_INVALID', 'REFERENCE_INACCESSIBLE', 'RESPONSE_INVALID']));
+
+    const missingComment = fixture([http({ data: { node: { __typename: 'Issue', id: 'I_comment', repository: { id: 'R_1' }, comments: null } } })]);
+    expect(await missingComment.client.getIssueContextById('I_comment', { purpose: 'comment_confirmation' })).toMatchObject({ state: 'partial', data: { comments: [] }, diagnostics: [{ code: 'NOT_FOUND_OR_INACCESSIBLE' }] });
+
+    const inaccessibleStatus = fixture([http({ data: { node: { __typename: 'Issue', id: 'I_status', repository: { id: 'R_1' }, projectItems: null } }, errors: [{ type: 'FORBIDDEN' }] })]);
+    const statusResponse = await inaccessibleStatus.client.getIssueContextById('I_status', { purpose: 'status_confirmation' });
+    expect(statusResponse).toMatchObject({ state: 'partial', data: { memberships: [] } });
+    expect(statusResponse.diagnostics.map(({ code }) => code)).toContain('REFERENCE_INACCESSIBLE');
+  });
+
+  it('preserves authentication failures and the greatest retry deadline from required connections', async () => {
+    const authentication = fixture([http({}, 401)]);
+    expect(await authentication.client.getIssueContextById('I_auth', { purpose: 'comment_confirmation' })).toMatchObject({ state: 'authentication_invalid', data: null, diagnostics: [{ code: 'AUTHENTICATION_INVALID' }] });
+
+    const rateLimited = fixture([
+      http({ data: { node: { __typename: 'Issue', id: 'I_rate', state: 'OPEN', repository: wireRepository } } }),
+      http({}, 429, { 'retry-after': '45' }),
+    ]);
+    expect(await rateLimited.client.getIssueContextById('I_rate', { purpose: 'authority' })).toMatchObject({ state: 'rate_limited', retryAtMs: expect.any(Number), diagnostics: [{ code: 'RATE_LIMITED' }] });
+    expect(rateLimited.calls).toHaveLength(2);
+  });
+
+  it('validates textual input, Issue typename, and exact returned ID for every purpose', async () => {
+    const requests = [
+      (client: ReturnType<typeof createClient>, id: string) => client.getIssueContextById(id),
+      (client: ReturnType<typeof createClient>, id: string) => client.getIssueContextById(id, { purpose: 'queue' }),
+      (client: ReturnType<typeof createClient>, id: string) => client.getIssueContextById(id, { purpose: 'authority' }),
+      (client: ReturnType<typeof createClient>, id: string) => client.getIssueContextById(id, { purpose: 'comment_confirmation' }),
+      (client: ReturnType<typeof createClient>, id: string) => client.getIssueContextById(id, { purpose: 'status_confirmation' }),
+    ];
+    for (const request of requests) {
+      const invalid = fixture([]);
+      expect(await request(invalid.client, '')).toMatchObject({ state: 'invalid_input', data: null });
+      expect(invalid.calls).toHaveLength(0);
+      for (const node of [null, { __typename: 'PullRequest', id: 'PR_1' }, { __typename: 'DraftIssue', id: 'D_1' }, { __typename: 'Issue', id: 'I_other' }]) {
+        const f = fixture([http({ data: { node } })]);
+        const response = await request(f.client, 'I_exact');
+        expect(response.data).toBeNull();
+        expect(response.state).not.toBe('complete');
+        expect(f.calls).toHaveLength(1);
+      }
+    }
+  });
+});
 
 describe('GitHub identity and query diagnostics', () => {
   it('lists branch names across all returned pages without mutating refs',async () => {

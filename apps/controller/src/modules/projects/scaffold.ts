@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
 import { CreateScaffold, ScaffoldInput, type CreationBoardOperation, type CreationBoardOperationKind, type EffectIdentity, type EffectView, type ScaffoldOptions, type ScaffoldPlan, type ScaffoldPlanned, type Prerequisite } from '#contracts';
 import { OperationError, type Storage } from '../storage/index.js';
-import type { GitHub } from '../github/index.js';
+import type { GitHub, GitHubBeforeSendContext } from '../github/index.js';
 import { ScaffoldWorkspaceError, validateScaffoldBranch, type Workspaces } from '../workspaces/index.js';
 import { engineeringSummary, fileDigest, loadScaffoldCatalog, renderEngineering, renderScaffoldReadme, scaffoldDigest } from './scaffold-resources.js';
 
@@ -15,8 +15,9 @@ export interface ScaffoldDependencies {
 }
 export function createScaffold({ storage, github, workspaces, logFailure, resourcesDirectory }: ScaffoldDependencies) {
   const jobs = new Set<Promise<void>>(); let closing = false;
-  const account = async () => {
+  const account = async (context?: GitHubBeforeSendContext) => {
     const observed = await github.getIdentity();
+    context?.assertActive();
     return { state: observed.state, id: observed.state === 'complete' ? observed.data?.id ?? null : null, login: observed.state === 'complete' ? observed.data?.login ?? null : null };
   };
   const prerequisites = (): Prerequisite[] => {
@@ -88,11 +89,14 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       logFailure(code);
     }
   }
-  async function currentAuthority(id: string,plan: ScaffoldPlan) {
-    const observed = await account(); const current = storage.getCreation(id).creation;
+  async function currentAuthority(id: string,plan: ScaffoldPlan,context?: GitHubBeforeSendContext) {
+    context?.assertActive();
+    const observed = await account(context); const current = storage.getCreation(id).creation;
     if (closing || !['running','partial','failed'].includes(current.state) || current.planHash !== scaffoldDigest(plan) || storage.getGlobalConfiguration().etag !== plan.settingsETag ||
       observed.state !== 'complete' || observed.id !== plan.account.id || observed.login !== plan.account.login || observed.id !== storage.getSettings().account_id) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The creation account, plan or continuity changed.');
+    context?.assertActive();
     const catalog = await loadScaffoldCatalog(resourcesDirectory);
+    context?.assertActive();
     if (!catalog.templates.some(t => t.id === plan.input.templateId && t.digest === plan.templateDigest)) throw new OperationError(409,'SCAFFOLD_TEMPLATE_CHANGED','Scaffold resources changed before the effect.');
   }
   async function executeRemote(id: string,plan: ScaffoldPlan) {
@@ -111,15 +115,20 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       }
       if (effect.state !== 'not_started' || !storage.claimEffect(effect.operationId,effect.revision,c.operationId)) throw new OperationError(409,'CREATION_EFFECT_UNRESOLVED','Inspect the existing effect before continuing.');
       const claimed = storage.getEffect(effect.operationId);
-      const authorize = async () => {
-        await currentAuthority(id,plan);
+      const authorize = async (context?: GitHubBeforeSendContext) => {
+        context?.assertActive();
+        await currentAuthority(id,plan,context);
+        context?.assertActive();
         if (repository) {
           const confirmed = await github.reconcileScaffoldRepository!(repository,plan.account.id!);
+          context?.assertActive();
           if (confirmed.state !== 'confirmed' || confirmed.receipt?.id !== repository.receipt?.id) throw new OperationError(409,'CREATION_REMOTE_IDENTITY_CONFLICT','The confirmed remote identity changed.');
         }
-        await currentAuthority(id,plan); storage.assertEffectAuthorized(effect.operationId,c.operationId);
+        await currentAuthority(id,plan,context);
+        context?.assertActive();
+        storage.assertEffectAuthorized(effect.operationId,c.operationId);
       };
-      await authorize();
+      if (kind !== 'create_repository') await authorize();
       const result = kind === 'create_repository' ? await github.createScaffoldRepository!(claimed,plan.account.id!,authorize)
         : await workspaces.executeScaffoldGit!(plan,claimed,plan.account.id!,authorize);
       storage.finishEffect(claimed.operationId,claimed.revision,result.state,result.receipt,result.reason);
@@ -127,11 +136,15 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       if (kind === 'create_repository') repository = storage.getEffect(effect.operationId);
     }
     await currentAuthority(id,plan);
-    const described = await github.describeScaffoldRepository?.(repository!,plan.account.id!,async () => {
-      await currentAuthority(id,plan);
+    const described = await github.describeScaffoldRepository?.(repository!,plan.account.id!,async (context) => {
+      context?.assertActive();
+      await currentAuthority(id,plan,context);
+      context?.assertActive();
       const confirmed = await github.reconcileScaffoldRepository!(repository!,plan.account.id!);
+      context?.assertActive();
       if (confirmed.state !== 'confirmed' || confirmed.receipt?.id !== repository!.receipt!.id) throw new OperationError(409,'CREATION_REMOTE_IDENTITY_CONFLICT','The confirmed remote identity changed.');
-      await currentAuthority(id,plan);
+      await currentAuthority(id,plan,context);
+      context?.assertActive();
     });
     if (described && described.state !== 'confirmed') throw new OperationError(409,described.reason ?? 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED','The repository description could not be confirmed.');
   }
@@ -172,11 +185,15 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
       const claimed = storage.claimCreationBoardOperation(operation.operation_id, current.revision);
       if (!claimed) throw new OperationError(409, 'BOARD_OPERATION_UNRESOLVED', 'The board operation is already being handled.');
       operation = claimed;
-      const authorize = async () => {
-        await currentAuthority(id,plan);
+      const authorize = async (context?: GitHubBeforeSendContext) => {
+        context?.assertActive();
+        await currentAuthority(id,plan,context);
+        context?.assertActive();
         const observed = await github.reconcileScaffoldRepository!(repository,plan.account.id!);
+        context?.assertActive();
         if (observed.state !== 'confirmed' || observed.receipt?.repositoryId !== repository.receipt?.repositoryId) throw new OperationError(409,'CREATION_REMOTE_IDENTITY_CONFLICT','The confirmed repository identity changed.');
-        await currentAuthority(id,plan);
+        await currentAuthority(id,plan,context);
+        context?.assertActive();
       };
       let sent = false;
       const markSent = () => { if (!sent) { operation = storage.markCreationBoardOperationSent(operation.operation_id, operation.revision); sent = true; } };
@@ -246,9 +263,11 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
           let current = storage.getCreation(id);
           const repository = current.effects.find(e => e.kind === 'create_repository' && e.state === 'confirmed');
           if (repository && github.describeScaffoldRepository) {
-            const described = await github.describeScaffoldRepository(repository,observed.id!,async () => {
+            const described = await github.describeScaffoldRepository(repository,observed.id!,async (context) => {
               const account = await github.getIdentity();
+              context?.assertActive();
               if (closing || account.state !== 'complete' || account.data?.id !== observed.id || storage.getSettings().account_id !== observed.id) throw new OperationError(409,'CREATION_AUTHORITY_CHANGED','The creation account changed.');
+              context?.assertActive();
             });
             if (described.state !== 'confirmed') throw new OperationError(409,described.reason ?? 'CREATION_REMOTE_DESCRIPTION_UNCONFIRMED','The repository description could not be confirmed.');
           }

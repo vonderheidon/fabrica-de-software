@@ -186,6 +186,40 @@ describe('remote scaffold journal and reconciliation with controlled adapters',(
     expect(existsSync(body.plan.destination)).toBe(false);
     const g = await fixture(); g.existingRemote(); await expect(g.authorize()).rejects.toMatchObject({ code: 'SCAFFOLD_REMOTE_EXISTS' });
   });
+  it('drops a board authorization continuation revoked during repository confirmation', async () => {
+    const f = await fixture(); const body = await f.authorize();
+    const controller = new AbortController();
+    const context = { signal: controller.signal, deadlineMonotonicMs: 60_000, assertActive() {
+      if (controller.signal.aborted) throw new Error('authorization stage stopped');
+    } };
+    let insideBoardAuthorization = false;
+    let identitiesAtConfirmation = 0;
+    f.github.reconcileScaffoldRepository.mockImplementation(async effect => {
+      if (insideBoardAuthorization) {
+        identitiesAtConfirmation = f.github.getIdentity.mock.calls.length;
+        controller.abort();
+      }
+      return { state: 'confirmed', receipt: effect.receipt, reason: null, retryAtMs: null };
+    });
+    f.github.createBoardOperation.mockImplementation(async (operation,_target,_repository,_account,authorize,markSent) => {
+      if (operation.kind === 'verify_board') return { state: 'unknown', receipt: null, reason: 'BOARD_CREATE_UNCONFIRMED' };
+      insideBoardAuthorization = true;
+      try { await authorize(context); }
+      catch { return { state: 'unknown', receipt: null, reason: 'BOARD_CREATE_UNCONFIRMED' }; }
+      finally { insideBoardAuthorization = false; }
+      markSent();
+      f.boardSends.push(operation.kind);
+      return { state: 'unknown', receipt: null, reason: 'BOARD_CREATE_UNCONFIRMED' };
+    });
+
+    const accepted = await f.scaffold.create(body,randomUUID());
+    await f.scaffold.drain();
+
+    expect(f.github.getIdentity).toHaveBeenCalledTimes(identitiesAtConfirmation);
+    expect(f.sends).toEqual(['create_repository','associate_origin','baseline_push']);
+    expect(f.boardSends).toEqual([]);
+    expect(f.scaffold.getCreation(accepted.resource.id).board_operations[0]).toMatchObject({ state: 'unknown', reason: 'BOARD_CREATE_UNCONFIRMED' });
+  });
   it.each(['account','settings'])('preserves a confirmed repository when %s changes before origin',async failure => {
     const f = await fixture(failure); const body = await f.authorize(); const op = await f.scaffold.create(body,randomUUID()); await f.scaffold.drain();
     const view = f.scaffold.getCreation(op.resource.id); expect(view.creation.state).toBe('partial'); expect(f.sends).toEqual(['create_repository']);

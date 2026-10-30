@@ -1,13 +1,13 @@
 import { Value } from '@sinclair/typebox/value';
 import { createHash } from 'node:crypto';
 import { EffectView, GitHubId, OperationId, type GitHubMutationResult } from '#contracts';
-import { GraphQLReader, object } from './transport.js';
+import { GraphQLReader, object, type GitHubBeforeSendContext, type GitHubQueryOptions } from './transport.js';
 import { inspectPullRequest, pullRequestMutation } from './pull-requests.js';
 
 /** Granted only by trusted host composition for known real targets. Never sourced from HTTP or environment. */
 export interface GitHubMutationAuthorization { accountId: string; repositoryIds: readonly string[]; projectIds: readonly string[] }
 export interface AttemptEffectAuthorization { kind: 'confirmed_attempt' }
-export interface GitHubEffectRequest { effect: EffectView; accountId: string; body?: string; authorize?: () => Promise<void> }
+export interface GitHubEffectRequest { effect: EffectView; accountId: string; body?: string; authorize?: (context: GitHubBeforeSendContext) => Promise<void> }
 const commentMutation = `mutation FactoryComment($input:AddCommentInput!) {
   addComment(input:$input) { clientMutationId commentEdge { node { id url body issue { id } repository { id } } } }
 }`;
@@ -25,25 +25,32 @@ export function createEffectWriter(reader: GraphQLReader, authorization?: GitHub
       (effect.kind !== 'project_status' || authorization.projectIds.includes(identity.projectId ?? ''));
     if (!identity.repositoryId || (!confirmedEffect && !trustedTarget)) return denied('MUTATION_NOT_AUTHORIZED');
     if ((effect.kind === 'issue_comment' || effect.kind === 'pull_request') && (typeof body !== 'string' || body.length > 60_000 || !identity.marker || !body.startsWith(identity.marker+'\n') || createHash('sha256').update(body).digest('hex') !== identity.bodyHash)) return denied('EFFECT_INPUT_INVALID');
+    let authorizationDenied = false;
+    const beforeSend: GitHubQueryOptions['beforeSend'] = authorize ? async context => {
+      try { await authorize(context); }
+      catch (error) { if (!context.signal.aborted) authorizationDenied = true; throw error; }
+    } : undefined;
     if (effect.kind === 'pull_request') {
       if (!identity.baseBranch || !identity.branchRef?.startsWith('refs/heads/') || !identity.commitSha || !identity.title || /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:#[0-9]|https:\/\/github\.com\/)/i.test(body!)) return denied('EFFECT_INPUT_INVALID');
-      const prior = await inspectPullRequest(reader,effect,accountId,true);
+      const scope = reader.scope();
+      const prior = await inspectPullRequest(scope,effect,accountId,true);
       if (prior.state === 'confirmed') return prior;
       if (prior.reason !== 'PR_NOT_OBSERVED') return denied(prior.reason ?? 'PR_READ_INCOMPLETE');
-      try { await authorize?.(); } catch { return denied('EFFECT_AUTHORITY_REVOKED'); }
       let sent = false;
-      const response = await reader.scope().query(pullRequestMutation,{ input: { repositoryId: identity.repositoryId,headRepositoryId: identity.repositoryId,
-        headRefName: identity.branchRef.slice(11),baseRefName: identity.baseBranch,title: identity.title,body,maintainerCanModify: false,draft: false,clientMutationId: effect.operationId } },() => { sent = true; });
-      if (!sent) return { ...denied(response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED'),retryAtMs: response.retryAtMs };
+      const response = await scope.query(pullRequestMutation,{ input: { repositoryId: identity.repositoryId,headRepositoryId: identity.repositoryId,
+        headRefName: identity.branchRef.slice(11),baseRefName: identity.baseBranch,title: identity.title,body,maintainerCanModify: false,draft: false,clientMutationId: effect.operationId } },() => { sent = true; },1,
+        beforeSend ? { beforeSend } : undefined);
+      if (!sent) return { ...denied(authorizationDenied ? 'EFFECT_AUTHORITY_REVOKED' : response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED'),retryAtMs: response.retryAtMs };
       // A mutation response alone never confirms PR identity or the remote head SHA.
-      return inspectPullRequest(reader,effect,accountId);
+      return inspectPullRequest(scope,effect,accountId,false);
     }
     if (effect.kind === 'project_status' && (!identity.projectId || !identity.itemId || !identity.fieldId || !identity.optionId)) return denied('EFFECT_INPUT_INVALID');
     const input = effect.kind === 'issue_comment' ? { subjectId: identity.issueId, body, clientMutationId: effect.operationId }
       : { projectId: identity.projectId, itemId: identity.itemId, fieldId: identity.fieldId, value: { singleSelectOptionId: identity.optionId }, clientMutationId: effect.operationId };
-    try { await authorize?.(); } catch { return denied('EFFECT_AUTHORITY_REVOKED'); }
     let sent = false;
-    const response = await reader.scope().query(effect.kind === 'issue_comment' ? commentMutation : statusMutation, { input }, () => { sent = true; });
+    const response = await reader.scope().query(effect.kind === 'issue_comment' ? commentMutation : statusMutation, { input }, () => { sent = true; },1,
+      beforeSend ? { beforeSend } : undefined);
+    if (!sent && authorizationDenied) return denied('EFFECT_AUTHORITY_REVOKED');
     if (response.state === 'complete' && response.data) {
       try {
         const payload = object(response.data[effect.kind === 'issue_comment' ? 'addComment' : 'updateProjectV2ItemFieldValue']);

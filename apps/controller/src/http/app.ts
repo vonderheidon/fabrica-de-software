@@ -13,7 +13,7 @@ import { installEventRoutes } from './routes/events.js';
 import { installNotificationRoutes } from './routes/notifications.js';
 import { installShutdownRoutes } from './routes/shutdown.js';
 import { createProjects, type ProjectDependencies } from '../modules/projects/index.js';
-import { createGitHub, type GitHub } from '../modules/github/index.js';
+import { createGitHub, type GitHubClient } from '../modules/github/index.js';
 import { createWorkspaces } from '../modules/workspaces/index.js';
 import { createProjectDeletions, createDeletionCoordinator } from '../modules/projects/index.js';
 import { installProjectDeletionRoutes } from './routes/project-deletions.js';
@@ -31,7 +31,7 @@ import { installScaffoldRoutes } from './routes/scaffold.js';
 import { createDiagnostics, type DiagnosticDependencies } from '../modules/diagnostics/index.js';
 import { installOperationRoutes } from './routes/operation.js';
 
-type ProjectAppDependencies = Partial<Pick<ProjectDependencies, 'github' | 'githubSetup' | 'workspaces' | 'execution' | 'selectProjectsDirectory' | 'selectGitHubExecutable' | 'selectExecutable' | 'toolDetector'>> & { githubRuntime?: GitHub };
+type ProjectAppDependencies = Partial<Pick<ProjectDependencies, 'github' | 'githubSetup' | 'workspaces' | 'execution' | 'selectProjectsDirectory' | 'selectGitHubExecutable' | 'selectExecutable' | 'toolDetector'>> & { githubRuntime?: GitHubClient };
 
 export function createApp(configuration: ControllerConfiguration, storage: Storage, logDestination?: Writable, projectDependencies?: ProjectAppDependencies, preparationDependencies?: Pick<PreparationDependencies, 'github' | 'workspaces'>, providedPipeline?: Pipeline, scaffoldDependencies?: Pick<ScaffoldDependencies, 'github' | 'workspaces'>, diagnosticDependencies?: Pick<DiagnosticDependencies, 'execution'>, deletionDependencies?: { workspaces: Parameters<typeof createDeletionCoordinator>[0]['workspaces']; coordinator: ReturnType<typeof createDeletionCoordinator> }) {
   const app = Fastify({

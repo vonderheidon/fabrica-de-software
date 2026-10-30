@@ -2,19 +2,34 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { performance } from 'node:perf_hooks';
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
-import type { GhRunner } from '../../apps/controller/src/modules/github/transport.js';
+import { getGitHubRunnerLifecycle, type GhRunner } from '../../apps/controller/src/modules/github/transport.js';
 
 export type Completion = 'success' | 'failure' | 'timeout' | 'cancelled' | 'pending';
 export type Layer = 'http' | 'logical' | 'graphql' | 'sql';
 export interface Span {
   id: number; observation: string; purpose: string; layer: Layer; operation: string;
   start: number; end: number | null; completion: Completion; afterAbort: boolean; startedAfterAbort: boolean;
+  physicalEnd: number | null; physicalCompletion: 'not_started' | 'observed' | 'unknown';
+}
+export interface BackendMeasurementRecord {
+  scenario: string; purpose: string; source_kind: 'simulation'; repetition: number;
+  logical_calls: number; physical_sends: number; response_bytes: number | null;
+  conservative_unknown_consumption_bytes: number; peak_in_flight: number; peak_logical_in_flight: number;
+  admission_wait_ms: number; provider_simulated_ms: number; cooldown_blocks: number;
+  duration_ms: number; result: string; equivalent: boolean | null;
+  physical_completion: 'observed' | 'unknown' | 'not_started';
+  selected_fields_absent?: string[];
 }
 /** Test-only instrumentation. Never retains SQL, bindings, URL queries or remote payloads. */
 export class BackendMeasurement {
   readonly spans: Span[] = [];
   private readonly context = new AsyncLocalStorage<{ observation: string; purpose: string }>();
   private readonly aborted = new Set<string>();
+  private readonly responseBytes = new Map<string, number | null>();
+  private readonly unknownConsumptionBytes = new Map<string, number>();
+  private readonly admissionWaitMs = new Map<string, number>();
+  private readonly providerSimulatedMs = new Map<string, number>();
+  private readonly cooldownBlocks = new Map<string, number>();
   constructor(private readonly now: () => number = () => performance.now()) {}
   abort(observation: string): void { this.aborted.add(observation); }
   observe<T>(observation: string, purpose: string, run: () => T): T {
@@ -25,7 +40,8 @@ export class BackendMeasurement {
     if (!context) return null; // setup and teardown are outside the measured journey
     const span: Span = { ...context, id: this.spans.length + 1, layer, operation,
       start: this.now(), end: null, completion: 'pending', afterAbort: false,
-      startedAfterAbort: this.aborted.has(context.observation) };
+      startedAfterAbort: this.aborted.has(context.observation), physicalEnd: null,
+      physicalCompletion: layer === 'graphql' ? 'unknown' : 'not_started' };
     this.spans.push(span);
     return span;
   }
@@ -46,19 +62,94 @@ export class BackendMeasurement {
   /** Physical send starts at the existing runner onSend callback, never at logical invocation. */
   runner(run: GhRunner): GhRunner {
     return async (input, onSend, responseBytes) => {
-      let span: Span | null = null;
+      const physical: { span: Span | null } = { span: null };
       let sent = false;
       try {
         const result = await run(input, () => {
           if (sent) throw new Error('DUPLICATE_SEND_CALLBACK');
-          sent = true; span = this.begin('graphql', 'page'); onSend?.();
+          sent = true; physical.span = this.begin('graphql', 'page');
+          onSend?.();
           }, responseBytes);
-        this.finish(span, 'success'); return result;
+        if (physical.span) { physical.span.physicalCompletion = 'observed'; physical.span.physicalEnd = this.now(); }
+        this.finish(physical.span, 'success'); return result;
       } catch (error) {
-        this.finish(span, error instanceof Error && error.name === 'TimeoutError' ? 'timeout'
+        const lifecycle = getGitHubRunnerLifecycle(error);
+        if (physical.span) {
+          physical.span.physicalCompletion = lifecycle?.physicallyClosed ? 'observed' : 'unknown';
+          if (lifecycle?.physicallyClosed) physical.span.physicalEnd = this.now();
+          if (lifecycle && !lifecycle.physicallyClosed) {
+            const span = physical.span;
+            void lifecycle.completion.then(() => {
+              span.physicalCompletion = 'observed'; span.physicalEnd = this.now();
+            });
+          }
+        }
+        this.finish(physical.span, error instanceof Error && error.name === 'TimeoutError' ? 'timeout'
           : error instanceof Error && error.name === 'AbortError' ? 'cancelled' : 'failure');
         throw error;
       }
+    };
+  }
+  noteResponseBytes(bytes: number | null): void {
+    const context = this.context.getStore();
+    if (!context) return;
+    const previous = this.responseBytes.get(context.observation);
+    if (bytes === null || previous === null) this.responseBytes.set(context.observation, null);
+    else this.responseBytes.set(context.observation, (previous ?? 0) + bytes);
+  }
+  noteCooldownBlock(): void {
+    const context = this.context.getStore();
+    if (context) this.cooldownBlocks.set(context.observation, (this.cooldownBlocks.get(context.observation) ?? 0) + 1);
+  }
+  noteAdmissionWaitMs(durationMs: number): void {
+    const context = this.context.getStore();
+    if (context) this.admissionWaitMs.set(context.observation,
+      (this.admissionWaitMs.get(context.observation) ?? 0) + Math.max(0, durationMs));
+  }
+  noteProviderSimulatedMs(durationMs: number): void {
+    const context = this.context.getStore();
+    if (context) this.providerSimulatedMs.set(context.observation,
+      (this.providerSimulatedMs.get(context.observation) ?? 0) + Math.max(0, durationMs));
+  }
+  noteConservativeUnknownConsumptionBytes(bytes: number): void {
+    const context = this.context.getStore();
+    if (context) this.unknownConsumptionBytes.set(context.observation,
+      (this.unknownConsumptionBytes.get(context.observation) ?? 0) + Math.max(0, bytes));
+  }
+  record(observation: string | undefined, input: {
+    scenario: string; purpose: string; repetition: number; result: string; equivalent: boolean | null;
+    selected_fields_absent?: string[];
+  }): BackendMeasurementRecord {
+    const selected = this.spans.filter(span => observation === undefined || span.observation === observation);
+    const sends = selected.filter(span => span.layer === 'graphql');
+    const concurrencyPeak = (spans: Span[], end: (span: Span) => number | null) => {
+      const events = spans.flatMap(span => [{ time: span.start, delta: 1 }, ...(end(span) === null ? [] : [{ time: end(span)!, delta: -1 }])])
+        .sort((a, b) => a.time - b.time || a.delta - b.delta);
+      let active = 0; let peak = 0;
+      for (const event of events) { active += event.delta; peak = Math.max(peak, active); }
+      return peak;
+    };
+    const logical = selected.filter(span => span.layer === 'logical');
+    const duration = selected.filter(span => span.operation === 'scenario' && span.end !== null)
+      .reduce((total, span) => total + span.end! - span.start, 0);
+    const physicalStates = new Set(sends.map(span => span.physicalCompletion));
+    const byteSamples = observation === undefined ? [...this.responseBytes.values()]
+      : [this.responseBytes.has(observation) ? this.responseBytes.get(observation)! : null];
+    const blockedSamples = observation === undefined ? [...this.cooldownBlocks.values()] : [this.cooldownBlocks.get(observation) ?? 0];
+    return {
+      ...input, source_kind: 'simulation', logical_calls: selected.filter(span => span.layer === 'logical').length,
+      physical_sends: sends.length, response_bytes: sends.length === 0 ? 0 : byteSamples.length === 0 || byteSamples.some(bytes => bytes === null)
+        ? null : byteSamples.reduce<number>((total, bytes) => total + (bytes ?? 0), 0),
+      conservative_unknown_consumption_bytes: observation === undefined ? [...this.unknownConsumptionBytes.values()].reduce((sum, bytes) => sum + bytes, 0)
+        : this.unknownConsumptionBytes.get(observation) ?? 0,
+      peak_in_flight: concurrencyPeak(sends, span => span.physicalEnd),
+      peak_logical_in_flight: concurrencyPeak(logical, span => span.end),
+      admission_wait_ms: observation === undefined ? [...this.admissionWaitMs.values()].reduce((sum, ms) => sum + ms, 0)
+        : this.admissionWaitMs.get(observation) ?? 0,
+      provider_simulated_ms: observation === undefined ? [...this.providerSimulatedMs.values()].reduce((sum, ms) => sum + ms, 0)
+        : this.providerSimulatedMs.get(observation) ?? 0,
+      cooldown_blocks: blockedSamples.reduce((total, count) => total + count, 0), duration_ms: duration,
+      physical_completion: sends.length === 0 ? 'not_started' : physicalStates.has('unknown') ? 'unknown' : 'observed',
     };
   }
   /** Hooks execution, not prepare(): reused prepared statements count on every invocation. */

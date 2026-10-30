@@ -103,3 +103,31 @@ it('rechecks the durable grant after PR lookup and refuses a revoked grant befor
   expect(result).toMatchObject({ state: 'failed_known',reason: 'EFFECT_AUTHORITY_REVOKED' }); expect(authorize).toHaveBeenCalledOnce();
   expect(f.run.mock.calls.some(([x]) => JSON.parse(x).query.includes('mutation'))).toBe(false);
 });
+
+it('preserves context and cooldown classifications before PR authorization', async () => {
+  const f = fixture();
+  const authorize = vi.fn(async () => {});
+  const confirmedAttempt = { kind: 'confirmed_attempt' as const };
+  const unavailable = createEffectWriter(new GraphQLReader(undefined), undefined, confirmedAttempt);
+  expect(await unavailable({ effect: f.effect,accountId: 'A',body: f.body,authorize })).toMatchObject({ reason: 'CONTEXT_UNAVAILABLE' });
+
+  const coolingReader = new GraphQLReader(f.run, () => 0, { retryAtMs: 1 });
+  const cooling = createEffectWriter(coolingReader, undefined, confirmedAttempt);
+  expect(await cooling({ effect: f.effect,accountId: 'A',body: f.body,authorize })).toMatchObject({ reason: 'RATE_LIMITED' });
+  expect(authorize).not.toHaveBeenCalled();
+  expect(f.run).not.toHaveBeenCalled();
+});
+
+it('preserves context and cooldown classifications before PR authorization', async () => {
+  const f = fixture();
+  const authorize = vi.fn(async () => {});
+  const confirmedAttempt = { kind: 'confirmed_attempt' as const };
+  const unavailable = createEffectWriter(new GraphQLReader(undefined), undefined, confirmedAttempt);
+  expect(await unavailable({ effect: f.effect,accountId: 'A',body: f.body,authorize })).toMatchObject({ reason: 'CONTEXT_UNAVAILABLE' });
+
+  const coolingReader = new GraphQLReader(f.run, () => 0, { retryAtMs: 1 });
+  const cooling = createEffectWriter(coolingReader, undefined, confirmedAttempt);
+  expect(await cooling({ effect: f.effect,accountId: 'A',body: f.body,authorize })).toMatchObject({ reason: 'RATE_LIMITED' });
+  expect(authorize).not.toHaveBeenCalled();
+  expect(f.run).not.toHaveBeenCalled();
+});

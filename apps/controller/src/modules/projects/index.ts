@@ -343,7 +343,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
               message: 'A identidade consultada não corresponde à conta ativa reportada pelo GitHub CLI.',
               recovery: 'Confira a conta ativa e consulte novamente antes de vinculá-la.' });
           }
-          if (status.active && status.valid && identity && identity.state !== 'complete') {
+          if (status.active && status.valid && identity && identity.state !== 'complete' && identity.diagnostics.length === 0) {
             diagnostics.push({ code: 'GITHUB_IDENTITY_UNAVAILABLE',
               message: 'A identidade da conta ativa não pôde ser confirmada.',
               recovery: 'Confira o contexto e a conectividade do GitHub CLI; consulte novamente.' });

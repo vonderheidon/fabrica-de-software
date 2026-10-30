@@ -19,21 +19,32 @@ export interface ObservationSample {
   projects: number; issuesPerProject: number; memberships: number; pages: number;
 }
 export interface ObservationScenario {
-  id: string; issuesPerProject: number; memberships: 1 | 3; pages: 1 | 2;
-  latencyMs: number;
+  id: string; issuesPerProject: number; memberships: 1 | 2 | 3; pages: 1 | 2;
+  latencyMs: number; largeCommentBytes: number;
 }
 export const observationScenarios: readonly ObservationScenario[] = [
-  { id: 'base', issuesPerProject: 10, memberships: 1, pages: 1, latencyMs: 5 },
-  { id: 'expanded', issuesPerProject: 10, memberships: 3, pages: 2, latencyMs: 5 },
-  { id: 'large', issuesPerProject: 100, memberships: 3, pages: 2, latencyMs: 5 },
+  { id: 'base', issuesPerProject: 10, memberships: 1, pages: 1, latencyMs: 5, largeCommentBytes: 0 },
+  { id: 'expanded', issuesPerProject: 10, memberships: 3, pages: 2, latencyMs: 5, largeCommentBytes: 0 },
+  { id: 'large', issuesPerProject: 100, memberships: 3, pages: 2, latencyMs: 5, largeCommentBytes: 0 },
 ];
+export const c12ObservationScenarios: readonly ObservationScenario[] = [
+  { id: 'one-page-one-membership', issuesPerProject: 10, memberships: 1, pages: 1, latencyMs: 5, largeCommentBytes: 0 },
+  { id: 'two-page-two-memberships', issuesPerProject: 10, memberships: 2, pages: 2, latencyMs: 5, largeCommentBytes: 0 },
+  { id: 'two-page-three-memberships', issuesPerProject: 10, memberships: 3, pages: 2, latencyMs: 5, largeCommentBytes: 0 },
+  { id: 'large-comment-continuation', issuesPerProject: 10, memberships: 1, pages: 2, latencyMs: 5, largeCommentBytes: 900_000 },
+];
+export const c12GroupedResponseScenario: ObservationScenario = {
+  id: 'large-grouped-response', issuesPerProject: 2, memberships: 3, pages: 2, latencyMs: 5, largeCommentBytes: 0,
+};
 
 /** Owns no real network/runtime. Queue and SQLite are production implementations. */
-export async function observationFixture(scenario: ObservationScenario, meter?: BackendMeasurement, wire = false, controls?: ObservationWireControls) {
-  if (!/^[a-z]+$/.test(scenario.id) || !Number.isSafeInteger(scenario.issuesPerProject)
+export async function observationFixture(scenario: ObservationScenario, meter?: BackendMeasurement, wire = false,
+  controls?: ObservationWireControls, path: 'client' | 'composed' = 'client') {
+  if (!/^[a-z][a-z0-9-]*$/.test(scenario.id) || !Number.isSafeInteger(scenario.issuesPerProject)
     || scenario.issuesPerProject < 2 || scenario.issuesPerProject > 1000
-    || ![1, 3].includes(scenario.memberships) || ![1, 2].includes(scenario.pages)
-    || !Number.isSafeInteger(scenario.latencyMs) || scenario.latencyMs < 0) throw new Error('INVALID_SYNTHETIC_SCENARIO');
+    || ![1, 2, 3].includes(scenario.memberships) || ![1, 2].includes(scenario.pages)
+    || !Number.isSafeInteger(scenario.latencyMs) || scenario.latencyMs < 0
+    || !Number.isSafeInteger(scenario.largeCommentBytes) || scenario.largeCommentBytes < 0 || scenario.largeCommentBytes > 900_000) throw new Error('INVALID_SYNTHETIC_SCENARIO');
   const f = await attemptFixture();
   try {
     await f.pipeline.close();
@@ -55,7 +66,7 @@ export async function observationFixture(scenario: ObservationScenario, meter?: 
       for (let number = 1; number <= scenario.issuesPerProject; number++) {
         const id = `I_synthetic_${index}_${number}`;
         const itemId = `ITEM_synthetic_${index}_${number}`;
-        const issue = { ...structuredClone(f.issue), id, number, title: `Synthetic ${number}`,
+        const issue = { ...structuredClone(f.issue), id, number, title: `Synthetic ${number}`, url: `${f.issue.repository.url}/issues/${number}`,
           memberships: Array.from({ length: scenario.memberships }, (_, membership) => ({
             ...structuredClone(f.issue.memberships[0]!), itemId: membership === 0 ? itemId : `${itemId}_${membership}`,
             projectId: membership === 0 ? boardId : `PVT_extra_${membership}`,
@@ -99,17 +110,26 @@ export async function observationFixture(scenario: ObservationScenario, meter?: 
     }
     const traced = <T>(operation: string, run: () => Promise<GitHubQueryResult<T>>) => meter
       ? meter.measure('logical', operation, run, result => result.state === 'complete' ? 'success' : 'failure') : run();
-    const remote = wire && meter ? observationWire({ issues, items, projects, pages: scenario.pages, account: () => accountId }, meter, controls) : null;
+    const remote = wire && meter ? observationWire({ issues, items, projects, pages: scenario.pages,
+      account: () => accountId, latencyMs: scenario.latencyMs, largeCommentBytes: scenario.largeCommentBytes }, meter, controls, path) : null;
     const github = {
       getIdentity: () => traced('identity', () => remote ? remote.getIdentity() : response({ id: accountId, login: 'synthetic-user' })),
       getProject: (id: string) => traced('project', () => { if (remote) return remote.getProject(id); const value = projects.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_PROJECT'); return response(value); }),
       listProjectItems: (id: string) => traced('items', () => { if (remote) return remote.listProjectItems(id); const value = items.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_PROJECT'); return response(value, scenario.pages); }),
-      getIssueContextById: (id: string) => traced('issue', () => { if (remote) return remote.getIssueContextById(id, { purpose: 'queue' }); const value = issues.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_ISSUE'); return response(value, scenario.pages); }),
+      getIssueContextById: (id: string, options?: { purpose: 'queue' }) => traced('issue', () => {
+        if (remote) return remote.getIssueContextById(id, options ?? { purpose: 'queue' });
+        const value = issues.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_ISSUE'); return response(value, scenario.pages);
+      }),
     };
+    const readFullIssueContext = (id: string) => traced('issue.full-context', () => {
+      if (remote) return remote.getIssueContextById(id);
+      const value = issues.get(id); if (!value) throw new Error('UNKNOWN_SYNTHETIC_ISSUE'); return response(value, scenario.pages);
+    });
     const queue = createQueue({ storage: f.storage, github, workspaces: f.workspaces, hostName: 'synthetic-host' });
     return {
-      storage: f.storage, directory: f.directory, projectIds, samples, queue, issues, projects, pipeline: f.pipeline,
-      github: { ...f.github, ...github }, workspaces: f.workspaces,
+      storage: f.storage, directory: f.directory, projectIds, samples, queue, issues, projects, pipeline: f.pipeline, purposeGitHub: remote,
+      github: { ...f.github, ...github }, workspaces: f.workspaces, readFullIssueContext,
+      scenario,
       advance(ms: number) { if (!Number.isSafeInteger(ms) || ms < 0) throw new Error('INVALID_CLOCK_ADVANCE'); now += ms; },
       changeAccount() { accountId = 'ACCOUNT_changed'; },
       failNextResponse() { failNext = true; },
@@ -139,7 +159,7 @@ export async function observationFixture(scenario: ObservationScenario, meter?: 
 
 export async function withObservationFixture<T>(scenario: ObservationScenario,
   run: (fixture: Awaited<ReturnType<typeof observationFixture>>) => Promise<T>,
-  options?: { meter: BackendMeasurement; wire: boolean; controls?: ObservationWireControls }): Promise<T> {
-  const fixture = await observationFixture(scenario, options?.meter, options?.wire, options?.controls);
+  options?: { meter: BackendMeasurement; wire: boolean; controls?: ObservationWireControls; path?: 'client' | 'composed' }): Promise<T> {
+  const fixture = await observationFixture(scenario, options?.meter, options?.wire, options?.controls, options?.path);
   try { return await run(fixture); } finally { await fixture.close(); }
 }

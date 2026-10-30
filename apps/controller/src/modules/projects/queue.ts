@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { Value } from '@sinclair/typebox/value';
-import { QueueCommand, QueueQuery, QueueReason, type GitHubAccount, type GitHubQueryResult, type QueueItem, type QueueObservation, type QueueQuery as QueueQueryType } from '#contracts';
+import { QueueCommand, QueueQuery, QueueReason, type GitHubAccount, type GitHubQueryResult, type IssueContext, type ProjectItem, type QueueItem, type QueueObservation, type QueueQuery as QueueQueryType } from '#contracts';
 import type { Static } from '@sinclair/typebox';
 import { OperationError, type Storage } from '../storage/index.js';
 import { assessIssueReadiness, type GitHub } from '../github/index.js';
@@ -134,7 +134,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
       if (configuration.queue_order.use_board_position && !useBoardPosition) diagnostics.push({ code: 'BOARD_POSITION_UNAVAILABLE', message: 'A leitura não fornece posição documentada dos itens.', recovery: 'A ordem usa número crescente e ID.' });
       if (activeAttempt) diagnostics.push({ code: 'QUEUE_OCCUPIED', message: 'Já existe uma tentativa ativa. Os demais candidatos permanecem visíveis e não serão descartados.', recovery: 'A fila pode consumir o próximo candidato quando a tentativa terminar.' });
       const issueItems = projectItems.filter(item => item.kind === 'issue' && item.contentId);
-      const issues = new Map<string, Awaited<ReturnType<QueueGitHub['getIssueContextById']>>>();
+      const issues = new Map<string, GitHubQueryResult<IssueContext | ProjectItem>>();
       let nextIssue = 0;
       await Promise.all(Array.from({ length: Math.min(3, issueItems.length) }, async () => {
         while (nextIssue < issueItems.length) {

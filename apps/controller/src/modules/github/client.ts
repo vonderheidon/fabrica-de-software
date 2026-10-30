@@ -48,6 +48,138 @@ function mapResponse<T>(response: GitHubQueryResult<Record<string, unknown>>, se
 export type ProjectSelection = GitHubProjectSelection;
 export type IssueReference = GitHubIssueReference;
 
+export type IssueAuthorityContext = Pick<IssueContext, 'id' | 'state' | 'repository' | 'assignees' | 'blockers' | 'memberships'>;
+export interface IssueCommentConfirmationContext {
+  id: IssueContext['id'];
+  repository: Pick<GitHubRepository, 'id'>;
+  comments: IssueComment[];
+}
+export interface IssueStatusConfirmationContext {
+  id: IssueContext['id'];
+  repository: Pick<GitHubRepository, 'id'>;
+  memberships: IssueMembership[];
+}
+
+function issueNodeById(response: GitHubQueryResult<Record<string, unknown>>, id: string): GitHubQueryResult<Record<string, unknown>> {
+  if (!response.data) return { ...response, data: null };
+  try {
+    const raw = response.data.node === null ? null : object(response.data.node);
+    if (raw === null) return response.state === 'complete' ? inaccessible() : { ...response, data: null };
+    if (raw.__typename !== 'Issue' || raw.id !== id) return result('unavailable', null, ['RESPONSE_INVALID'], response.retryAtMs);
+    checked(IssueContext.properties.id, raw.id);
+    return { ...response, data: raw };
+  } catch { return result('unavailable', null, ['RESPONSE_INVALID'], response.retryAtMs); }
+}
+
+function projectionResult<T>(data: T, parts: GitHubQueryResult<unknown>[]): GitHubQueryResult<T> {
+  const codes = parts.flatMap((part) => part.diagnostics.map((entry) => entry.code));
+  const retryAtMs = Math.max(0, ...parts.map((part) => part.retryAtMs ?? 0)) || null;
+  const failureStates: GitHubQueryResult<unknown>['state'][] = ['authentication_invalid', 'context_unavailable', 'rate_limited', 'unavailable'];
+  const failureCodes: Record<string, GitHubQueryResult<unknown>['state']> = {
+    AUTHENTICATION_INVALID: 'authentication_invalid', CONTEXT_UNAVAILABLE: 'context_unavailable', RATE_LIMITED: 'rate_limited',
+    CLI_UNAVAILABLE: 'unavailable', QUERY_FAILED: 'unavailable', QUERY_LIMIT: 'unavailable',
+  };
+  const state = failureStates.find((candidate) => parts.some((part) => part.state === candidate ||
+    part.diagnostics.some(({ code }) => failureCodes[code] === candidate))) ??
+    (parts.every((part) => part.state === 'complete') ? 'complete' : 'partial');
+  return result(state, data, codes, retryAtMs);
+}
+
+function hasGlobalFailure(part: GitHubQueryResult<unknown>): boolean {
+  return ['authentication_invalid', 'context_unavailable', 'rate_limited', 'unavailable'].includes(part.state) ||
+    part.diagnostics.some(({ code }) => ['AUTHENTICATION_INVALID', 'CONTEXT_UNAVAILABLE', 'RATE_LIMITED', 'CLI_UNAVAILABLE', 'QUERY_FAILED', 'QUERY_LIMIT'].includes(code));
+}
+
+async function readMembershipsWithValues(reader: GraphQLReader, id: string,
+  firstPage?: GitHubQueryResult<Record<string, unknown>>): Promise<{ memberships: IssueMembership[]; parts: GitHubQueryResult<unknown>[] }> {
+  const memberships = await collect(reader, queries.membershipsQuery, { id }, (data) => child(data, 'node', 'projectItems'), (node) => checked(IssueMembership, {
+    itemId: node.id, projectId: object(node.project).id, archived: node.isArchived, statusValues: [],
+  }), undefined, firstPage);
+  const parts: GitHubQueryResult<unknown>[] = [memberships];
+  const populated: IssueMembership[] = [];
+  if (hasGlobalFailure(memberships)) {
+    return { memberships: (memberships.data ?? []).map((membership) => ({ ...membership, statusValues: [] })), parts };
+  }
+  for (const membership of memberships.data ?? []) {
+    const fields = await collect(reader, queries.valuesQuery, { id: membership.itemId }, (data) => child(data, 'node', 'fieldValues'), (node) => {
+      if (node.__typename !== 'ProjectV2ItemFieldSingleSelectValue') return null;
+      return { kind: 'select' as const, field: checked(IssueMembership.properties.statusValues.items, {
+        fieldId: object(node.field).id, optionId: node.optionId, name: node.name,
+      }) };
+    }, (node) => ['ProjectV2ItemFieldSingleSelectValue', 'ProjectV2ItemFieldNumberValue'].includes(String(node.__typename)) ? string(node.id) : null);
+    parts.push(fields);
+    populated.push({ ...membership, statusValues: (fields.data ?? []).flatMap((entry) => entry?.kind === 'select' ? [entry.field] : []) });
+    if (hasGlobalFailure(fields)) break;
+  }
+  return { memberships: populated, parts };
+}
+
+async function readIssueAuthority(reader: GraphQLReader, id: string): Promise<GitHubQueryResult<IssueAuthorityContext>> {
+  const response = await reader.query(queries.issueAuthorityQuery, { id });
+  const header = issueNodeById(response, id);
+  if (!header.data) return { ...header, data: null };
+  let data: IssueAuthorityContext;
+  try {
+    data = {
+      id: checked(IssueContext.properties.id, header.data.id),
+      state: checked(IssueContext.properties.state, header.data.state),
+      repository: repository(header.data.repository), assignees: [], blockers: [], memberships: [],
+    };
+  } catch { return result('unavailable', null, ['RESPONSE_INVALID'], response.retryAtMs); }
+  const parts: GitHubQueryResult<unknown>[] = [header];
+  if (hasGlobalFailure(header)) return projectionResult(data, parts);
+
+  const assignees = await collect(reader, queries.assigneesQuery, { id }, (value) => child(value, 'node', 'assignees'), (node) => checked(GitHubAccount, node));
+  parts.push(assignees);
+  data.assignees = assignees.data ?? [];
+  if (hasGlobalFailure(assignees)) return projectionResult(data, parts);
+
+  const blockers = await collect(reader, queries.blockersQuery, { id }, (value) => child(value, 'node', 'blockedBy'), (node) => checked(IssueBlocker, node));
+  parts.push(blockers);
+  data.blockers = blockers.data ?? [];
+  if (hasGlobalFailure(blockers)) return projectionResult(data, parts);
+
+  const membershipResult = await readMembershipsWithValues(reader, id);
+  parts.push(...membershipResult.parts);
+  data.memberships = membershipResult.memberships;
+  return projectionResult(data, parts);
+}
+
+async function readIssueCommentConfirmation(reader: GraphQLReader, id: string): Promise<GitHubQueryResult<IssueCommentConfirmationContext>> {
+  const response = await reader.query(queries.issueCommentConfirmationQuery, { id });
+  const header = issueNodeById(response, id);
+  if (!header.data) return { ...header, data: null };
+  let data: IssueCommentConfirmationContext;
+  try {
+    data = {
+      id: checked(IssueContext.properties.id, header.data.id),
+      repository: { id: checked(GitHubRepository.properties.id, object(header.data.repository).id) },
+      comments: [],
+    };
+  } catch { return result('unavailable', null, ['RESPONSE_INVALID'], response.retryAtMs); }
+  const comments = await collect(reader, queries.commentsQuery, { id }, (value) => child(value, 'node', 'comments'), (node) => checked(IssueComment, node), undefined, response);
+  data.comments = comments.data ?? [];
+  return projectionResult(data, [header, comments]);
+}
+
+async function readIssueStatusConfirmation(reader: GraphQLReader, id: string): Promise<GitHubQueryResult<IssueStatusConfirmationContext>> {
+  const response = await reader.query(queries.issueStatusConfirmationQuery, { id });
+  const header = issueNodeById(response, id);
+  if (!header.data) return { ...header, data: null };
+  let data: IssueStatusConfirmationContext;
+  try {
+    data = {
+      id: checked(IssueContext.properties.id, header.data.id),
+      repository: { id: checked(GitHubRepository.properties.id, object(header.data.repository).id) },
+      memberships: [],
+    };
+  } catch { return result('unavailable', null, ['RESPONSE_INVALID'], response.retryAtMs); }
+  if (hasGlobalFailure(header)) return projectionResult(data, [header]);
+  const memberships = await readMembershipsWithValues(reader, id, response);
+  data.memberships = memberships.memberships;
+  return projectionResult(data, [header, ...memberships.parts]);
+}
+
 export function createClient(rootReader: GraphQLReader) {
   async function getProjectOwner(id: string): Promise<GitHubQueryResult<GitHubProject['owner']>> {
     if (!Value.Check(GitHubProject.properties.owner.properties.id, id)) return invalid();
@@ -199,16 +331,23 @@ export function createClient(rootReader: GraphQLReader) {
     return result(parts.every((part) => part.state === 'complete') ? 'complete' : 'partial', data,
       parts.flatMap((part) => part.diagnostics.map((entry) => entry.code)), Math.max(0, ...parts.map((part) => part.retryAtMs ?? 0)) || null);
   }
-  async function getIssueContextById(id: string, options?: { purpose: 'queue' }): Promise<GitHubQueryResult<IssueContext | ProjectItem>> {
+  function getIssueContextById(id: string, options: { purpose: 'authority' }): Promise<GitHubQueryResult<IssueAuthorityContext>>;
+  function getIssueContextById(id: string, options: { purpose: 'comment_confirmation' }): Promise<GitHubQueryResult<IssueCommentConfirmationContext>>;
+  function getIssueContextById(id: string, options: { purpose: 'status_confirmation' }): Promise<GitHubQueryResult<IssueStatusConfirmationContext>>;
+  function getIssueContextById(id: string, options?: { purpose?: 'queue' }): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
+  async function getIssueContextById(id: string, options?: { purpose?: 'queue' | 'authority' | 'comment_confirmation' | 'status_confirmation' }): Promise<GitHubQueryResult<unknown>> {
     if (!Value.Check(GitHubId, id)) return invalid();
     const reader = rootReader.scope();
+    if (options?.purpose === 'authority') return readIssueAuthority(reader, id);
+    if (options?.purpose === 'comment_confirmation') return readIssueCommentConfirmation(reader, id);
+    if (options?.purpose === 'status_confirmation') return readIssueStatusConfirmation(reader, id);
     const header = await reader.query(options?.purpose === 'queue' ? queries.queueIssueQuery : queries.issueReferenceQuery, { id });
     if (header.state !== 'complete' || !header.data) return { ...header, data: null };
     let reference: IssueReference;
     try {
       if (header.data.node === null) return inaccessible();
       const raw = object(header.data.node);
-      if (raw.__typename !== 'Issue' || raw.id !== id) return invalid();
+      if (raw.__typename !== 'Issue' || raw.id !== id) return result('unavailable', null, ['RESPONSE_INVALID'], header.retryAtMs);
       const repo = object(raw.repository);
       reference = checked(GitHubIssueReference, { owner: object(repo.owner).login, name: repo.name, number: raw.number });
     } catch { return result('unavailable', null, ['RESPONSE_INVALID']); }

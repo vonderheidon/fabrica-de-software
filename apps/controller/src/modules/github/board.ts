@@ -1,7 +1,6 @@
 import { Value } from '@sinclair/typebox/value';
 import { CreationBoardMutationResult, CreationBoardOperation, V3StatusMapping, type CreationBoardMutationResult as BoardResult, type CreationBoardOperationKind, type ScaffoldInput } from '#contracts';
-import type { GraphQLReader } from './transport.js';
-import { object } from './transport.js';
+import { GraphQLReader, object, type GitHubBeforeSendContext, type GitHubQueryOptions } from './transport.js';
 import type { ScaffoldAuthorization } from './scaffold.js';
 
 type Remote = NonNullable<ScaffoldInput['remote']>;
@@ -133,16 +132,16 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
   const authorized = (ownerId: string, remote: Remote, accountId: string): boolean => Boolean(authorization &&
     (('kind' in authorization && authorization.kind === 'confirmed_plan') || ('accountId' in authorization && authorization.accountId === accountId &&
       authorization.targets.some(target => target.ownerId === ownerId && target.name === remote.name && target.visibility === remote.visibility))));
-  const readSnapshot = async (operation: CreationBoardOperation): Promise<BoardSnapshot | null> => {
+  const readSnapshot = async (operation: CreationBoardOperation, scope: GraphQLReader, options: GitHubQueryOptions): Promise<BoardSnapshot | null> => {
     const projectId = expectedProject(operation); if (!projectId) return null;
-    const response = await reader.scope().query(projectSnapshot, { id: projectId });
+    const response = await scope.query(projectSnapshot, { id: projectId },undefined,1,options);
     if (!successful(response)) return null;
     try { return decodeSnapshot(response.data, operation); } catch { return null; }
   };
-  async function listCreatedBoards(operation: CreationBoardOperation, accountId: string): Promise<Array<{ id: string; createdAt: number }>|null> {
+  async function listCreatedBoards(operation: CreationBoardOperation, accountId: string, scope: GraphQLReader, options: GitHubQueryOptions): Promise<Array<{ id: string; createdAt: number }>|null> {
     let cursor: string | null = null; const cursors = new Set<string>(); const seen = new Set<string>(); const matches: Array<{ id: string; createdAt: number }> = [];
     for (let i = 0; i < 100; i++) {
-      const response = await reader.scope().query(ownerBoards, { id: operation.expected_identity.owner_id, after: cursor });
+      const response = await scope.query(ownerBoards, { id: operation.expected_identity.owner_id, after: cursor },undefined,1,options);
       if (!successful(response)) return null;
       try {
         if (object(response.data.viewer).id !== accountId) return null;
@@ -162,8 +161,8 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
     }
     return null;
   }
-  async function verify(operation: CreationBoardOperation, remote: Remote, accountId: string): Promise<BoardResult> {
-    const snapshot = await readSnapshot(operation); if (!snapshot) return unknown('BOARD_READ_INCOMPLETE');
+  async function verify(operation: CreationBoardOperation, remote: Remote, accountId: string, scope: GraphQLReader, options: GitHubQueryOptions): Promise<BoardResult> {
+    const snapshot = await readSnapshot(operation, scope, options); if (!snapshot) return unknown('BOARD_READ_INCOMPLETE');
     if (snapshot.viewerId !== accountId || snapshot.ownerId !== remote.ownerId || snapshot.closed) return failed('BOARD_IDENTITY_MISMATCH');
     const field = statusField(snapshot); const view = snapshot.views.find(candidate => candidate.id === operation.expected_identity.view_id) ??
       snapshot.views.find(candidate => candidate.name === viewName);
@@ -179,10 +178,14 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
   function remoteRepositoryId(operation: CreationBoardOperation): string {
     return operation.expected_identity.repository_id ?? '';
   }
-  async function mutation(operation: CreationBoardOperation, query: string, variables: Record<string, unknown>, authorize: () => Promise<void>, markSent: () => void): Promise<Record<string, unknown> | null> {
-    try { await authorize(); } catch { return null; }
+  async function mutation(operation: CreationBoardOperation, query: string, variables: Record<string, unknown>, authorize: (context?: GitHubBeforeSendContext) => Promise<void>, markSent: () => void, scope: GraphQLReader, options: GitHubQueryOptions): Promise<Record<string, unknown> | null> {
     let sent = false;
-    const response = await reader.scope().query(query, { ...variables, input: { ...object(variables.input), clientMutationId: operation.operation_id } }, () => { markSent(); sent = true; });
+    const beforeSend = async (context: GitHubBeforeSendContext) => {
+      await authorize(context);
+      context.assertActive();
+    };
+    const response = await scope.query(query, { ...variables, input: { ...object(variables.input), clientMutationId: operation.operation_id } },
+      () => { markSent(); sent = true; },1,{ ...options,beforeSend });
     if (!sent || !successful(response)) return null;
     return response.data;
   }
@@ -196,24 +199,26 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
     };
   });
   async function doOperation(operation: CreationBoardOperation, remote: Remote, repositoryId: string, accountId: string,
-    authorize: () => Promise<void>, markSent: () => void): Promise<BoardResult> {
+    authorize: (context?: GitHubBeforeSendContext) => Promise<void>, markSent: () => void): Promise<BoardResult> {
     if (!Value.Check(CreationBoardOperation, operation) || !authorized(remote.ownerId, remote, accountId) || operation.authorization.account_id !== accountId) return failed('BOARD_TARGET_NOT_AUTHORIZED');
+    const scope = reader.scope();
+    const options: GitHubQueryOptions = {};
     if (operation.kind === 'create_board') {
       if (!mutationValid(operation, 'create_board')) return failed('BOARD_OPERATION_INVALID');
-      const matches = await listCreatedBoards(operation, accountId);
+      const matches = await listCreatedBoards(operation, accountId, scope, options);
       if (!matches) return unknown('BOARD_OWNER_READ_INCOMPLETE');
       if (matches.length) return failed('BOARD_NAME_ALREADY_EXISTS');
-      const data = await mutation(operation, createBoardMutation, { input: { ownerId: remote.ownerId, title: operation.expected_identity.board_name } }, authorize, markSent);
+      const data = await mutation(operation, createBoardMutation, { input: { ownerId: remote.ownerId, title: operation.expected_identity.board_name } }, authorize, markSent, scope, options);
       if (!data) return unknown('BOARD_CREATE_UNCONFIRMED');
       try {
         const payload = object(data.createProjectV2); const project = object(payload.projectV2);
         if (payload.clientMutationId !== operation.operation_id || typeof project.id !== 'string' || !project.id) return unknown('BOARD_CREATE_UNCONFIRMED');
-        const snapshot = await readSnapshot({ ...operation, expected_identity: { ...operation.expected_identity, project_id: project.id } });
+        const snapshot = await readSnapshot({ ...operation, expected_identity: { ...operation.expected_identity, project_id: project.id } }, scope, options);
         if (!snapshot || snapshot.id !== project.id || snapshot.viewerId !== accountId || snapshot.ownerId !== remote.ownerId || snapshot.title !== operation.expected_identity.board_name) return unknown('BOARD_CREATE_UNCONFIRMED');
         return confirmed(receiptFor(snapshot));
       } catch { return unknown('BOARD_CREATE_UNCONFIRMED'); }
     }
-    const snapshot = await readSnapshot(operation);
+    const snapshot = await readSnapshot(operation, scope, options);
     if (!snapshot) return unknown('BOARD_READ_INCOMPLETE');
     if (snapshot.viewerId !== accountId || snapshot.closed || snapshot.ownerId !== remote.ownerId) return failed('BOARD_IDENTITY_MISMATCH');
     if (operation.kind === 'configure_status') {
@@ -223,9 +228,9 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
       if (snapshot.fields.filter(candidate => candidate.name === fieldName).length > 1) return failed('BOARD_STATUS_FIELD_AMBIGUOUS');
       const input = field ? { fieldId: field.id, singleSelectOptions: statusInputs(field) } :
         { projectId: snapshot.id, name: fieldName, dataType: 'SINGLE_SELECT', singleSelectOptions: statusInputs(null) };
-      const data = await mutation(operation, field ? updateStatusMutation : createStatusMutation, { input }, authorize, markSent);
+      const data = await mutation(operation, field ? updateStatusMutation : createStatusMutation, { input }, authorize, markSent, scope, options);
       if (!data) return unknown('BOARD_STATUS_UNCONFIRMED');
-      const checkedSnapshot = await readSnapshot(operation); const status = checkedSnapshot && statusField(checkedSnapshot);
+      const checkedSnapshot = await readSnapshot(operation, scope, options); const status = checkedSnapshot && statusField(checkedSnapshot);
       if (!checkedSnapshot || checkedSnapshot.viewerId !== accountId || !status || !exactOptions(status)) return unknown('BOARD_STATUS_UNCONFIRMED');
       return confirmed({ ...receiptFor(checkedSnapshot), status_field_id: status.id, status_field_name: status.name, status_options: status.options });
     }
@@ -233,9 +238,9 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
       if (!mutationValid(operation, 'link_repository')) return failed('BOARD_OPERATION_INVALID');
       if (operation.expected_identity.repository_id !== repositoryId) return failed('BOARD_CROSS_IDENTITY');
       if (snapshot.repositories.includes(repositoryId)) return confirmed({ ...receiptFor(snapshot), repository_ids: snapshot.repositories });
-      const data = await mutation(operation, linkRepositoryMutation, { input: { projectId: snapshot.id, repositoryId } }, authorize, markSent);
+      const data = await mutation(operation, linkRepositoryMutation, { input: { projectId: snapshot.id, repositoryId } }, authorize, markSent, scope, options);
       if (!data) return unknown('BOARD_LINK_UNCONFIRMED');
-      const checkedSnapshot = await readSnapshot(operation);
+      const checkedSnapshot = await readSnapshot(operation, scope, options);
       return checkedSnapshot?.viewerId === accountId && checkedSnapshot.repositories.includes(repositoryId)
         ? confirmed({ ...receiptFor(checkedSnapshot), repository_ids: checkedSnapshot.repositories }) : unknown('BOARD_LINK_UNCONFIRMED');
     }
@@ -250,29 +255,31 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
         return view.layout === 'BOARD_LAYOUT' && view.visibleFields.some(visible => visible.id === field.id) && viewHasOrderedStatusColumns(view, field)
           ? confirmed(viewReceipt(snapshot,view)) : failed('BOARD_VIEW_CONFIGURATION_CONFLICT');
       }
-      const data = await mutation(operation, createViewMutation, { input: { projectId: snapshot.id, name: viewName, layout: 'BOARD_LAYOUT', configuration: { visibleFieldIds: [field.id] } } }, authorize, markSent);
+      const data = await mutation(operation, createViewMutation, { input: { projectId: snapshot.id, name: viewName, layout: 'BOARD_LAYOUT', configuration: { visibleFieldIds: [field.id] } } }, authorize, markSent, scope, options);
       if (!data) return unknown('BOARD_VIEW_UNCONFIRMED');
-      const checkedSnapshot = await readSnapshot(operation); const created = checkedSnapshot?.views.filter(candidate => candidate.name === viewName) ?? [];
+      const checkedSnapshot = await readSnapshot(operation, scope, options); const created = checkedSnapshot?.views.filter(candidate => candidate.name === viewName) ?? [];
       if (!checkedSnapshot || created.length !== 1 || created[0]!.layout !== 'BOARD_LAYOUT' || !created[0]!.visibleFields.some(visible => visible.id === field.id) ||
           !viewHasOrderedStatusColumns(created[0]!, field)) return unknown('BOARD_VIEW_UNCONFIRMED');
       return confirmed(viewReceipt(checkedSnapshot,created[0]!));
     }
     if (!mutationValid(operation, 'verify_board')) return failed('BOARD_OPERATION_INVALID');
-    return verify(operation, remote, accountId);
+    return verify(operation, remote, accountId, scope, options);
   }
   async function reconcile(operation: CreationBoardOperation, remote: Remote, repositoryId: string, accountId: string): Promise<BoardResult> {
     if (!Value.Check(CreationBoardOperation, operation) || !authorized(remote.ownerId, remote, accountId) ||
         operation.authorization.account_id !== accountId || !['running','unknown'].includes(operation.state)) return failed('BOARD_OPERATION_INVALID');
+    const scope = reader.scope();
+    const options: GitHubQueryOptions = {};
     if (operation.kind === 'create_board') {
-      const matches = await listCreatedBoards(operation, accountId); if (!matches) return unknown('BOARD_OWNER_READ_INCOMPLETE');
+      const matches = await listCreatedBoards(operation, accountId, scope, options); if (!matches) return unknown('BOARD_OWNER_READ_INCOMPLETE');
       const since = operation.sent_at_ms;
       const created = matches.filter(candidate => since !== null && candidate.createdAt >= since - 1000);
       if (created.length !== 1) return unknown(created.length > 1 ? 'BOARD_CREATE_AMBIGUOUS' : 'BOARD_CREATE_NOT_OBSERVED');
-      const snapshot = await readSnapshot({ ...operation, expected_identity: { ...operation.expected_identity, project_id: created[0]!.id } });
+      const snapshot = await readSnapshot({ ...operation, expected_identity: { ...operation.expected_identity, project_id: created[0]!.id } }, scope, options);
       if (!snapshot || snapshot.viewerId !== accountId || snapshot.ownerId !== remote.ownerId || snapshot.title !== operation.expected_identity.board_name) return unknown('BOARD_CREATE_UNCONFIRMED');
       return confirmed(receiptFor(snapshot));
     }
-    const snapshot = await readSnapshot(operation); if (!snapshot) return unknown('BOARD_READ_INCOMPLETE');
+    const snapshot = await readSnapshot(operation, scope, options); if (!snapshot) return unknown('BOARD_READ_INCOMPLETE');
     if (snapshot.viewerId !== accountId || snapshot.closed || snapshot.ownerId !== remote.ownerId) return unknown('BOARD_IDENTITY_CONFLICT');
     if (operation.kind === 'configure_status') {
       const field = statusField(snapshot); return field && exactOptions(field)
@@ -287,7 +294,7 @@ export function createBoardOperations(reader: GraphQLReader, authorization?: Sca
         view.layout === 'BOARD_LAYOUT' && view.visibleFields.some(visible => visible.id === field.id) && viewHasOrderedStatusColumns(view, field)
         ? confirmed(viewReceipt(snapshot,view)) : unknown('BOARD_VIEW_NOT_OBSERVED');
     }
-    return verify(operation, remote, accountId);
+    return verify(operation, remote, accountId, scope, options);
   }
   return {
     scaffoldBoardCapability(ownerId: string, remote: Remote, accountId: string) { return { available: authorized(ownerId, remote, accountId), reason_code: 'BOARD_TARGET_NOT_AUTHORIZED' }; },

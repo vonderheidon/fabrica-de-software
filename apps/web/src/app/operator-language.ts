@@ -31,6 +31,7 @@ const codeLabels: Readonly<Record<string, string>> = {
   CREATION_REMOTE_DESCRIPTION_CHANGED: 'Descrição alterada no GitHub; preserve o texto e confira a criação',
   ACCOUNT_UNOBSERVED: 'Conta GitHub sem vínculo', ACCOUNT_REQUIRED: 'Conta GitHub necessária', ACCOUNT_NOT_CONFIGURED: 'Conta GitHub sem vínculo',
   ACCOUNT_MISMATCH: 'Conta ativa diferente da conta vinculada', GITHUB_IDENTITY_CONFIRMED: 'Conta GitHub confirmada',
+  GITHUB_IDENTITY_UNAVAILABLE: 'Identidade da conta GitHub não confirmada', RATE_LIMITED: 'Limite temporário do GitHub',
   PROJECTS_ROOT_REQUIRED: 'Pasta dos projetos necessária', PROJECTS_ROOT_UNAVAILABLE: 'Pasta dos projetos indisponível',
   PROJECTS_ROOT_CHANGED: 'A pasta dos projetos mudou', PROJECTS_ROOT_NOT_CONFIRMED: 'Pasta dos projetos não confirmada',
   CONFIGURATION_RECORDED: 'Configuração consultada', EXECUTION_REVALIDATION_REQUIRED: 'Nova validação necessária antes de iniciar',
@@ -147,6 +148,16 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
     title: 'Confira a conta GitHub ativa',
     cause: 'A identidade ativa observada difere da conta vinculada à fábrica.',
     nextAction: 'Confirme a conta ativa no GitHub CLI e use a ação explícita de troca em Configuração.',
+  },
+  RATE_LIMITED: {
+    title: 'Aguarde a próxima consulta ao GitHub',
+    cause: 'O GitHub pediu uma pausa antes de aceitar novas consultas de identidade.',
+    nextAction: 'Aguarde o horário previsto para a próxima consulta antes de verificar o status novamente.',
+  },
+  GITHUB_IDENTITY_UNAVAILABLE: {
+    title: 'Identidade GitHub não confirmada',
+    cause: 'A consulta não confirmou que a identidade ativa do GitHub CLI corresponde a uma conta válida.',
+    nextAction: 'Consulte o diagnóstico principal da conexão e aguarde o horário indicado antes de tentar novamente.',
   },
   ACCOUNT_SWITCH_ATTEMPT_ACTIVE: {
     title: 'Aguarde a tentativa ativa',

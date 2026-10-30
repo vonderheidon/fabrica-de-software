@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { GitHubMutationResult } from '#contracts';
 import { attemptFixture, complete } from '../fixtures/attempt.js';
+import { withPublicationIssueProjections } from '../fixtures/publication.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import type { GitHubEffectRequest } from '../../apps/controller/src/modules/github/index.js';
 import { withWindowsTerminalJobs } from '../../dist/apps/controller/src/modules/execution/index.js';
@@ -92,7 +93,8 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
   Object.assign(f.execution, execution);
   const github = { ...f.github, getRepository: async () => complete(structuredClone(f.issue.repository)),
     mutateEffect: async ({ effect, body, authorize }: GitHubEffectRequest): Promise<GitHubMutationResult> => {
-      await authorize?.();
+      const signal = new AbortController().signal;
+      await authorize?.({ signal, deadlineMonotonicMs: 60_000, assertActive() { if (signal.aborted) throw new Error('AUTHORIZATION_REVOKED'); } });
       if (effect.kind === 'project_status') {
         f.issue.memberships[0]!.statusValues[0]!.optionId = effect.expectedIdentity.optionId!;
         return { state: 'unknown', receipt: null, reason: 'STATUS_READBACK_REQUIRED', retryAtMs: null };
@@ -106,7 +108,8 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     prepareAttempt: (input: Parameters<typeof prepare>[0]) => prepare({ ...input, source: { ...input.source, kind: 'local', location: seed } }),
     captureDelivery: createCapturer(f.directory, git, undefined, resolveAttemptRoot), materializeReview: shared, getDeliveryDiff: createDeliveryDiff(f.directory, git, undefined, resolveAttemptRoot),
     verifyRetainedDelivery: createRetainedVerifier(f.directory, git, undefined, resolveAttemptRoot), folderCapability: createEnvironmentRecovery(f.directory, git, undefined, undefined, resolveAttemptRoot).folderCapability };
-  const createController = () => createPipeline({ ...f.dependencies, github, workspaces, publication: { github, workspaces } });
+  const { github: publicationGithub } = withPublicationIssueProjections(github);
+  const createController = () => createPipeline({ ...f.dependencies, github, workspaces, publication: { github: publicationGithub, workspaces } });
   let pipeline = createController();
   const watchdog = setTimeout(() => { void pipeline.close(); }, Math.max(0, deadline - Date.now()));
   const attempts: string[] = [];

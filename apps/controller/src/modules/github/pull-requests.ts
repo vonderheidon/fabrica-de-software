@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
 import { EffectView, type GitHubMutationResult } from '#contracts';
-import { collect, GraphQLReader, object, string } from './transport.js';
+import { collect, GraphQLReader, object, string, type GitHubQueryOptions } from './transport.js';
 
 export const pullRequestMutation = `mutation FactoryPullRequest($input:CreatePullRequestInput!) {
   createPullRequest(input:$input) { clientMutationId pullRequest { id } }
@@ -16,7 +16,8 @@ const query = `query FactoryPullRequests($repositoryId:ID!,$head:String!,$headRe
   } } }
 }`;
 export const prUnknown = (reason: string): GitHubMutationResult => ({ state: 'unknown',receipt: null,reason,retryAtMs: null });
-export async function inspectPullRequest(reader: GraphQLReader, effect: EffectView, accountId: string, requireApprovedBase = false): Promise<GitHubMutationResult> {
+export async function inspectPullRequest(reader: GraphQLReader, effect: EffectView, accountId: string, requireApprovedBase = false,
+  options?: GitHubQueryOptions): Promise<GitHubMutationResult> {
   if (!Value.Check(EffectView,effect) || effect.kind !== 'pull_request') return prUnknown('EFFECT_INPUT_INVALID');
   const i = effect.expectedIdentity;
   if (!i.repositoryId || !effect.attemptId || effect.creationId || !i.branchRef?.startsWith('refs/heads/') || !i.baseBranch || !i.marker || !i.bodyHash || !i.commitSha || !i.title) return prUnknown('EFFECT_INPUT_INVALID');
@@ -26,8 +27,8 @@ export async function inspectPullRequest(reader: GraphQLReader, effect: EffectVi
     if (node.id !== i.repositoryId || object(object(node.headRef).target).oid !== i.commitSha || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(string(object(object(node.baseRef).target).oid))) throw new Error('IDENTITY_INVALID');
     if (requireApprovedBase && i.parentSha && object(object(node.baseRef).target).oid !== i.parentSha) throw new Error('BASE_CHANGED');
     return node.pullRequests;
-  }, node => node);
-  if (response.state !== 'complete' || !response.data) return { ...prUnknown('PR_READ_INCOMPLETE'),retryAtMs: response.retryAtMs };
+  }, node => node, undefined, undefined, options);
+  if (response.state !== 'complete' || !response.data) return { ...prUnknown(response.diagnostics[0]?.code ?? 'PR_READ_INCOMPLETE'),retryAtMs: response.retryAtMs };
   // All PRs for this head are inspected; an unrelated or duplicated marker cannot be adopted.
   const matches = response.data.filter(p => typeof p.body === 'string' && p.body.startsWith(i.marker!+'\n'));
   if (matches.length !== 1) return prUnknown(response.data.length ? 'PR_IDENTITY_CONFLICT' : 'PR_NOT_OBSERVED');

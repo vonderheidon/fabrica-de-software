@@ -1,6 +1,6 @@
 import { Value } from '@sinclair/typebox/value';
 import { EffectView, GitHubId, type GitHubMutationResult, type ScaffoldInput } from '#contracts';
-import { GraphQLReader, object, result } from './transport.js';
+import { GraphQLReader, object, result, type GitHubBeforeSendContext, type GitHubQueryOptions } from './transport.js';
 
 /** The interactive host uses the persisted operator confirmation; restricted hosts may pin targets. */
 export type ScaffoldAuthorization = { kind: 'confirmed_plan' } | {
@@ -27,12 +27,12 @@ export function createRemoteScaffolder(reader: GraphQLReader, authorization?: Sc
   const allowed = (remote: Remote | undefined, accountId: string, push = false) => Boolean(authorization &&
     (('kind' in authorization && authorization.kind === 'confirmed_plan') || ('accountId' in authorization && authorization.accountId === accountId &&
       authorization.targets.some(t => (!remote || (t.ownerId === remote.ownerId && t.name === remote.name && t.visibility === remote.visibility)) && (!push || t.allowPush)))));
-  async function inspect(remote: Remote, accountId: string): Promise<import('#contracts').GitHubQueryResult<{ ownerLogin: string; repositoryId: string | null }>> {
+  async function inspect(remote: Remote, accountId: string, scope = reader.scope(), options: GitHubQueryOptions = {}): Promise<import('#contracts').GitHubQueryResult<{ ownerLogin: string; repositoryId: string | null }>> {
     if (!Value.Check(GitHubId,remote.ownerId) || !Value.Check(GitHubId,accountId) || !/^[A-Za-z0-9_.-]{1,100}$/.test(remote.name) || /^\.+$/.test(remote.name)) return result('invalid_input',null,['INPUT_INVALID']);
-    const scope = reader.scope(); let after: string | null = null; const cursors = new Set<string>(); const ids = new Set<string>();
+    let after: string | null = null; const cursors = new Set<string>(); const ids = new Set<string>();
     let ownerLogin: string | null = null; let repositoryId: string | null = null;
     for (let page = 0; page < 100; page++) {
-      const response = await scope.query(listing,{ id: remote.ownerId,after });
+      const response = await scope.query(listing,{ id: remote.ownerId,after },undefined,1,options);
       if (response.state !== 'complete' || !response.data) return { ...response,data: null };
       try {
         if (object(response.data.viewer).id !== accountId) return result('authentication_invalid',null,['AUTHENTICATION_INVALID']);
@@ -62,14 +62,14 @@ export function createRemoteScaffolder(reader: GraphQLReader, authorization?: Sc
       ? { ownerId: i.ownerId,name: i.repositoryName,visibility: i.visibility } : null;
   }
   const denied = (reason: string, state: GitHubMutationResult['state'] = 'failed_known'): GitHubMutationResult => ({ state,receipt: null,reason,retryAtMs: null });
-  async function confirm(effect: EffectView, accountId: string, repositoryId?: string): Promise<GitHubMutationResult> {
+  async function confirm(effect: EffectView, accountId: string, repositoryId?: string, scope = reader.scope(), options: GitHubQueryOptions = {}): Promise<GitHubMutationResult> {
     const remote = remoteOf(effect); if (!remote || !['running','unknown','confirmed'].includes(effect.state)) return denied('EFFECT_INPUT_INVALID','unknown');
     if (!repositoryId) {
-      const observed = await inspect(remote,accountId);
+      const observed = await inspect(remote,accountId,scope,options);
       if (observed.state !== 'complete' || !observed.data?.repositoryId || observed.data.ownerLogin !== effect.expectedIdentity.repositoryOwner) return { ...denied('CREATION_REMOTE_NOT_CONFIRMED','unknown'),retryAtMs: observed.retryAtMs };
       repositoryId = observed.data.repositoryId;
     }
-    const response = await reader.scope().query(details,{ id: repositoryId });
+    const response = await scope.query(details,{ id: repositoryId },undefined,1,options);
     if (response.state !== 'complete' || !response.data) return { ...denied('CREATION_REMOTE_READ_INCOMPLETE','unknown'),retryAtMs: response.retryAtMs };
     try {
       const node = object(response.data.node); const owner = object(node.owner); const i = effect.expectedIdentity;
@@ -85,38 +85,57 @@ export function createRemoteScaffolder(reader: GraphQLReader, authorization?: Sc
     scaffoldRemoteCapability(remote: Remote | undefined, accountId: string, push = false) { return { available: allowed(remote, accountId, push), reason_code: 'CREATION_TARGET_NOT_AUTHORIZED' }; },
     inspectScaffoldRemote: inspect,
     reconcileScaffoldRepository: confirm,
-    async describeScaffoldRepository(effect: EffectView, accountId: string, authorize: () => Promise<void>): Promise<GitHubMutationResult> {
+    async describeScaffoldRepository(effect: EffectView, accountId: string, authorize: (context?: GitHubBeforeSendContext) => Promise<void>): Promise<GitHubMutationResult> {
       if (effect.state !== 'confirmed' || !effect.receipt || !allowed(remoteOf(effect) ?? undefined, accountId)) return denied('CREATION_REMOTE_IDENTITY_CONFLICT','unknown');
-      const verified = await confirm(effect, accountId, effect.receipt.id);
+      const scope = reader.scope();
+      const options: GitHubQueryOptions = {};
+      const verified = await confirm(effect, accountId, effect.receipt.id, scope, options);
       if (verified.state !== 'confirmed') return verified;
       const description = `Projeto ${effect.expectedIdentity.repositoryName}, preparado com configuração de engenharia pela Nova Fábrica.`;
-      const read = await reader.scope().query(details, { id: effect.receipt.id });
+      const read = await scope.query(details, { id: effect.receipt.id },undefined,1,options);
       if (read.state !== 'complete' || !read.data) return denied('CREATION_REMOTE_READ_INCOMPLETE','unknown');
       const node = object(read.data.node);
       if (node.description === description) return verified;
       if (node.description !== `${effect.expectedIdentity.marker} Factory-Operation:${effect.operationId}`) return denied('CREATION_REMOTE_DESCRIPTION_CHANGED','unknown');
-      try { await authorize(); } catch { return denied('CREATION_AUTHORITY_CHANGED','unknown'); }
-      const updated = await reader.scope().query(updateDescription, { input: { repositoryId: effect.receipt.id, description, clientMutationId: effect.operationId } });
+      let authorizationRejected = false;
+      let sent = false;
+      const beforeSend = async (context: GitHubBeforeSendContext) => {
+        try { await authorize(context); context.assertActive(); }
+        catch (error) { if (!context.signal.aborted) authorizationRejected = true; throw error; }
+      };
+      const updated = await scope.query(updateDescription, { input: { repositoryId: effect.receipt.id, description, clientMutationId: effect.operationId } },
+        () => { sent = true; },1,{ ...options,beforeSend });
+      if (authorizationRejected || (!sent && updated.diagnostics.some(item => item.code === 'QUERY_LIMIT' || item.code === 'QUERY_FAILED')))
+        return denied('CREATION_AUTHORITY_CHANGED','unknown');
       if (updated.state !== 'complete') return denied('CREATION_REMOTE_DESCRIPTION_UNCONFIRMED','unknown');
-      const observed = await reader.scope().query(details, { id: effect.receipt.id });
+      const observed = await scope.query(details, { id: effect.receipt.id },undefined,1,options);
       if (observed.state !== 'complete' || !observed.data || object(observed.data.node).description !== description) return denied('CREATION_REMOTE_DESCRIPTION_UNCONFIRMED','unknown');
-      return confirm(effect, accountId, effect.receipt.id);
+      return confirm(effect, accountId, effect.receipt.id, scope, options);
     },
-    async createScaffoldRepository(effect: EffectView, accountId: string, authorize: () => Promise<void>): Promise<GitHubMutationResult> {
+    async createScaffoldRepository(effect: EffectView, accountId: string, authorize: (context?: GitHubBeforeSendContext) => Promise<void>): Promise<GitHubMutationResult> {
       const remote = remoteOf(effect);
       if (!remote || effect.state !== 'running' || !effect.authorized || !allowed(remote,accountId)) return denied('CREATION_TARGET_NOT_AUTHORIZED');
-      const prior = await inspect(remote,accountId);
+      const scope = reader.scope();
+      const options: GitHubQueryOptions = {};
+      const prior = await inspect(remote,accountId,scope,options);
       if (prior.state !== 'complete' || !prior.data || prior.data.ownerLogin !== effect.expectedIdentity.repositoryOwner) return denied('CREATION_REMOTE_READ_INCOMPLETE');
       if (prior.data.repositoryId) return denied('SCAFFOLD_REMOTE_EXISTS');
-      try { await authorize(); } catch { return denied('CREATION_AUTHORITY_CHANGED'); }
       let sent = false;
-      const response = await reader.scope().query(mutation,{ input: { ownerId: remote.ownerId,name: remote.name,visibility: remote.visibility.toUpperCase(),
-        description: `${effect.expectedIdentity.marker} Factory-Operation:${effect.operationId}`,hasIssuesEnabled: true,hasWikiEnabled: false,clientMutationId: effect.operationId } },() => { sent = true; });
+      let authorizationRejected = false;
+      const beforeSend = async (context: GitHubBeforeSendContext) => {
+        try { await authorize(context); context.assertActive(); }
+        catch (error) { if (!context.signal.aborted) authorizationRejected = true; throw error; }
+      };
+      const response = await scope.query(mutation,{ input: { ownerId: remote.ownerId,name: remote.name,visibility: remote.visibility.toUpperCase(),
+        description: `${effect.expectedIdentity.marker} Factory-Operation:${effect.operationId}`,hasIssuesEnabled: true,hasWikiEnabled: false,clientMutationId: effect.operationId } },
+        () => { sent = true; },1,{ ...options,beforeSend });
+      if (authorizationRejected || (!sent && response.diagnostics.some(item => item.code === 'QUERY_LIMIT' || item.code === 'QUERY_FAILED')))
+        return denied('CREATION_AUTHORITY_CHANGED');
       if (response.state !== 'complete' || !response.data) return { ...denied('CREATION_REMOTE_UNCONFIRMED',sent ? 'unknown' : 'failed_known'),retryAtMs: response.retryAtMs };
       try {
         const payload = object(response.data.createRepository); const node = object(payload.repository);
         if (payload.clientMutationId !== effect.operationId || !Value.Check(GitHubId,node.id)) return denied('CREATION_REMOTE_RESPONSE_INVALID','unknown');
-        return await confirm(effect,accountId,node.id);
+        return await confirm(effect,accountId,node.id,scope,options);
       } catch { return denied('CREATION_REMOTE_RESPONSE_INVALID','unknown'); }
     },
   };

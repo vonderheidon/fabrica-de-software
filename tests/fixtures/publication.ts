@@ -1,12 +1,42 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { vi } from 'vitest';
-import type { GitHubMutationResult, ImplementerResult, ReviewerResult, ProjectConfiguration } from '#contracts';
+import { vi, type Mock } from 'vitest';
+import type { GitHubMutationResult, GitHubQueryResult, ImplementerResult, IssueContext, ProjectItem, ReviewerResult, ProjectConfiguration } from '#contracts';
 import { attemptFixture, complete } from './attempt.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
-import type { GitHubEffectRequest } from '../../apps/controller/src/modules/github/index.js';
+import type { GitHub, GitHubBeforeSendContext, GitHubEffectRequest, IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext } from '../../apps/controller/src/modules/github/index.js';
 import type { Workspaces } from '../../apps/controller/src/modules/workspaces/index.js';
+
+type PurposeIssueContext = IssueAuthorityContext | IssueCommentConfirmationContext | IssueStatusConfirmationContext | IssueContext | ProjectItem;
+type Purpose = 'queue' | 'authority' | 'comment_confirmation' | 'status_confirmation';
+type PurposeIssueReader = Mock<(id: string, purpose: Purpose) => Promise<GitHubQueryResult<PurposeIssueContext>>>;
+
+export function withPublicationIssueProjections<T extends Pick<GitHub, 'getIssueContextById'>>(github: T) {
+  const issueReader: PurposeIssueReader = vi.fn(async (id: string, purpose: Purpose): Promise<GitHubQueryResult<PurposeIssueContext>> => {
+    const response = await github.getIssueContextById(id);
+    const issue = response.state === 'complete' && response.data && 'body' in response.data ? response.data : null;
+    if (!issue) return { ...response, data: null };
+    if (purpose === 'authority') {
+      return { ...response, data: { id: issue.id, state: issue.state, repository: issue.repository, assignees: issue.assignees, blockers: issue.blockers, memberships: issue.memberships } };
+    }
+    if (purpose === 'comment_confirmation') {
+      return { ...response, data: { id: issue.id, repository: { id: issue.repository.id }, comments: issue.comments } };
+    }
+    if (purpose === 'status_confirmation') {
+      return { ...response, data: { id: issue.id, repository: { id: issue.repository.id }, memberships: issue.memberships } };
+    }
+    return response;
+  });
+  function getIssueContextById(id: string, options: { purpose: 'authority' }): Promise<GitHubQueryResult<IssueAuthorityContext>>;
+  function getIssueContextById(id: string, options: { purpose: 'comment_confirmation' }): Promise<GitHubQueryResult<IssueCommentConfirmationContext>>;
+  function getIssueContextById(id: string, options: { purpose: 'status_confirmation' }): Promise<GitHubQueryResult<IssueStatusConfirmationContext>>;
+  function getIssueContextById(id: string, options?: { purpose?: 'queue' }): Promise<GitHubQueryResult<IssueContext | ProjectItem>>;
+  function getIssueContextById(id: string, options?: { purpose?: 'queue' | 'authority' | 'comment_confirmation' | 'status_confirmation' }): Promise<GitHubQueryResult<PurposeIssueContext>> {
+    return issueReader(id, options?.purpose ?? 'queue');
+  }
+  return { github: { ...github, getIssueContextById }, issueReader };
+}
 
 export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
   options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean } = {}) {
@@ -21,6 +51,13 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
   const verifyRetainedDelivery = vi.fn(async () => {});
   const folderCapability = vi.fn(async () => ({ available: false, reason: 'NATIVE_OPEN_UNAVAILABLE' }));
   const reconcileLocalCommit = vi.fn<Workspaces['reconcileLocalCommit']>(async () => ({ state: 'unknown', receipt: null, reason: 'COMMIT_NOT_OBSERVED' }));
+  async function authorizeMutation(authorize: GitHubEffectRequest['authorize']): Promise<void> {
+    if (!authorize) return;
+    const signal = new AbortController().signal;
+    const context: GitHubBeforeSendContext = { signal, deadlineMonotonicMs: Number.MAX_SAFE_INTEGER,
+      assertActive() { if (signal.aborted) throw new Error('AUTHORIZATION_REVOKED'); } };
+    await authorize(context);
+  }
   const createLocalCommit = vi.fn<Workspaces['createLocalCommit']>(async (delivery,effect,authorize) => {
     await authorize();
     const deliveryIdentity = effect.expectedIdentity.targetOperationId ? { targetOperationId:effect.expectedIdentity.targetOperationId,
@@ -33,7 +70,7 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
   });
   const remotePRs = new Map<string,GitHubMutationResult>();
   const mutateEffect = vi.fn(async ({ effect, body, authorize }: GitHubEffectRequest): Promise<GitHubMutationResult> => {
-    await authorize?.();
+    await authorizeMutation(authorize);
     const identity = effect.expectedIdentity;
     if (effect.kind === 'project_status') {
       f.issue.memberships[0]!.statusValues[0]!.optionId = identity.optionId!;
@@ -47,8 +84,9 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
     f.issue.comments.push({ id, url, body: body!, author: { id: 'ACCOUNT_test', login: 'test-user' }, updatedAt: '2026-10-17T00:00:00Z' });
     return { state: 'confirmed', receipt: { id, url }, reason: null, retryAtMs: null };
   });
-  const github = { ...f.github, getRepository: vi.fn(async () => complete(structuredClone(f.issue.repository))), mutateEffect,
-    reconcilePullRequest: vi.fn<import('../../apps/controller/src/modules/github/index.js').GitHub['reconcilePullRequest']>(async e => remotePRs.get(e.operationId) ?? { state: 'unknown',receipt: null,reason: 'PR_NOT_OBSERVED',retryAtMs: null }) };
+  const projected = withPublicationIssueProjections({ ...f.github, getRepository: vi.fn(async () => complete(structuredClone(f.issue.repository))), mutateEffect,
+    reconcilePullRequest: vi.fn<GitHub['reconcilePullRequest']>(async e => remotePRs.get(e.operationId) ?? { state: 'unknown',receipt: null,reason: 'PR_NOT_OBSERVED',retryAtMs: null }) });
+  const { github, issueReader } = projected;
   const workspaces = { ...f.workspaces, verifyRetainedDelivery, folderCapability,
     importIntegrationBase: vi.fn<Workspaces['importIntegrationBase']>(async () => {}),
     inspectIntegrationTarget: vi.fn<Workspaces['inspectIntegrationTarget']>(async (localPath,task) => ({ localPath,baseSha:task.baseSha,rootIdentity:'controlled-target' })),
@@ -97,7 +135,7 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
     const accepted = f.persistence.acceptResult({ binding: passage.binding, result, sha256: digest(result) });
     await pipeline.drain(); return accepted;
   }
-  return { ...f, pipeline, workspaces, github, mutateEffect, verifyRetainedDelivery, folderCapability, attemptId, status, context, implement, approve,
+  return { ...f, pipeline, workspaces, github, issueReader, mutateEffect, verifyRetainedDelivery, folderCapability, attemptId, status, context, implement, approve,
     async close() { await pipeline.close(); await f.close(); } };
 }
 export type PublicationFixture = Awaited<ReturnType<typeof publicationFixture>>;

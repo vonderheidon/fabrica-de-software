@@ -82,7 +82,7 @@ it.each(['cancel', 'close', 'assignee', 'status', 'partial'] as const)('does not
     if (change === 'close') await f.pipeline.close();
     if (change === 'assignee') f.issue.assignees = [];
     if (change === 'status') f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
-    if (change === 'partial') vi.mocked(f.github.getIssueContextById).mockResolvedValue({ state: 'partial', data: f.issue, diagnostics: [], retryAtMs: null });
+    if (change === 'partial') f.issueReader.mockResolvedValue({ state: 'partial', data: f.issue, diagnostics: [], retryAtMs: null });
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 16000);
     await f.pipeline.tick(); await f.pipeline.drain();
     expect(f.execution.startPassage).toHaveBeenCalledTimes(1);

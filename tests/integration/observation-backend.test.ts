@@ -229,7 +229,7 @@ it('separates elapsed HTTP critical path from accumulated concurrent dependency 
   expect(meter.report()).toMatchObject({ httpMs: [10], dependencyWorkMs: 20, dependencyWindowMs: 10, peak: 2 });
 });
 
-it('measures three issue workers per observation and six across overlapping authority reads', async () => {
+it('caps six issue workers from overlapping observations at three shared sends', async () => {
   const meter = new BackendMeasurement();
   const gate = deferred(); const reached = deferred();
   let blocked = 0;
@@ -239,13 +239,15 @@ it('measures three issue workers per observation and six across overlapping auth
     try {
       await reached.promise;
       expect(meter.report('first', 'logical', 'issue').peak).toBe(3);
-      expect(meter.report('second', 'logical', 'issue').peak).toBe(3);
-      expect(meter.report(undefined, 'logical', 'issue').peak).toBe(6);
+      expect(meter.report('second', 'logical', 'issue').peak).toBe(0);
+      expect(meter.report(undefined, 'logical', 'issue').peak).toBe(3);
       expect(meter.report().counts.pending).toBeGreaterThan(0);
     } finally { gate.resolve(); await Promise.all([first, second]); }
+    expect(meter.report('second', 'logical', 'issue').peak).toBe(3);
+    expect(meter.report(undefined, 'logical', 'issue').peak).toBe(6);
     expect(meter.report().counts.pending).toBe(0);
   }, { meter, wire: true, controls: { afterSend: async operation => {
-    if (operation === 'QueueIssue') { blocked++; if (blocked === 6) reached.resolve(); await gate.promise; }
+    if (operation === 'QueueIssue') { blocked++; if (blocked === 3) reached.resolve(); await gate.promise; }
   } } });
   await task;
 });
