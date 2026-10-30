@@ -1,5 +1,5 @@
 import { Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import { Value, ValueErrorType } from '@sinclair/typebox/value';
 import { ExecutionQuestion, OperationId, PassageRequest, type PassageResult, type PassageRole } from '#contracts';
 import type { AnswerRecord, Execution, ExecutionOptions, PassageHandle, PassageRecord, StopReceipt } from '../../index.js';
 import { ExecutionError, type ExecutionCode } from '../../errors.js';
@@ -21,6 +21,10 @@ const Lost = Type.Object({ type: Type.Literal('tracking-lost') }, { additionalPr
 type Native = ReturnType<typeof createNative>;
 const profileValue = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
 export interface AdapterDependencies { native?: Native; channel?: ChannelFactory; bootstrap?: BootstrapWriter; runCli?: typeof runCli }
+interface ResultValidationIssue { path: string; rule: string }
+class ResultValidationError extends ExecutionError {
+  constructor(readonly issues: readonly ResultValidationIssue[]) { super('RESULT_INVALID'); }
+}
 interface LivePassage {
   handoff?: boolean;
   idle?: { resolve: () => void; reject: () => void } | undefined;
@@ -37,18 +41,52 @@ const codeOf = (error: unknown, fallback: ExecutionCode): ExecutionCode => error
 
 function validateResult(request: PassageRequest, payload: unknown): PassageResult {
   const schema = resultSchemaFor(request.binding.role);
-  if (!Value.Check(schema, payload)) throw new ExecutionError('RESULT_INVALID');
+  if (!Value.Check(schema, payload)) {
+    const issues: ResultValidationIssue[] = [];
+    for (const error of Value.Errors(schema, payload)) {
+      if (issues.length === 8) break;
+      issues.push({ path: error.path || '/', rule: ValueErrorType[error.type] ?? 'SchemaValidation' });
+    }
+    throw new ResultValidationError(issues.length ? issues : [{ path: '/', rule: 'SchemaValidation' }]);
+  }
+  const issues: ResultValidationIssue[] = [];
   const ids = payload.criteria.map(c => c.criterionId);
-  if (new Set(ids).size !== ids.length || canonical([...ids].sort()) !== canonical([...request.criterionIds].sort())) throw new ExecutionError('RESULT_INVALID');
+  if (new Set(ids).size !== ids.length) issues.push({ path: '/criteria', rule: 'criterion_ids_must_be_unique' });
+  if (canonical([...ids].sort()) !== canonical([...request.criterionIds].sort())) issues.push({ path: '/criteria', rule: 'must_match_captured_criterion_ids' });
   if ('findings' in payload) {
-    if (payload.findings.some(f => f.priority === undefined)) throw new ExecutionError('RESULT_INVALID');
+    payload.findings.forEach((finding, index) => {
+      if (finding.priority === undefined) issues.push({ path: `/findings/${index}/priority`, rule: 'required' });
+    });
     const keys = payload.findings.map(f => f.key);
     const resolutions = payload.resolutions.map(f => f.findingKey);
-    if (new Set(keys).size !== keys.length || new Set(resolutions).size !== resolutions.length ||
-      canonical([...resolutions].sort()) !== canonical([...request.previousFindingKeys].sort()) ||
-      payload.findings.some(f => f.criterionIds.some(id => !request.criterionIds.includes(id))) ||
-      (payload.verdict === 'approved' && (payload.criteria.some(c => c.verdict !== 'passed') || payload.findings.some(f => f.blocking) || payload.resolutions.some(f => f.verdict !== 'resolved' && (request.previousBlockingFindingKeys ?? request.previousFindingKeys).includes(f.findingKey))))) throw new ExecutionError('RESULT_INVALID');
-  } else if (new Set(payload.checks.map(c => c.id)).size !== payload.checks.length) throw new ExecutionError('RESULT_INVALID');
+    if (new Set(keys).size !== keys.length) issues.push({ path: '/findings', rule: 'finding_keys_must_be_unique' });
+    if (new Set(resolutions).size !== resolutions.length) issues.push({ path: '/resolutions', rule: 'finding_keys_must_be_unique' });
+    if (canonical([...resolutions].sort()) !== canonical([...request.previousFindingKeys].sort())) {
+      issues.push({ path: '/resolutions', rule: 'must_match_prior_finding_keys' });
+    }
+    payload.findings.forEach((finding, index) => {
+      if (finding.criterionIds.some(id => !request.criterionIds.includes(id))) {
+        issues.push({ path: `/findings/${index}/criterionIds`, rule: 'must_use_captured_criterion_ids' });
+      }
+    });
+    if (payload.verdict === 'approved') {
+      payload.criteria.forEach((criterion, index) => {
+        if (criterion.verdict !== 'passed') issues.push({ path: `/criteria/${index}/verdict`, rule: 'must_be_passed_for_approval' });
+      });
+      payload.findings.forEach((finding, index) => {
+        if (finding.blocking) issues.push({ path: `/findings/${index}/blocking`, rule: 'must_not_be_blocking_for_approval' });
+      });
+      const blockingKeys = request.previousBlockingFindingKeys ?? request.previousFindingKeys;
+      payload.resolutions.forEach((resolution, index) => {
+        if (resolution.verdict !== 'resolved' && blockingKeys.includes(resolution.findingKey)) {
+          issues.push({ path: `/resolutions/${index}/verdict`, rule: 'prior_blocking_findings_must_be_resolved' });
+        }
+      });
+    }
+  } else if (new Set(payload.checks.map(c => c.id)).size !== payload.checks.length) {
+    issues.push({ path: '/checks', rule: 'check_ids_must_be_unique' });
+  }
+  if (issues.length) throw new ResultValidationError(issues.slice(0, 8));
   return payload;
 }
 
@@ -249,7 +287,13 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
               const question = store.raiseQuestion({ binding: entry.request.binding, question: frame.payload, sha256: digest(frame.payload) });
               reply = { type: 'reply', id: frame.id, ok: true, questionId: question.questionId };
             }
-          } catch (error) { reply = { type: 'reply', id: frame.id, ok: false, code: codeOf(error, 'STORAGE_FAILED') }; }
+          } catch (error) {
+            const validationIssues = error instanceof ResultValidationError ? error.issues :
+              frame.tool === 'execution_complete' && error instanceof ExecutionError && error.code === 'RESULT_INVALID'
+                ? [{ path: '/', rule: 'contextual_result_validation' }] : undefined;
+            reply = { type: 'reply', id: frame.id, ok: false, code: codeOf(error, 'STORAGE_FAILED'),
+              ...(validationIssues ? { validationIssues } : {}) };
+          }
           await entry.channel?.send(reply);
         },
         lost: (code) => { interrupt(entry, code); },

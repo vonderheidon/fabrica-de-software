@@ -112,7 +112,18 @@ export default function executionExtension(api: ExtensionApi): void {
       pending.set(id, { resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: () => { clearTimeout(timer); reject(new ExecutionError('CHANNEL_EOF')); } });
       void wire?.send({ type: 'call', id, tool, payload }).catch(() => { pending.get(id)?.reject(); pending.delete(id); });
     });
-    if (reply.ok !== true) return { content: [{ type: 'text', text: 'Payload recusado. Confira o schema e corrija os argumentos; a sessão continua operacional.' }], details: { accepted: false, code: typeof reply.code === 'string' ? reply.code : 'RESULT_INVALID' }, isError: true };
+    if (reply.ok !== true) {
+      const validationIssues = Array.isArray(reply.validationIssues) ? reply.validationIssues.slice(0, 8).flatMap(value => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        const issue = value as Record<string, unknown>;
+        if (typeof issue.path !== 'string' || typeof issue.rule !== 'string' || !/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(issue.rule)) return [];
+        return [{ path: issue.path.replace(/[\u0000-\u001f\u007f]/g, '?').slice(0, 256), rule: issue.rule }];
+      }) : [];
+      const diagnostic = validationIssues.length
+        ? ` Diagnóstico: ${validationIssues.map(issue => `${issue.path} (${issue.rule})`).join('; ')}.` : '';
+      return { content: [{ type: 'text', text: `Payload recusado pelo controlador.${diagnostic} Corrija os argumentos e tente novamente; a sessão continua operacional.` }],
+        details: { accepted: false, code: typeof reply.code === 'string' ? reply.code : 'RESULT_INVALID', ...(validationIssues.length ? { validationIssues } : {}) }, isError: true };
+    }
     return { content: [{ type: 'text', text: 'Recebido e persistido pela fábrica.' }], details: { accepted: true, ...(typeof reply.receiptId === 'string' ? { receiptId: reply.receiptId } : {}), ...(typeof reply.questionId === 'string' ? { questionId: reply.questionId } : {}) } };
   };
   for (const [name, schema] of [['execution_complete', launch.role.resultSchema], ['execution_question', launch.role.questionSchema]] as const) {
