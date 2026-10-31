@@ -84,11 +84,11 @@ it('keeps publication completion separate from uncertain effects', async () => {
   expect(container.textContent).not.toContain('Código no ambiente da tentativa');
 });
 
-it('shows the shared workspace and the immutable inherited attempt and content identity', async () => {
+it('omits the workspace origin notice from the attempt detail', async () => {
   await mount();
-  expect(container.textContent).toContain('Workspace compartilhado');
-  expect(container.textContent).toContain(`herdou o conteúdo da tentativa ${a.slice(0, 8)}`);
-  expect(container.textContent).toContain('dddddddd');
+  expect(container.querySelector('[aria-label="Origem do ambiente da issue"]')).toBeNull();
+  expect(container.textContent).not.toContain('Workspace compartilhado');
+  expect(container.textContent).not.toContain('herdou o conteúdo da tentativa');
 });
 
 it('omits empty destination and correction panels and hides revalidation during normal execution', async () => {

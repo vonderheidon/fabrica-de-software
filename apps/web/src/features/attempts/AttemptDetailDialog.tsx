@@ -203,14 +203,6 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attempt && <>
       <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError) || attemptRefreshing} blocked={!attempt.result && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED'} />
       <div className="attempt-detail-heading"><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
-      <div className="notice" role="status" aria-label="Origem do ambiente da issue">
-        <b>{attempt.workspace_lineage.predecessor_attempt_id ? 'Workspace compartilhado' : 'Ambiente da issue'}</b>
-        {attempt.workspace_lineage.initial_state.kind === 'inherited_attempt'
-          ? <p>Esta tentativa herdou o conteúdo da tentativa {attempt.workspace_lineage.initial_state.source_attempt_id.slice(0, 8)} · {attempt.workspace_lineage.initial_state.content_identity.slice(0, 8)}.</p>
-          : attempt.workspace_lineage.initial_state.kind === 'pending_inherited_attempt'
-            ? <p>A origem herdada da tentativa {attempt.workspace_lineage.initial_state.source_attempt_id.slice(0, 8)} ainda não foi confirmada. Consulte o estado antes de agir sobre versões anteriores.</p>
-            : <p>Conteúdo inicial registrado · {attempt.workspace_lineage.initial_state.content_identity.slice(0, 8)}.</p>}
-      </div>
       {delivery && <PublicationDialog key={delivery.delivery.id}
         projectId={attempt.project_id}
         attemptId={attemptId}
