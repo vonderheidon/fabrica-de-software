@@ -3,6 +3,12 @@ import { diagnosticCopyFor, isKnownOperatorEvent, isPortugueseOperatorText, oper
 import { fieldGuidanceFor } from '../features/projects/FieldHelp.js';
 
 describe('operator language', () => {
+  it('explains the exhausted integration limit instead of hiding it behind a generic failure', () => {
+    const message = operatorErrorMessage('INTEGRATION_LIMIT','Publication or projection remains pending.');
+    expect(message).toContain('limite de correções');
+    expect(message).toContain('versão aprovada foi preservada');
+    expect(message).toContain('nova tentativa');
+  });
   it('keeps a concrete prerequisite message instead of claiming data changed', () => {
     expect(operatorErrorMessage('ISSUE_OBJECTIVE_REQUIRED', 'O objetivo da issue está ausente ou não foi reconhecido.', 409)).toBe('O objetivo da issue está ausente ou não foi reconhecido.');
     expect(operatorErrorMessage('ISSUE_CLOSED', 'Issue is closed.', 409)).toBe('Issue fechada');

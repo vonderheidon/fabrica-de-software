@@ -4,7 +4,7 @@ import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { CompletePublication, ReconcilePublication, AuthorizeUpgrade, OperationId, type EffectView, type PublicationSummary } from '#contracts';
 import { attemptEvent, readAttempt, readCapture } from './attempts.js';
-import { readDelivery } from './deliveries.js';
+import { readDelivery, publicationBaseSha } from './deliveries.js';
 import { configurationETag, digest, guarded, readConfiguration } from './configuration-reads.js';
 import { readSettings } from './settings.js';
 import { OperationError, readOperation, type StoredOperation } from './operations.js';
@@ -33,7 +33,7 @@ export function publicationSnapshot(db: Database.Database, attemptId: string, de
   const effects = effectsFor(db, attemptId);
   const authority = db.prepare<[string], { reason: string | null; expected_status_id: string | null; observed_status_id: string | null; observed_at_ms: number }>('SELECT reason,expected_status_id,observed_status_id,observed_at_ms FROM attempt_authority WHERE attempt_id=?').get(attemptId) ?? null;
   const stamp = digest([status.id,status.revision,configurationETag(configuration),delivery?.id,delivery?.revision,effects.map(e => [e.operationId,e.revision])]);
-  return { status, capture, settings, configuration, delivery, review, effects, authority, stamp, mode: authorizedMode(db,attemptId) };
+  return { status, capture, settings, configuration, delivery, publicationBaseSha: delivery ? publicationBaseSha(db,delivery.id) : null, review, effects, authority, stamp, mode: authorizedMode(db,attemptId) };
 }
 /** Local eligibility uses scalar projections; polling never deserializes the captured task or evidence. */
 function publicationBlockReason(db: Database.Database, attemptId: string, deliveryId: string, explicit: boolean): string | null {

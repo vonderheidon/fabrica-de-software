@@ -5,7 +5,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, DeliveryTarget, type DeliveryTarget as SealedTarget, EffectView, type EffectReceipt } from '#contracts';
 import type { GitHub } from '../github/index.js';
-import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory } from './capture.js';
+import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
 import type { GitReader } from './git.js';
 import { retainedRepositoryOwner, retainedRepositoryPath, requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 import { githubReference } from './inspect.js';
@@ -202,8 +202,8 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const c = await localContext(delivery,effect,target,false); const observed = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       if (observed.exitCode === 1) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
       const sha = observed.stdout.trim();
-      if (target.local_identity.branch_kind === 'existing' && sha === delivery.baseSha) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
-      if (!oid.test(sha) || (await c.commitMessage(sha)).trimEnd() !== c.message.trimEnd() || await c.tree(sha) !== delivery.contentIdentity || await c.parent(sha) !== delivery.baseSha) targetError('COMMIT_IDENTITY_CONFLICT');
+      if (target.local_identity.branch_kind === 'existing' && sha === target.local_identity.base_sha) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
+      if (!oid.test(sha) || (await c.commitMessage(sha)).trimEnd() !== c.message.trimEnd() || await c.tree(sha) !== delivery.contentIdentity || await c.parent(sha) !== target.local_identity.base_sha) targetError('COMMIT_IDENTITY_CONFLICT');
       await transferBranch(c,target,sha);
       await verifyWorkingState(c,target);
       return { state:'confirmed',receipt: receipt(delivery,effect,target,sha),reason:null };
@@ -214,12 +214,12 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         effect.kind !== 'local_commit' || effect.expectedIdentity.targetOperationId !== target.operation_id ||
         effect.expectedIdentity.branchRef !== target.branch_ref || effect.expectedIdentity.repositoryId !== target.repository_id ||
         effect.expectedIdentity.taskType !== target.task_type || effect.expectedIdentity.taskDescription !== target.task_description ||
-        delivery.attemptId !== target.attempt_id || delivery.id !== target.delivery_id || delivery.baseSha !== target.base_sha ||
+        delivery.attemptId !== target.attempt_id || delivery.id !== target.delivery_id || delivery.baseSha !== target.base_sha || effect.expectedIdentity.parentSha !== target.local_identity.base_sha ||
         delivery.gitRef !== target.approved_ref || delivery.contentIdentity !== target.content_identity || !dataDirectory || !isolated) targetError('COMMIT_IDENTITY_INVALID');
     const expected = await observe(target.local_path,{ attemptId:delivery.attemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:delivery.repositoryRelative,
       issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,
       repositoryUrl:`https://github.com/${effect.expectedIdentity.repositoryOwner!}/${effect.expectedIdentity.repositoryName!}`,
-      baseBranch:target.base_branch,baseSha:target.base_sha,sourceKind:target.local_identity.source_kind },{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },compareWorkingState && target.local_identity.branch_kind !== 'existing');
+      baseBranch:target.base_branch,baseSha:target.local_identity.base_sha,sourceKind:target.local_identity.source_kind },{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },compareWorkingState && target.local_identity.branch_kind !== 'existing');
     if (expected.rootIdentity !== target.local_identity.root_identity || expected.gitDirectoryIdentity !== target.local_identity.git_directory_identity || expected.remoteName !== target.local_identity.remote_name || expected.remoteHash !== target.local_identity.remote_hash ||
         compareWorkingState && (expected.head !== target.local_identity.observed_head || expected.observedBranchRef !== target.local_identity.observed_branch_ref ||
           expected.workingStateHash !== target.local_identity.working_state_hash || expected.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
@@ -228,6 +228,11 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     const retained = retainedRepositoryPath(data, delivery.attemptId, delivery.repositoryRelative);
     await plainDirectory(retained,canonicalize); await noBorrowedObjects(retained);
     if ((await metadataBytes(resolve(retained,'factory-owner'),64)).toString('utf8') !== retainedRepositoryOwner(delivery.attemptId,delivery.repositoryRelative)) targetError('RETAINED_REPOSITORY_INVALID');
+    await verifyRetained(async args => {
+      const result = await isolated!(retained,[`--git-dir=${retained}`,...args]);
+      if (result.exitCode !== 0) targetError('DELIVERY_INTEGRITY_FAILED');
+      return result.stdout;
+    },delivery);
     const run = async (args: string[],input?: string,commitTime?: number) => {
       const result = await isolated!(repository,args,{ ...(input === undefined ? {} : { input }),isolatedConfig: true,...(commitTime ? { commitTime } : {}) });
       if (result.exitCode !== 0) targetError('DELIVERY_TARGET_GIT_FAILED');
@@ -246,8 +251,8 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       if (worktrees.split(/\r?\n/u).includes(`branch ${target.branch_ref}`)) targetError('DELIVERY_BRANCH_IN_USE');
     }
     const observed = await observe(target.local_path,{ attemptId:c.sourceAttemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:c.repositoryRelative,
-      issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,repositoryUrl:c.repositoryUrl,baseBranch:target.base_branch,baseSha:target.base_sha,sourceKind:target.local_identity.source_kind },
-      { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },target.local_identity.branch_kind !== 'existing');
+      issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,repositoryUrl:c.repositoryUrl,baseBranch:target.base_branch,baseSha:target.local_identity.base_sha,sourceKind:target.local_identity.source_kind },
+      { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },target.local_identity.branch_kind !== 'existing');
     if (observed.workingStateHash !== target.local_identity.working_state_hash || observed.indexHash !== target.local_identity.index_hash) targetError('DELIVERY_CHECKOUT_CHANGED');
   }
   async function transferBranch(c: Awaited<ReturnType<typeof localContext>>,target: SealedTarget,sha: string) {
@@ -264,7 +269,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     }
   }
   function receipt(delivery: Delivery,effect: EffectView,target: SealedTarget,sha: string): EffectReceipt {
-    return { id:sha,contentIdentity:delivery.contentIdentity!,parentSha:delivery.baseSha,branchRef:target.branch_ref,operationId:effect.operationId,
+    return { id:sha,contentIdentity:delivery.contentIdentity!,parentSha:target.local_identity.base_sha,branchRef:target.branch_ref,operationId:effect.operationId,
       targetOperationId:target.operation_id,taskType:target.task_type,taskDescription:target.task_description };
   }
   async function createLocalCommit(delivery: Delivery,effect: EffectView,target: SealedTarget,authorize: () => Promise<void>): Promise<TargetCommitResult> {
@@ -274,21 +279,22 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const c = await localContext(delivery,effect,target);
       const current = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       const existing = target.local_identity.branch_kind === 'existing';
-      if (current.exitCode === 0 && (!existing || current.stdout.trim() !== delivery.baseSha)) return reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
-      if (existing && (current.exitCode !== 0 || current.stdout.trim() !== delivery.baseSha)) targetError('DELIVERY_BASE_CHANGED');
+      if (current.exitCode === 0 && (!existing || current.stdout.trim() !== target.local_identity.base_sha)) return reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+      if (existing && (current.exitCode !== 0 || current.stdout.trim() !== target.local_identity.base_sha)) targetError('DELIVERY_BASE_CHANGED');
       if ((!existing && current.exitCode !== 1) || effect.state !== 'running') return { state:'unknown',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
       const fetch = await isolated!(c.repository,['fetch','--no-tags','--no-recurse-submodules','--',c.retained,delivery.gitRef!]);
       if (fetch.exitCode !== 0 || (await isolated!(c.repository,['rev-parse','--verify','FETCH_HEAD'])).stdout.trim() !== delivery.commitSha) targetError('DELIVERY_INTEGRITY_FAILED');
       if ((await isolated!(c.repository,['rev-parse','--verify',`${delivery.commitSha}^{tree}`])).stdout.trim() !== target.content_identity) targetError('DELIVERY_INTEGRITY_FAILED');
       const baseTree = (await isolated!(c.repository,['rev-parse','--verify',`${delivery.baseSha}^{tree}`])).stdout.trim();
       if ((baseTree !== delivery.contentIdentity) !== delivery.hasDelta) targetError('DELIVERY_INTEGRITY_FAILED');
-      if (baseTree === delivery.contentIdentity) return { state:'not_applicable',receipt:null,reason:'APPROVED_NO_DELTA' };
+      const publicationBaseTree = (await isolated!(c.repository,['rev-parse','--verify',`${target.local_identity.base_sha}^{tree}`])).stdout.trim();
+      if (publicationBaseTree === delivery.contentIdentity) return { state:'not_applicable',receipt:null,reason:'APPROVED_NO_DELTA' };
       await verifyWorkingState(c,target);
       await authorize(); mutationStarted = true;
-      const created = await isolated!(c.repository,['-c','user.name=Nova Fábrica','-c','user.email=fabrica@localhost','commit-tree',delivery.contentIdentity!,'-p',delivery.baseSha],{input:c.message,commitTime:c.commitTime,isolatedConfig:true});
+      const created = await isolated!(c.repository,['-c','user.name=Nova Fábrica','-c','user.email=fabrica@localhost','commit-tree',delivery.contentIdentity!,'-p',target.local_identity.base_sha],{input:c.message,commitTime:c.commitTime,isolatedConfig:true});
       const sha = created.stdout.trim();
       if (created.exitCode !== 0 || !oid.test(sha)) targetError('COMMIT_IDENTITY_INVALID');
-      const update = await isolated!(c.repository,['update-ref','--no-deref',target.branch_ref,sha,existing ? delivery.baseSha : '0'.repeat(sha.length)]);
+      const update = await isolated!(c.repository,['update-ref','--no-deref',target.branch_ref,sha,existing ? target.local_identity.base_sha : '0'.repeat(sha.length)]);
       if (update.exitCode !== 0) {
         const reconciled = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
         if (reconciled.state === 'confirmed') return reconciled;
@@ -300,7 +306,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     } catch (e) { return { state:mutationStarted ? 'unknown' : 'failed_known',receipt:null,reason:e instanceof CaptureError ? e.code : 'DELIVERY_TARGET_UNAVAILABLE' }; }
   }
   async function verifyDeliveryTarget(target: SealedTarget,task: DeliveryTaskInput): Promise<void> {
-    const found = await observe(target.local_path,task,{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },target.local_identity.branch_kind !== 'existing');
+    const found = await observe(target.local_path,task,{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },target.local_identity.branch_kind !== 'existing');
     if (found.rootIdentity !== target.local_identity.root_identity || found.gitDirectoryIdentity !== target.local_identity.git_directory_identity ||
         found.remoteHash !== target.local_identity.remote_hash || found.remoteName !== target.local_identity.remote_name ||
         found.head !== target.local_identity.observed_head || found.observedBranchRef !== target.local_identity.observed_branch_ref ||

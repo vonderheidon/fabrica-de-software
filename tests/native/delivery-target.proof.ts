@@ -25,7 +25,8 @@ function git(cwd: string,...args: string[]) {
   return result.stdout.trim();
 }
 
-it.each([[false, 'automatic'], [true, 'automatic'], [true, 'new'], [true, 'existing']] as const)('commits and reconciles with project storage=%s and branch=%s preserving checkout state', async (projectScoped, branchKind) => {
+it.each([[false, 'automatic', false, false], [true, 'automatic', false, false], [true, 'new', false, false], [true, 'existing', false, false],
+  [true, 'automatic', true, false], [true, 'existing', true, false], [true, 'automatic', true, true]] as const)('commits and reconciles with project storage=%s, branch=%s, inherited=%s, inherited only=%s preserving checkout state', async (projectScoped, branchKind, inherited, inheritedOnly) => {
   const root = await mkdtemp(join(process.cwd(),'.cache','delivery-target-git-')); roots.push(root);
   const bare = join(root,'origin.git'); const seed = join(root,'seed'); const targetRoot = join(root,'clone ç');
   const data = join(root,'factory-data'); const attemptRoot = projectScoped ? join(data,'projects','p','v1','managed') : data;
@@ -42,8 +43,18 @@ it.each([[false, 'automatic'], [true, 'automatic'], [true, 'new'], [true, 'exist
   const approvedRef = 'refs/factory/deliveries/' + deliveryId;
   const retainedRepo = join(retained,attemptId + '.git'); git(root,'clone','--bare',bare,retainedRepo);
   await writeFile(join(retainedRepo,'factory-owner'),attemptId);
-  git(seed,'checkout','-b','approved'); await writeFile(join(seed,'approved.txt'),'approved only\n');
-  git(seed,'add','--','approved.txt'); git(seed,'commit','-m','approved');
+  git(seed,'checkout','-b','approved');
+  if (inherited) {
+    await writeFile(join(seed,'inherited.txt'),'preserved from the interrupted attempt\n');
+    git(seed,'add','--','inherited.txt'); git(seed,'commit','-m','inherited workspace snapshot');
+  }
+  const captureBaseSha = git(seed,'rev-parse','HEAD');
+  if (inheritedOnly) {
+    git(seed,'commit','--allow-empty','-m','approved inherited content');
+  } else {
+    await writeFile(join(seed,'approved.txt'),'approved only\n');
+    git(seed,'add','--','approved.txt'); git(seed,'commit','-m','approved');
+  }
   const commitSha = git(seed,'rev-parse','HEAD'); const contentIdentity = git(seed,'rev-parse','HEAD^{tree}');
   git(seed,'push','origin',commitSha + ':' + approvedRef);
   git(retainedRepo,'fetch',bare,approvedRef + ':' + approvedRef);
@@ -83,8 +94,8 @@ it.each([[false, 'automatic'], [true, 'automatic'], [true, 'new'], [true, 'exist
   };
   const resolveAttemptRoot = vi.fn(async (id: string) => { expect(id).toBe(attemptId); return attemptRoot; });
   const workspaces = createDeliveryTargetWorkspace(github,data,port,undefined,resolveAttemptRoot);
-  const delivery: Delivery = { id:deliveryId,attemptId,producerPassageId:passageId,round:1,baseSha,captureState:'captured',
-    gitRef:approvedRef,repositoryRelative:'git/' + attemptId + '.git',contentIdentity,commitSha,hasDelta:true,diagnostic:null,capturedAtMs:1,revision:1,warnings:[] };
+  const delivery: Delivery = { id:deliveryId,attemptId,producerPassageId:passageId,round:1,baseSha:captureBaseSha,captureState:'captured',
+    gitRef:approvedRef,repositoryRelative:'git/' + attemptId + '.git',contentIdentity,commitSha,hasDelta:!inheritedOnly,diagnostic:null,capturedAtMs:1,revision:1,warnings:[] };
   const task = { attemptId,approvedRef,contentIdentity,repositoryRelative:delivery.repositoryRelative,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha, ...(branchKind === 'automatic' ? {} : { sourceKind: 'local' as const, deliveryBranch: { kind:branchKind, name:branchKind === 'existing' ? 'release' : 'custom/result' } }) };
   const plan = await workspaces.inspectDeliveryTarget(targetRoot,task,{ approvedRef,contentIdentity,baseSha });
   if (branchKind === 'existing') {
@@ -97,7 +108,7 @@ it.each([[false, 'automatic'], [true, 'automatic'], [true, 'new'], [true, 'exist
   expect(plan.branch_ref).toBe(branchKind === 'automatic' ? 'refs/heads/fix/17-corrigir-acesso-c-e-unicode-' + attemptId.replaceAll('-','').slice(0,8) : branchKind === 'existing' ? 'refs/heads/release' : 'refs/heads/custom/result');
   const target = { operation_id:targetOperationId,selection_operation_id:null,delivery_id:deliveryId,attempt_id:attemptId,repository_id:repository.id,
     local_path:plan.local_path,local_identity:plan.local_identity,branch_ref:plan.branch_ref,task_type:plan.task_type,task_description:plan.task_description,
-    issue_number:17,base_branch:'main',base_sha:baseSha,approved_ref:approvedRef,content_identity:contentIdentity,format_version:1 as const,created_at_ms:1 };
+    issue_number:17,base_branch:'main',base_sha:captureBaseSha,approved_ref:approvedRef,content_identity:contentIdentity,format_version:1 as const,created_at_ms:1 };
   const effect: EffectView = { operationId:randomUUID(),attemptId,creationId:null,deliveryId,kind:'local_commit',scopeKey:deliveryId,
     state:'running',expectedIdentity:{ repositoryId:repository.id,issueId:randomUUID(),issueNumber:17,contentIdentity,parentSha:baseSha,branchRef:plan.branch_ref,
       commitTime:1_798_000_000,targetOperationId,taskType:plan.task_type,taskDescription:plan.task_description,repositoryOwner:'org',repositoryName:'repo',baseBranch:'main' },
@@ -120,6 +131,8 @@ it.each([[false, 'automatic'], [true, 'automatic'], [true, 'new'], [true, 'exist
   expect(await readFile(join(targetRoot,'untracked.txt'))).toEqual(originalUntracked);
   const commit = git(targetRoot,'show','--no-patch','--format=%T%x00%P%x00%B',reconciled.receipt!.id);
   expect(commit).toContain(contentIdentity + '\0' + baseSha + '\0fix: Corrigir acesso ç e Unicode (#17)');
+  expect(git(retainedRepo,'rev-parse',approvedRef)).toBe(commitSha);
+  if (inherited) expect(git(targetRoot,'show',reconciled.receipt!.id + ':inherited.txt')).toBe('preserved from the interrupted attempt');
   expect(git(targetRoot,'rev-parse','refs/heads/fix/17-corrigir-acesso-c-e-unicode')).toBe(baseSha);
   expect(git(targetRoot,'rev-parse',plan.branch_ref)).toBe(reconciled.receipt!.id);
   expect(git(retainedRepo,'rev-parse',plan.branch_ref)).toBe(reconciled.receipt!.id);

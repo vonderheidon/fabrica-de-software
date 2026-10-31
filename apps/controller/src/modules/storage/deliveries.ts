@@ -21,6 +21,19 @@ export function deliveryBaseSha(capture: Pick<AttemptCapture, 'workspace'>, inte
   }
   return capture.workspace.comparison_base_sha;
 }
+export function publicationBaseSha(db: Database.Database, deliveryId: string): string {
+  const delivery = readDelivery(db,deliveryId);
+  const capture = readCapture(db,delivery.attemptId);
+  const integration = db.prepare<[string,number],{ baseSha:string }>(`SELECT json_extract(integration_json,'$.base_sha') AS baseSha FROM rounds
+    WHERE attempt_id=? AND round_number<=? AND integration_json IS NOT NULL ORDER BY round_number DESC LIMIT 1`).get(delivery.attemptId,delivery.round);
+  if (integration) return integration.baseSha;
+  const workspace = capture.workspace;
+  if (workspace.initial_state.kind === 'inherited_attempt') {
+    if (!workspace.inherited_base_sha || delivery.baseSha !== workspace.comparison_base_sha) throw new StorageError('OPERATION_DATA_INVALID');
+    return workspace.inherited_base_sha;
+  }
+  return delivery.baseSha;
+}
 export function createPendingDelivery(db: Database.Database, binding: PassageBinding): void {
   const capture = readCapture(db, binding.attemptId);
   const attempt = db.prepare<[string], { issue_number: number }>('SELECT issue_number FROM attempts WHERE id=?').get(binding.attemptId);

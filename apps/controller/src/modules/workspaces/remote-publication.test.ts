@@ -9,16 +9,17 @@ import type { GitReader } from './git.js';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root,{ recursive: true }); });
-async function fixture() {
+async function fixture(inherited = false) {
   await mkdir(join(process.cwd(),'.cache'),{ recursive: true }); const root = await mkdtemp(join(process.cwd(),'.cache','push ç-')); roots.push(root);
   const f = await captureFixture(root); const d = delivery(f.input,await f.capture(f.input)); const sha = 'c'.repeat(40); const commitOperationId = randomUUID();
   const branchRef = `refs/heads/factory/17/${d.attemptId}`; f.refs.set(branchRef,sha);
   const effect: EffectView = { operationId: randomUUID(),attemptId: d.attemptId,creationId: null,deliveryId: d.id,kind: 'push',scopeKey: d.id,state: 'running',authorized: true,
     expectedIdentity: { repositoryId: 'R',issueId: 'I',issueNumber: 17,repositoryOwner: 'org',repositoryName: 'repo',contentIdentity: d.contentIdentity!,parentSha: d.baseSha,commitSha: sha,commitOperationId,branchRef,baseBranch: 'main' },
     receipt: null,confirmedIdentity: null,reason: null,revision: 2,sentAtMs: 1,confirmedAtMs: null };
+  if (inherited) Object.assign(effect.expectedIdentity,{parentSha:'e'.repeat(40),targetOperationId:randomUUID(),taskType:'feat',taskDescription:'Inherited issue'});
   let remote: string | null = null; let lost = false; let config = false; let wrongParent = false;
   const git = vi.fn<GitReader>(async (cwd,args,input) => {
-    if (args.includes('show')) return { exitCode: 0,stdout: `${d.contentIdentity}\0${wrongParent ? 'f'.repeat(40) : d.baseSha}\0feat: deliver issue #17\n\nFactory-Attempt: ${d.attemptId}\nFactory-Delivery: ${d.id}\nFactory-Operation: ${commitOperationId}\n` };
+    if (args.includes('show')) return { exitCode: 0,stdout: `${d.contentIdentity}\0${wrongParent ? 'f'.repeat(40) : effect.expectedIdentity.parentSha}\0${inherited ? 'feat: Inherited issue (#17)' : 'feat: deliver issue #17'}\n\nFactory-Attempt: ${d.attemptId}\nFactory-Delivery: ${d.id}\nFactory-Operation: ${commitOperationId}\n${inherited ? `Factory-Target: ${effect.expectedIdentity.targetOperationId}\n` : ''}` };
     if (args.includes('--get-regexp')) return { exitCode: config ? 0 : 1,stdout: config ? 'url.rewrite.insteadof https://github.com/' : '' };
     if (args.includes('ls-remote')) return { exitCode: 0,stdout: remote ? `${remote}\t${branchRef}\n` : '' };
     if (args.includes('push')) { remote = sha; if (lost) throw new Error('PRIVATE_RESPONSE_LOSS'); return { exitCode: 0,stdout: '' }; }
@@ -27,6 +28,18 @@ async function fixture() {
   const publisher = createRemotePublisher(root,git,{ accountId: 'A',repositoryIds: ['R'] },async p => p, undefined, async () => root);
   return { ...f,d,effect,sha,git,publisher,remote: (sha: string | null) => { remote = sha; },lose: () => { lost = true; },config: () => { config = true; },wrongParent: () => { wrongParent = true; } };
 }
+
+it('pushes the exact sealed publication parent for inherited content and rejects a different observed parent', async () => {
+  const f = await fixture(true);
+  const authorize = vi.fn(async () => {});
+  expect(f.effect.expectedIdentity.parentSha).not.toBe(f.d.baseSha);
+  f.wrongParent();
+  expect(await f.publisher.pushApproved(f.d,f.effect,'A',authorize)).toMatchObject({state:'failed_known',reason:'PUSH_IDENTITY_INVALID'});
+  expect(authorize).not.toHaveBeenCalled();
+  const correct = await fixture(true);
+  expect(await correct.publisher.pushApproved(correct.d,correct.effect,'A',authorize)).toMatchObject({state:'confirmed'});
+  expect(authorize).toHaveBeenCalledOnce();
+});
 
 it('publishes a confirmed attempt without a static repository grant and rechecks revocation', async () => {
   const f = await fixture();

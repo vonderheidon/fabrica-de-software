@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { DeliveryTarget, type DeliveryTarget as DeliveryTargetValue } from '#contracts';
 import { readAttempt, readCapture } from './attempts.js';
-import { readDelivery } from './deliveries.js';
+import { readDelivery, publicationBaseSha } from './deliveries.js';
 import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { assertDeletionPathsAvailable } from './project-deletion-barrier.js';
 import { OperationError } from './operations.js';
@@ -28,7 +28,7 @@ export function sealDeliveryTarget(db: Database.Database, plan: DeliveryTargetPl
       FROM publication_requests p WHERE p.operation_id=? AND p.attempt_id=? AND p.delivery_id=?`).get(plan.operation_id,plan.attempt_id,plan.delivery_id);
     if (!operation || !['publication.complete','publication.authorize-upgrade'].includes(operation.kind) ||
         !['commit','pr'].includes(operation.authorized_mode) || !['accepted','running'].includes(operation.state) ||
-        capture.issue.repository.id !== plan.repository_id || delivery.baseSha !== plan.base_sha || delivery.gitRef !== plan.approved_ref ||
+        capture.issue.repository.id !== plan.repository_id || delivery.baseSha !== plan.base_sha || publicationBaseSha(db,delivery.id) !== plan.local_identity.base_sha || delivery.gitRef !== plan.approved_ref ||
         delivery.contentIdentity !== plan.content_identity || capture.issue.number !== plan.issue_number ||
         (capture.configuration.configuration.delivery_branch?.kind === 'existing' ? capture.configuration.configuration.delivery_branch.name : capture.configuration.configuration.base_branch) !== plan.base_branch) {
       throw new OperationError(409,'DELIVERY_TARGET_AUTHORIZATION_INVALID','O destino não corresponde à autorização e à versão aprovada atuais.');
@@ -37,7 +37,7 @@ export function sealDeliveryTarget(db: Database.Database, plan: DeliveryTargetPl
     if (prior) {
       const old = readDeliveryTarget(db,prior.operation_id);
       if (old.repository_id !== plan.repository_id || old.local_path.toLowerCase() !== plan.local_path.toLowerCase() ||
-          old.selection_operation_id !== plan.selection_operation_id || old.base_sha !== plan.base_sha || old.content_identity !== plan.content_identity) {
+          old.selection_operation_id !== plan.selection_operation_id || old.base_sha !== plan.base_sha || old.local_identity.base_sha !== plan.local_identity.base_sha || old.content_identity !== plan.content_identity) {
         throw new OperationError(409,'DELIVERY_TARGET_CHANGED','O destino anterior permanece selado; reconcilie-o antes de escolher outro.');
       }
       return old;

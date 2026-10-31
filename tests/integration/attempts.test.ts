@@ -228,6 +228,23 @@ describe('manual attempt composition and HTTP', () => {
     expect(retryTask.workspaceScope).toEqual(expect.stringContaining('workspace.comparison_base_sha'));
     expect(retryTask.dependencyManagement).toMatchObject({ managerSelection: expect.stringContaining('packageManager') });
   });
+  it('preserves the original repository base across multiple inherited attempts after the observed main advances', async () => {
+    const f = await fixture();
+    const first = await start(f);
+    let previousId = first.id;
+    for (let generation = 0; generation < 2; generation++) {
+      confirmTerminalStops(f,previousId);
+      f.db.prepare("UPDATE attempts SET phase='finished',result='interrupted' WHERE id=?").run(previousId);
+      f.observation.base!.sha = 'c'.repeat(40);
+      f.observation.remote!.branch!.sha = 'c'.repeat(40);
+      const command = await f.prepare(f.projectId,'icr','existing_clone',false,undefined,previousId);
+      const operation = await f.pipeline.startAttempt(command.body,command.context); await f.pipeline.drain();
+      const capture = f.storage.getAttemptCapture(operation.resource.id);
+      expect(capture.baseSha).toBe('c'.repeat(40));
+      expect(capture.workspace.inherited_base_sha).toBe('a'.repeat(40));
+      previousId = operation.resource.id;
+    }
+  });
   it('persists role sessions before occupancy and reuses only a released physical terminal with a new OMP session', async () => {
     const f = await fixture(); const first = await start(f);
     const firstHandle = { passageId: first.status.passageId };

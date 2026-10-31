@@ -60,10 +60,10 @@ function validateAttemptEffect(db: Database.Database, attemptId: string, deliver
     if (!d || identity.contentIdentity !== d.content_identity) throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','The effect must identify the approved tree.');
     if (kind === 'local_commit') {
       const target = identity.targetOperationId ? readDeliveryTarget(db,identity.targetOperationId) : null;
-      if (mode === 'icr' || identity.parentSha !== d.base_sha || identity.issueNumber !== capture.issue.number || !identity.commitTime ||
+      if (mode === 'icr' || identity.parentSha !== (target?.local_identity.base_sha ?? d.base_sha) || identity.issueNumber !== capture.issue.number || !identity.commitTime ||
           (target ? target.attempt_id !== attemptId || target.delivery_id !== deliveryId || target.repository_id !== capture.issue.repository.id ||
             target.branch_ref !== identity.branchRef || target.local_identity.branch_kind !== identity.branchKind || target.task_type !== identity.taskType || target.task_description !== identity.taskDescription ||
-            target.content_identity !== identity.contentIdentity || target.base_sha !== identity.parentSha
+            target.content_identity !== identity.contentIdentity || target.local_identity.base_sha !== identity.parentSha
             : identity.branchRef !== `refs/heads/factory/${capture.issue.number}/${attemptId}`)) {
         throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','O commit deve corresponder à versão, base e branch seladas do destino.');
       }
@@ -83,7 +83,7 @@ function validateAttemptEffect(db: Database.Database, attemptId: string, deliver
         identity.branchRef !== (target?.branch_ref ?? `refs/heads/factory/${capture.issue.number}/${attemptId}`) ||
         (target && (target.attempt_id !== attemptId || target.delivery_id !== deliveryId || target.task_type !== identity.taskType || target.task_description !== identity.taskDescription)) ||
         identity.repositoryOwner !== capture.issue.repository.owner.login || identity.repositoryName !== capture.issue.repository.name ||
-        identity.baseBranch !== capture.configuration.configuration.base_branch || identity.parentSha !== d.base_sha) {
+        identity.baseBranch !== capture.configuration.configuration.base_branch || identity.parentSha !== (target?.local_identity.base_sha ?? d.base_sha) || identity.parentSha !== priorIdentity?.parentSha) {
         throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','Remote publication requires the authorized repository, branch, base and confirmed commit.');
       }
       if (kind === 'pull_request' && !db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id=? AND kind='push' AND state IN ('confirmed','not_applicable')").get(attemptId,deliveryId)) throw new OperationError(409,'PUSH_PENDING','Confirm the exact remote ref and SHA before creating a pull request.');

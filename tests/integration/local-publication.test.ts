@@ -7,10 +7,71 @@ import { openStorage } from '../../apps/controller/src/modules/storage/index.js'
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
+import { CaptureError } from '../../apps/controller/src/modules/workspaces/index.js';
 
 const fixtures: PublicationFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 async function fixture(hasDelta = true) { const f = await publicationFixture(true,'commit',hasDelta); fixtures.push(f); return f; }
+it.each(['commit','pr'] as const)('publishes inherited approved content in %s mode on the repository base without an integration round, even at the correction limit', async mode => {
+  const f = await publicationFixture(true,mode,true,{ inheritPreviousAttempt:true,correctionLimit:0 }); fixtures.push(f);
+  await f.implement();
+  const delivery = f.storage.getDelivery(f.status().deliveryId!).delivery;
+  const capture = f.storage.getAttemptCapture(f.attemptId);
+  expect(capture.workspace).toMatchObject({ initial_state:{kind:'inherited_attempt'},comparison_base_sha:'b'.repeat(40),inherited_base_sha:'a'.repeat(40) });
+  expect(delivery.baseSha).toBe('b'.repeat(40));
+  f.workspaces.inspectDeliveryTarget.mockImplementation(async (root,task) => {
+    expect(task.baseSha).toBe('a'.repeat(40));
+    return { repository_id:f.issue.repository.id,local_path:root,
+      local_identity:{format_version:1,root_identity:'controlled-target',git_directory_identity:'controlled-git',remote_name:'origin',remote_hash:'f'.repeat(64),base_branch:task.baseBranch,base_sha:task.baseSha,
+        observed_head:task.baseSha,observed_branch_ref:'refs/heads/main',working_state_hash:'d'.repeat(64),index_hash:'e'.repeat(64)},
+      branch_ref:'refs/heads/feat/17-inherited',task_type:'feat',task_description:'Inherited issue' };
+  });
+  await f.approve();
+  expect(f.status()).toMatchObject({phase:'finished',result:'delivered',round:1});
+  expect(f.storage.getDelivery(delivery.id).delivery).toEqual(delivery);
+  expect(f.storage.getReview(delivery.id)?.state).toBe('approved');
+  const effect = f.storage.getEffects(f.attemptId).find(e => e.kind === 'local_commit')!;
+  expect(effect).toMatchObject({state:'confirmed',expectedIdentity:{parentSha:'a'.repeat(40),contentIdentity:delivery.contentIdentity},receipt:{parentSha:'a'.repeat(40)}});
+  expect(f.workspaces.createTargetCommit).toHaveBeenCalledOnce();
+  expect(f.issue.comments).toHaveLength(mode === 'commit' ? 1 : 0);
+  for (const remote of f.storage.getEffects(f.attemptId).filter(e => ['push','pull_request'].includes(e.kind))) {
+    expect(remote).toMatchObject({state:'confirmed',expectedIdentity:{parentSha:'a'.repeat(40),contentIdentity:delivery.contentIdentity}});
+  }
+});
+it('continues an interrupted inherited delivery without replacing its approved capture or review', async () => {
+  const f = await publicationFixture(true,'commit',true,{inheritPreviousAttempt:true,correctionLimit:0}); fixtures.push(f);
+  await f.implement();
+  f.workspaces.inspectDeliveryTarget.mockRejectedValueOnce(new CaptureError('CONTEXT_UNAVAILABLE'));
+  await f.approve();
+  const delivery = f.storage.getDelivery(f.status().deliveryId!).delivery;
+  const review = f.storage.getReview(delivery.id);
+  confirmTerminalStops(f,f.attemptId);
+  f.db.prepare("UPDATE attempts SET phase='finished',result='interrupted',diagnostic='CHANNEL_EOF' WHERE id=?").run(f.attemptId);
+  const command = f.context();
+  f.pipeline.completePublication(f.attemptId,{deliveryId:delivery.id,authorizedMode:'commit',authorized:true},command);
+  await f.pipeline.drain();
+  expect(f.storage.getOperation(command.operationId)?.state).toBe('succeeded');
+  expect(f.status()).toMatchObject({phase:'finished',result:'delivered',round:1});
+  expect(f.storage.getDelivery(delivery.id).delivery).toEqual(delivery);
+  expect(f.storage.getReview(delivery.id)).toEqual(review);
+  expect(f.workspaces.createTargetCommit).toHaveBeenCalledOnce();
+});
+it('still requires integration when the real publication base moves and preserves the correction limit', async () => {
+  const f = await publicationFixture(true,'commit',true,{inheritPreviousAttempt:true,correctionLimit:0}); fixtures.push(f);
+  await f.implement();
+  f.workspaces.inspectDeliveryTarget.mockRejectedValue(new CaptureError('DELIVERY_BASE_CHANGED'));
+  const importIntegrationBase = vi.fn();
+  Object.assign(f.workspaces,{
+    inspectIntegrationTarget:vi.fn(async () => ({baseSha:'d'.repeat(40),localPath:'controlled-target',rootIdentity:'controlled-target'})),
+    importIntegrationBase,
+  });
+  await f.approve();
+  expect(f.db.prepare('SELECT diagnostic FROM publication_requests WHERE attempt_id=? ORDER BY rowid DESC LIMIT 1').get(f.attemptId)).toEqual({diagnostic:'INTEGRATION_LIMIT'});
+  expect(f.storage.getReview(f.status().deliveryId!)?.state).toBe('approved');
+  expect(f.workspaces.createTargetCommit).not.toHaveBeenCalled();
+  expect(importIntegrationBase).not.toHaveBeenCalled();
+  expect(f.issue.comments).toHaveLength(0);
+});
 const request = (f: PublicationFixture) => ({ deliveryId: f.status().deliveryId!, authorizedMode: 'commit' as const, authorized: true as const });
 
 it('commits only after durable intent/claim, then comments and completes without a GitHub code publication', async () => {

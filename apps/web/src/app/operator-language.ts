@@ -274,6 +274,9 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
 };
 
 const errorCopy: Readonly<Record<string, string>> = {
+  INTEGRATION_LIMIT: 'A base Git do destino mudou e a integração exige outra rodada de validação, mas o limite de correções desta tentativa foi atingido. A versão aprovada foi preservada. Prepare uma nova tentativa para adaptar a entrega.',
+  INTEGRATION_REVIEW_PENDING: 'A base Git do destino mudou. A integração está em uma nova rodada e precisa de validação e revisão antes da entrega.',
+  DELIVERY_BASE_CHANGED: 'A base Git do destino difere da base de publicação prevista. Consulte o estado da integração antes de tentar novamente.',
   DELIVERY_BRANCH_IN_USE: 'A branch de destino está aberta em um checkout. Troque a branch desse checkout e tente concluir a entrega novamente.',
   DELIVERY_BRANCH_NOT_FOUND: 'A branch de destino não existe no repositório local. Confira o nome e disponibilize essa branch antes de concluir a entrega.',
   DELIVERY_BRANCH_INVALID: 'Informe um nome Git válido para a branch de destino.',

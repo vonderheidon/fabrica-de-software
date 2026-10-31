@@ -204,7 +204,7 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     const latest = latestProjectIssueAttempt(db, preparation.view.project_id, capture.issue.repository.id, capture.issue.id);
     if (latest && !preparation.view.previous_attempt_id) {
       throw new OperationError(409, 'PREVIOUS_ATTEMPT_REQUIRED', 'Select the previous attempt to reuse this issue workspace.', {
-        recovery: 'Create a new preparation from the most recent attempt for this issue, then authorize its current summary.' });
+        recovery: 'Crie uma nova preparação a partir da tentativa mais recente desta issue e autorize o resumo atualizado.' });
     }
     if (preparation.view.previous_attempt_id && latest?.id !== preparation.view.previous_attempt_id) {
       throw new OperationError(409, 'PREVIOUS_ATTEMPT_NOT_LATEST', 'Select the most recent attempt for this issue workspace.', {
@@ -223,7 +223,7 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     }
     if (workspaceReferences.length > 0 && !preparation.view.previous_attempt_id) {
       throw new OperationError(409, 'PREVIOUS_ATTEMPT_REQUIRED', 'Select the previous attempt to reuse this issue workspace.', {
-        recovery: 'Create a new preparation from the most recent attempt for this issue, then authorize its current summary.' });
+        recovery: 'Crie uma nova preparação a partir da tentativa mais recente desta issue e autorize o resumo atualizado.' });
     }
     // A new preparation is a fresh authorization; an accepted preparation must not dispatch twice.
     const previous = db.prepare('SELECT id FROM attempts WHERE preparation_id=?').get(preparation.view.id);
@@ -249,7 +249,7 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
       initial_state: inheritWorkspace
         ? { kind: 'pending_inherited_attempt', source_attempt_id: preparation.view.previous_attempt_id! }
         : { kind: 'base_checkout', content_identity: capture.baseSha },
-      inherited_base_sha: inheritWorkspace ? predecessorCapture!.baseSha : null,
+      inherited_base_sha: inheritWorkspace ? predecessorCapture!.workspace.inherited_base_sha ?? predecessorCapture!.baseSha : null,
       comparison_base_sha: inheritWorkspace ? null : capture.baseSha,
     } };
     const suspension = capture.tools.some(t => t.state === 'unavailable') ? 'TOOL_VERSION_UNAVAILABLE' : null;

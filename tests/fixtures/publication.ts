@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { vi, type Mock } from 'vitest';
 import type { GitHubMutationResult, GitHubQueryResult, ImplementerResult, IssueContext, ProjectItem, ReviewerResult, ProjectConfiguration } from '#contracts';
-import { attemptFixture, complete } from './attempt.js';
+import { attemptFixture, complete, confirmTerminalStops } from './attempt.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import type { GitHub, GitHubBeforeSendContext, GitHubEffectRequest, IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext } from '../../apps/controller/src/modules/github/index.js';
@@ -39,7 +39,7 @@ export function withPublicationIssueProjections<T extends Pick<GitHub, 'getIssue
 }
 
 export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
-  options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean } = {}) {
+  options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean; inheritPreviousAttempt?: boolean } = {}) {
   const f = await attemptFixture(options.temporaryRoot, options.baseSha, undefined, undefined, options.recordCleanInitialization ?? false); await f.pipeline.close();
   if (options.correctionLimit !== undefined || options.deliveryBranch !== undefined) {
     const current = f.storage.getConfiguration(f.projectId);
@@ -62,7 +62,7 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
     await authorize();
     const deliveryIdentity = effect.expectedIdentity.targetOperationId ? { targetOperationId:effect.expectedIdentity.targetOperationId,
       taskType:effect.expectedIdentity.taskType!,taskDescription:effect.expectedIdentity.taskDescription! } : {};
-    const result = hasDelta ? { state: 'confirmed' as const, receipt: { id: 'c'.repeat(40), contentIdentity: delivery.contentIdentity!, parentSha: delivery.baseSha,
+    const result = hasDelta ? { state: 'confirmed' as const, receipt: { id: 'c'.repeat(40), contentIdentity: delivery.contentIdentity!, parentSha: effect.expectedIdentity.parentSha!,
       branchRef: effect.expectedIdentity.branchRef!, operationId: effect.operationId, ...deliveryIdentity }, reason: null }
       : { state: 'not_applicable' as const, receipt: null, reason: 'APPROVED_NO_DELTA' };
     if (result.state === 'confirmed') reconcileLocalCommit.mockResolvedValue(result);
@@ -111,7 +111,15 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
     materializeReview: vi.fn(async (d: { attemptId: string }, id: string) => join(f.directory,'work',d.attemptId,'reviews',id,'checkout')) };
   const pipeline = createPipeline({ ...f.dependencies, github, workspaces, ...(composed ? { publication: { github, workspaces } } : {}) });
   if (options.baseBranch) { f.observation.base!.branch = options.baseBranch; f.observation.remote!.branch!.name = options.baseBranch; }
-  const prepare = await f.prepare(f.projectId,mode,options.targetKind,options.targetForIcr ?? false,options.baseBranch); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
+  let predecessorId: string | undefined;
+  if (options.inheritPreviousAttempt) {
+    const initial = await f.prepare(f.projectId,mode,options.targetKind,options.targetForIcr ?? false,options.baseBranch);
+    const predecessor = await pipeline.startAttempt(initial.body,initial.context); await pipeline.drain();
+    predecessorId = predecessor.resource.id;
+    confirmTerminalStops(f,predecessorId);
+    f.db.prepare("UPDATE attempts SET phase='finished',result='interrupted' WHERE id=?").run(predecessorId);
+  }
+  const prepare = await f.prepare(f.projectId,mode,options.targetKind,options.targetForIcr ?? false,options.baseBranch,predecessorId); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
   const attemptId = op.resource.id;
   const status = () => f.storage.getAttempt(attemptId);
   const context = () => ({ operationId: randomUUID(), expectedRevision: `"${attemptId}:${status().revision}"` });

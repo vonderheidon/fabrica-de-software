@@ -234,7 +234,7 @@ export function createPublication(deps: PublicationDependencies) {
     const commit = snapshot.effects.find(e => e.kind === 'local_commit' && e.deliveryId === d.id);
     const commitMode = snapshot.mode === 'commit';
     const lines = [marker, commitMode ? '### Resultado Commit local da fábrica' : '### Resultado ICR da fábrica', '', `Tentativa: ${snapshot.status.id}`, `Versão: ${d.id}`, `Tree aprovada: ${d.contentIdentity}`,
-      `Base: ${d.baseSha}`, `Referência retida: ${d.gitRef}`, ...(commitMode && commit?.expectedIdentity.targetOperationId ? [`Tarefa: ${commit.expectedIdentity.taskType}: ${commit.expectedIdentity.taskDescription}`, `Branch: ${commit.expectedIdentity.branchRef}`] : []), `Revisão independente: approved (${review.id}).`,
+      `Base de comparação: ${d.baseSha}`, `Referência retida: ${d.gitRef}`, ...(commitMode && commit?.expectedIdentity.targetOperationId ? [`Base de publicação: ${commit.expectedIdentity.parentSha}`, `Tarefa: ${commit.expectedIdentity.taskType}: ${commit.expectedIdentity.taskDescription}`, `Branch: ${commit.expectedIdentity.branchRef}`] : []), `Revisão independente: approved (${review.id}).`,
       commitMode ? (commit?.state === 'not_applicable' ? 'Commit: not_applicable (APPROVED_NO_DELTA). Entrega revisada sem alterações; nenhum commit vazio foi criado.' : `Commit local: ${commit?.receipt?.id}; ${commit?.expectedIdentity.taskType ?? 'branch'} ${commit?.expectedIdentity.taskDescription ?? ''}; branch: ${commit?.expectedIdentity.branchRef}.`) : 'Versão aprovada para entrega local ICR. Alterações e ambiente preservados, sem commit de entrega ou push.',
       ...(commitMode ? ['Publicação local, sem push, PR ou fechamento da issue.'] : []), '', 'Critérios verificados:',
        ...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}; ${c.evidence.length} referência(s) de evidência no resultado oficial.`),
@@ -270,9 +270,9 @@ export function createPublication(deps: PublicationDependencies) {
         const next = await deps.workspaces.inspectIntegrationTarget(target.local_path,{ attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
           contentIdentity:delivery.contentIdentity!,repositoryRelative:delivery.repositoryRelative,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
           repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
-          baseBranch:target.base_branch,baseSha:delivery.baseSha, sourceKind:target.local_identity.source_kind, deliveryBranch: snapshot.capture.configuration.configuration.delivery_branch });
+          baseBranch:target.base_branch,baseSha:target.local_identity.base_sha, sourceKind:target.local_identity.source_kind, deliveryBranch: snapshot.capture.configuration.configuration.delivery_branch });
         if (next.rootIdentity !== target.local_identity.root_identity) blocked('DELIVERY_TARGET_CHANGED');
-        if (next.baseSha !== delivery.baseSha) {
+        if (next.baseSha !== target.local_identity.base_sha) {
           if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
           await deps.adaptIntegration(delivery.id,command.operationId,next);
           return blocked('INTEGRATION_REVIEW_PENDING');
@@ -314,7 +314,7 @@ export function createPublication(deps: PublicationDependencies) {
       const task = { attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
         contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
         repositoryRelative:delivery.repositoryRelative,repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
-        baseBranch:snapshot.capture.configuration.configuration.delivery_branch?.kind === 'existing' ? snapshot.capture.configuration.configuration.delivery_branch.name : snapshot.capture.configuration.configuration.base_branch,baseSha:delivery.baseSha, sourceKind:source.kind, deliveryBranch:snapshot.capture.configuration.configuration.delivery_branch };
+        baseBranch:snapshot.capture.configuration.configuration.delivery_branch?.kind === 'existing' ? snapshot.capture.configuration.configuration.delivery_branch.name : snapshot.capture.configuration.configuration.base_branch,baseSha:snapshot.publicationBaseSha!, sourceKind:source.kind, deliveryBranch:snapshot.capture.configuration.configuration.delivery_branch };
       let inspected;
       try { inspected = await deps.workspaces.inspectDeliveryTarget(localPath,task,task); }
       catch (error) {
@@ -335,7 +335,7 @@ export function createPublication(deps: PublicationDependencies) {
       target = storage.sealDeliveryTarget(plan);
     }
     const identity: EffectIdentity = previous?.expectedIdentity ?? (target ? {
-      repositoryId: snapshot.capture.issue.repository.id,issueId: snapshot.capture.issue.id,contentIdentity: delivery.contentIdentity!,parentSha: delivery.baseSha,
+      repositoryId: snapshot.capture.issue.repository.id,issueId: snapshot.capture.issue.id,contentIdentity: delivery.contentIdentity!,parentSha: target.local_identity.base_sha,
       branchRef: target.branch_ref,...(target.local_identity.branch_kind ? { branchKind:target.local_identity.branch_kind } : {}),issueNumber: snapshot.capture.issue.number,commitTime: Math.floor(Date.now()/1000),
       repositoryOwner:snapshot.capture.issue.repository.owner.login,repositoryName:snapshot.capture.issue.repository.name,
       baseBranch:target.base_branch,targetOperationId:target.operation_id,taskType:target.task_type,taskDescription:target.task_description,
@@ -377,7 +377,8 @@ export function createPublication(deps: PublicationDependencies) {
     const pending = open.filter(f => !f.blocking);
     const body = [`<!-- factory:pr:${s.settings.installation_id}:${s.status.id}:${d.id} -->`,
       '### Entrega aprovada da fábrica',`Escopo: ${safe(s.capture.issue.title)}`,`Issue: ${s.capture.issue.url}`,
-      `Tentativa (attemptId): ${s.status.id}`,`Versão: ${d.id}`,`Base configurada: ${safe(s.capture.configuration.configuration.base_branch)} (${d.baseSha})`,
+      `Tentativa (attemptId): ${s.status.id}`,`Versão: ${d.id}`,`Base configurada: ${safe(s.capture.configuration.configuration.base_branch)} (${s.publicationBaseSha})`,
+      `Base de comparação: ${d.baseSha}`,
       `Tree aprovada: ${d.contentIdentity}`,`Referência: ${d.gitRef}`,`Parecer: ${review.state}; revisão ${review.id}.`,
       'Critérios:',...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}.`),
       'Pendências não impeditivas:',...pending.map(f => `- ${f.id}: ${safe(f.problem)}; esperado: ${safe(f.expectedResult)}.`),
@@ -395,11 +396,11 @@ export function createPublication(deps: PublicationDependencies) {
         const sealedTarget = storage.assertDeliveryTarget(targetIdentity.targetOperationId);
         await deps.workspaces.verifyDeliveryTarget(sealedTarget,{ attemptId:s.status.id,approvedRef:d.gitRef!,contentIdentity:d.contentIdentity!,repositoryRelative:d.repositoryRelative,
           issueNumber:s.capture.issue.number,issueTitle:s.capture.issue.title,repositoryId:s.capture.issue.repository.id,
-          repositoryUrl:s.capture.issue.repository.url,baseBranch:sealedTarget.base_branch,baseSha:d.baseSha,sourceKind:sealedTarget.local_identity.source_kind });
+          repositoryUrl:s.capture.issue.repository.url,baseBranch:sealedTarget.base_branch,baseSha:sealedTarget.local_identity.base_sha,sourceKind:sealedTarget.local_identity.source_kind });
       }
       const old = s.effects.find(e => e.kind === kind && e.deliveryId === d.id);
       if (old && ['confirmed','not_applicable'].includes(old.state)) continue;
-      const identity: EffectIdentity = old?.expectedIdentity ?? { repositoryId: s.capture.issue.repository.id,issueId: s.capture.issue.id,contentIdentity: d.contentIdentity!,parentSha: d.baseSha,
+      const identity: EffectIdentity = old?.expectedIdentity ?? { repositoryId: s.capture.issue.repository.id,issueId: s.capture.issue.id,contentIdentity: d.contentIdentity!,parentSha: targetIdentity.parentSha!,
         issueNumber: s.capture.issue.number,branchRef: targetIdentity.branchRef!,repositoryOwner: s.capture.issue.repository.owner.login,repositoryName: s.capture.issue.repository.name,
         ...(targetIdentity.targetOperationId ? { targetOperationId:targetIdentity.targetOperationId,taskType:targetIdentity.taskType,taskDescription:targetIdentity.taskDescription } : {}),
         ...(targetIdentity.branchKind ? { branchKind:targetIdentity.branchKind } : {}),

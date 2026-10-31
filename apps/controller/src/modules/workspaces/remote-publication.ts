@@ -16,7 +16,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     const i = effect.expectedIdentity;
     if (!Value.Check(Delivery,delivery) || !Value.Check(EffectView,effect) || effect.kind !== 'push' || !effect.authorized || !['running','unknown'].includes(effect.state) ||
       effect.attemptId !== delivery.attemptId || effect.deliveryId !== delivery.id || effect.scopeKey !== delivery.id ||
-      i.contentIdentity !== delivery.contentIdentity || i.parentSha !== delivery.baseSha || !i.commitSha || !i.commitOperationId ||
+      i.contentIdentity !== delivery.contentIdentity || (!i.targetOperationId && i.parentSha !== delivery.baseSha) || !i.parentSha || !i.commitSha || !i.commitOperationId ||
        !i.repositoryId || !i.issueNumber || !i.branchRef || (i.targetOperationId ? !i.taskType || !i.taskDescription || !i.baseBranch : i.branchRef !== `refs/heads/factory/${i.issueNumber}/${delivery.attemptId}`) ||
       !i.repositoryOwner || !/^[A-Za-z0-9-]{1,100}$/.test(i.repositoryOwner) || !i.repositoryName || !/^[A-Za-z0-9_.-]{1,100}$/.test(i.repositoryName)) throw new CaptureError('PUSH_IDENTITY_INVALID');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
@@ -27,7 +27,7 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
     const local = async (args: string[]) => { const r = await git(repository,[`--git-dir=${repository}`,...args],{ isolatedConfig: true }); if (r.exitCode) throw new CaptureError('PUBLICATION_GIT_FAILED'); return r.stdout; };
     await verifyRetained(local,delivery);
     const message = (i.targetOperationId ? `${i.taskType}: ${i.taskDescription} (#${i.issueNumber})\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${i.commitOperationId}\nFactory-Target: ${i.targetOperationId}\n` : `feat: deliver issue #${i.issueNumber}\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${i.commitOperationId}\n`);
-    if ((await local(['show','--no-patch','--format=%T%x00%P%x00%B',i.commitSha,'--'])).trimEnd() !== `${delivery.contentIdentity}\0${delivery.baseSha}\0${message}`.trimEnd()) throw new CaptureError('PUSH_IDENTITY_INVALID');
+    if ((await local(['show','--no-patch','--format=%T%x00%P%x00%B',i.commitSha,'--'])).trimEnd() !== `${delivery.contentIdentity}\0${i.parentSha}\0${message}`.trimEnd()) throw new CaptureError('PUSH_IDENTITY_INVALID');
     if ((await local(['rev-parse','--verify',i.branchRef])).trim() !== i.commitSha) throw new CaptureError('PUSH_IDENTITY_INVALID');
     // Keep the host's normal credential helper, but never honor URL rewriting or caller-selected transport commands.
     const config = await git(repository,[`--git-dir=${repository}`,'config','--get-regexp','^(url\\..*\\.(insteadof|pushinsteadof)|core\\.sshcommand|remote\\..*\\.(push|mirror|receivepack)|push\\.pushoption)$']);
