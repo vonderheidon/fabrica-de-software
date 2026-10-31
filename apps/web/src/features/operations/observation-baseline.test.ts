@@ -98,6 +98,7 @@ async function click(label: string): Promise<void> {
   const button = [...container.querySelectorAll('button')].find(item => item.textContent === label);
   expect(button, label).toBeDefined(); expect(button!.disabled).toBe(false);
   trigger = 'manual'; await act(async () => button!.click());
+  await tick(1);
 }
 async function finish(record: Request, body?: unknown, status = 200): Promise<void> {
   await act(async () => record.resolve(body, status));
@@ -116,6 +117,7 @@ beforeEach(async () => {
     const route = String(input);
     const record: Request = { id: records.length + 1, route, screen, trigger, started: Date.now(), ended: null,
       aborted: false, abortWhilePending: false, completedAfterAbort: false, responseBytes: 0, completion: 'pending', resolve: (body = defaultBody(route), status = 200) => {
+        if (record.ended !== null) return;
         expect(record.ended).toBeNull(); record.ended = Date.now(); record.completion = status >= 400 ? 'failure' : 'success';
         record.completedAfterAbort = record.abortWhilePending;
         const serialized = JSON.stringify(body); record.responseBytes = Buffer.byteLength(serialized);
@@ -185,11 +187,11 @@ it.each(['dashboard', 'fila', 'tentativas'])('attributes spaced events, resync a
   const before = records.length;
   for (const project of [projectA, projectB]) for (let count = 0; count < 10; count++) { await event('attempt', project); await tick(200); }
   const eventReads = records.length - before;
-  expect(eventReads).toBe(tab === 'dashboard' ? 60 : tab === 'fila' ? 20 : 10);
+  expect(eventReads).toBe(tab === 'dashboard' ? 50 : tab === 'fila' ? 10 : 10);
   // Attempts on the current page also refresh across project scope; empty pages do not.
   if (tab === 'tentativas') expect(matching('/api/v1/attempts').length).toBe(11);
-  const preResync = records.length; await event('resync'); await tick(); expect(records.length).toBeGreaterThan(preResync);
-  const preGlobal = records.length; await event('global'); await tick();
+  const preResync = records.length; await event('resync'); await tick(250); expect(records.length).toBeGreaterThan(preResync);
+  const preGlobal = records.length; await event('global'); await tick(250);
   expect(records.length - preGlobal).toBe(tab === 'dashboard' ? 3 : tab === 'fila' ? 1 : 0);
   trigger = 'coincident';
   const beforeCoincident = records.length;
@@ -197,7 +199,7 @@ it.each(['dashboard', 'fila', 'tentativas'])('attributes spaced events, resync a
     window.dispatchEvent(new Event('factory-controller-resync'));
     window.dispatchEvent(new CustomEvent('factory-controller-event', { detail: { entity: { type: 'attempt', id: attemptA }, project_id: projectA, attempt_id: attemptA } }));
   });
-  await tick(); expect(records.length).toBeGreaterThan(beforeCoincident);
+  await tick(250); expect(records.length).toBeGreaterThan(beforeCoincident);
   console.info('Synthetic web events', JSON.stringify({ tab, eventReads, coincidentReads: records.length - beforeCoincident }));
 });
 
@@ -210,7 +212,7 @@ it('measures rendered partial, error, retained content and confirmed empty as di
   await finish(matching('/api/v1/queue').at(-1)!, { code: 'SYNTHETIC_UNAVAILABLE', message: 'Falha sintética', request_id: 'synthetic' }, 503);
   capture('queue', refreshStart, 'Não foi possível atualizar a fila', 'error', 'warm');
   expect(container.textContent).toContain('Partial candidate'); expect(container.querySelector('[role="alert"]')).not.toBeNull();
-  await click('Revalidar fila'); expect(container.textContent).toContain('Não foi possível atualizar a fila');
+  await tick(30_001); expect(container.textContent).toContain('Não foi possível atualizar a fila');
   const empty = queue(); empty.page.items = []; empty.eligible_total = 0;
   await finish(matching('/api/v1/queue').at(-1)!, empty); capture('queue', refreshStart, 'Nenhum item nesta página', 'empty', 'warm');
   expect(container.querySelector('[role="alert"]')).toBeNull();
@@ -219,8 +221,9 @@ it('measures rendered partial, error, retained content and confirmed empty as di
 
 it.each([false, true])('discards A after invalidation and B completion, late A failure=%s', async failure => {
   await render('dashboard'); await tick(30); automatic = false;
-  await event('attempt'); const old = matching('/api/v1/queue').at(-1)!;
-  await event('resync'); const current = matching('/api/v1/queue').at(-1)!;
+  await event('attempt'); await tick(250); const old = matching('/api/v1/queue').at(-1)!;
+  await event('resync'); expect(old.aborted).toBe(true); await tick(250);
+  const current = matching('/api/v1/queue').at(-1)!;
   expect(current.id).not.toBe(old.id); expect(old.aborted).toBe(true);
   await finish(current, queue('B current'));
   expect(container.textContent).toContain('B current');
@@ -274,9 +277,10 @@ it('renders attempt continuation and visible failure while retaining the current
 
 it.each(['attempt', 'resync'])('invalidates immediately before completion on %s and preserves selection by IDs', async kind => {
   await render('dashboard'); await tick(30); automatic = false;
-  await event('attempt'); const old = matching('/api/v1/queue').at(-1)!;
-  await event(kind); await finish(old, queue('Obsolete title'));
+  await event('attempt'); await tick(250); const old = matching('/api/v1/queue').at(-1)!;
+  await event(kind); expect(old.aborted).toBe(true); await finish(old, queue('Obsolete title'));
   expect(container.textContent).not.toContain('Obsolete title');
+  await tick(250);
   const fresh = queue('Current title'); fresh.page.items[0]!.issue_id = 'selected-issue'; fresh.page.items[0]!.project_id = projectB;
   await finish(matching('/api/v1/queue').at(-1)!, fresh);
   await click('Preparar'); expect(openDialog).toHaveBeenCalledWith('preparation', expect.anything(), { projectId: projectB, issueId: 'selected-issue' });

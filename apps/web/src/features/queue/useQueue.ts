@@ -26,6 +26,7 @@ export function useQueue(projectId: string | null, enabled: boolean) {
   const readFailures = useRef(0);
   const requestActive = useRef(false);
   const requestScheduled = useRef(false);
+  const activeController = useRef<AbortController | null>(null);
   const pendingEvent = useRef(false);
   const retryAt = useRef(0);
   const refreshTimer = useRef<number | undefined>();
@@ -76,11 +77,21 @@ export function useQueue(projectId: string | null, enabled: boolean) {
     scheduleRefresh(Date.now(), 'manual');
   }, [enabled, scheduleRefresh]);
 
-  const onUpdated = useCallback(() => {
+  const onUpdated = useCallback((event: Event) => {
     if (!enabled || Date.now() < retryAt.current) return;
     if (requestActive.current) {
+      const detail = (event as CustomEvent<{ event_type?: unknown }>).detail;
+      const invalidatesCurrent = event.type === 'factory-controller-resync' ||
+        (event.type === 'factory-controller-event' && typeof detail?.event_type === 'string');
+      if (!invalidatesCurrent) {
+        pendingEvent.current = true;
+        return;
+      }
+      version.current += 1;
+      requestActive.current = false;
+      activeController.current?.abort();
+      activeController.current = null;
       pendingEvent.current = true;
-      return;
     }
     if (requestScheduled.current) return;
     scheduleRefresh(Date.now() + EVENT_COALESCE_MS, 'event');
@@ -121,6 +132,7 @@ export function useQueue(projectId: string | null, enabled: boolean) {
 
     let active = true;
     const controller = new AbortController();
+    activeController.current = controller;
     const currentVersion = ++version.current;
     const previousLoad = loadRef.current;
     requestActive.current = true;
@@ -129,6 +141,7 @@ export function useQueue(projectId: string | null, enabled: boolean) {
     const query = queueQuery(projectId, cursor);
     requestJsonWithMetadata<QueueObservation>(`/api/v1/queue?${query}`, { signal: controller.signal }).then(({ data, etag }) => {
       if (!active || currentVersion !== version.current) return;
+      activeController.current = null;
       requestActive.current = false;
       readFailures.current = 0;
       const remoteRetryAt = data.polling.retry_at_ms ?? 0;
@@ -146,6 +159,7 @@ export function useQueue(projectId: string | null, enabled: boolean) {
       }
     }).catch((error: unknown) => {
       if (!active || currentVersion !== version.current || (error instanceof DOMException && error.name === 'AbortError')) return;
+      activeController.current = null;
       requestActive.current = false;
       if (cursor && error instanceof HttpError && error.status === 409) {
         setPageNotice('A ordem ou o conjunto da fila mudou. A consulta foi reiniciada na primeira página; a seleção continua vinculada aos IDs observados.');
@@ -172,6 +186,7 @@ export function useQueue(projectId: string | null, enabled: boolean) {
     return () => {
       active = false;
       controller.abort();
+      if (activeController.current === controller) activeController.current = null;
       if (currentVersion === version.current) requestActive.current = false;
     };
   }, [clearRefreshTimer, cursor, enabled, projectId, reloadKey, scheduleRefresh]);
