@@ -106,8 +106,40 @@ Salvar configuração
 - Na parte inferior, **Automação deste projeto habilitada** está desmarcada e **Usar posição do quadro** está marcada. Seus textos explicativos ficam parcialmente encobertos pelo rodapé.
 - Há rolagem vertical. O rodapé contém o botão **Salvar configuração**, alinhado à direita.
 
+## Registro do problema: issues bloqueadas aparecem como elegíveis na preparação
+
+Data do registro: 2026-10-31.
+
+### Relato
+
+No modal **Preparar issue**, issues bloqueadas estão aparecendo no seletor apresentado como **Selecione uma issue elegível**. A listagem não mostra indicação de bloqueio, passando a impressão de que essas issues podem ser iniciadas.
+
+O bloqueio foi informado pelo usuário. A imagem transcrita comprova a apresentação das opções sem indicação visível de bloqueio; ela não comprova o estado remoto das dependências nem que o início de uma tentativa bloqueada foi autorizado.
+
+### Evidência fornecida
+
+- Projeto selecionado: **fabrica-software-eve**.
+- Seletor aberto com o texto **Selecione uma issue elegível** e campo **Buscar opção**.
+- Opções visíveis: **Configurar instalação local e perfis Eve por papel** e **Iniciar uma tentativa Eve e conversar pelo painel B**.
+- Nenhuma das duas opções apresenta indicação textual visível de bloqueio.
+- Rodapé: **Selecione uma issue elegível para revisar a tentativa.** e botão **Revisar e autorizar**.
+
+### Ajuste desejado
+
+A seleção deve refletir os impedimentos atuais: issues com dependências bloqueadoras abertas não podem ser apresentadas como elegíveis. Se forem exibidas para consulta, devem indicar o motivo e não permitir seleção para início enquanto o bloqueio persistir. A revisão e o início devem revalidar a elegibilidade, pois o estado pode mudar após a listagem.
+
+### Critérios de aceite propostos
+
+1. Uma issue com dependência bloqueadora aberta não aparece como opção elegível para iniciar uma tentativa.
+2. Caso uma issue bloqueada seja exibida, a interface identifica o bloqueio e impede sua seleção para início.
+3. Após a resolução das dependências e uma nova consulta, a issue pode aparecer como elegível se os demais requisitos estiverem atendidos.
+4. Se surgir um bloqueio após a listagem, a revisão ou o início recusa a execução e informa o impedimento atual.
+
+Registro de backlog, sem implementação ou diagnóstico confirmado da causa. A escolha entre omitir issues bloqueadas ou exibi-las indisponíveis permanece para detalhamento.
+
 ## Histórico
 
 | Data | Registro | Estado |
 | --- | --- | --- |
 | 2026-10-31 | Relato de orientação autorreferente e estado confuso do aviso de perfis na configuração do projeto | Backlog; sem implementação |
+| 2026-10-31 | Issues bloqueadas apresentadas como elegíveis no modal Preparar issue | Backlog; sem implementação |
