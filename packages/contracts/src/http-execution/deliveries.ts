@@ -14,7 +14,7 @@ export const Delivery = Type.Object({
     round: Type.Integer({ minimum: 1, maximum: 6 }), base_sha: GitObjectId,
     capture_state: Type.Union(['pending', 'running', 'captured', 'failed'].map(v => Type.Literal(v))),
     git_ref: Type.Union([Type.Null(), Type.String({ pattern: '^refs/factory/deliveries/[a-f0-9-]{36}$' })]),
-    repository_relative: Type.String({ pattern: '^git/[a-f0-9-]{36}\\.git$' }),
+    repository_relative: Type.String({ minLength: 1, maxLength: 128, pattern: '^(?:git/[a-f0-9-]{36}\\.git|issues/[1-9][0-9]*/history\\.git)$' }),
     content_identity: Type.Union([Type.Null(), GitObjectId]), commit_sha: Type.Union([Type.Null(), GitObjectId]),
     has_delta: Type.Union([Type.Null(), Type.Boolean()]), diagnostic: Type.Union([Type.Null(), Type.String({ maxLength: 128 })]),
     captured_at_ms: Type.Union([Type.Null(), Type.Integer({ minimum: 0 })]), revision: Type.Integer({ minimum: 1 }),

@@ -588,6 +588,7 @@ describe('native Maestri and Windows launch', () => {
     const script = Buffer.from(command.split(' ').at(-1)!, 'base64').toString('utf16le');
     expect(script).toContain("C:\\Dados ç 😀\\O''Brien\\launch.json");
     expect(script).toContain('[System.Text.Encoding]::UTF8');
+    expect(script).toContain('$env:npm_config_cache=$launch.npmCacheDirectory');
     expect(script).toContain('& $launch.ompExecutable @($launch.args)');
     expect(script).not.toContain('--no-tools'); expect(command).not.toContain('token');
   });

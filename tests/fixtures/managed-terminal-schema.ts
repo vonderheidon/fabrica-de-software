@@ -2,6 +2,13 @@ import type Database from 'better-sqlite3';
 
 /** Disposable migration fixtures only; this never downgrades an installation. */
 export function removeAttemptDecisionSchema(db: Database.Database): void {
+  if (db.pragma('user_version', { simple: true }) === 54) {
+    const snapshots = db.prepare<[], { count: number }>('SELECT count(*) AS count FROM attempt_workspace_snapshots').get();
+    if (snapshots?.count !== 0) throw new Error('WORKSPACE_SNAPSHOT_ROWS_CANNOT_BE_DOWNGRADED');
+    db.exec(`DROP TRIGGER attempt_workspace_snapshots_delete_guard; DROP TRIGGER attempt_workspace_snapshot_update_immutable;
+      DROP TRIGGER attempt_workspace_snapshot_insert_guard; DROP TABLE attempt_workspace_snapshots;
+      DELETE FROM schema_migrations WHERE version=54; PRAGMA user_version=53;`);
+  }
   if (db.pragma('user_version', { simple: true }) === 53) {
     const reviews = db.prepare<[], { count: number }>('SELECT count(*) AS count FROM reviews').get();
     if (reviews?.count !== 0) throw new Error('E1_REVIEW_ROWS_CANNOT_BE_DOWNGRADED');

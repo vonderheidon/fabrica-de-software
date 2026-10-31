@@ -2,9 +2,9 @@ import { toHttpRoundHistory, toHttpProducerResult } from '../../apps/controller/
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { ReviewerResult, type ImplementerResult, type ReviewerResult as ReviewerResultType } from '#contracts';
+import { attemptSessionDirectoryReference, managedWorkspaceReference, ReviewerResult, type ImplementerResult, type ReviewerResult as ReviewerResultType } from '#contracts';
 import { Value } from '@sinclair/typebox/value';
-import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -19,7 +19,10 @@ async function fixture(limit = 2, beforeStart?: (fixture: AttemptFixture) => Pro
   const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _createdAtMs, ...configuration } = config.view.configuration;
   if (limit !== configuration.correction_limit) f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: config.etag, projectId: f.projectId,
     body: { project_changes: { correction_limit: limit } }, globalChanges: {}, configuration: { ...configuration, correction_limit: limit } });
-  const materializeReview = vi.fn(async (d: { attemptId: string }, _id: string) => join(f.directory, 'work', d.attemptId, 'implementation'));
+  const materializeReview = vi.fn(async (d: { attemptId: string }, _id: string) => {
+    const binding = f.storage.getAttemptWorkspaceBinding(d.attemptId);
+    return join(f.directory, ...managedWorkspaceReference(binding.workspace.project_id, binding.issue_number).split('/'));
+  });
   const captureDelivery = vi.fn(async (input: { deliveryId: string }) => ({ gitRef: `refs/factory/deliveries/${input.deliveryId}`,
     contentIdentity: digest(input).slice(0, 40), commitSha: digest({ commit: input }).slice(0, 40), hasDelta: true, warnings: [] }));
   Object.assign(f.workspaces, { captureDelivery, materializeReview,
@@ -73,6 +76,46 @@ async function noProgressBlockedFixture(limit = 4) {
   expect(f.storage.getAttemptBlock(f.attemptId)?.reason).toBe('no_progress');
   return f;
 }
+
+it('binds review scope to the snapshot and explains inherited index state', async () => {
+  const f = await fixture();
+  f.implement(); await f.pipeline.drain();
+  const request = vi.mocked(f.execution.startPassage).mock.calls.at(-1)![0];
+  const task = JSON.parse(request.task) as { workspaceScope: { comparisonBaseSha: string | null; capturedCommitSha: string | null; instructions: string } };
+  const capture = f.storage.getAttemptCapture(f.attemptId);
+  const delivery = f.storage.getDelivery(f.status().deliveryId!).delivery;
+
+  expect(task.workspaceScope).toEqual({ comparisonBaseSha: capture.workspace.comparison_base_sha, capturedCommitSha: delivery.commitSha,
+    instructions: expect.stringContaining('workspace.comparison_base_sha') });
+  expect(task.workspaceScope.instructions).toContain('including currently untracked paths');
+  expect(task.workspaceScope.instructions).toContain('git status or the staged-index diff alone');
+  expect(task.workspaceScope.instructions).toContain('a staged deletion paired with an identical untracked file');
+  expect(task.workspaceScope.instructions).toContain('compare the immutable delivery.commitSha tree with workspace.comparison_base_sha');
+});
+
+it('keeps predecessor findings as history rather than current-attempt result obligations', async () => {
+  const f = await fixture(1);
+  f.implement(); await f.pipeline.drain();
+  f.accept(f.result(false)); await f.pipeline.drain();
+  await f.pipeline.cancelAttempt(f.attemptId, {}, { operationId: randomUUID(), expectedRevision: undefined });
+  await f.pipeline.drain();
+  const currentPassage = f.status().passageId;
+  f.persistence.recordStop({ passageId: currentPassage }, { passageId: currentPassage, state: 'confirmed' });
+  confirmTerminalStops(f, f.attemptId);
+  const prior = f.storage.getOpenFindings(f.attemptId, 2);
+  expect(prior).toHaveLength(1);
+  const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, f.attemptId);
+  const next = await f.pipeline.startAttempt(command.body, command.context); await f.pipeline.drain();
+  const request = vi.mocked(f.execution.startPassage).mock.calls.at(-1)![0];
+  expect(request.previousFindingKeys).toEqual([]);
+  expect(JSON.parse(request.task).predecessorProgress.unresolvedFindings).toEqual(expect.arrayContaining([expect.objectContaining({ id: prior[0]!.id })]));
+  const status = f.storage.getAttempt(next.resource.id);
+  const binding = f.persistence.getPassage({ passageId: status.passageId }).binding;
+  const result: ImplementerResult = { formatVersion: 1, summary: 'Inherited work checked', writesStopped: true,
+    checks: [], findingResponses: [], criteria: ['ac-1', 'ac-2'].map(criterionId => ({ criterionId, verdict: 'not_verified', evidence: ['Requires independent review of the new version'] })) };
+  expect(f.persistence.acceptResult({ binding, result, sha256: digest(result) }).result).toEqual(result);
+  expect(f.storage.getOpenFindings(f.attemptId, 2).map(finding => finding.id)).toEqual(prior.map(finding => finding.id));
+});
 
 it('derives immutable dispute identity from the accepted finding and implementer passage without resolving it', async () => {
   const f = await disputedFixture(); const p = f.producer(); const finding = f.original.findings[0]!;
@@ -354,11 +397,13 @@ it('dispatches review after durable capture and producer result, with exact prof
   const { review, passage } = f.reviewer(); const delivery = f.storage.getDelivery(review.deliveryId);
   const calls = vi.mocked(f.execution.startPassage).mock.calls; expect(calls).toHaveLength(2);
   const request = calls[1]![0]; const task = JSON.parse(request.task) as Record<string, unknown>;
+  const evidenceDirectory = join(f.directory, 'projects', f.projectId, 'v1', 'managed', 'issues', '17', 'attempts', f.attemptId, 'evidence', delivery.delivery.id);
   expect(request.binding.role).toBe('reviewer'); expect(request.cwd).toBe(calls[0]![0].cwd);
   expect(request.binding.passageId).not.toBe(calls[0]![0].binding.passageId);
   expect(task).not.toHaveProperty('transcript'); expect(task).not.toHaveProperty('implementerResult');
   expect(task).toHaveProperty('producerResult');
-  expect(task.evidenceDirectory).toBe(`.factory-evidence/${review.id}/`);
+  expect(task.evidenceDirectory).toBe(evidenceDirectory);
+  expect(task.evidenceDirectory).not.toContain('.factory-evidence');
   expect(task.delivery).toEqual(delivery.delivery); expect(passage.effectiveProfile?.model).toBe(f.profile.model);
   expect(review.contentIdentity).toBe(delivery.delivery.contentIdentity);
   const accepted = f.accept(f.result()); await f.pipeline.drain();
@@ -435,7 +480,9 @@ it('keeps two conversations and three independent versions through two correctio
   const sessions = f.db.prepare('SELECT id,role,omp_session_id FROM attempt_sessions WHERE attempt_id=?').all(f.attemptId);
   expect(sessions).toHaveLength(2);
   const directories = f.db.prepare<[string], { role: string; session_directory_relative: string }>('SELECT role,session_directory_relative FROM attempt_sessions WHERE attempt_id=?').all(f.attemptId);
-  for (const session of directories) expect(session.session_directory_relative).toBe(`sessions/${f.attemptId}/${session.role}`);
+  const issueNumber = f.storage.getAttemptWorkspaceBinding(f.attemptId).issue_number;
+  for (const session of directories) expect(session.session_directory_relative).toBe(
+    attemptSessionDirectoryReference(issueNumber, f.attemptId, session.role as 'implementer' | 'reviewer'));
   for (const role of ['implementer','reviewer']) {
     const bindings = f.db.prepare('SELECT DISTINCT attempt_session_id FROM passages WHERE attempt_id=? AND role=?').all(f.attemptId, role);
     expect(bindings).toHaveLength(1);
@@ -491,6 +538,7 @@ it('keeps the captured guidance and profile revision through a correction after 
   const correction = vi.mocked(f.execution.continuePassage).mock.calls[0]![1];
   expect(correction.profile.guidance).toBe('Profile guidance');
   expect(correction.profile.guidance).not.toContain('Future attempts');
+  expect(JSON.parse(correction.task)).toHaveProperty('dependencyManagement.managerSelection');
   expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(captured);
 });
 
@@ -858,7 +906,10 @@ it('prepares a role-matched successor without ending or starting the blocked att
   expect(f.db.prepare<[string], { attempt_id: string }>('SELECT attempt_id FROM cancellation_requests WHERE operation_id=?').get(endContext.operationId)).toEqual({ attempt_id: f.attemptId });
   expect(f.execution.cancelAttempt).toHaveBeenCalledExactlyOnceWith(f.attemptId, endContext.operationId);
   expect(f.storage.getResources(f.attemptId).cleanup).toBe('pending');
-  f.storage.validatePreviousAttempt(f.attemptId, f.projectId, f.issue.id);
+  expect(() => f.storage.validatePreviousAttempt(f.attemptId, f.projectId, f.issue.id))
+    .toThrow('Writers from the previous attempt have not been confirmed stopped.');
+  confirmTerminalStops(f, f.attemptId);
+  expect(() => f.storage.validatePreviousAttempt(f.attemptId, f.projectId, f.issue.id)).not.toThrow();
   expect((await f.preparations.getPreparation(successorId)).view.preparation.previous_attempt_id).toBe(f.attemptId);
 });
 

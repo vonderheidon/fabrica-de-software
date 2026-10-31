@@ -20,15 +20,19 @@ import { createRemotePublisher, type PushAuthorization } from './remote-publicat
 import { createDeletionInspector, windowsReferenceDeletionPlatform, nativeDeletionInspectionPlatform } from './deletion.js';
 import { createProjectStorageInspector, type ProjectStoragePersistence } from './project-storage.js';
 import { createProjectStorageTransitionWorkspace } from './project-storage-transition.js';
+import { createRetainedHistoryMigrator, type RetainedHistoryMigrationStore } from './retained-history-migration.js';
 export { createDeletionInspector, nativeDeletionInspectionPlatform } from './deletion.js';
 export type { DeletionInspection, DeletionInspectionInput, DeletionInspectionPlatform, DeletionPathClaim, DeletionPathObservation } from './deletion.js';
 export type { LocalCommitResult } from './publication.js';
 export { ScaffoldWorkspaceError, validateScaffoldBranch } from './scaffold.js';
 export type { EnvironmentObservation } from './recovery.js';
 export { CaptureError, captureLimits, type CaptureInput, type CapturedContent } from './capture.js';
-export { ProjectStorageError, projectStorageRootRelative, requireAttemptRootResolver } from './project-storage.js';
+export { ProjectStorageError, projectStorageRootRelative, requireAttemptAreaResolver, requireAttemptRootResolver } from './project-storage.js';
+export { IssueProgressError, renderIssueProgress, writeIssueProgressFile } from './issue-progress.js';
+export type { IssueProgressDecision, IssueProgressDocument, IssueProgressIdentity, IssueProgressMilestone,
+  IssueProgressPredecessor, IssueProgressRound } from './issue-progress.js';
 export { createProjectStorageTransitionWorkspace } from './project-storage-transition.js';
-export type { AttemptRootResolver, ProjectStoragePersistence } from './project-storage.js';
+export type { AttemptAreaResolver, AttemptRootResolver, AttemptWorkspacePathResolver, ProjectStoragePersistence } from './project-storage.js';
 import { resolve } from 'node:path';
 import type { ToolObservation } from '#contracts';
 export { WorkspacePreparationError } from './prepare.js';
@@ -38,7 +42,7 @@ export { gitSafety } from './git.js';
 export { TargetError } from './publication-target.js';
 export type { TargetIdentity } from './publication-target.js';
 export type { DeliveryTaskInput, DeliveryTargetInspection, TargetCommitResult } from './delivery-target.js';
-export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'> & Partial<Pick<GitHub,'listBranches'>>; context?: GitContext; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization; projectStorage?: ProjectStoragePersistence }
+export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'> & Partial<Pick<GitHub,'listBranches'>>; context?: GitContext; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization; projectStorage?: ProjectStoragePersistence; historyMigration?: RetainedHistoryMigrationStore }
 export function createWorkspaces(options: WorkspaceOptions) {
   const git = options.context ? createGitReader(options.context) : undefined;
   const listBranches = createBranchLister(options.github,git);
@@ -46,13 +50,16 @@ export function createWorkspaces(options: WorkspaceOptions) {
   const projectStorage = createProjectStorageInspector(options.dataDirectory ?? resolve('.'), undefined, options.projectStorage);
   const projectStorageTransition = createProjectStorageTransitionWorkspace(options.dataDirectory ?? resolve('.'));
   const resolveAttemptRoot = projectStorage.resolveAttemptRoot;
+  const resolveAttemptWorkspace = projectStorage.resolveAttemptWorkspace;
+  const migrateLegacyIssueHistory = createRetainedHistoryMigrator(options.dataDirectory, git, options.historyMigration, resolveAttemptRoot);
   const deliveryTargetWorkspace = createDeliveryTargetWorkspace(options.github,options.dataDirectory,git,undefined,resolveAttemptRoot);
-  const sharedAttempt = createAttemptMaterializer(options.dataDirectory, git, undefined, resolveAttemptRoot);
-  return { ...createPublicationTargetWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot), ...projectStorage, ...projectStorageTransition, prepareAttempt: createWorkspacePreparer(options.dataDirectory, git, undefined, resolveAttemptRoot),
-    captureDelivery: createCapturer(options.dataDirectory, git, undefined, resolveAttemptRoot), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git, undefined, resolveAttemptRoot),
+  const sharedAttempt = createAttemptMaterializer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace);
+  return { ...createPublicationTargetWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot, resolveAttemptWorkspace), ...projectStorage, ...projectStorageTransition,
+    ...(options.historyMigration ? { migrateLegacyIssueHistory } : {}), prepareAttempt: createWorkspacePreparer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace),
+    captureDelivery: createCapturer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git, undefined, resolveAttemptRoot),
     listBranches,
     verifyRetainedDelivery: createRetainedVerifier(options.dataDirectory, git, undefined, resolveAttemptRoot),
-    ...createLocalPublisher(options.dataDirectory, git, undefined, resolveAttemptRoot),
+    ...createLocalPublisher(options.dataDirectory, git, undefined, resolveAttemptRoot, projectStorage.resolveAttemptArea),
     inspectDeliveryTarget: deliveryTargetWorkspace.inspectDeliveryTarget,
     inspectIntegrationTarget: deliveryTargetWorkspace.inspectIntegrationTarget,
     importIntegrationBase: createIntegrationImporter(git,sharedAttempt),

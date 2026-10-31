@@ -30,10 +30,9 @@ export function retainedGitObjects() {
   return { objects, baseSha, contentIdentity, commitSha, approvedBlob, approvedBytes, ignore };
 }
 
-export async function writeRetainedGit(directory: string, attemptId: string, deliveryId: string) {
+export async function writeRetainedGit(managedRoot: string, implementation: string, attemptId: string, deliveryId: string) {
   const fixture = retainedGitObjects();
-  const repository = join(directory, 'git', `${attemptId}.git`);
-  const implementation = join(directory, 'work', attemptId, 'implementation');
+  const repository = join(managedRoot, 'git', `${attemptId}.git`);
   const gitRef = `refs/factory/deliveries/${deliveryId}`;
   for (const [metadata, bare] of [[repository, true], [join(implementation, '.git'), false]] as const) {
     await mkdir(join(metadata, 'objects', 'info'), { recursive: true });

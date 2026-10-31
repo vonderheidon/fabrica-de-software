@@ -5,6 +5,7 @@ import { loadRoleResources } from './roles.js';
 export type PassageHandle = Readonly<{ passageId: string }>;
 import type { ExecutionCode } from './errors.js';
 import type { ToolObservation } from '#contracts';
+import type { AttemptAreaResolver } from '../workspaces/index.js';
 export { ExecutionError, type ExecutionCode } from './errors.js';
 export type PassageState = 'starting' | 'ready' | 'partial' | 'interrupted' | 'cancelled';
 export interface PassageRecord {
@@ -81,6 +82,7 @@ export interface ExecutionOptions {
   dataDirectory: string; persistence: ExecutionPersistence; host?: ExecutionHost;
   resolveHost?: () => Promise<ExecutionHost | undefined>;
   projectStorageRootForAttempt?: (attemptId: string, allocate?: boolean) => Promise<string>;
+  projectStorageAreaForAttempt?: AttemptAreaResolver;
   /** Defaults to resources distributed next to the application. */
   roleDirectory?: string;
 }

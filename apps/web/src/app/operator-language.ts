@@ -16,6 +16,8 @@ const stateLabels: Readonly<Record<string, string>> = {
 };
 
 const codeLabels: Readonly<Record<string, string>> = {
+  DISPATCH_FAILED: 'Inicialização da passagem interrompida',
+  PROJECT_STORAGE_ROOT_UNAVAILABLE: 'Área gerenciada do projeto indisponível',
   IMPLEMENTATION_BLOCKED: 'Implementação impedida por pré-requisito',
   ISSUE_CLOSED: 'Issue fechada', NOT_AN_ISSUE: 'O item não é uma issue executável',
   READ_INCOMPLETE: 'Leitura incompleta', REPOSITORY_MISMATCH: 'Repositório diferente do projeto',
@@ -43,6 +45,14 @@ const codeLabels: Readonly<Record<string, string>> = {
   CAPTURE_CONTINUITY_REVOKED: 'Continuidade da captura revogada', CAPTURE_REF_CONFLICT: 'Referência da captura divergente',
   HUMAN_DECISION: 'Aguardando decisão do operador', QUESTION_EXPIRED: 'Pergunta expirada',
   CAPTURE_FAILED: 'Captura da versão falhou',
+  PREVIOUS_ATTEMPT_NOT_STOPPED: 'Parada física da tentativa anterior não confirmada',
+  PREVIOUS_ATTEMPT_REQUIRED: 'Selecione a tentativa anterior para reutilizar o workspace',
+  PREVIOUS_ATTEMPT_NOT_LATEST: 'A issue teve uma tentativa mais recente', WORKSPACE_RESOLUTION_CONFLICT: 'Localização do workspace da issue ambígua',
+  WORKSPACE_SHARED: 'Ambiente compartilhado com outra tentativa', WORKSPACE_MISSING: 'Ambiente herdado ausente',
+  WORKSPACE_ROOT_UNAVAILABLE: 'Raiz gerenciada do workspace indisponível', WORKSPACE_PATH_UNAVAILABLE: 'Caminho do workspace indisponível',
+  WORKSPACE_IDENTITY_MISMATCH: 'Identidade do ambiente herdado divergente', WORKSPACE_REPOSITORY_MISMATCH: 'Repositório do ambiente herdado divergente',
+  WORKSPACE_SNAPSHOT_FAILED: 'Snapshot do ambiente herdado falhou', WORKSPACE_SNAPSHOT_IMPORT_FAILED: 'Snapshot do ambiente não pôde ser vinculado ao checkout',
+  WORKSPACE_ATTEMPT_BRANCH_EXISTS: 'Branch da tentativa já existe', WORKSPACE_CONTENT_INVALID: 'Conteúdo do ambiente herdado não pôde ser validado',
   EXECUTOR_COST_NOT_OBSERVED: 'Custo não fornecido pelo executor', NATIVE_OPEN_UNAVAILABLE: 'Abertura nativa indisponível',
   DECLARED_NEW_FILE_IGNORED: 'Arquivo novo ignorado', KNOWN_SECRET_EXCLUDED: 'Arquivo excluído pela regra de segurança',
   RESULT_INVALID: 'Resultado precisa de correção', RESULT_CONFLICT: 'Resultado conflita com um resultado anterior',
@@ -58,6 +68,8 @@ const codeLabels: Readonly<Record<string, string>> = {
 };
 
 const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; nextAction: string }>> = {
+  DISPATCH_FAILED: { title: 'Inicialização da passagem interrompida', cause: 'O controlador não conseguiu concluir a preparação ou iniciar a passagem.', nextAction: 'Consulte os registros da tentativa para identificar a falha antes de preparar uma nova execução.' },
+  PROJECT_STORAGE_ROOT_UNAVAILABLE: { title: 'Área gerenciada do projeto indisponível', cause: 'O controlador não conseguiu confirmar a localização gerenciada necessária à tentativa.', nextAction: 'Confira a localização e os registros do projeto antes de continuar. Preserve as pastas existentes.' },
   IMPLEMENTATION_BLOCKED: { title: 'Implementação impedida', cause: 'O Implementador registrou um pré-requisito bloqueante. A tentativa não avançou para revisão.', nextAction: 'Consulte o resultado do Implementador, resolva o pré-requisito e prepare uma nova tentativa, ou encerre a atual.' },
   ACCOUNT_CHANGED: { title: 'Conta ativa diferente da vinculada', cause: 'A conta GitHub observada mudou em relação à conta vinculada à preparação.', nextAction: 'Confira a conta ativa e o vínculo em Configuração; depois, consulte a preparação novamente.' },
   ISSUE_CLOSED: { title: 'Issue fechada', cause: 'A issue selecionada está fechada no GitHub.', nextAction: 'Selecione uma issue aberta ou revise seu estado no GitHub e consulte novamente.' },

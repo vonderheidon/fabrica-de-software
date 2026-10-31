@@ -1,11 +1,11 @@
 import { realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, EffectView, type EffectReceipt } from '#contracts';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
 import { createPublicationMaterializer } from './materialize.js';
 import type { GitReader } from './git.js';
-import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
+import { retainedRepositoryOwner, retainedRepositoryPath, requireAttemptRootResolver, type AttemptAreaResolver, type AttemptRootResolver } from './project-storage.js';
 
 export interface LocalCommitResult {
   state: 'confirmed' | 'not_applicable' | 'failed_known' | 'unknown';
@@ -15,9 +15,9 @@ export interface LocalCommitResult {
 
 /** Publication uses retained objects only. The removable implementation is never inspected. */
 export function createLocalPublisher(dataDirectory?: string, git?: GitReader, canonicalize: (path: string) => Promise<string> = realpath,
-  resolveAttemptRoot?: AttemptRootResolver) {
+  resolveAttemptRoot?: AttemptRootResolver, resolveAttemptArea?: AttemptAreaResolver) {
   const isolated: GitReader | undefined = git ? (cwd, args, input) => git(cwd, args, { ...input, isolatedConfig: true }) : undefined;
-  const materialize = createPublicationMaterializer(dataDirectory, isolated, canonicalize, resolveAttemptRoot);
+  const materialize = createPublicationMaterializer(dataDirectory, isolated, canonicalize, resolveAttemptRoot, resolveAttemptArea);
   async function context(delivery: Delivery, effect: EffectView) {
     const identity = effect.expectedIdentity;
     if (!Value.Check(Delivery, delivery) || !Value.Check(EffectView, effect) || effect.kind !== 'local_commit' ||
@@ -26,9 +26,9 @@ export function createLocalPublisher(dataDirectory?: string, git?: GitReader, ca
       !identity.issueNumber || !identity.commitTime || identity.branchRef !== `refs/heads/factory/${identity.issueNumber}/${delivery.attemptId}`) throw new CaptureError('COMMIT_IDENTITY_INVALID');
     if (!dataDirectory || !isolated) throw new CaptureError('CONTEXT_UNAVAILABLE');
     const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId), canonicalize);
-    const root = resolve(data, 'git'); const repository = resolve(root, `${delivery.attemptId}.git`);
+    const repository = retainedRepositoryPath(data, delivery.attemptId, delivery.repositoryRelative); const root = dirname(repository);
     await plainDirectory(root, canonicalize); await plainDirectory(repository, canonicalize); await noBorrowedObjects(repository);
-    if ((await metadataBytes(resolve(repository, 'factory-owner'), 36)).toString('utf8') !== delivery.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
+    if ((await metadataBytes(resolve(repository, 'factory-owner'), 64)).toString('utf8') !== retainedRepositoryOwner(delivery.attemptId, delivery.repositoryRelative)) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
     const raw = (args: string[], input?: string) => isolated(repository, [`--git-dir=${repository}`, '-c', 'core.bare=true', '-c', 'core.fsync=committed', ...args], { ...(input === undefined ? {} : { input }), ...(args.includes('commit-tree') ? { commitTime: identity.commitTime! } : {}) });
     const run = async (args: string[], input?: string) => {
       const result = await raw(args, input);

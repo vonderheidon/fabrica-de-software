@@ -12,6 +12,7 @@ import { acquireControllerLock, openStorage } from '../../dist/apps/controller/s
 import { createGitHub } from '../../dist/apps/controller/src/modules/github/index.js';
 import { createWorkspaces } from '../../dist/apps/controller/src/modules/workspaces/index.js';
 import { createEnvironmentRecovery } from '../../dist/apps/controller/src/modules/workspaces/recovery.js';
+import { createProjectStorageInspector } from '../../dist/apps/controller/src/modules/workspaces/project-storage.js';
 import { createDeliveryDiff } from '../../dist/apps/controller/src/modules/workspaces/diff.js';
 import { createRetainedVerifier } from '../../dist/apps/controller/src/modules/workspaces/retention.js';
 import { createPreparations } from '../../dist/apps/controller/src/modules/projects/index.js';
@@ -69,8 +70,13 @@ const lock = acquireControllerLock(directory);
 const storage = openStorage({ dataDirectory: directory });
 storage.checkHealth();
 const github = createGitHub();
-const resolveFixtureRoot = async () => directory;
-const workspaces = { ...createWorkspaces({ github }), ...createEnvironmentRecovery(directory, git, undefined, canonicalize, resolveFixtureRoot),
+const projectStorage = createProjectStorageInspector(directory, canonicalize, storage);
+/** @param {string} attemptId @param {boolean=} allocate */
+const resolveFixtureRoot = (attemptId, allocate) => projectStorage.resolveAttemptRoot(attemptId, allocate);
+/** @param {string} attemptId */
+const resolveFixtureWorkspace = attemptId => projectStorage.resolveAttemptWorkspace(attemptId);
+const workspaces = { ...createWorkspaces({ github, dataDirectory: directory, projectStorage: storage }),
+  ...createEnvironmentRecovery(directory, git, undefined, canonicalize, resolveFixtureRoot, resolveFixtureWorkspace),
   getDeliveryDiff: createDeliveryDiff(directory, git, canonicalize, resolveFixtureRoot) };
 const preparations = createPreparations({ storage, github, workspaces });
 const execution = createExecution({ dataDirectory: directory, persistence: storage.executionPersistence() });

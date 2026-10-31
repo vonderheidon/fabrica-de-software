@@ -2,6 +2,7 @@ import { Type, type Static } from '@sinclair/typebox';
 import { ArtifactPolicy, DeliveryMode, OperationId, OperationReceipt, Page, TimeDefaults } from './base.js';
 import { GitHubDiagnostic, GitHubId, ConfigurationIssueContext, ConfigurationIssueOption } from './github.js';
 import { ComposedExecutionProfileValue, ExecutionProfileValue, Prerequisite, ProjectConfiguration, StoredExecutionProfileValue } from './projects.js';
+import { AttemptWorkspaceSnapshot, WorkspaceIdentity } from './workspaces.js';
 
 const closed = { additionalProperties: false } as const;
 const revision = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });
@@ -99,14 +100,15 @@ export const IssueOptions = Type.Object({
 }, closed);
 export type IssueOptions = Static<typeof IssueOptions>;
 export const WorkspacePreparation = Type.Object({
-  attemptId: OperationId, issueNumber: Type.Integer({ minimum: 1, maximum: 2_147_483_647 }),
-  source: ProjectConfiguration.properties.source, baseSha: sha,
+  attemptId: OperationId, workspace: WorkspaceIdentity, issueNumber: Type.Integer({ minimum: 1, maximum: 2_147_483_647 }),
+  source: ProjectConfiguration.properties.source, baseSha: sha, predecessorAttemptId: Type.Union([OperationId, Type.Null()]),
+  inheritedBaseSha: Type.Union([sha, Type.Null()]),
 }, closed);
 export type WorkspacePreparation = Static<typeof WorkspacePreparation>;
 export const PreparedWorkspace = Type.Object({
-  state: Type.Union([Type.Literal('prepared'), Type.Literal('failed')]), attemptId: OperationId,
+  state: Type.Union([Type.Literal('prepared'), Type.Literal('failed')]), attemptId: OperationId, workspace: WorkspaceIdentity,
   resource: Type.Object({ kind: Type.Literal('implementation'), path: text(8192), owned: Type.Boolean() }, closed),
-  baseSha: sha, branch: text(1024),
+  baseSha: sha, branch: text(1024), snapshot: Type.Union([AttemptWorkspaceSnapshot, Type.Null()]),
   diagnostic: Type.Union([Type.Object({ code: text(128), message: text(2048), recovery: text(2048) }, closed), Type.Null()]),
 }, closed);
 export type PreparedWorkspace = Static<typeof PreparedWorkspace>;

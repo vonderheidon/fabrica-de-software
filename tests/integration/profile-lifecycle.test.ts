@@ -46,6 +46,13 @@ async function createCapturedAttempt(f: Awaited<ReturnType<typeof attemptFixture
     criteriaDigest: preparation.criteria_preview.digest,
     roleResources: f.roles,
     tools: f.tools,
+    workspace: {
+      identity: { project_id: f.projectId, repository_id: preparation.issue.repository.id, issue_id: preparation.issue.id },
+      predecessor_attempt_id: null,
+      initial_state: { kind: 'base_checkout', content_identity: preparation.base_sha },
+      inherited_base_sha: null,
+      comparison_base_sha: preparation.base_sha,
+    },
   };
   const accepted = f.storage.createAttempt({
     command: { operationId, expectedRevision: saved.etag, body: {

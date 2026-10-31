@@ -13,7 +13,9 @@ mkdirSync(join(root, '.cache'), { recursive: true });
 const data = mkdtempSync(join(root, '.cache', 'distribution dados-'));
 assert(!existsSync(join(directory, 'apps/controller/src')));
 assert(!existsSync(join(directory, 'dist/apps/controller/src/modules/storage/migrations')));
-assert.deepEqual(readdirSync(join(directory, 'dist/resources/storage')).sort(), ['initial-schema.v54.sql', 'schema-recognition.v1.json']);
+assert.deepEqual(readdirSync(join(directory, 'dist/resources/storage')).sort(), [
+  '055_issue_history_repository_reference.sql', 'initial-schema.v56.sql', 'schema-recognition.v1.json',
+]);
 assert(!existsSync(join(directory, '.agents')));
 assert(!existsSync(join(directory, 'node_modules/typescript')));
 const main = pathToFileURL(join(directory, 'dist/apps/controller/src/main.js')).href;

@@ -10,7 +10,7 @@ import { createPipeline } from '../../apps/controller/src/modules/pipeline/index
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { applyHistoricalSchemaFixture, loadHistoricalSchemaFixtures } from '../fixtures/historical-schema.js';
 import { seedLegacySettings as seedSettings } from '../fixtures/legacy-settings.js';
-import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, complete, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
@@ -38,18 +38,19 @@ describe('atomic attempt acceptance', () => {
     const f = await fixture(); const c = await f.prepare(); const op = await f.pipeline.startAttempt(c.body, c.context); await f.pipeline.drain();
     f.storage.interruptAttempts();
     expect(f.storage.getAttempt(op.resource.id).result).toBe('interrupted');
-    await expect(f.pipeline.startAttempt(c.body, { ...c.context, operationId: randomUUID() })).rejects.toMatchObject({ code: 'EXPLICIT_RETRY_REQUIRED' });
+    await expect(f.pipeline.startAttempt(c.body, { ...c.context, operationId: randomUUID() })).rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_REQUIRED' });
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(1);
   });
-  it('accepts a fresh manual preparation for an interrupted issue using the newly selected branch', async () => {
+  it('revalidates the selected branch while inheriting the stopped predecessor workspace', async () => {
     const f = await fixture(); const first = await f.prepare();
     const original = await f.pipeline.startAttempt(first.body, first.context); await f.pipeline.drain();
     f.storage.interruptAttempts();
+    confirmTerminalStops(f, original.resource.id);
     const branch = 'feat/landing'; const sha = 'b'.repeat(40);
     f.observation.base = { branch, sha, observedFrom: 'github' };
     f.observation.remote!.branch = { repositoryId: f.issue.repository.id, name: branch, sha };
     const saved = await f.preparations.createPreparation(f.projectId, {
-      issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: { base_branch: branch },
+      issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: { base_branch: branch }, previous_attempt_id: original.resource.id,
     }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;
     const next = await f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision,
@@ -58,6 +59,8 @@ describe('atomic attempt acceptance', () => {
     expect(next.resource.id).not.toBe(original.resource.id);
     expect(f.storage.getAttempt(original.resource.id).result).toBe('interrupted');
     expect(f.workspaces.prepareAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ baseSha: sha }));
+    expect(f.storage.getAttemptCapture(next.resource.id).workspace).toMatchObject({ predecessor_attempt_id: original.resource.id,
+      inherited_base_sha: 'a'.repeat(40), comparison_base_sha: 'b'.repeat(40) });
   });
   it('automatically consumes one durable Ready cycle and rearms only after observed exit and eligible return', async () => {
     const f = await fixture();
@@ -85,6 +88,7 @@ describe('atomic attempt acceptance', () => {
       expect(f.storage.listAttempts({ projectId: f.projectId, limit: '10' }).items).toHaveLength(1);
 
       f.storage.interruptAttempts();
+      confirmTerminalStops(f, first.id);
       f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
       clock.mockReturnValue(base + 30_002); await f.pipeline.tick();
       expect(f.storage.getQueueCycle('ACCOUNT_test', f.projectId, f.issue.id)).toMatchObject({ cycleNumber: 1, ready: false, consumedAttemptId: first.id });

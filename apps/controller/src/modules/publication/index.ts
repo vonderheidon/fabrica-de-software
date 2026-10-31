@@ -268,7 +268,7 @@ export function createPublication(deps: PublicationDependencies) {
       const absent = !previous || await deps.workspaces.reconcileTargetCommit?.(delivery,previous,target);
       if (absent === true || absent && absent.state === 'failed_known' && absent.reason === 'COMMIT_NOT_OBSERVED') {
         const next = await deps.workspaces.inspectIntegrationTarget(target.local_path,{ attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
-          contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
+          contentIdentity:delivery.contentIdentity!,repositoryRelative:delivery.repositoryRelative,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
           repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
           baseBranch:target.base_branch,baseSha:delivery.baseSha, sourceKind:target.local_identity.source_kind, deliveryBranch: snapshot.capture.configuration.configuration.delivery_branch });
         if (next.rootIdentity !== target.local_identity.root_identity) blocked('DELIVERY_TARGET_CHANGED');
@@ -313,7 +313,7 @@ export function createPublication(deps: PublicationDependencies) {
       }
       const task = { attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
         contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
-        repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
+        repositoryRelative:delivery.repositoryRelative,repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
         baseBranch:snapshot.capture.configuration.configuration.delivery_branch?.kind === 'existing' ? snapshot.capture.configuration.configuration.delivery_branch.name : snapshot.capture.configuration.configuration.base_branch,baseSha:delivery.baseSha, sourceKind:source.kind, deliveryBranch:snapshot.capture.configuration.configuration.delivery_branch };
       let inspected;
       try { inspected = await deps.workspaces.inspectDeliveryTarget(localPath,task,task); }
@@ -393,7 +393,7 @@ export function createPublication(deps: PublicationDependencies) {
       s = storage.getPublicationSnapshot(s.status.id,d.id);
       if (targetIdentity.targetOperationId && deps.workspaces.verifyDeliveryTarget) {
         const sealedTarget = storage.assertDeliveryTarget(targetIdentity.targetOperationId);
-        await deps.workspaces.verifyDeliveryTarget(sealedTarget,{ attemptId:s.status.id,approvedRef:d.gitRef!,contentIdentity:d.contentIdentity!,
+        await deps.workspaces.verifyDeliveryTarget(sealedTarget,{ attemptId:s.status.id,approvedRef:d.gitRef!,contentIdentity:d.contentIdentity!,repositoryRelative:d.repositoryRelative,
           issueNumber:s.capture.issue.number,issueTitle:s.capture.issue.title,repositoryId:s.capture.issue.repository.id,
           repositoryUrl:s.capture.issue.repository.url,baseBranch:sealedTarget.base_branch,baseSha:d.baseSha,sourceKind:sealedTarget.local_identity.source_kind });
       }

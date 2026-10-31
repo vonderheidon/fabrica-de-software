@@ -47,7 +47,8 @@ function fixture(initialEffort: string | null = 'high', ompVersion = '19.2.0-bet
   const loadedRole = loadRoleResources().get('implementer')!;
   const role = { reference: loadedRole.reference, resultSchema: loadedRole.resultSchema, questionSchema: loadedRole.questionSchema };
   seam.launch = JSON.stringify({ protocolVersion: 1, host: '127.0.0.1', port: 12345, token: 'x'.repeat(43),
-    cwd: 'C:\\Clone ç 😀', ompVersion, role, task: 'Long task '.repeat(15000), guidance: profileGuidance, gitNexusRequired: true });
+    cwd: 'C:\\Clone ç 😀', npmCacheDirectory: 'C:\\Factory\\var\\factory\\runtime\\npm-cache',
+    ompVersion, role, task: 'Long task '.repeat(15000), guidance: profileGuidance, gitNexusRequired: true });
   const handlers = new Map<string, Parameters<Api['on']>[1]>();
   const tools = new Map<string, Parameters<Api['registerTool']>[0]>();
   let effort: string | undefined = initialEffort ?? undefined;

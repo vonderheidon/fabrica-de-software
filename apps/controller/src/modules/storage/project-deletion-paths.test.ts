@@ -6,6 +6,9 @@ import { seedSettings } from './settings.js';
 import { readConfiguration } from './configuration-reads.js';
 import { insertRevision, registerProject } from './configuration-writes.js';
 import { readProjectDeletionPaths } from './project-deletion-paths.js';
+import { attemptFixture } from '../../../../../tests/fixtures/attempt.js';
+import { passageBootstrapDirectoryReference } from '#contracts';
+import { resolve } from 'node:path';
 
 describe('saved current origins and versioned deletion path inventory', () => {
   it('selects B after A→B, preserves A after B→URL and never writes during inspection', () => {
@@ -37,5 +40,37 @@ describe('saved current origins and versioned deletion path inventory', () => {
       expect(remote.inventoryVersion).not.toBe(b.inventoryVersion);
       expect(db.prepare('SELECT count(*) AS n FROM project_revisions WHERE project_id=?').get(projectId)).toEqual({ n: 3 });
     } finally { db.close(); }
+  });
+
+  it('targets bootstrap residues by passage and protects bootstrap paths owned by another project', async () => {
+    const fixture = await attemptFixture();
+    try {
+      const prepared = await fixture.prepare();
+      await fixture.pipeline.startAttempt(prepared.body, prepared.context);
+      await fixture.pipeline.drain();
+      const repository = fixture.issue.repository;
+      Object.assign(repository, { id: 'R_other', name: 'repo-other', url: 'https://github.com/test-org/repo-other' });
+      fixture.issue.url = `${repository.url}/issues/17`;
+      const otherProjectId = fixture.register();
+      fixture.observation.source = fixture.storage.getConfiguration(otherProjectId).view.configuration.source;
+      if (!fixture.observation.remote?.branch) throw new Error('TEST_FIXTURE_REMOTE_BRANCH_MISSING');
+      Object.assign(fixture.observation.remote, { url: repository.url, repository,
+        branch: { ...fixture.observation.remote.branch, repositoryId: repository.id } });
+      const otherPrepared = await fixture.prepare(otherProjectId);
+      await fixture.pipeline.startAttempt(otherPrepared.body, otherPrepared.context);
+      await fixture.pipeline.drain();
+      const selected = fixture.db.prepare<[string], { id: string; attempt_id: string }>(`SELECT p.id,p.attempt_id FROM passages p
+        JOIN attempts a ON a.id=p.attempt_id WHERE a.project_id=? ORDER BY p.id`).all(fixture.projectId);
+      const other = fixture.db.prepare<[string], { id: string }>(`SELECT p.id FROM passages p JOIN attempts a ON a.id=p.attempt_id
+        WHERE a.project_id=? ORDER BY p.id`).all(otherProjectId);
+      const paths = fixture.storage.getProjectDeletionPaths(fixture.projectId);
+      for (const passage of selected) expect(paths.targets).toContainEqual(expect.objectContaining({
+        key: `bootstrap:${passage.id}`, kind: 'exclusive_workspace', ownerKind: 'attempt', ownerId: passage.attempt_id,
+        path: resolve(fixture.directory, ...passageBootstrapDirectoryReference(passage.id).split('/')),
+      }));
+      for (const passage of other) expect(paths.protectedPaths).toContain(
+        resolve(fixture.directory, ...passageBootstrapDirectoryReference(passage.id).split('/')));
+      expect(paths.containers).toContain(resolve(fixture.directory, 'runtime', 'bootstrap'));
+    } finally { await fixture.close(); }
   });
 });

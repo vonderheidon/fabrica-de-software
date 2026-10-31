@@ -50,6 +50,14 @@ Ordem: validar bootstrap → adquirir lock → abrir/conferir migrations e confi
 
 As únicas variáveis de bootstrap são `NODE_ENV`, `FACTORY_BIND_HOST`, `FACTORY_PORT`, `FACTORY_BROWSER_ORIGIN` e `FACTORY_LOG_LEVEL`. Defaults/validação estão no README raiz. O banco é fixo em `<raiz da instalação>/var/factory/factory.sqlite`, independentemente do cwd. `FACTORY_DATA_DIR` é ignorada; HTTP e configuração persistida não substituem esse caminho. Git retido, ambientes, evidências e lock usam a mesma raiz operacional `var/factory`. Não inserir senha humana, token, Wire, segredos de provider ou variáveis `VITE_*` no exemplo/bundle.
 
+Comandos npm iniciados pelo OMP usam o cache compartilhado da instalação em `var/factory/runtime/npm-cache`. Ele fica fora dos workspaces por issue e dos repositórios Git retidos; `npm_config_cache` é configurada somente no processo OMP e seus filhos. `node_modules` continua dentro do workspace da issue.
+
+Screenshots e relatórios de revisão ficam em `var/factory/projects/<project-id>/v1/managed/issues/<issue-number>/attempts/<attempt-id>/evidence/<delivery-id>`, fora do workspace mutável e do Git retido. Evidências antigas em `.factory-evidence` não são movidas automaticamente; a exclusão autorizada do projeto remove a raiz gerenciada que contém as evidências novas.
+
+Antes de validar uma mudança que depende de pacotes, o Implementador reutiliza a árvore instalada quando ela está coerente. Se precisar reconciliar, escolhe npm, Yarn ou pnpm pelo campo `packageManager` e pelo lockfile do package root, e usa a instalação normal do gerenciador. Gerenciadores conflitantes, ausentes ou sem suporte bloqueiam a instalação e são registrados como impedimento. Não usa instalação limpa nem apaga `node_modules`; depois da instalação, confere mudanças rastreadas e só mantém alterações de lockfile necessárias à tarefa.
+
+O arquivo de conexão temporário do OMP fica em `var/factory/runtime/bootstrap/<passage-id>/launch.json`, com ACL restrita no Windows. Após o handshake, o controlador revoga o arquivo e tenta remover somente a pasta vazia. Uma pasta existente só pode ser reutilizada se estiver vazia ou, quando contém o arquivo de conexão, após confirmar que o terminal anterior parou; conteúdo inesperado bloqueia a reconciliação. A exclusão autorizada do projeto confere e remove resíduos ligados às suas passagens, protegendo os demais projetos. Pastas sem vínculo registrado não são adotadas nem removidas automaticamente.
+
 ## Configurar e iniciar trabalho
 
 Navegue à origem configurada, por padrão `http://127.0.0.1:4310`. Produção serve assets e API `/api/v1` na mesma origem. Health é somente técnico; não prova execução de agente. Host/Origin são exatos, sem CORS global, wildcard ou confiança genérica em headers de proxy. Para desenvolver a UI, use build + controlador na mesma origem; não há script `dev` configurado. Não abrir Vite em outra origem para contornar a proteção.

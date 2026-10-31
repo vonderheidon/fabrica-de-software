@@ -85,7 +85,7 @@ it.each([[false, 'automatic'], [true, 'automatic'], [true, 'new'], [true, 'exist
   const workspaces = createDeliveryTargetWorkspace(github,data,port,undefined,resolveAttemptRoot);
   const delivery: Delivery = { id:deliveryId,attemptId,producerPassageId:passageId,round:1,baseSha,captureState:'captured',
     gitRef:approvedRef,repositoryRelative:'git/' + attemptId + '.git',contentIdentity,commitSha,hasDelta:true,diagnostic:null,capturedAtMs:1,revision:1,warnings:[] };
-  const task = { attemptId,approvedRef,contentIdentity,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha, ...(branchKind === 'automatic' ? {} : { sourceKind: 'local' as const, deliveryBranch: { kind:branchKind, name:branchKind === 'existing' ? 'release' : 'custom/result' } }) };
+  const task = { attemptId,approvedRef,contentIdentity,repositoryRelative:delivery.repositoryRelative,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha, ...(branchKind === 'automatic' ? {} : { sourceKind: 'local' as const, deliveryBranch: { kind:branchKind, name:branchKind === 'existing' ? 'release' : 'custom/result' } }) };
   const plan = await workspaces.inspectDeliveryTarget(targetRoot,task,{ approvedRef,contentIdentity,baseSha });
   if (branchKind === 'existing') {
     await expect(workspaces.inspectDeliveryTarget(targetRoot,{ ...task,deliveryBranch:{kind:'existing',name:'main'} },task)).rejects.toMatchObject({code:'DELIVERY_BRANCH_IN_USE'});

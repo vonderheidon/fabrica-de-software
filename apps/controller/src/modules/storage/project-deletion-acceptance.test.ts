@@ -83,7 +83,8 @@ describe('durable project deletion acceptance and shared authorization barrier',
       prepareAttempts: (ids, id) => f.pipeline.prepareProjectDeletion(ids, id) });
     await coordinator.schedule(operationId);
     expect(f.execution.cancelAttempt).toHaveBeenCalledWith(started.resource.id, operationId);
-    expect(removeReference).not.toHaveBeenCalled();
+    expect(removeReference).toHaveBeenCalled();
+    expect(removed.size).toBeGreaterThan(0);
     expect(f.storage.getProjectDeletion(operationId)).toEqual({ operation_id: operationId, state: 'succeeded' });
     expect(f.db.prepare('SELECT id FROM projects WHERE id=?').get(f.projectId)).toBeUndefined();
     expect(f.db.pragma('foreign_key_check')).toEqual([]);

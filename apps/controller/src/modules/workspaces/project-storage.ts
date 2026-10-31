@@ -1,15 +1,14 @@
 import { lstat, mkdir, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { OperationId, ProjectStorageRootObservation, type ProjectStorageObjectIdentity, type ProjectStorageView } from '#contracts';
+import { issueAttemptAreaReference, issueAttemptEvidenceDirectoryReference, issueHistoryRepositoryReference, managedWorkspaceReference, OperationId, ProjectStorageRootObservation, type AttemptWorkspaceBinding, type IssueAttemptArea, type ProjectStorageObjectIdentity, type ProjectStorageView } from '#contracts';
 
 export class ProjectStorageError extends Error {
   constructor(readonly code: string) { super(code); }
 }
 
 export interface ProjectStoragePersistence {
-  getAttemptProjectId(attemptId: string): string;
-  getAttemptWorkspaceReference(attemptId: string): string;
+  getAttemptWorkspaceBinding(attemptId: string): AttemptWorkspaceBinding;
   getProjectStorageView(projectId: string): ProjectStorageView;
   getStorageTransition?(operationId: string): {
     state: 'planned' | 'running' | 'verified' | 'uncertain' | 'blocked';
@@ -23,8 +22,20 @@ export interface ProjectStoragePersistence {
 }
 
 export type AttemptRootResolver = (attemptId: string, allocate?: boolean) => Promise<string>;
+export type AttemptAreaResolver = (attemptId: string, area: IssueAttemptArea) => Promise<string>;
+export type AttemptWorkspacePathResolver = (attemptId: string) => Promise<string>;
 
 export function requireAttemptRootResolver(resolver: AttemptRootResolver | undefined): AttemptRootResolver {
+  if (!resolver) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
+  return resolver;
+}
+
+export function requireAttemptAreaResolver(resolver: AttemptAreaResolver | undefined): AttemptAreaResolver {
+  if (!resolver) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
+  return resolver;
+}
+
+export function requireAttemptWorkspacePathResolver(resolver: AttemptWorkspacePathResolver | undefined): AttemptWorkspacePathResolver {
   if (!resolver) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
   return resolver;
 }
@@ -39,6 +50,30 @@ export function projectStorageRootRelative(projectId: string, locationKey: strin
     throw new ProjectStorageError('PROJECT_STORAGE_IDENTITY_INVALID');
   }
   return `var/factory/projects/${projectId}/v${layoutVersion}/${locationKey}`;
+}
+
+export function issueHistoryRepositoryRelative(issueNumber: number): string {
+  if (!Number.isSafeInteger(issueNumber) || issueNumber < 1 || issueNumber > 2_147_483_647) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+  return issueHistoryRepositoryReference(issueNumber);
+}
+
+export function retainedRepositoryOwner(attemptId: string, repositoryRelative: string): string {
+  if (!Value.Check(OperationId, attemptId)) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+  if (repositoryRelative === `git/${attemptId}.git`) return attemptId;
+  const match = /^issues\/([1-9][0-9]*)\/history\.git$/.exec(repositoryRelative);
+  const issueNumber = match ? Number(match[1]) : NaN;
+  if (!Number.isSafeInteger(issueNumber) || issueNumber < 1 || issueNumber > 2_147_483_647) {
+    throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+  }
+  return `issue:${issueNumber}`;
+}
+
+export function retainedRepositoryPath(managedRoot: string, attemptId: string, repositoryRelative: string): string {
+  if (!isAbsolute(managedRoot)) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+  retainedRepositoryOwner(attemptId, repositoryRelative);
+  const target = resolve(managedRoot, ...repositoryRelative.split('/'));
+  if (relative(managedRoot, target) !== repositoryRelative.split('/').join(sep)) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+  return target;
 }
 
 function statIdentity(stat: Awaited<ReturnType<typeof lstat>>): { volume_id: string; object_id: string } {
@@ -140,14 +175,16 @@ export function createProjectStorageInspector(dataDirectory: string, canonicaliz
       return target;
     },
   };
-  return {
+  let resolveManagedRoot: AttemptRootResolver;
+  const projectStorage = {
     ...inspector,
     ensureProjectStorageRoot,
     async resolveAttemptRoot(attemptId: string, allocate = false): Promise<string> {
       if (!persistence) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
-      const projectId = persistence.getAttemptProjectId(attemptId);
-      const reference = persistence.getAttemptWorkspaceReference(attemptId);
-      if (!Value.Check(OperationId, attemptId) || reference !== `projects/${projectId}/v1/managed/work/${attemptId}/implementation`) {
+      const binding = persistence.getAttemptWorkspaceBinding(attemptId);
+      const projectId = binding.workspace.project_id;
+      if (!Value.Check(OperationId, attemptId) || binding.attempt_id !== attemptId ||
+          binding.environment_reference !== managedWorkspaceReference(projectId, binding.issue_number)) {
         throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
       }
       const view = persistence.getProjectStorageView(projectId);
@@ -179,12 +216,79 @@ export function createProjectStorageInspector(dataDirectory: string, canonicaliz
         return resolve(installationRoot, ...transition.destination_relative.split('/'));
       }
     },
-    async resolveRepositoryReference(attemptId: string, repositoryRelative: string): Promise<string> {
-      if (!Value.Check(OperationId, attemptId) || repositoryRelative !== `git/${attemptId}.git`) {
+    async resolveAttemptWorkspace(attemptId: string): Promise<string> {
+      if (!persistence) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
+      const binding = persistence.getAttemptWorkspaceBinding(attemptId);
+      const root = await resolveManagedRoot(attemptId);
+      const expectedReference = managedWorkspaceReference(binding.workspace.project_id, binding.issue_number);
+      const reference = `issues/${binding.issue_number}/workspace`;
+      if (binding.environment_reference !== expectedReference || !safeRelative(reference)) {
         throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
       }
-      const root = await this.resolveAttemptRoot(attemptId);
-      return resolve(root, 'git', `${attemptId}.git`);
+      const target = resolve(root, ...reference.split('/'));
+      const part = relative(root, target);
+      if (!part || isAbsolute(part) || part.startsWith(`..${sep}`)) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      return target;
+    },
+    async resolveAttemptArea(attemptId: string, area: IssueAttemptArea): Promise<string> {
+      if (!persistence || !['publication', 'sessions', 'evidence'].includes(area)) {
+        throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
+      }
+      const binding = persistence.getAttemptWorkspaceBinding(attemptId);
+      const root = await resolveManagedRoot(attemptId);
+      const reference = issueAttemptAreaReference(binding.issue_number, attemptId, area);
+      if (!safeRelative(reference)) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      const target = resolve(root, ...reference.split('/'));
+      const pathFromRoot = relative(root, target);
+      if (!pathFromRoot || pathFromRoot === '..' || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+        throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      }
+      return target;
+    },
+    async resolveAttemptEvidenceDirectory(attemptId: string, deliveryId: string): Promise<string> {
+      if (!persistence || !Value.Check(OperationId, attemptId) || !Value.Check(OperationId, deliveryId)) {
+        throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      }
+      const binding = persistence.getAttemptWorkspaceBinding(attemptId);
+      const root = await resolveManagedRoot(attemptId);
+      const reference = issueAttemptEvidenceDirectoryReference(binding.issue_number, attemptId, deliveryId);
+      if (!safeRelative(reference)) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      const target = resolve(root, ...reference.split('/'));
+      const pathFromRoot = relative(root, target);
+      if (!pathFromRoot || pathFromRoot === '..' || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+        throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      }
+      let current = root;
+      for (const segment of pathFromRoot.split(sep)) {
+        if (!segment || segment === '.' || segment === '..') throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+        current = resolve(current, segment);
+        await ensureDirectory(current);
+      }
+      if (current !== target) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      return target;
+    },
+    async resolveAttemptProgressFile(attemptId: string): Promise<string> {
+      const binding = persistence?.getAttemptWorkspaceBinding(attemptId);
+      if (!binding || binding.attempt_id !== attemptId || basename(binding.environment_reference) !== 'workspace') {
+        throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      }
+      const workspace = await projectStorage.resolveAttemptWorkspace(attemptId);
+      if (basename(workspace) !== 'workspace') throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      return resolve(dirname(workspace), 'progress.md');
+    },
+    async resolveRepositoryReference(attemptId: string, repositoryRelative: string): Promise<string> {
+      if (!Value.Check(OperationId, attemptId)) {
+        throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      }
+      retainedRepositoryOwner(attemptId, repositoryRelative);
+      if (!persistence) throw new ProjectStorageError('PROJECT_STORAGE_PERSISTENCE_UNAVAILABLE');
+      const binding = persistence.getAttemptWorkspaceBinding(attemptId);
+      if (repositoryRelative !== `git/${attemptId}.git` &&
+          repositoryRelative !== issueHistoryRepositoryRelative(binding.issue_number)) throw new ProjectStorageError('PROJECT_STORAGE_REFERENCE_INVALID');
+      const root = await resolveManagedRoot(attemptId);
+      return retainedRepositoryPath(root, attemptId, repositoryRelative);
     },
   };
+  resolveManagedRoot = projectStorage.resolveAttemptRoot;
+  return projectStorage;
 }

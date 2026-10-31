@@ -11,6 +11,13 @@ export function latestIssueAttempt(db: Database.Database, repositoryId: string, 
   return row ? { id: row.id, active: row.result === null } : null;
 }
 
+export function latestProjectIssueAttempt(db: Database.Database, projectId: string, repositoryId: string, issueId: string): { id: string; active: boolean } | null {
+  const row = db.prepare<[string | null, string, string, string], { id: string; result: string | null }>(`SELECT id,result FROM attempts
+    WHERE account_id IS ? AND project_id=? AND repository_id=? AND issue_id=? ORDER BY rowid DESC LIMIT 1`)
+    .get(readSettings(db).account_id, projectId, repositoryId, issueId);
+  return row ? { id: row.id, active: row.result === null } : null;
+}
+
 export interface QueueCycleObservation {
   accountId: string;
   projectId: string;

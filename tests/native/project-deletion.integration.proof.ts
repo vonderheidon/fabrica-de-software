@@ -166,6 +166,7 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
 
     const dataDirectory = resolve(f.directory);
     const managedRoot = resolve(installRoot, ...projectStorageRootRelative(selectedId, 'managed').split('/'));
+    const selectedEvidenceRoot = join(managedRoot, 'issues', '17', 'attempts', history.selected.attemptId, 'evidence', history.selected.deliveryId);
     await mkdir(managedRoot, { recursive: true });
     f.storage.recordProjectStorageLocation(await createProjectStorageInspector(dataDirectory).inspectProjectStorageRoot(selectedId, 'managed'));
     const input = f.storage.getProjectDeletionPaths(selectedId);
@@ -175,16 +176,20 @@ describe.skipIf(process.platform !== 'win32')('native project deletion integrati
       expect(targetRelative === '' || (!isAbsolute(targetRelative) && !targetRelative.startsWith(`..${sep}`) && targetRelative !== '..'),
         'native removal targets must stay inside this explicit test fixture').toBe(true);
     }
-    await Promise.all(['work', 'git', 'execution-bootstrap', 'fixture']
+    await Promise.all(['work', 'git', 'runtime', 'runtime/bootstrap']
       .map(name => mkdir(join(dataDirectory, name), { recursive: true })));
     await Promise.all(input.targets.map((target, index) => createFileTree(target.path, `selected:${target.key}:${index}`)));
+    await createFileTree(selectedEvidenceRoot, 'selected:review-evidence');
     const otherPassages = f.db.prepare<[string], { id: string }>(
       'SELECT id FROM passages WHERE attempt_id=? ORDER BY id',
     ).all(history.other.attemptId);
+    const otherEvidenceRoot = join(installRoot, ...projectStorageRootRelative(otherId, 'managed').split('/'),
+      'issues', '17', 'attempts', history.other.attemptId, 'evidence', history.other.deliveryId);
     const otherRoots = [
       join(dataDirectory, 'work', history.other.attemptId),
       join(dataDirectory, 'git', `${history.other.attemptId}.git`),
-      ...otherPassages.map(({ id }) => join(dataDirectory, 'execution-bootstrap', id)),
+      ...otherPassages.map(({ id }) => join(dataDirectory, 'runtime', 'bootstrap', id)),
+      otherEvidenceRoot,
     ];
     await Promise.all(otherRoots.map((root, index) => createFileTree(root, `other-registration:${index}`)));
     const otherInventory = f.storage.getProjectDeletionInventory(otherId);

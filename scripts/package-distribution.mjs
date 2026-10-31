@@ -13,7 +13,8 @@ export function createDistribution() {
   for (const file of ['dist/apps/controller/src/main.js', 'dist/web/index.html', 'dist/web/favicon.ico',
     'dist/packages/contracts/src/index.js', 'dist/resources/roles/implementer.v1.json',
     'dist/resources/roles/reviewer.v1.json', 'dist/resources/templates/catalog.v1.json',
-    'dist/resources/storage/initial-schema.v54.sql', 'dist/resources/storage/schema-recognition.v1.json']) {
+    'dist/resources/storage/055_issue_history_repository_reference.sql', 'dist/resources/storage/initial-schema.v56.sql',
+    'dist/resources/storage/schema-recognition.v1.json']) {
     if (!existsSync(join(root, file))) throw new Error('DISTRIBUTION_BUILD_REQUIRED');
   }
   if (existsSync(join(root, 'dist/apps/controller/src/modules/storage/migrations'))) {

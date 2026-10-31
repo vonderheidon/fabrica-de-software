@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
+import { confirmTerminalStops } from '../fixtures/attempt.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { JsonLines, executionLimits } from '../../apps/controller/src/modules/execution/adapters/maestri-omp/wire.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
@@ -83,6 +84,7 @@ describe('first slice contracts across domain boundaries (controlled)', () => {
     const captured = f.storage.getAttemptCapture(oldId);
     await f.pipeline.cancelAttempt(oldId, {}, { operationId: randomUUID(), expectedRevision: undefined });
     await f.pipeline.drain();
+    confirmTerminalStops(f, oldId);
     f.issue.memberships[0]!.statusValues[0]!.optionId = 'PROGRESS';
     const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: 'Nova tentativa 😀', overrides: {}, previous_attempt_id: oldId }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;

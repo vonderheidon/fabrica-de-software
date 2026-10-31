@@ -1,12 +1,12 @@
 import { realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, EffectView } from '#contracts';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
 import type { GitReader } from './git.js';
 import type { LocalCommitResult } from './publication.js';
 import type { AttemptEffectAuthorization } from '../github/index.js';
-import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
+import { retainedRepositoryOwner, retainedRepositoryPath, requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 
 /** Additional trusted host boundary; never populated from a request or environment. */
 export interface PushAuthorization { accountId: string; repositoryIds: readonly string[] }
@@ -20,9 +20,10 @@ export function createRemotePublisher(dataDirectory?: string, git?: GitReader, a
        !i.repositoryId || !i.issueNumber || !i.branchRef || (i.targetOperationId ? !i.taskType || !i.taskDescription || !i.baseBranch : i.branchRef !== `refs/heads/factory/${i.issueNumber}/${delivery.attemptId}`) ||
       !i.repositoryOwner || !/^[A-Za-z0-9-]{1,100}$/.test(i.repositoryOwner) || !i.repositoryName || !/^[A-Za-z0-9_.-]{1,100}$/.test(i.repositoryName)) throw new CaptureError('PUSH_IDENTITY_INVALID');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
-    const root = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId),canonicalize); const parent = resolve(root,'git'); const repository = resolve(parent,`${delivery.attemptId}.git`);
+    const root = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId),canonicalize);
+    const repository = retainedRepositoryPath(root, delivery.attemptId, delivery.repositoryRelative); const parent = dirname(repository);
     await plainDirectory(parent,canonicalize); await plainDirectory(repository,canonicalize); await noBorrowedObjects(repository);
-    if ((await metadataBytes(resolve(repository,'factory-owner'),36)).toString('utf8') !== delivery.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
+    if ((await metadataBytes(resolve(repository,'factory-owner'),64)).toString('utf8') !== retainedRepositoryOwner(delivery.attemptId, delivery.repositoryRelative)) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
     const local = async (args: string[]) => { const r = await git(repository,[`--git-dir=${repository}`,...args],{ isolatedConfig: true }); if (r.exitCode) throw new CaptureError('PUBLICATION_GIT_FAILED'); return r.stdout; };
     await verifyRetained(local,delivery);
     const message = (i.targetOperationId ? `${i.taskType}: ${i.taskDescription} (#${i.issueNumber})\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${i.commitOperationId}\nFactory-Target: ${i.targetOperationId}\n` : `feat: deliver issue #${i.issueNumber}\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${i.commitOperationId}\n`);

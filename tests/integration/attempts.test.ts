@@ -1,15 +1,18 @@
 import { toHttpStartAttempt } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { ProjectStorageError } from '../../apps/controller/src/modules/workspaces/project-storage.js';
+import { createRetainedHistoryMigrator } from '../../apps/controller/src/modules/workspaces/retained-history-migration.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
-import { AttemptCapture, OperationAccepted, type SessionResponse } from '#contracts';
+import { AttemptCapture, attemptSessionDirectoryReference, managedWorkspaceReference, OperationAccepted, WorkspaceInitialState, type SessionResponse } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { readCapturedConfiguration, serializeCapture } from '../../apps/controller/src/modules/storage/historical-configuration.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
-import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, complete, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
 
 const fixtures: AttemptFixture[] = [];
 const apps: ReturnType<typeof createApp>[] = [];
@@ -27,6 +30,92 @@ async function start(f: AttemptFixture) {
 }
 
 describe('manual attempt composition and HTTP', () => {
+  it('initializes the first workspace after a predecessor failed before allocation, without inventing inherited content', async () => {
+    const f = await fixture();
+    Object.assign(f.workspaces, { migrateLegacyIssueHistory: vi.fn(async () => { throw new ProjectStorageError('PROJECT_STORAGE_ROOT_UNAVAILABLE'); }) });
+    const first = await start(f);
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+    await f.pipeline.cancelAttempt(first.id, {}, { operationId: randomUUID(), expectedRevision: undefined });
+    await f.pipeline.drain();
+    Object.assign(f.workspaces, { migrateLegacyIssueHistory: vi.fn(async () => undefined) });
+    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const operation = await f.pipeline.startAttempt(command.body, command.context);
+    await f.pipeline.drain();
+    expect(f.storage.getAttempt(operation.resource.id)).toMatchObject({ phase: 'implementing', suspension: null });
+    expect(f.workspaces.prepareAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ predecessorAttemptId: first.id, inheritedBaseSha: null }));
+    expect(f.storage.getAttemptCapture(operation.resource.id).workspace).toMatchObject({ predecessor_attempt_id: first.id,
+      initial_state: { kind: 'base_checkout', content_identity: first.capture.baseSha }, inherited_base_sha: null, comparison_base_sha: first.capture.baseSha });
+  });
+
+  it('does not authorize a fresh workspace when an older attempt allocated it before a later dispatch failure', async () => {
+    const f = await fixture();
+    const first = await start(f);
+    confirmTerminalStops(f, first.id);
+    await f.pipeline.cancelAttempt(first.id, {}, { operationId: randomUUID(), expectedRevision: undefined });
+    await f.pipeline.drain();
+    Object.assign(f.workspaces, { migrateLegacyIssueHistory: vi.fn(async () => { throw new ProjectStorageError('PROJECT_STORAGE_ROOT_UNAVAILABLE'); }) });
+    const secondCommand = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const second = await f.pipeline.startAttempt(secondCommand.body, secondCommand.context);
+    await f.pipeline.drain();
+    await f.pipeline.cancelAttempt(second.resource.id, {}, { operationId: randomUUID(), expectedRevision: undefined });
+    await f.pipeline.drain();
+    const thirdCommand = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, second.resource.id);
+    const third = await f.pipeline.startAttempt(thirdCommand.body, thirdCommand.context);
+    expect(f.storage.getAttemptCapture(third.resource.id).workspace).toMatchObject({ initial_state: { kind: 'pending_inherited_attempt' }, inherited_base_sha: first.capture.baseSha });
+  });
+  it('writes progress for a planned round before its first delivery exists', async () => {
+    const f = await fixture();
+    const path = join(f.directory, 'progress.md');
+    const resolveUnallocatedRoot = vi.fn(async (): Promise<string> => { throw new ProjectStorageError('PROJECT_STORAGE_ROOT_UNAVAILABLE'); });
+    Object.assign(f.workspaces, { resolveAttemptProgressFile: async () => path,
+      migrateLegacyIssueHistory: createRetainedHistoryMigrator(f.directory, vi.fn(), f.storage, resolveUnallocatedRoot) });
+    const attempt = await start(f);
+    expect(attempt.status.phase).toBe('implementing');
+    expect(f.db.prepare('SELECT count(*) AS n FROM deliveries').get()).toEqual({ n: 0 });
+    expect(await readFile(path, 'utf8')).toContain('Resultado do Implementador ainda não registrado.');
+    expect(f.logFailure).not.toHaveBeenCalledWith('ISSUE_PROGRESS_WRITE_FAILED');
+    expect(resolveUnallocatedRoot).not.toHaveBeenCalled();
+    expect(f.execution.startPassage).toHaveBeenCalledOnce();
+  });
+  it('updates issue progress after cancellation is persisted', async () => {
+    const f = await fixture();
+    const path = join(f.directory, 'progress.md');
+    Object.assign(f.workspaces, { resolveAttemptProgressFile: async () => path });
+    const attempt = await start(f);
+
+    await f.pipeline.cancelAttempt(attempt.id, {}, { operationId: randomUUID(), expectedRevision: undefined });
+    const progress = await readFile(path, 'utf8');
+
+    expect(f.storage.getAttempt(attempt.id)).toMatchObject({ phase: 'finished', result: 'cancelled' });
+    expect(progress).toContain('Tentativa cancelada no controlador.');
+    expect(progress).toContain('resultado `cancelled`');
+    expect(progress).toContain('Confira o estado real dos arquivos e dos processos');
+    await f.pipeline.drain();
+  });
+  it('keeps predecessor progress when the previous attempt ended without a delivery', async () => {
+    const f = await fixture();
+    const path = join(f.directory, 'progress.md');
+    Object.assign(f.workspaces, { resolveAttemptProgressFile: async () => path });
+    const first = await start(f);
+    confirmTerminalStops(f, first.id);
+    f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(first.id);
+    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    await f.pipeline.startAttempt(command.body, command.context);
+    await f.pipeline.drain();
+    const progress = await readFile(path, 'utf8');
+    expect(progress).toContain('inherited_attempt');
+    expect(progress).toContain(first.id);
+    expect(progress).toContain('Ainda não registrado');
+    expect(f.logFailure).not.toHaveBeenCalledWith('ISSUE_PROGRESS_WRITE_FAILED');
+  });
+  it('preserves the managed root diagnostic when dispatch fails before preparation', async () => {
+    const f = await fixture();
+    Object.assign(f.workspaces, { migrateLegacyIssueHistory: async () => { throw new ProjectStorageError('PROJECT_STORAGE_ROOT_UNAVAILABLE'); } });
+    const attempt = await start(f);
+    expect(attempt.status).toMatchObject({ suspension: 'DISPATCH_FAILED', diagnostic: 'PROJECT_STORAGE_ROOT_UNAVAILABLE' });
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+  });
   it('commits capture, criteria, round, passage and resource intentions before any clone or process', async () => {
     const f = await fixture();
     const savedConfiguration = f.storage.getConfiguration(f.projectId);
@@ -42,18 +131,35 @@ describe('manual attempt composition and HTTP', () => {
       expect(f.db.prepare('SELECT count(*) AS n FROM rounds WHERE attempt_id=?').get(a.id)).toEqual({ n: 1 });
       expect(f.db.prepare('SELECT count(*) AS n FROM resources WHERE attempt_id=?').get(a.id)).toEqual({ n: 2 });
       expect(f.storage.getAttemptCapture(a.id).roleResources).toEqual(f.roles);
+      const workspace = f.storage.getAttemptWorkspaceBinding(a.id);
+      expect(workspace).toMatchObject({ attempt_id: a.id,
+        workspace: { project_id: a.projectId, repository_id: f.issue.repository.id, issue_id: f.issue.id },
+        environment_reference: managedWorkspaceReference(a.projectId, input.issueNumber),
+        predecessor_attempt_id: null, initial_state: { kind: 'base_checkout', content_identity: input.baseSha },
+        comparison_base_sha: input.baseSha, resolution_state: 'candidate' });
       expect(f.execution.startPassage).not.toHaveBeenCalled();
-      return { state: 'prepared', attemptId: a.id, baseSha: input.baseSha, branch: `factory/17/${a.id}`,
-        resource: { kind: 'implementation', path: join(f.directory, 'work', a.id, 'implementation'), owned: true }, diagnostic: null };
+      return { state: 'prepared', attemptId: a.id, workspace: input.workspace, baseSha: input.baseSha, branch: `factory/17/${a.id}`,
+        resource: { kind: 'implementation', path: join(f.directory, 'projects', a.projectId, 'v1', 'managed', 'issues', String(input.issueNumber), 'workspace'), owned: true },
+        snapshot: { identity: input.workspace, predecessor_attempt_id: null,
+          initial_state: { kind: 'base_checkout', content_identity: input.baseSha }, inherited_base_sha: null, comparison_base_sha: input.baseSha }, diagnostic: null };
     });
     const operation = await f.pipeline.startAttempt(command.body, command.context);
     expect(operation.state).toBe('accepted'); expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
     await f.pipeline.drain();
     expect(f.storage.getAttempt(operation.resource.id)).toMatchObject({ phase: 'implementing', result: null, suspension: null, tracking: 'tracked', round: 1 });
     expect(f.execution.startPassage).toHaveBeenCalledTimes(1);
+    const implementerTask = JSON.parse(vi.mocked(f.execution.startPassage).mock.calls[0]![0].task) as Record<string, unknown>;
+    expect(implementerTask.dependencyManagement).toMatchObject({
+      managerSelection: expect.stringContaining('packageManager'),
+      reconciliation: expect.stringContaining('instalação normal'),
+      preservation: expect.stringContaining('Nunca apague node_modules'),
+    });
     expect(f.execution.preflight).not.toHaveBeenCalled();
     const capture = f.storage.getAttemptCapture(operation.resource.id);
     expect(Value.Check(AttemptCapture, capture)).toBe(true);
+    const { workspace: _workspace, ...captureWithoutWorkspace } = capture;
+    expect(Value.Check(AttemptCapture, captureWithoutWorkspace)).toBe(false);
+    expect(Value.Check(WorkspaceInitialState, { kind: 'unobserved' })).toBe(false);
     expect(capture.criteria.map(c => c.id)).toEqual(['ac-1', 'ac-2']);
     expect(capture.summaryHash).toBe(command.body.authorizedSummaryHash);
     expect(capture.preparationRevision).toBe(f.storage.getPreparation(command.body.preparationId).view.revision);
@@ -65,6 +171,62 @@ describe('manual attempt composition and HTTP', () => {
     const captureDocument = f.db.prepare<[string], { capture_json: string }>('SELECT capture_json FROM attempts WHERE id=?').get(operation.resource.id)!;
     expect(captureDocument.capture_json).not.toContain('"checks"');
     expect(f.db.pragma('foreign_key_check')).toEqual([]);
+  });
+  it('keeps one issue workspace shared across retries after the previous writer is stopped', async () => {
+    const f = await fixture();
+    const first = await start(f);
+    f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(first.id);
+    await f.pipeline.drain();
+    await expect(f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id))
+      .rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_NOT_STOPPED' });
+    confirmTerminalStops(f, first.id);
+    const unlinked = await f.prepare();
+    await expect(f.pipeline.startAttempt(unlinked.body, unlinked.context)).rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_REQUIRED' });
+    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const operation = await f.pipeline.startAttempt(command.body, command.context);
+    await f.pipeline.drain();
+
+    const firstWorkspace = f.storage.getAttemptWorkspaceBinding(first.id);
+    const secondWorkspace = f.storage.getAttemptWorkspaceBinding(operation.resource.id);
+    expect(firstWorkspace.workspace).toEqual(secondWorkspace.workspace);
+    expect(firstWorkspace.environment_reference).toBe(secondWorkspace.environment_reference);
+    expect(firstWorkspace.resolution_state).toBe('candidate');
+    expect(secondWorkspace.resolution_state).toBe('candidate');
+    const implementation = f.storage.getResources(first.id).entries.find(resource => resource.kind === 'implementation')!;
+    const removalSnapshot = f.storage.getResourceSnapshot(first.id, implementation.id);
+    expect(removalSnapshot.sharedWorkspace).toBe(true);
+    expect(() => f.storage.acceptRecovery({ operationId: randomUUID(), expectedRevision: removalSnapshot.etag, attemptId: first.id,
+      resourceId: implementation.id, kind: 'resource.remove', body: { confirmed: true, planHash: 'a'.repeat(64) } }, removalSnapshot.stamp))
+      .toThrow(expect.objectContaining({ code: 'WORKSPACE_SHARED' }));
+    confirmTerminalStops(f, operation.resource.id);
+    f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(operation.resource.id);
+    await expect(f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id))
+      .rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_NOT_LATEST' });
+  });
+  it('persists the immutable inherited commit before launching the retry session', async () => {
+    const f = await fixture();
+    const first = await start(f);
+    confirmTerminalStops(f, first.id);
+    f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(first.id);
+    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const operation = await f.pipeline.startAttempt(command.body, command.context);
+    await f.pipeline.drain();
+    expect(f.storage.getAttempt(operation.resource.id)).toMatchObject({ phase: 'implementing', suspension: null });
+    expect(f.workspaces.prepareAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ predecessorAttemptId: first.id, inheritedBaseSha: 'a'.repeat(40) }));
+    expect(f.storage.getAttemptCapture(operation.resource.id).workspace).toMatchObject({ predecessor_attempt_id: first.id,
+      initial_state: { kind: 'inherited_attempt', source_attempt_id: first.id, content_identity: 'b'.repeat(40) },
+      inherited_base_sha: 'a'.repeat(40), comparison_base_sha: 'b'.repeat(40) });
+    expect(f.storage.getAttemptDetail(operation.resource.id, {}).workspaceLineage).toMatchObject({ predecessor_attempt_id: first.id,
+      initial_state: { kind: 'inherited_attempt', source_attempt_id: first.id, content_identity: 'b'.repeat(40) }, comparison_base_sha: 'b'.repeat(40) });
+    const rawWorkspace = JSON.parse(f.db.prepare<[string], { capture_json: string }>('SELECT capture_json FROM attempts WHERE id=?').get(operation.resource.id)!.capture_json).workspace;
+    expect(rawWorkspace).toMatchObject({ predecessor_attempt_id: first.id, initial_state: { kind: 'pending_inherited_attempt' }, comparison_base_sha: null });
+    expect(f.db.prepare<[string], { attempt_id: string; snapshot_json: string }>('SELECT attempt_id,snapshot_json FROM attempt_workspace_snapshots WHERE attempt_id=?')
+      .get(operation.resource.id)?.attempt_id).toBe(operation.resource.id);
+    const retryTask = JSON.parse(vi.mocked(f.execution.startPassage).mock.calls.at(-1)![0].task) as Record<string, unknown>;
+    expect(retryTask).toMatchObject({ workspace: { predecessor_attempt_id: first.id },
+      predecessorProgress: { attemptId: first.id, result: 'cancelled', unresolvedFindings: [], findingsTruncated: false } });
+    expect(retryTask.workspaceScope).toEqual(expect.stringContaining('workspace.comparison_base_sha'));
+    expect(retryTask.dependencyManagement).toMatchObject({ managerSelection: expect.stringContaining('packageManager') });
   });
   it('persists role sessions before occupancy and reuses only a released physical terminal with a new OMP session', async () => {
     const f = await fixture(); const first = await start(f);
@@ -96,8 +258,10 @@ describe('manual attempt composition and HTTP', () => {
     expect(secondSession.terminalId).toBe(firstSession.terminalId);
     expect(secondSession.ompSessionId).not.toBe(firstSession.ompSessionId);
     expect(secondSession.sessionDirectoryRelative).not.toBe(firstSession.sessionDirectoryRelative);
-    expect(firstSession.sessionDirectoryRelative).toBe(`sessions/${first.id}/implementer`);
-    expect(secondSession.sessionDirectoryRelative).toBe(`sessions/${second.id}/implementer`);
+    const firstIssueNumber = f.storage.getAttemptWorkspaceBinding(first.id).issue_number;
+    const secondIssueNumber = f.storage.getAttemptWorkspaceBinding(second.id).issue_number;
+    expect(firstSession.sessionDirectoryRelative).toBe(attemptSessionDirectoryReference(firstIssueNumber, first.id, 'implementer'));
+    expect(secondSession.sessionDirectoryRelative).toBe(attemptSessionDirectoryReference(secondIssueNumber, second.id, 'implementer'));
   });
   it('never reuses an uncertain physical terminal when a later attempt needs a role resource', async () => {
     const f = await fixture(); const first = await start(f); const firstHandle = { passageId: first.status.passageId };

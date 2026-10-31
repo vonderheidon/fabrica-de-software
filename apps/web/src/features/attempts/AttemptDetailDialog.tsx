@@ -203,6 +203,14 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attempt && <>
       <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError) || attemptRefreshing} blocked={!attempt.result && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED'} />
       <div className="attempt-detail-heading"><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
+      <div className="notice" role="status" aria-label="Origem do ambiente da issue">
+        <b>{attempt.workspace_lineage.predecessor_attempt_id ? 'Workspace compartilhado' : 'Ambiente da issue'}</b>
+        {attempt.workspace_lineage.initial_state.kind === 'inherited_attempt'
+          ? <p>Esta tentativa herdou o conteúdo da tentativa {attempt.workspace_lineage.initial_state.source_attempt_id.slice(0, 8)} · {attempt.workspace_lineage.initial_state.content_identity.slice(0, 8)}.</p>
+          : attempt.workspace_lineage.initial_state.kind === 'pending_inherited_attempt'
+            ? <p>A origem herdada da tentativa {attempt.workspace_lineage.initial_state.source_attempt_id.slice(0, 8)} ainda não foi confirmada. Consulte o estado antes de agir sobre versões anteriores.</p>
+            : <p>Conteúdo inicial registrado · {attempt.workspace_lineage.initial_state.content_identity.slice(0, 8)}.</p>}
+      </div>
       {delivery && <PublicationDialog key={delivery.delivery.id}
         projectId={attempt.project_id}
         attemptId={attemptId}
@@ -311,7 +319,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
               {plan && <div className="attempt-removal-plan">
                 <h4>Plano de remoção</h4>
                 <div className="attempt-evidence-columns"><div><b>Será perdido</b><ul>{plan.value.losses.map((item) => <li key={item}>{item}</li>)}</ul></div><div><b>Será preservado</b><ul>{plan.value.preserved_references.map((item) => <li key={item}>{item}</li>)}</ul></div></div>
-                {!plan.value.capability.available && <><p className="muted">A remoção não está disponível enquanto os pré-requisitos atuais não forem confirmados.</p></>}
+                {!plan.value.capability.available && <><p className="muted">A remoção não está disponível: {plan.value.capability.reason ? operatorCodeLabel(plan.value.capability.reason) : 'pré-requisitos não confirmados'}.</p></>}
                 {plan.value.capability.available && !resource.removed && <><label className="form-check attempt-removal-confirmation"><input type="checkbox" checked={confirmedResources[resource.id] === plan.value.plan_hash} onChange={(event) => { const checked = event.currentTarget.checked; setConfirmedResources((current) => { const next = { ...current }; if (checked) next[resource.id] = plan.value.plan_hash; else delete next[resource.id]; return next; }); }} /><span>Confirmo a remoção deste ambiente e as perdas listadas acima.</span></label><button type="button" className="danger" onClick={() => void actions.requestRemoval(resource.id)} disabled={confirmedResources[resource.id] !== plan.value.plan_hash || actions.busy}>Remover ambiente</button></>}
               </div>}
             </div>}

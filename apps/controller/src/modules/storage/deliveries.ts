@@ -2,7 +2,7 @@ import { serializeOperationReceipt } from './common-json.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { CaptureRetry, Delivery, OperationId, type CaptureWarning, type PassageBinding } from '#contracts';
+import { CaptureRetry, Delivery, issueHistoryRepositoryReference, OperationId, type AttemptCapture, type CaptureWarning, type PassageBinding } from '#contracts';
 import { OperationError, readOperation, type StoredOperation } from './operations.js';
 import { attemptEvent, readAttempt, readCapture } from './attempts.js';
 import { digest, eventCursor, guarded } from './configuration-reads.js';
@@ -14,17 +14,28 @@ export interface RetryCaptureCommand {
   operationId: string; expectedRevision: string | undefined; attemptId: string; deliveryId: string; body: CaptureRetry;
 }
 export interface CaptureClaim { id: string; deliveryId: string; attemptRevision: number; input: CaptureInput }
+export function deliveryBaseSha(capture: Pick<AttemptCapture, 'workspace'>, integrationBaseSha?: string): string {
+  if (integrationBaseSha) return integrationBaseSha;
+  if (capture.workspace.initial_state.kind === 'pending_inherited_attempt' || capture.workspace.comparison_base_sha === null) {
+    throw new StorageError('OPERATION_DATA_INVALID');
+  }
+  return capture.workspace.comparison_base_sha;
+}
 export function createPendingDelivery(db: Database.Database, binding: PassageBinding): void {
   const capture = readCapture(db, binding.attemptId);
+  const attempt = db.prepare<[string], { issue_number: number }>('SELECT issue_number FROM attempts WHERE id=?').get(binding.attemptId);
+  if (!attempt || !Number.isSafeInteger(attempt.issue_number) || attempt.issue_number < 1) throw new StorageError('OPERATION_DATA_INVALID');
   const integration = db.prepare<[string, number], { baseSha: string }>(`SELECT json_extract(integration_json,'$.base_sha') AS baseSha FROM rounds
     WHERE attempt_id=? AND round_number<=? AND integration_json IS NOT NULL ORDER BY round_number DESC LIMIT 1`).get(binding.attemptId,binding.round);
-  db.prepare(`INSERT INTO deliveries(id,attempt_id,round_number,producer_passage_id,base_sha,repository_relative,capture_state)
-    VALUES (?,?,?,?,?,?,'pending')`).run(binding.deliveryVersion, binding.attemptId, binding.round, binding.passageId, integration?.baseSha ?? capture.baseSha, `git/${binding.attemptId}.git`);
+  db.prepare(`INSERT INTO deliveries(id,attempt_id,round_number,producer_passage_id,base_sha,repository_relative,history_repository_relative,capture_state)
+    VALUES (?,?,?,?,?,?,?,'pending')`).run(binding.deliveryVersion, binding.attemptId, binding.round, binding.passageId,
+    deliveryBaseSha(capture, integration?.baseSha), `git/${binding.attemptId}.git`, issueHistoryRepositoryReference(attempt.issue_number));
 }
 export function readDelivery(db: Database.Database, id: string, authorize = true): Delivery {
   if (!Value.Check(OperationId, id)) throw new OperationError(400, 'DELIVERY_ID_INVALID', 'Delivery ID is invalid.');
   const row = db.prepare<[string], Omit<Delivery, 'hasDelta' | 'warnings'> & { hasDelta: number | null }>(`SELECT id,attempt_id AS attemptId,
-    producer_passage_id AS producerPassageId,round_number AS round,base_sha AS baseSha,repository_relative AS repositoryRelative,
+    producer_passage_id AS producerPassageId,round_number AS round,base_sha AS baseSha,
+    coalesce(history_repository_relative,repository_relative) AS repositoryRelative,
     capture_state AS captureState,git_ref AS gitRef,content_identity AS contentIdentity,commit_sha AS commitSha,has_delta AS hasDelta,
     diagnostic,captured_at_ms AS capturedAtMs,revision FROM deliveries WHERE id=?`).get(id);
   if (!row) throw new OperationError(404, 'DELIVERY_NOT_FOUND', 'Delivery not found in the current scope.');
@@ -55,7 +66,8 @@ function claim(db: Database.Database, d: Delivery, operationId: string | null): 
   const summary = db.prepare<[string], { summary_json: string }>('SELECT summary_json FROM passage_results WHERE passage_id=?').get(d.producerPassageId);
   const result = JSON.parse(summary!.summary_json) as { declaredFiles?: string[] };
   attemptEvent(db, d.attemptId, 'capture.running');
-  return { id, deliveryId: d.id, attemptRevision, input: { attemptId: d.attemptId, passageId: d.producerPassageId, deliveryId: d.id, baseSha: d.baseSha, declaredFiles: result.declaredFiles ?? [] } };
+  return { id, deliveryId: d.id, attemptRevision, input: { attemptId: d.attemptId, passageId: d.producerPassageId, deliveryId: d.id,
+    repositoryRelative: d.repositoryRelative, baseSha: d.baseSha, declaredFiles: result.declaredFiles ?? [] } };
 }
 export function beginCapture(db: Database.Database, id: string): CaptureClaim | null {
   return guarded(() => db.transaction(() => {

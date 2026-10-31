@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { StageActivity, HttpAttemptMeasurements } from '#contracts';
-import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
 import { attemptEvent } from '../../apps/controller/src/modules/storage/attempts.js';
 import { readStageActivity } from '../../apps/controller/src/modules/storage/stage-activity.js';
 import { readMeasurements } from '../../apps/controller/src/modules/storage/measurements.js';
@@ -142,6 +142,7 @@ it('serializes StageActivity through protected HTTP operation, detail and measur
     expect(session.statusCode).toBe(200);
     const headers = { host, cookie: String(session.headers['set-cookie']).split(';')[0]! };
     // App startup interrupts prior work. Start this controlled attempt after recovery.
+    confirmTerminalStops(f, f.id);
     const saved = await f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {}, previous_attempt_id: f.id }, { operationId: randomUUID(), expectedRevision: undefined });
     const preparation = saved.view.preparation;
     const operation = await f.pipeline.startAttempt({ preparationId: preparation.id, preparationRevision: preparation.revision, authorizedSummaryHash: preparation.summary_hash, authorized: true }, { operationId: randomUUID(), expectedRevision: saved.etag }); await f.pipeline.drain();

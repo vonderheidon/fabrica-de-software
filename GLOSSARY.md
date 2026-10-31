@@ -28,7 +28,7 @@ _Avoid_: Evento de transição Ready, qualquer card em Ready
 Sequência por ID de projeto. Dentro de cada projeto, usa a posição do quadro quando `use_board_position` está ativa e todos os itens retornados têm posição; caso contrário, usa número crescente da issue (nulos por último) e ID da issue/item.
 
 **Tentativa**:
-Execução identificada de uma issue, com configuração de partida e ambiente próprios. Outra tentativa não retoma a sessão nem substitui o histórico da anterior.
+Execução identificada de uma issue, com configuração de partida, resultados, sessões e evidências próprios. Ela mantém vínculo explícito ao ambiente da issue e não substitui o histórico de tentativas anteriores.
 _Avoid_: Rodada, reinício do agente
 
 **Rodada**:
@@ -63,9 +63,13 @@ _Avoid_: Sessão, terminal
 Escolhas editáveis para uma tentativa ainda não iniciada, sem autoridade de execução.
 _Avoid_: Execução, versão guardada como ação operacional
 
-**Ambiente da tentativa**:
-Área gerenciada dedicada ao trabalho de uma tentativa, separada das pastas do operador e das outras tentativas.
-_Avoid_: Sandbox geral, checkout compartilhado
+**Ambiente da issue**:
+Área de trabalho identificada pelo projeto, repositório e ID estável da issue. O vínculo de cada tentativa registra o ambiente físico, a origem e a base de comparação. Ambientes históricos ambíguos permanecem como candidatos até sua identidade e elegibilidade serem verificadas.
+_Avoid_: Pasta como identidade, clone automaticamente escolhido
+
+**Vínculo da tentativa ao ambiente**:
+Registro persistido que associa uma tentativa ao ambiente da issue, identifica a origem do conteúdo inicial e conserva a base usada para comparar sua entrega. O caminho físico sozinho não estabelece a identidade da issue.
+_Avoid_: Associação inferida pelo nome ou caminho da pasta
 
 **Entrega**:
 Conjunto identificado de alterações e evidências produzido pela tentativa, independente da conversa do agente.

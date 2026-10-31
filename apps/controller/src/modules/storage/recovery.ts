@@ -19,7 +19,7 @@ export type RecoveryCommand = CommandIdentity & (
   { kind: 'interaction.open'; resourceId: string; passageId: string; body: Record<string, never> }
 );
 export interface ResourceSnapshot {
-  resource: AttemptResource; etag: string; stamp: string; stopped: boolean; removalPending: boolean; deliveries: Delivery[]; eventCursor: string;
+  resource: AttemptResource; etag: string; stamp: string; stopped: boolean; removalPending: boolean; sharedWorkspace: boolean; deliveries: Delivery[]; eventCursor: string;
 }
 export function readOwnedPassage(db: Database.Database, attemptId: string, passageId: string) {
   readAttempt(db, attemptId);
@@ -49,7 +49,9 @@ export function resourceSnapshot(db: Database.Database, attemptId: string, resou
   const stamp = digest({ attempt: attemptState, entries: resources.entries, captures, deliveries });
   const stopped = Boolean(attempt.result) && resources.cleanup === 'complete' && !captures.some(r => r.state === 'running');
   const removalPending = Boolean(db.prepare("SELECT operation_id FROM resource_removals WHERE resource_id=? AND state IN ('accepted','unknown')").get(resourceId));
-  return { resource, etag: `"${digest([resource.id, resource.revision])}"`, stamp, stopped, removalPending, deliveries, eventCursor: resources.eventCursor };
+  const sharedWorkspace = resource.kind === 'implementation' && Boolean(db.prepare("SELECT id FROM resources WHERE kind='implementation' AND reference=? AND attempt_id<>? AND removed=0 LIMIT 1")
+    .get(resource.reference, attemptId));
+  return { resource, etag: `"${digest([resource.id, resource.revision])}"`, stamp, stopped, removalPending, sharedWorkspace, deliveries, eventCursor: resources.eventCursor };
 }
 function commandHash(command: RecoveryCommand): string {
   const schema = command.kind === 'attempt.cancel' ? CancelAttempt : command.kind === 'resource.remove' ? RemoveResource : EmptyBody;
@@ -91,6 +93,7 @@ export function acceptRecovery(db: Database.Database, command: RecoveryCommand, 
         if (command.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
         if (command.expectedRevision !== snapshot.etag) throw new OperationError(412, 'REVISION_CONFLICT', 'The resource changed.');
         if (!snapshot.stopped) throw new OperationError(409, 'RESOURCE_NOT_STOPPED', 'Known writers have not been confirmed stopped.');
+        if (snapshot.sharedWorkspace) throw new OperationError(409, 'WORKSPACE_SHARED', 'This issue workspace is shared by another attempt and cannot be removed here.');
         if (snapshot.resource.kind !== 'implementation' || !snapshot.resource.owned || snapshot.resource.removed) throw new OperationError(409, 'RESOURCE_REMOVAL_UNAVAILABLE', 'Only an existing owned environment can be removed.');
         if (db.prepare("SELECT operation_id FROM resource_removals WHERE resource_id=? AND state IN ('accepted','unknown')").get(command.resourceId)) throw new OperationError(409, 'REMOVAL_IN_PROGRESS', 'Removal is already accepted or uncertain.');
       }
@@ -146,5 +149,25 @@ export function validatePreviousAttempt(db: Database.Database, id: string, proje
     ).get(id, successorPreparationId) : undefined;
     if (linkedSuccessor?.action === 'change_profile') return;
     throw new OperationError(409, 'ATTEMPT_ACTIVE', 'End the previous attempt before preparing a new one.');
+  }
+  const latest = db.prepare<[string, string, string], { id: string }>(`SELECT id FROM attempts WHERE project_id=? AND repository_id=? AND issue_id=?
+    ORDER BY rowid DESC LIMIT 1`).get(projectId, capture.issue.repository.id, issueId);
+  const successor = successorPreparationId ? db.prepare<[string, string, string, string], { id: string }>(`SELECT id FROM attempts
+    WHERE preparation_id=? AND project_id=? AND repository_id=? AND issue_id=?`).get(successorPreparationId, projectId, capture.issue.repository.id, issueId) : undefined;
+  if (latest?.id !== (successor?.id ?? id)) throw new OperationError(409, 'PREVIOUS_ATTEMPT_NOT_LATEST', 'Select the most recent attempt for this issue workspace.', {
+    recovery: 'Reload the issue history and create a preparation from its latest attempt.' });
+  const terminalCount = db.prepare<[string], { count: number }>("SELECT count(*) AS count FROM resources WHERE attempt_id=? AND kind='terminal'").get(id)?.count ?? 0;
+  const unresolvedWriter = db.prepare<[string], { id: string }>(`SELECT id FROM resources WHERE attempt_id=? AND kind='terminal' AND
+    (stop_state IN ('requested','uncertain') OR (launch_state<>'planned' AND stop_state<>'confirmed')) LIMIT 1`).get(id);
+  const activeOccupancy = db.prepare<[string], { id: string }>("SELECT id FROM terminal_occupancies WHERE attempt_id=? AND state IN ('occupied','uncertain') LIMIT 1").get(id);
+  const uncertainTerminal = db.prepare<[string], { id: string }>(`SELECT t.id FROM managed_terminals t JOIN attempt_sessions s ON s.managed_terminal_id=t.id
+    WHERE s.attempt_id=? AND t.state IN ('occupied','uncertain') LIMIT 1`).get(id);
+  const activeCapture = db.prepare<[string], { id: string }>(`SELECT c.id FROM capture_runs c JOIN deliveries d ON d.id=c.delivery_id
+    WHERE d.attempt_id=? AND c.state='running' LIMIT 1`).get(id);
+  if (terminalCount === 0 || unresolvedWriter || activeOccupancy || uncertainTerminal || activeCapture) {
+    throw new OperationError(409, 'PREVIOUS_ATTEMPT_NOT_STOPPED', 'Writers from the previous attempt have not been confirmed stopped.', {
+      affected_requirements: ['RF-45', 'RF-47', 'RF-48'],
+      recovery: 'Reconcile the previous attempt and its Maestri terminal, confirm the physical processes have stopped, then prepare the retry again.',
+    });
   }
 }

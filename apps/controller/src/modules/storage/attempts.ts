@@ -5,18 +5,18 @@ import { assertStartsAllowed } from './shutdown.js';
 import { hostname } from 'node:os';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { AttemptCapture, AttemptStatus, OperationId, StartAttempt, type RoleResourceReference } from '#contracts';
+import { AttemptCapture, AttemptStatus, AttemptWorkspaceBinding, AttemptWorkspaceSnapshot, attemptSessionDirectoryReference, managedWorkspaceReference, OperationId, StartAttempt, type RoleResourceReference } from '#contracts';
 import { configurationETag, digest, eventCursor, guarded, readConfiguration } from './configuration-reads.js';
 import { readPreparation } from './preparations.js';
 import { readSettings } from './settings.js';
 import { OperationError, readOperation, type StoredOperation } from './operations.js';
 import { StorageError } from './errors.js';
-import { readCapturedConfiguration, serializeCapture } from './historical-configuration.js';
+import { readCapturedConfiguration, readPreparationChoices, serializeCapture } from './historical-configuration.js';
 import { assertPreparationProfileRoles, assertProfileTypesAvailable } from './profile-integrity.js';
 import { stopQuestions } from './questions.js';
 import { validatePreviousAttempt } from './recovery.js';
 import { effectEvent } from './effects.js';
-import { consumeQueueCycle } from './queue-cycles.js';
+import { consumeQueueCycle, latestProjectIssueAttempt } from './queue-cycles.js';
 import { isLocalAbsoluteTargetPath, publicationTargetHash, publicationTargetPath } from './publication-target.js';
 
 export interface AttemptCommand { operationId: string; expectedRevision: string | undefined; body: StartAttempt }
@@ -62,13 +62,62 @@ export function readAttempt(db: Database.Database, id: string): AttemptStatus {
   if (!Value.Check(AttemptStatus, status)) throw new StorageError('OPERATION_DATA_INVALID');
   return status;
 }
-export function readAttemptWorkspaceReference(db: Database.Database, id: string): string {
+export function readAttemptWorkspaceBinding(db: Database.Database, id: string): AttemptWorkspaceBinding {
   if (!Value.Check(OperationId, id)) throw new OperationError(400, 'ATTEMPT_ID_INVALID', 'Attempt ID is invalid.');
-  if (!db.prepare<[string], { id: string }>('SELECT id FROM attempts WHERE id=?').get(id)) throw new OperationError(404, 'ATTEMPT_NOT_FOUND', 'Attempt not found.');
-  const row = db.prepare<[string], { reference: string }>(`SELECT reference FROM resources
-    WHERE attempt_id=? AND kind='implementation'`).get(id);
-  if (!row) throw new StorageError('OPERATION_DATA_INVALID');
-  return row.reference;
+  const rows = db.prepare<[string], { attempt_id: string; project_id: string; repository_id: string; issue_id: string; issue_number: number;
+    resource_id: string; environment_reference: string; choices_json: string }>(`SELECT a.id AS attempt_id,
+    a.project_id,a.repository_id,a.issue_id,a.issue_number,r.id AS resource_id,r.reference AS environment_reference,
+    pr.choices_json FROM attempts a JOIN resources r ON r.attempt_id=a.id AND r.kind='implementation'
+    JOIN preparation_revisions pr ON pr.preparation_id=a.preparation_id AND pr.revision=a.preparation_revision
+    WHERE a.id=? ORDER BY r.created_at_ms,r.id`).all(id);
+  if (rows.length === 0) {
+    if (!db.prepare<[string], { id: string }>('SELECT id FROM attempts WHERE id=?').get(id)) {
+      throw new OperationError(404, 'ATTEMPT_NOT_FOUND', 'Attempt not found.');
+    }
+    throw new StorageError('OPERATION_DATA_INVALID');
+  }
+  if (rows.length !== 1) throw new StorageError('OPERATION_DATA_INVALID');
+  const row = rows[0]!;
+  const capture = readCapture(db, row.attempt_id);
+  const snapshot = capture.workspace;
+  const workspace = { project_id: row.project_id, repository_id: row.repository_id, issue_id: row.issue_id };
+  if (snapshot && (snapshot.identity.project_id !== workspace.project_id || snapshot.identity.repository_id !== workspace.repository_id ||
+      snapshot.identity.issue_id !== workspace.issue_id)) throw new StorageError('OPERATION_DATA_INVALID');
+  const choices = readPreparationChoices(JSON.parse(row.choices_json) as unknown);
+  const predecessor = choices.previous_attempt_id ?? null;
+  const state = snapshot.initial_state;
+  const pending = state.kind === 'pending_inherited_attempt';
+  if (row.environment_reference !== managedWorkspaceReference(row.project_id, row.issue_number) ||
+      snapshot.predecessor_attempt_id !== predecessor ||
+      (pending ? (predecessor === null || state.source_attempt_id !== predecessor || snapshot.comparison_base_sha !== null || snapshot.inherited_base_sha === null) :
+        (snapshot.comparison_base_sha === null || state.content_identity !== snapshot.comparison_base_sha ||
+          (state.kind === 'base_checkout' ? snapshot.inherited_base_sha !== null :
+            predecessor !== state.source_attempt_id || snapshot.inherited_base_sha === null)))) {
+    throw new StorageError('OPERATION_DATA_INVALID');
+  }
+  const resolution = db.prepare<[string, string, string], { path_count: number }>(`SELECT
+    count(DISTINCT r.reference) AS path_count FROM attempts a
+    JOIN resources r ON r.attempt_id=a.id AND r.kind='implementation'
+    WHERE a.project_id=? AND a.repository_id=? AND a.issue_id=?`).get(
+    workspace.project_id, workspace.repository_id, workspace.issue_id);
+  if (!resolution?.path_count) throw new StorageError('OPERATION_DATA_INVALID');
+  const binding: AttemptWorkspaceBinding = {
+    attempt_id: row.attempt_id,
+    workspace,
+    issue_number: row.issue_number,
+    resource_id: row.resource_id, environment_reference: row.environment_reference,
+    predecessor_attempt_id: snapshot.predecessor_attempt_id, initial_state: snapshot.initial_state,
+    inherited_base_sha: snapshot.inherited_base_sha, comparison_base_sha: snapshot.comparison_base_sha,
+    resolution_state: resolution.path_count > 1 ? 'conflict' : 'candidate',
+  };
+  if (!Value.Check(AttemptWorkspaceBinding, binding)) {
+    throw new StorageError('OPERATION_DATA_INVALID');
+  }
+  return binding;
+}
+
+export function readAttemptWorkspaceReference(db: Database.Database, id: string): string {
+  return readAttemptWorkspaceBinding(db, id).environment_reference;
 }
 export function readAttemptProjectId(db: Database.Database, id: string): string {
   if (!Value.Check(OperationId, id)) throw new OperationError(400, 'ATTEMPT_ID_INVALID', 'Attempt ID is invalid.');
@@ -79,8 +128,15 @@ export function readAttemptProjectId(db: Database.Database, id: string): string 
 export function readCapture(db: Database.Database, id: string): AttemptCapture {
   readAttempt(db, id);
   const row = db.prepare<[string], { capture_json: string }>('SELECT capture_json FROM attempts WHERE id=?').get(id);
-  const capture: unknown = row ? JSON.parse(row.capture_json) : null;
-  return readCapturedConfiguration(capture);
+  const capture = readCapturedConfiguration(row ? JSON.parse(row.capture_json) as unknown : null);
+  const storedSnapshot = db.prepare<[string], { snapshot_json: string }>('SELECT snapshot_json FROM attempt_workspace_snapshots WHERE attempt_id=?').get(id);
+  if (!storedSnapshot) return capture;
+  if (capture.workspace.initial_state.kind !== 'pending_inherited_attempt') throw new StorageError('OPERATION_DATA_INVALID');
+  const snapshot: unknown = JSON.parse(storedSnapshot.snapshot_json);
+  if (!Value.Check(AttemptWorkspaceSnapshot, snapshot)) throw new StorageError('OPERATION_DATA_INVALID');
+  const completed: AttemptCapture = { ...capture, workspace: snapshot };
+  if (!Value.Check(AttemptCapture, completed)) throw new StorageError('OPERATION_DATA_INVALID');
+  return completed;
 }
 export function attemptEvent(db: Database.Database, id: string, type: string, passage?: { round: number; role: 'implementer' | 'reviewer' }): void {
   const row = db.prepare<[string], { project_id: string; operation_id: string; revision: number }>('SELECT project_id,operation_id,revision FROM attempts WHERE id=?').get(id);
@@ -145,11 +201,57 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     const active = db.prepare<[string, string, string], { id: string }>('SELECT id FROM attempts WHERE account_id=? AND repository_id=? AND issue_id=? AND result IS NULL')
       .get(capture.accountId, capture.issue.repository.id, capture.issue.id);
     if (active) throw new AttemptConflict(active.id);
+    const latest = latestProjectIssueAttempt(db, preparation.view.project_id, capture.issue.repository.id, capture.issue.id);
+    if (latest && !preparation.view.previous_attempt_id) {
+      throw new OperationError(409, 'PREVIOUS_ATTEMPT_REQUIRED', 'Select the previous attempt to reuse this issue workspace.', {
+        recovery: 'Create a new preparation from the most recent attempt for this issue, then authorize its current summary.' });
+    }
+    if (preparation.view.previous_attempt_id && latest?.id !== preparation.view.previous_attempt_id) {
+      throw new OperationError(409, 'PREVIOUS_ATTEMPT_NOT_LATEST', 'Select the most recent attempt for this issue workspace.', {
+        recovery: 'Reload the issue history and create a preparation from its latest attempt.' });
+    }
+    const expectedWorkspaceReference = managedWorkspaceReference(preparation.view.project_id, capture.issue.number);
+    const workspaceReferences = db.prepare<[string, string, string], { reference: string }>(`SELECT DISTINCT r.reference FROM resources r
+      JOIN attempts a ON a.id=r.attempt_id WHERE a.project_id=? AND a.repository_id=? AND a.issue_id=? AND r.kind='implementation'`)
+      .all(preparation.view.project_id, capture.issue.repository.id, capture.issue.id);
+    const pathOwnerConflict = db.prepare<[string, string, string], { id: string }>(`SELECT a.id FROM resources r JOIN attempts a ON a.id=r.attempt_id
+      WHERE r.kind='implementation' AND r.reference=? AND (a.repository_id<>? OR a.issue_id<>?) LIMIT 1`)
+      .get(expectedWorkspaceReference, capture.issue.repository.id, capture.issue.id);
+    if (workspaceReferences.length > 1 || workspaceReferences.some(row => row.reference !== expectedWorkspaceReference) || pathOwnerConflict) {
+      throw new OperationError(409, 'WORKSPACE_RESOLUTION_CONFLICT', 'The existing issue workspace paths do not resolve to one verified workspace.', {
+        recovery: 'Inspect the registered workspace paths and reconcile their ownership before starting another attempt.' });
+    }
+    if (workspaceReferences.length > 0 && !preparation.view.previous_attempt_id) {
+      throw new OperationError(409, 'PREVIOUS_ATTEMPT_REQUIRED', 'Select the previous attempt to reuse this issue workspace.', {
+        recovery: 'Create a new preparation from the most recent attempt for this issue, then authorize its current summary.' });
+    }
     // A new preparation is a fresh authorization; an accepted preparation must not dispatch twice.
     const previous = db.prepare('SELECT id FROM attempts WHERE preparation_id=?').get(preparation.view.id);
     if (preparation.view.previous_attempt_id) validatePreviousAttempt(db, preparation.view.previous_attempt_id, preparation.view.project_id, capture.issue.id);
     else if (previous && !input.queueCycle) throw new OperationError(409, 'EXPLICIT_RETRY_REQUIRED', 'This preparation has already started. Create a new preparation for another attempt.');
+    const predecessorCapture = preparation.view.previous_attempt_id ? readCapture(db, preparation.view.previous_attempt_id) : null;
+    if (predecessorCapture && predecessorCapture.issue.repository.id !== capture.issue.repository.id) {
+      throw new OperationError(409, 'REPOSITORY_MISMATCH', 'The inherited workspace belongs to a different repository.');
+    }
+    // A planned resource has not crossed the durable boundary that precedes filesystem writes.
+    const workspaceStarted = db.prepare<[string, string, string], { id: string }>(`SELECT a.id FROM attempts a
+      WHERE a.project_id=? AND a.repository_id=? AND a.issue_id=? AND (
+        EXISTS(SELECT 1 FROM resources r WHERE r.attempt_id=a.id AND r.kind='implementation'
+          AND (r.launch_state<>'planned' OR r.owned=1 OR r.removed=1))
+        OR EXISTS(SELECT 1 FROM attempt_workspace_snapshots s WHERE s.attempt_id=a.id)
+        OR EXISTS(SELECT 1 FROM deliveries d WHERE d.attempt_id=a.id)) LIMIT 1`)
+      .get(preparation.view.project_id, capture.issue.repository.id, capture.issue.id);
+    const inheritWorkspace = predecessorCapture !== null && workspaceStarted !== undefined;
     const id = randomUUID(); const passageId = randomUUID(); const deliveryVersion = randomUUID(); const now = Date.now();
+    const persistedCapture: AttemptCapture = { ...capture, workspace: {
+      identity: { project_id: preparation.view.project_id, repository_id: capture.issue.repository.id, issue_id: capture.issue.id },
+      predecessor_attempt_id: preparation.view.previous_attempt_id ?? null,
+      initial_state: inheritWorkspace
+        ? { kind: 'pending_inherited_attempt', source_attempt_id: preparation.view.previous_attempt_id! }
+        : { kind: 'base_checkout', content_identity: capture.baseSha },
+      inherited_base_sha: inheritWorkspace ? predecessorCapture!.baseSha : null,
+      comparison_base_sha: inheritWorkspace ? null : capture.baseSha,
+    } };
     const suspension = capture.tools.some(t => t.state === 'unavailable') ? 'TOOL_VERSION_UNAVAILABLE' : null;
     const seq = Number(eventCursor(db)) + 1;
     // Global sequence, including other account histories.
@@ -160,7 +262,7 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
       commandHash(input.command), JSON.stringify({ etag: input.command.expectedRevision }), serializeOperationReceipt(receipt));
     db.prepare(`INSERT INTO attempts(id,operation_id,project_id,project_revision_id,preparation_id,preparation_revision,account_id,repository_id,issue_id,issue_number,issue_title,capture_json,phase,suspension,diagnostic,created_at_ms,updated_at_ms,source)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'preparing',?,?,?,?,?)`).run(id, input.command.operationId, preparation.view.project_id, config.configuration.id,
-      preparation.view.id, preparation.view.revision, capture.accountId, capture.issue.repository.id, capture.issue.id, capture.issue.number, capture.issue.title, serializeCapture(capture), suspension, suspension, now, now,
+      preparation.view.id, preparation.view.revision, capture.accountId, capture.issue.repository.id, capture.issue.id, capture.issue.number, capture.issue.title, serializeCapture(persistedCapture), suspension, suspension, now, now,
       input.queueCycle ? 'automatic' : preparation.view.previous_attempt_id ? 'retry' : 'manual');
     if (input.queueCycle) consumeQueueCycle(db, input.queueCycle.accountId, input.queueCycle.projectId, input.queueCycle.issueId, input.queueCycle.cycleNumber, id);
     for (const c of capture.criteria) db.prepare('INSERT INTO attempt_criteria(attempt_id,criterion_id,occurrence_index,text) VALUES (?,?,?,?)').run(id, c.id, c.occurrence_index, c.text);
@@ -188,7 +290,7 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
       sessions.set(role, sessionId);
       db.prepare(`INSERT INTO attempt_sessions(id,attempt_id,role,managed_terminal_id,session_directory_relative,terminal_generation,state,created_at_ms,updated_at_ms)
         VALUES (?,?,?,?,?,?,'reserved',?,?)`).run(sessionId, id, role, terminal.id,
-        `sessions/${id}/${role}`, sessionGeneration, now, now);
+        attemptSessionDirectoryReference(capture.issue.number, id, role), sessionGeneration, now, now);
     }
     const resource: RoleResourceReference = roles.get('implementer')!;
     // passages.terminal_name remains a unique per-passage resource reference; the shared
@@ -196,8 +298,10 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
     const terminalName = `factory-${passageId}`;
     db.prepare(`INSERT INTO passages(id,attempt_id,round_number,delivery_version,role,role_resource_json,terminal_name,state,tracking_state,created_at_ms,attempt_session_id)
       VALUES (?,?,1,?,'implementer',?,?,'starting','pending',?,?)`).run(passageId, id, deliveryVersion, JSON.stringify(resource), terminalName, now, sessions.get('implementer')!);
+    const implementationResourceId = randomUUID();
+    const implementationReference = managedWorkspaceReference(preparation.view.project_id, capture.issue.number);
     db.prepare(`INSERT INTO resources(id,attempt_id,passage_id,kind,reference,owned,launch_state,created_at_ms) VALUES (?,?,?,'implementation',?,0,'planned',?)`)
-      .run(randomUUID(), id, passageId, `projects/${preparation.view.project_id}/v1/managed/work/${id}/implementation`, now);
+      .run(implementationResourceId, id, passageId, implementationReference, now);
     db.prepare(`INSERT INTO resources(id,attempt_id,passage_id,kind,reference,owned,launch_state,created_at_ms) VALUES (?,?,?,'terminal',?,0,'planned',?)`)
       .run(randomUUID(), id, passageId, terminalName, now);
     attemptEvent(db, id, 'attempt.accepted');
@@ -223,6 +327,34 @@ export function recordDispatchFailure(db: Database.Database, id: string, code: s
     db.prepare('UPDATE attempts SET suspension=?,diagnostic=?,revision=revision+1,updated_at_ms=? WHERE id=? AND result IS NULL')
       .run('DISPATCH_FAILED', code, Date.now(), id);
     attemptEvent(db, id, 'dispatch.failed');
+  }).immediate());
+}
+
+export function recordWorkspaceSnapshot(db: Database.Database, id: string, snapshot: AttemptWorkspaceSnapshot): void {
+  if (!Value.Check(OperationId, id) || !Value.Check(AttemptWorkspaceSnapshot, snapshot)) {
+    throw new OperationError(400, 'WORKSPACE_SNAPSHOT_INVALID', 'The workspace snapshot is invalid.');
+  }
+  guarded(() => db.transaction(() => {
+    const row = db.prepare<[string], { capture_json: string; phase: string; result: string | null; suspension: string | null }>(
+      'SELECT capture_json,phase,result,suspension FROM attempts WHERE id=?').get(id);
+    if (!row) throw new OperationError(404, 'ATTEMPT_NOT_FOUND', 'Attempt not found.');
+    const capture = readCapturedConfiguration(JSON.parse(row.capture_json) as unknown);
+    const pending = capture.workspace.initial_state;
+    if (row.phase !== 'preparing' || row.result !== null || row.suspension !== null || pending.kind !== 'pending_inherited_attempt' ||
+        snapshot.identity.project_id !== capture.workspace.identity.project_id ||
+        snapshot.identity.repository_id !== capture.workspace.identity.repository_id || snapshot.identity.issue_id !== capture.workspace.identity.issue_id ||
+        snapshot.predecessor_attempt_id !== capture.workspace.predecessor_attempt_id || snapshot.predecessor_attempt_id !== pending.source_attempt_id ||
+        snapshot.initial_state.kind !== 'inherited_attempt' || snapshot.initial_state.source_attempt_id !== pending.source_attempt_id ||
+        snapshot.inherited_base_sha !== capture.workspace.inherited_base_sha || snapshot.comparison_base_sha === null ||
+        snapshot.comparison_base_sha !== snapshot.initial_state.content_identity) {
+      throw new OperationError(409, 'WORKSPACE_SNAPSHOT_CONFLICT', 'The attempt can no longer accept this inherited workspace snapshot.');
+    }
+    if (!Value.Check(AttemptCapture, { ...capture, workspace: snapshot }) ||
+        db.prepare('SELECT attempt_id FROM attempt_workspace_snapshots WHERE attempt_id=?').get(id)) {
+      throw new OperationError(409, 'WORKSPACE_SNAPSHOT_CONFLICT', 'The attempt already has a recorded workspace snapshot.');
+    }
+    db.prepare('INSERT INTO attempt_workspace_snapshots(attempt_id,snapshot_json,created_at_ms) VALUES (?,?,?)')
+      .run(id, JSON.stringify(snapshot), Date.now());
   }).immediate());
 }
 

@@ -40,7 +40,7 @@ import { assertDatabaseSnapshotUnchanged, assertNoOrphanedDatabaseSidecars, capt
 import { initializeSchema, inspectHistory, loadSchemaRecognitionResources, type DatabaseRecognition } from './migrations.js';
 import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, recordToolPreferenceValidation, seedSettings } from './settings.js';
 import { hasUncertainAccountCleanup, OperationError, readOperation, readCompletedProjectDeletion, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
-import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceReference, readCapture, recordImplementationBlocked, recordDispatchFailure, recordWorkspace, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
+import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceBinding, readAttemptWorkspaceReference, readCapture, recordImplementationBlocked, recordDispatchFailure, recordWorkspace, recordWorkspaceSnapshot, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
 import { terminalRecoveryCandidates, reconcileTerminalAvailability, type TerminalRecoveryCandidate } from './terminal-recovery.js';
 import { createExecutionPersistence } from './execution.js';
 import { acceptRecovery, recoverRecovery, finishRecovery, readResources, readOwnedPassage, resourceSnapshot, validatePreviousAttempt, type RecoveryCommand, type ResourceSnapshot } from './recovery.js';
@@ -50,7 +50,7 @@ import type { CapturedContent } from '../workspaces/index.js';
 import type { DeliveryView, PassageBinding } from '#contracts';
 export type { CaptureClaim, RetryCaptureCommand } from './deliveries.js';
 import type { ExecutionPersistence } from '../execution/index.js';
-import type { AttemptCapture, AttemptStatus } from '#contracts';
+import type { AttemptCapture, AttemptStatus, AttemptWorkspaceBinding, AttemptWorkspaceSnapshot } from '#contracts';
 import { readEvents } from './events.js';
 import { readOperationSummary } from './operation-summary.js';
 import { acceptDiagnostic, recoverDiagnostic, finishDiagnostic, readContextDiagnostics, diagnosticContext, interruptDiagnostics, type DiagnosticCommand } from './diagnostics.js';
@@ -59,7 +59,7 @@ export type { DiagnosticCommand } from './diagnostics.js';
 import { readPreparation, recoverPreparationCommand, savePreparation, type PreparationCommand, type SavePreparation, type StoredPreparation } from './preparations.js';
 import { configurationETag, digest, guarded, readConfiguration, readProject, readProjects, readSettingsView } from './configuration-reads.js';
 import { recoverConfigurationCommand, registerProject, saveConfiguration, saveSettings, type ConfigurationCommand, type RegisterProject, type SaveConfiguration, type SaveSettings } from './configuration-writes.js';
-import { latestIssueAttempt, readQueueCycle, recordQueueObservations, type QueueCycle, type QueueCycleObservation } from './queue-cycles.js';
+import { latestIssueAttempt, latestProjectIssueAttempt, readQueueCycle, recordQueueObservations, type QueueCycle, type QueueCycleObservation } from './queue-cycles.js';
 import { queueETag, recoverQueueChange, saveQueueChange, type QueueChange } from './queue.js';
 import type { QueueScope } from '#contracts';
 import { createProjectDeletionPersistence, type FinalizeProjectDeletion } from './project-deletions.js';
@@ -68,6 +68,7 @@ export type { DeletionWorker } from './project-deletion-worker.js';
 import type { ProjectDeletionInventory } from './project-deletion-inventory.js';
 import { readProjectDeletionPaths } from './project-deletion-paths.js';
 import { createProjectStorageLocations } from './project-storage-locations.js';
+import { createRetainedHistoryMigrations, type RetainedHistoryMigrationCandidate, type RetainedHistoryMigrationInput } from './retained-history-migrations.js';
 import { acceptStorageTransition, advanceStorageTransition, claimStorageTransition, completeStorageTransition, interruptStorageTransitions,
   readStorageTransition, storageTransitionView, assertStorageTransitionQuiescent, type AcceptStorageTransition, type StorageTransition } from './project-storage-transitions.js';
 import type { ProjectStorageObjectIdentity, ProjectStorageRootObservation } from '#contracts';
@@ -216,6 +217,14 @@ export interface Storage {
   recoverAttempt(command: AttemptCommand): StoredOperation | null;
   getAttempt(id: string): AttemptStatus;
   getAttemptCapture(id: string): AttemptCapture;
+  getAttemptWorkspaceBinding(id: string): AttemptWorkspaceBinding;
+  listRetainedHistoryMigrationCandidates(currentAttemptId: string): RetainedHistoryMigrationCandidate[];
+  getRetainedHistoryMigration(attemptId: string): ReturnType<ReturnType<typeof createRetainedHistoryMigrations>['get']>;
+  beginRetainedHistoryMigration(input: RetainedHistoryMigrationInput): void;
+  recordRetainedHistoryMigrationDestination(attemptId: string, identity: string): void;
+  blockRetainedHistoryMigration(attemptId: string, reason: string): void;
+  completeRetainedHistoryMigration(attemptId: string, refsSha256: string, refCount: number, destinationIdentity: string): void;
+  recordWorkspaceSnapshot(id: string, snapshot: AttemptWorkspaceSnapshot): void;
   recordWorkspace(id: string, state: 'starting' | 'ready' | 'failed', owned: boolean, diagnostic: string | null): void;
   recordDispatchFailure(id: string, code: string): void;
   recordImplementationBlocked(id: string): void;
@@ -245,6 +254,7 @@ export interface Storage {
   saveConfiguration(input: SaveConfiguration): StoredOperation;
   getQueueCycle(accountId: string, projectId: string, issueId: string): QueueCycle | null;
   getLatestIssueAttempt(repositoryId: string, issueId: string): { id: string; active: boolean } | null;
+  getLatestProjectIssueAttempt(projectId: string, repositoryId: string, issueId: string): { id: string; active: boolean } | null;
   getQueueETag(scope: QueueScope): string;
   recoverQueueChange(command: QueueChange): StoredOperation | null;
   saveQueueChange(command: QueueChange): StoredOperation;
@@ -277,6 +287,9 @@ function openStorageWithSchema(options: StorageOptions): Storage {
       snapshot = captureDatabaseSnapshot(filename);
       preflight = inspectExistingDatabase(filename, timeout, resources);
       assertDatabaseSnapshotUnchanged(filename, snapshot);
+      if (preflight && (preflight.kind === 'previous-direct' || preflight.kind === 'previous-ledger')) {
+        throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
+      }
     } else assertNoOrphanedDatabaseSidecars(filename);
     mkdirSync(directory, { recursive: true });
     db = new Database(filename, { timeout });
@@ -303,6 +316,7 @@ function openStorageWithSchema(options: StorageOptions): Storage {
     }
     const projectDeletions = createProjectDeletionPersistence(connection);
     const projectStorageLocations = createProjectStorageLocations(connection);
+    const retainedHistoryMigrations = createRetainedHistoryMigrations(connection);
     const resultListeners = new Set<(binding: PassageBinding) => void>();
     const controllerInstanceId = randomUUID();
     initializeShutdown(connection, controllerInstanceId);
@@ -339,6 +353,13 @@ function openStorageWithSchema(options: StorageOptions): Storage {
       assertProjectStorageLocation: observation => guarded(() => connection.transaction(() => projectStorageLocations.assertCurrent(observation))()),
       getAttemptProjectId: id => guarded(() => readAttemptProjectId(connection, id)),
       getAttemptWorkspaceReference: id => guarded(() => connection.transaction(() => readAttemptWorkspaceReference(connection, id))()),
+      getAttemptWorkspaceBinding: id => guarded(() => connection.transaction(() => readAttemptWorkspaceBinding(connection, id))()),
+      listRetainedHistoryMigrationCandidates: id => guarded(() => connection.transaction(() => retainedHistoryMigrations.candidates(id))()),
+      getRetainedHistoryMigration: id => guarded(() => connection.transaction(() => retainedHistoryMigrations.get(id))()),
+      beginRetainedHistoryMigration: input => guarded(() => retainedHistoryMigrations.begin(input)),
+      recordRetainedHistoryMigrationDestination: (id, identity) => guarded(() => retainedHistoryMigrations.recordDestinationIdentity(id, identity)),
+      blockRetainedHistoryMigration: (id, reason) => guarded(() => retainedHistoryMigrations.block(id, reason)),
+      completeRetainedHistoryMigration: (id, refsSha256, refCount, identity) => guarded(() => retainedHistoryMigrations.complete(id, refsSha256, refCount, identity)),
       finalizeProjectDeletion: command => guarded(() => projectDeletions.finalize(command)),
       captureLocalHost: () => guarded(() => captureLocalHost(connection)),
       recordToolPreferenceValidation: paths => guarded(() => recordToolPreferenceValidation(connection, paths)),
@@ -431,6 +452,7 @@ function openStorageWithSchema(options: StorageOptions): Storage {
       recoverAttempt: (command) => guarded(() => connection.transaction(() => recoverAttempt(connection, command))()),
       getAttempt: (id) => guarded(() => connection.transaction(() => readAttempt(connection, id))()),
       getAttemptCapture: (id) => guarded(() => connection.transaction(() => readCapture(connection, id))()),
+      recordWorkspaceSnapshot: (id, snapshot) => recordWorkspaceSnapshot(connection, id, snapshot),
       recordWorkspace: (id, state, owned, diagnostic) => recordWorkspace(connection, id, state, owned, diagnostic),
       recordDispatchFailure: (id, code) => recordDispatchFailure(connection, id, code),
       recordImplementationBlocked: id => recordImplementationBlocked(connection, id),
@@ -494,6 +516,7 @@ function openStorageWithSchema(options: StorageOptions): Storage {
       saveConfiguration: (input) => saveConfiguration(connection, input),
       getQueueCycle: (accountId, projectId, issueId) => guarded(() => connection.transaction(() => readQueueCycle(connection, accountId, projectId, issueId))()),
       getLatestIssueAttempt: (repositoryId, issueId) => guarded(() => connection.transaction(() => latestIssueAttempt(connection, repositoryId, issueId))()),
+      getLatestProjectIssueAttempt: (projectId, repositoryId, issueId) => guarded(() => connection.transaction(() => latestProjectIssueAttempt(connection, projectId, repositoryId, issueId))()),
       recordQueueObservations: observations => recordQueueObservations(connection, observations),
       getQueueETag: scope => guarded(() => connection.transaction(() => queueETag(connection, scope))()),
       recoverQueueChange: command => guarded(() => connection.transaction(() => recoverQueueChange(connection, command))()),

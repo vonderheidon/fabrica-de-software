@@ -26,12 +26,14 @@ it('materializes only the retained commit in an exclusively reserved checkout, i
     if (args.includes('status')) return { exitCode: 0, stdout: '' };
     return f.run(cwd, args, options);
   };
-  const materialize = createPublicationMaterializer(root, git, async p => p, async () => root); const id = randomUUID(); const path = await materialize(d, id);
-  expect(path).toContain(join('publication', id, 'checkout'));
+  const materialize = createPublicationMaterializer(root, git, async p => p, async () => root,
+    async (attemptId, area) => resolve(root, 'issues', '17', 'attempts', attemptId, area));
+  const id = randomUUID(); const path = await materialize(d, id);
+  expect(path).toBe(resolve(root, 'issues', '17', 'attempts', d.attemptId, 'publication', id, 'checkout'));
   expect((await readFile(join(path, 'tracked.txt'), 'utf8'))).toBe('changed tracked bytes\n');
   expect(calls.every(c => c.cwd !== f.implementation)).toBe(true);
   expect(calls.find(c => c.args.includes('clone'))?.args).toEqual(expect.arrayContaining(['--no-local', '--no-hardlinks', '--no-checkout', resolve(root, 'git', `${d.attemptId}.git`)]));
-  expect(calls.find(c => c.args.includes('fetch'))?.args).toContain(d.gitRef);
+  expect(calls.find(c => c.args.includes('fetch'))?.args).toEqual(expect.arrayContaining(['-c', 'protocol.file.allow=always', d.gitRef!]));
   await expect(materialize(d, id)).rejects.toMatchObject({ code: 'PUBLICATION_GIT_FAILED' });
   f.refs.set(d.gitRef!, 'f'.repeat(40));
   await expect(materialize(d, randomUUID())).rejects.toMatchObject({ code: 'DELIVERY_INTEGRITY_FAILED' });

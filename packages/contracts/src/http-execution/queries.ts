@@ -15,6 +15,7 @@ import { Criterion, PublicationTargetIntent } from "../preparations.js";
 import { Finding, Review, RoundHistory } from "./reviews.js";
 import { CriterionOutcome } from "./protocol-views.js";
 import { PassageRole } from "./protocol-views.js";
+import { AttemptWorkspaceSnapshot } from "../workspaces.js";
 const closed = { additionalProperties: false } as const;
 const nullable = <T extends import('@sinclair/typebox').TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
 const text = Type.String({ maxLength: 4096 });
@@ -74,6 +75,7 @@ export const DetailPage = Type.Object({ section: DetailSection, ...Page(DetailIt
 export type DetailPage = Static<typeof DetailPage>;
 export const AttemptV3DetailPage = Type.Union([Type.Object({ section: Type.Literal('target_selections'), items: Type.Array(PublicationTargetSelection, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed), Type.Object({ section: Type.Literal('finding_assessments'), items: Type.Array(FindingAssessment, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed), Type.Object({ section: Type.Literal('finding_disputes'), items: Type.Array(FindingDispute, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed), Type.Object({ section: Type.Literal('decisions'), items: Type.Array(AttemptDecisionView, { maxItems: 100 }), next_cursor: nullable(Type.String({ minLength: 1, maxLength: 2048 })), has_more: Type.Boolean() }, closed)]);
 export const AttemptDetail = Type.Object({ ...AttemptStatus.properties,
+    workspace_lineage: AttemptWorkspaceSnapshot,
     stage_activity: StageActivity,
     expected_account_id: Type.String({ maxLength: 256 }),
     issue: IssueHeader,

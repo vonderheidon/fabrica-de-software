@@ -1,18 +1,18 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery, DeliveryTarget, type DeliveryTarget as SealedTarget, EffectView, type EffectReceipt } from '#contracts';
 import type { GitHub } from '../github/index.js';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory } from './capture.js';
 import type { GitReader } from './git.js';
-import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
+import { retainedRepositoryOwner, retainedRepositoryPath, requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 import { githubReference } from './inspect.js';
 
 export interface DeliveryTaskInput {
   sourceKind?: 'local' | 'github' | undefined; deliveryBranch?: { kind: 'new' | 'existing'; name: string } | null | undefined;
-  attemptId: string; approvedRef: string; contentIdentity: string; issueNumber: number; issueTitle: string; repositoryId: string; repositoryUrl: string; baseBranch: string; baseSha: string;
+  attemptId: string; approvedRef: string; contentIdentity: string; repositoryRelative: string; issueNumber: number; issueTitle: string; repositoryId: string; repositoryUrl: string; baseBranch: string; baseSha: string;
 }
 export interface DeliveryTargetInspection {
   repository_id: string; local_path: string; local_identity: SealedTarget['local_identity']; branch_ref: string;
@@ -151,8 +151,9 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     if (!dataDirectory) targetError('CONTEXT_UNAVAILABLE');
     const found = await observe(path,task,approved);
     const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(task.attemptId),canonicalize);
-    const retained = resolve(data,'git',task.attemptId + '.git');
-    await plainDirectory(retained,canonicalize);
+    const retained = retainedRepositoryPath(data, task.attemptId, task.repositoryRelative);
+    await plainDirectory(dirname(retained),canonicalize); await plainDirectory(retained,canonicalize); await noBorrowedObjects(retained);
+    if ((await metadataBytes(resolve(retained,'factory-owner'),64)).toString('utf8') !== retainedRepositoryOwner(task.attemptId,task.repositoryRelative)) targetError('RETAINED_REPOSITORY_INVALID');
     const diff = await isolated!(retained,['--git-dir=' + retained,'diff-tree','--no-commit-id','--name-only','--no-renames','-r','-z',task.baseSha,approved.approvedRef]);
     if (diff.exitCode !== 0) targetError('DELIVERY_APPROVED_VERSION_INVALID');
     const identity = taskIdentity(task.issueTitle,nul(diff.stdout));
@@ -215,7 +216,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         effect.expectedIdentity.taskType !== target.task_type || effect.expectedIdentity.taskDescription !== target.task_description ||
         delivery.attemptId !== target.attempt_id || delivery.id !== target.delivery_id || delivery.baseSha !== target.base_sha ||
         delivery.gitRef !== target.approved_ref || delivery.contentIdentity !== target.content_identity || !dataDirectory || !isolated) targetError('COMMIT_IDENTITY_INVALID');
-    const expected = await observe(target.local_path,{ attemptId:delivery.attemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,
+    const expected = await observe(target.local_path,{ attemptId:delivery.attemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:delivery.repositoryRelative,
       issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,
       repositoryUrl:`https://github.com/${effect.expectedIdentity.repositoryOwner!}/${effect.expectedIdentity.repositoryName!}`,
       baseBranch:target.base_branch,baseSha:target.base_sha,sourceKind:target.local_identity.source_kind },{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },compareWorkingState && target.local_identity.branch_kind !== 'existing');
@@ -224,9 +225,9 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
           expected.workingStateHash !== target.local_identity.working_state_hash || expected.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
     const repository = expected.root;
     const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId),canonicalize);
-    const retained = resolve(data,'git',`${delivery.attemptId}.git`);
+    const retained = retainedRepositoryPath(data, delivery.attemptId, delivery.repositoryRelative);
     await plainDirectory(retained,canonicalize); await noBorrowedObjects(retained);
-    if ((await metadataBytes(resolve(retained,'factory-owner'),36)).toString('utf8') !== delivery.attemptId) targetError('RETAINED_REPOSITORY_INVALID');
+    if ((await metadataBytes(resolve(retained,'factory-owner'),64)).toString('utf8') !== retainedRepositoryOwner(delivery.attemptId,delivery.repositoryRelative)) targetError('RETAINED_REPOSITORY_INVALID');
     const run = async (args: string[],input?: string,commitTime?: number) => {
       const result = await isolated!(repository,args,{ ...(input === undefined ? {} : { input }),isolatedConfig: true,...(commitTime ? { commitTime } : {}) });
       if (result.exitCode !== 0) targetError('DELIVERY_TARGET_GIT_FAILED');
@@ -234,7 +235,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     };
     const message = `${target.task_type}: ${target.task_description} (#${target.issue_number})\n\nFactory-Attempt: ${delivery.attemptId}\nFactory-Delivery: ${delivery.id}\nFactory-Operation: ${effect.operationId}\nFactory-Target: ${target.operation_id}\n`;
     return { repository,retained,run,message,commitTime: effect.expectedIdentity.commitTime ?? Math.floor(Date.now()/1000),source: effect.expectedIdentity.repositoryId!,
-      sourceAttemptId: delivery.attemptId,repositoryUrl:`https://github.com/${effect.expectedIdentity.repositoryOwner!}/${effect.expectedIdentity.repositoryName!}`,
+      sourceAttemptId: delivery.attemptId,repositoryRelative:delivery.repositoryRelative,repositoryUrl:`https://github.com/${effect.expectedIdentity.repositoryOwner!}/${effect.expectedIdentity.repositoryName!}`,
       async commitMessage(sha: string) { return run(['show','--no-patch','--format=%B',sha,'--']); },
       async tree(sha: string) { return (await run(['rev-parse','--verify',`${sha}^{tree}`])).trim(); },
       async parent(sha: string) { return (await run(['rev-list','--parents','-n','1',sha])).trim().split(' ').slice(1).join(' '); } };
@@ -244,7 +245,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const worktrees = await c.run(['worktree','list','--porcelain']);
       if (worktrees.split(/\r?\n/u).includes(`branch ${target.branch_ref}`)) targetError('DELIVERY_BRANCH_IN_USE');
     }
-    const observed = await observe(target.local_path,{ attemptId:c.sourceAttemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,
+    const observed = await observe(target.local_path,{ attemptId:c.sourceAttemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:c.repositoryRelative,
       issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,repositoryUrl:c.repositoryUrl,baseBranch:target.base_branch,baseSha:target.base_sha,sourceKind:target.local_identity.source_kind },
       { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.base_sha },target.local_identity.branch_kind !== 'existing');
     if (observed.workingStateHash !== target.local_identity.working_state_hash || observed.indexHash !== target.local_identity.index_hash) targetError('DELIVERY_CHECKOUT_CHANGED');

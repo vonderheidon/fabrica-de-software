@@ -256,7 +256,8 @@ export function readAttemptDetail(db: Database.Database, id: string, query: Atte
   const expectedAccountId = db.prepare<[string], { account_id: string }>('SELECT account_id FROM attempts WHERE id=?').get(id)?.account_id;
   if (!expectedAccountId) throw new StorageError('ATTEMPT_DATA_INVALID');
   const publication = publicationSummary(db,id,exists ? selectedDeliveryId! : undefined);
-  const targetCapture = readCapture(db,id).v3Delivery;
+  const attemptCapture = readCapture(db,id);
+  const targetCapture = attemptCapture.v3Delivery;
   const details = readDetailPage(db,id,query);
    const v3Details = details?.section === 'target_selections' ? { section: 'target_selections' as const, items: details.items.filter((item): item is import('#contracts').PublicationTargetSelection => 'selection_kind' in item), next_cursor: details.next_cursor, has_more: details.has_more }
      : details?.section === 'finding_assessments' ? { section: 'finding_assessments' as const, items: details.items.filter((item): item is import('#contracts').FindingAssessment => 'progress' in item && 'findingId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
@@ -267,7 +268,7 @@ export function readAttemptDetail(db: Database.Database, id: string, query: Atte
     return Boolean(db.prepare(`SELECT 1 FROM ${plan.from} WHERE t.attempt_id=? AND ${plan.round}=?${selectedDeliveryId ? ` AND ${plan.delivery}=?` : ''} LIMIT 1`)
       .get(...(selectedDeliveryId ? [id, selectedRound, selectedDeliveryId] : [id, selectedRound])));
   });
-  return { ...a, v3Details, historySections, block: readAttemptBlock(db,id), expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound,
+  return { ...a, v3Details, historySections, workspaceLineage: attemptCapture.workspace, block: readAttemptBlock(db,id), expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound,
     deliverySummary: exists ? readDeliverySummary(db,id,selectedDeliveryId!,publication) : null,
     publicationTarget: targetCapture?.publication_target ?? null, publicationTargetHash: targetCapture?.publication_target_hash ?? null,
     stageActivity: readStageActivity(db,id), publication, measurements: readMeasurements(db,id), cleanup: readResources(db,id).cleanup,

@@ -10,6 +10,8 @@ const ownership = {
   preparations: 'project_id = @projectId',
   preparation_revisions: 'project_id = @projectId',
   attempts: 'project_id = @projectId',
+  retained_history_migrations: 'project_id = @projectId',
+  attempt_workspace_snapshots: 'attempt_id IN (SELECT id FROM owned_attempts)',
   attempt_sessions: 'attempt_id IN (SELECT id FROM owned_attempts)',
   terminal_occupancies: 'attempt_id IN (SELECT id FROM owned_attempts)',
   attempt_criteria: 'attempt_id IN (SELECT id FROM owned_attempts)',

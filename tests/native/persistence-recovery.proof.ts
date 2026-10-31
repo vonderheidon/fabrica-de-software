@@ -11,6 +11,7 @@ import { publicationFixture } from '../fixtures/publication.js';
 import { retainedGitObjects, writeRetainedGit } from '../fixtures/retained-git.js';
 import { assertNoContent, auditDatabase, inventory, sha256, sizes } from '../fixtures/persistence-measurement.js';
 import { persistenceReferenceSnapshot } from './persistence-references.mjs';
+import { createProjectStorageInspector } from '../../apps/controller/src/modules/workspaces/project-storage.js';
 
 interface Snapshot {
   pid: number; delivery: Delivery; review: ReturnType<Storage['getReview']>; producerResult: ReturnType<Storage['getProducerResult']>;
@@ -68,16 +69,19 @@ it('initializes clean storage and preserves the multi-round reference graph acro
   const controllers: ReturnType<typeof controller>[] = [];
   const markers = [objects.approvedBytes, 'RECOVERY_IGNORED_CACHE_BYTES', 'diff --git'];
   try {
-    expect(f.cleanInitialization).toMatchObject({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: [],
+    expect(f.cleanInitialization).toMatchObject({ schemaVersion: 56, integrityCheck: 'ok', foreignKeyViolations: [],
       counts: { accounts: 0, profiles: 0, projects: 0, preparations: 0, attempts: 0 }, accountId: null,
       directoryCreatedExclusive: true, openedByNormalStoragePath: true });
     const binding = f.persistence.getPassage({ passageId: f.status().passageId }).binding;
     const firstDeliveryId = binding.deliveryVersion;
-    const git = await writeRetainedGit(f.directory, f.attemptId, firstDeliveryId);
+    const projectStorage = createProjectStorageInspector(f.directory, undefined, f.storage);
+    const managedRoot = await projectStorage.resolveAttemptRoot(f.attemptId, true);
+    const workspacePath = await projectStorage.resolveAttemptWorkspace(f.attemptId);
+    const git = await writeRetainedGit(managedRoot, workspacePath, f.attemptId, firstDeliveryId);
     f.workspaces.captureDelivery.mockImplementation(async input => {
       const gitRef = `refs/factory/deliveries/${input.deliveryId}`;
       if (input.deliveryId !== firstDeliveryId) {
-        await writeFile(join(f.directory, 'git', `${f.attemptId}.git`, ...gitRef.split('/')), `${git.commitSha}\n`, { flag: 'wx' });
+        await writeFile(join(git.repository, ...gitRef.split('/')), `${git.commitSha}\n`, { flag: 'wx' });
       }
       return { gitRef, contentIdentity: git.contentIdentity, commitSha: git.commitSha, hasDelta: true, warnings: [] };
     });
@@ -116,11 +120,11 @@ it('initializes clean storage and preserves the multi-round reference graph acro
     // No original storage/fixture connections remain when a controller boots.
     const start = () => { const current = controller(f.directory, f.attemptId, deliveryId); controllers.push(current); return current; };
     const first = start(); const firstReady = await first.ready;
-    expect(firstReady).toMatchObject({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
+    expect(firstReady).toMatchObject({ schemaVersion: 56, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
     const before = await first.request<Snapshot>('snapshot');
     expect(before.delivery).toEqual(delivery); expect(before.review).toEqual(review); expect(before.producerResult).toEqual(producerResult);
     expectReferencesPreserved(before);
-    expect(before.databaseIntegrity).toMatchObject({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
+    expect(before.databaseIntegrity).toMatchObject({ schemaVersion: 56, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
     const started = await first.request<{ passageId: string; pid: number }[]>('start-processes');
     expect(started).toHaveLength(2); expect(new Set(started.map(p => p.pid)).size).toBe(2);
     const blockedPlan = await first.request<Awaited<ReturnType<Pipeline['getRemovalPlan']>>>('plan');
@@ -139,13 +143,13 @@ it('initializes clean storage and preserves the multi-round reference graph acro
     expect(() => process.kill(firstReady.pid, 0)).toThrow();
     // The next child receives only the directory and IDs, never fixture maps or SQL connections.
     const second = start(); const secondReady = await second.ready;
-    expect(secondReady).toMatchObject({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
+    expect(secondReady).toMatchObject({ schemaVersion: 56, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
     expect(secondReady.pid).not.toBe(firstReady.pid);
     expect(secondReady.readyAtMs).toBeGreaterThanOrEqual(firstExit.closedAtMs);
     const restarted = await second.request<Snapshot>('snapshot');
     expect(restarted.delivery).toEqual(delivery); expect(restarted.review).toEqual(review); expect(restarted.producerResult).toEqual(producerResult);
     expectReferencesPreserved(restarted);
-    expect(restarted.databaseIntegrity).toMatchObject({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
+    expect(restarted.databaseIntegrity).toMatchObject({ schemaVersion: 56, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
     const afterRestart = sizes(await inventory(f.directory));
     const removed = await second.request<{ operation: ReturnType<Storage['getOperation']>; resources: ReturnType<Storage['getResources']> }>('remove');
     expect(removed.operation?.state).toBe('succeeded');
@@ -156,13 +160,13 @@ it('initializes clean storage and preserves the multi-round reference graph acro
     expect((await inventory(f.directory)).some(file => file.path.startsWith('artifacts/'))).toBe(false);
     const secondExit = await second.kill();
     const third = start(); const thirdReady = await third.ready;
-    expect(thirdReady).toMatchObject({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
+    expect(thirdReady).toMatchObject({ schemaVersion: 56, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
     expect(new Set([firstReady.pid, secondReady.pid, thirdReady.pid]).size).toBe(3);
     expect(thirdReady.readyAtMs).toBeGreaterThanOrEqual(secondExit.closedAtMs);
     const recovered = await third.request<Snapshot>('snapshot');
     expect(recovered.delivery).toEqual(delivery); expect(recovered.review).toEqual(review); expect(recovered.producerResult).toEqual(producerResult);
     expectReferencesPreserved(recovered);
-    expect(recovered.databaseIntegrity).toMatchObject({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
+    expect(recovered.databaseIntegrity).toMatchObject({ schemaVersion: 56, integrityCheck: 'ok', foreignKeyViolations: [], retiredTables: [] });
     const preservedReceipts = new Map(recovered.persistenceReferences.operationReceipts.map(row => [String(row.operation_id), row] as const));
     for (const receipt of initialReferences.operationReceipts) expect(preservedReceipts.get(String(receipt.operation_id))).toEqual(receipt);
     expect(recovered.resources.entries.find(r => r.kind === 'implementation')?.removed).toBe(true);
@@ -183,7 +187,8 @@ it('initializes clean storage and preserves the multi-round reference graph acro
     try {
       databaseAudit = auditDatabase(audit, markers);
     } finally { audit.close(); }
-    for (const file of (await inventory(f.directory)).filter(file => !file.path.startsWith('work/') && !file.path.startsWith('git/'))) {
+    for (const file of (await inventory(f.directory)).filter(file => !file.path.startsWith('work/') && !file.path.startsWith('issues/') &&
+      !file.path.startsWith('projects/') && !file.path.startsWith('git/'))) {
       assertNoContent(await readFile(join(f.directory, file.path)), markers);
       expect(/^factory\.sqlite(?:-wal|-shm)?$|^controller-lock\.sqlite(?:-journal)?$/.test(file.path)).toBe(true);
     }

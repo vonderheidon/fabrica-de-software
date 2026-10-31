@@ -54,7 +54,8 @@ async function fixture() {
     }
     return f.run(cwd,args,input);
   };
-  const publisher = createLocalPublisher(root,git,async p => p, async () => root);
+  const publisher = createLocalPublisher(root,git,async p => p, async () => root,
+    async (attemptId, area) => join(root,'issues','17','attempts',attemptId,area));
   return { ...f,d,effect,publisher,calls,commits,lose: () => { loseResponse = true; },forge: () => { forge = true; },noDelta: () => { noDelta = true; d.hasDelta = false; } };
 }
 
@@ -65,7 +66,7 @@ it('publishes the approved tree in a private checkout after implementation remov
   let authorizations = 0;
   const result = await f.publisher.createLocalCommit(f.d,f.effect,async () => { authorizations++; });
   expect(result).toMatchObject({ state: 'confirmed',receipt: { contentIdentity: f.d.contentIdentity,parentSha: f.d.baseSha,operationId: f.effect.operationId } });
-  const checkout = join(f.root,'work',f.d.attemptId,'publication',f.effect.operationId,'checkout');
+  const checkout = join(f.root,'issues','17','attempts',f.d.attemptId,'publication',f.effect.operationId,'checkout');
   expect(await readFile(join(checkout,'tracked.txt'),'utf8')).toBe('changed tracked bytes\n');
   await expect(readFile(join(checkout,'cache','declared.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   expect(f.calls.every(c => c.cwd !== f.implementation)).toBe(true);

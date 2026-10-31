@@ -29,7 +29,7 @@ const removalOrder: readonly DeletionTable[] = [
   'finding_disputes', 'finding_assessments', 'attempt_blocks', 'finding_resolutions', 'findings', 'reviews',
   'capture_warnings', 'capture_runs', 'deliveries', 'criterion_results', 'passage_results',
   'passage_events', 'passage_measurements', 'execution_questions', 'terminal_occupancies', 'attempt_sessions', 'resources', 'passages',
-  'rounds', 'attempt_criteria', 'attempts', 'preparation_revisions', 'preparations',
+  'rounds', 'attempt_criteria', 'attempt_workspace_snapshots', 'retained_history_migrations', 'attempts', 'preparation_revisions', 'preparations',
   'project_creations', 'project_revisions', 'project_storage_transitions', 'project_storage_locations', 'projects', 'operation_requests',
   'project_deletion_targets', 'project_deletions',
 ];

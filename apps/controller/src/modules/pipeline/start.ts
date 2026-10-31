@@ -1,23 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import { Value } from '@sinclair/typebox/value';
-import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueItem } from '#contracts';
+import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type AttemptWorkspaceBinding, type AttemptWorkspaceSnapshot, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueItem } from '#contracts';
 import { isLocalAbsoluteTargetPath, OperationError, publicationTargetHash, publicationTargetPath, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import { interpretIssue, preparationDigest } from './criteria.js';
 import { ExecutionError, type Execution } from '../execution/index.js';
 import type { Preparations, Queue } from '../projects/index.js';
 import type { Workspaces } from '../workspaces/index.js';
-import { CaptureError } from '../workspaces/index.js';
+import { CaptureError, ProjectStorageError } from '../workspaces/index.js';
 import type { DeliveryDiffQuery } from '#contracts';
 import { createRecovery } from './recovery.js';
 import { createPublication, type PublicationDependencies } from '../publication/index.js';
+import { IssueProgressError, writeIssueProgressFile, type IssueProgressDecision, type IssueProgressMilestone,
+  type IssueProgressPredecessor, type IssueProgressRound } from '../workspaces/index.js';
 import type { AuthorizeUpgrade, CompletePublication, ReconcilePublication, MakeAttemptDecision } from '#contracts';
 
 export interface PipelineDependencies {
   github?: Pick<GitHub, 'getIssueContextById'>;
   storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'createPreparation' | 'getPreparation' | 'prepareDecisionSuccessor'>; execution: Execution;
   queue?: Pick<Queue, 'observe' | 'revalidateForDispatch'>;
-  workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment' | 'importIntegrationBase'>>;
+  workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment' | 'importIntegrationBase' | 'resolveAttemptEvidenceDirectory' | 'resolveAttemptProgressFile' | 'migrateLegacyIssueHistory'>>;
   observeTools: () => Promise<ToolObservation[]>;
   publication?: Pick<PublicationDependencies, 'github' | 'workspaces'>;
   hostName?: string;
@@ -26,6 +28,44 @@ export interface PipelineDependencies {
 function profile(value: ExecutionProfileValue): ExecutionProfileValue {
   const { name, executor, provider, model, effort, guidance } = value;
   return { name, executor, provider, model, effort, guidance };
+}
+
+const dependencyManagement = {
+  managerSelection: 'No package root relevante, use o campo packageManager de package.json se ele apontar para npm, Yarn ou pnpm e corresponder ao lockfile. Sem esse campo, infira o gerenciador somente se houver um único tipo de lockfile: package-lock.json ou npm-shrinkwrap.json para npm, yarn.lock para Yarn, pnpm-lock.yaml para pnpm. Trate diretórios independentes de monorepo separadamente. Se houver conflito, formato não suportado ou gerenciador indisponível, preserve o estado e registre o impedimento, sem escolher ou instalar outro gerenciador.',
+  reconciliation: 'Antes de validações que precisam das dependências, reutilize a árvore instalada quando estiver presente e coerente. Se o estado instalado estiver ausente ou inconsistente com manifestos e lockfile, execute a instalação normal do gerenciador no package root, sem instalação limpa. Não reinstale em toda tentativa quando nada mudou.',
+  preservation: 'Nunca apague node_modules, caches, arquivos ignorados ou o workspace; não use npm ci nem outro comando de instalação limpa. Depois de instalar, confira o diff do Git. Mantenha mudanças de lockfile apenas quando forem necessárias às mudanças de dependência desta tarefa. Se a reconciliação exigir alterações não relacionadas ou não puder ser feita sem limpar dados, preserve o conteúdo e registre um check bloqueado com causa e limitação.',
+} as const;
+
+const workspaceScopeInstructions = 'Use workspace.comparison_base_sha as the content baseline for this attempt; baseSha only identifies the repository base. Compare the complete working-tree content, including currently untracked paths, with that snapshot; do not infer new scope from git status or the staged-index diff alone. Preserve the existing index without staging, resetting, checking out or normalizing files. If a path is absent from that preserved index but its working-tree content matches the entry in workspace.comparison_base_sha, treat it as inherited state; this includes a staged deletion paired with an identical untracked file. For staged differences that appear to be only line endings, verify semantic equality and exclude inherited changes from this attempt scope. After capture, compare the immutable delivery.commitSha tree with workspace.comparison_base_sha. Review the immutable delivery.commitSha/ref, not the mutable workspace HEAD or index.';
+
+const resultSubmissionProtocol = {
+  beforeSend: 'Finish all owned tools and product writers before calling execution_complete, in a separate tool call. Check every required field, nested field, enum and value type against its tool schema. Use formatVersion: 1, meaningful nonblank text and concise observed evidence. Use only captured criterion IDs, each exactly once. The controller supplies private passage, attempt, round and delivery identities; do not add them to the result.',
+  receipt: 'Completion requires accepted: true and the factory receipt. For RESULT_INVALID, read validationIssues paths/rules and correct the reported arguments before resubmitting. For OWNED_TOOLS_RUNNING, wait for those tools to finish. For STORAGE_FAILED, RESULT_CONFLICT, timeout or channel loss, preserve the submitted result and work, report the exact code and any receipt already received; do not change the payload merely to bypass the error or claim acceptance without a receipt.',
+} as const;
+const resultSubmissionInstructions = {
+  implementer: {
+    ...resultSubmissionProtocol,
+    requiredFields: ['formatVersion', 'summary', 'writesStopped', 'additionalChangesJustification', 'criteria', 'checks'],
+    values: 'On EVERY round, including the first, include additionalChangesJustification: null when there are no additional changes, otherwise a concrete justification. Set writesStopped: true only after confirming writers stopped. Each criterion has criterionId, verdict passed/failed/not_verified and a nonempty evidence array of strings. Each check has id, outcome and evidence, all strings; use checks: [] only when there are no checks to report, and describe unperformed pertinent checks and their limitations honestly.',
+    findings: 'Use findingResponses: [] when this passage has no current-attempt findings. Otherwise respond exactly once to every supplied current finding ID using findingId, responseType corrected/disputed, response and a nonempty evidence array. Keep check IDs unique and declaredFiles relative to this checkout.',
+  },
+  reviewer: {
+    ...resultSubmissionProtocol,
+    requiredFields: ['formatVersion', 'summary', 'verdict', 'criteria', 'findings', 'resolutions', 'assessments', 'commandRepetitions', 'disputeResponses'],
+    emptyValues: 'Include every required array even when empty. Use findings: [] for no new findings; resolutions: [] and assessments: [] for no prior findings; commandRepetitions: [] for no repeated commands; disputeResponses: [] for no disputes.',
+    findings: 'Each finding requires key, criterionIds, category, problem, evidence, expectedResult, blocking, priority critical/high/medium/low, and originFindingId. Use originFindingId: null for a new problem, or the supplied root finding UUID for the same recurring problem and criteria. Keep keys unique. In resolutions.findingKey and assessments.findingId, use each supplied prior finding UUID exactly once, not its human-readable key or a new UUID.',
+    consistency: 'Each criterion requires criterionId, verdict passed/failed/not_verified and a nonempty evidence array. Approval requires all criteria passed and all blocking findings resolved. Rejection needs a demonstrated failed/unverified criterion, actionable blocking finding or unresolved prior finding. For proven/partial assessments, reuse the exact same independent evidence string in the matching criterion evidence array; none/not_assessable uses evidence: [] with a concrete justification. commandRepetitions.prior_evidence must match evidence supplied by this delivery producer. Respond once per supplied disputeId, with maintained paired to unresolved or resolved paired to resolved in the finding resolution.',
+  },
+} as const;
+
+function validWorkspaceSnapshot(snapshot: AttemptWorkspaceSnapshot, binding: AttemptWorkspaceBinding, baseSha: string): boolean {
+  const state = snapshot.initial_state;
+  if (snapshot.identity.project_id !== binding.workspace.project_id || snapshot.identity.repository_id !== binding.workspace.repository_id ||
+      snapshot.identity.issue_id !== binding.workspace.issue_id || snapshot.predecessor_attempt_id !== binding.predecessor_attempt_id ||
+      snapshot.inherited_base_sha !== binding.inherited_base_sha || snapshot.comparison_base_sha === null ||
+      state.kind === 'pending_inherited_attempt' || snapshot.comparison_base_sha !== state.content_identity) return false;
+  if (binding.initial_state.kind === 'base_checkout') return state.kind === 'base_checkout' && snapshot.inherited_base_sha === null && snapshot.comparison_base_sha === baseSha;
+  return state.kind === 'inherited_attempt' && state.source_attempt_id === binding.predecessor_attempt_id && snapshot.inherited_base_sha !== null;
 }
 
 type ExecutionCatalogResult = Awaited<ReturnType<Execution['getCatalog']>>;
@@ -78,6 +118,84 @@ export function createPipeline(deps: PipelineDependencies) {
   const pending = new Set<Promise<void>>(); const abort = new AbortController(); let closed = false;
   let queueDispatching = false; let nextQueuePollAt = 0;
   const attemptSignals = new Map<string, AbortController>();
+  async function updateIssueProgress(attemptId: string, milestone: IssueProgressMilestone): Promise<void> {
+    if (!workspaces.resolveAttemptProgressFile) return;
+    try {
+      const status = storage.getAttempt(attemptId);
+      const capture = storage.getAttemptCapture(attemptId);
+      const rounds: IssueProgressRound[] = storage.getRounds(attemptId).entries.map(entry => {
+        const delivery = entry.producerReceiptId === null ? null : storage.getDelivery(entry.deliveryId).delivery;
+        const producer = delivery ? storage.getProducerResult(entry.deliveryId) : null;
+        const review = delivery ? storage.getReview(entry.deliveryId) : null;
+        const criteria = producer?.result.criteria;
+        return {
+          round: entry.round, deliveryId: entry.deliveryId, producerPassageId: entry.producerPassageId,
+          producerReceiptId: entry.producerReceiptId, reviewId: entry.reviewId,
+          reviewState: (review?.state ?? entry.reviewState) as IssueProgressRound['reviewState'],
+          reviewIndependence: (review?.independenceState ?? null) as IssueProgressRound['reviewIndependence'],
+          contentIdentity: delivery?.contentIdentity ?? entry.contentIdentity, commitSha: delivery?.commitSha ?? null,
+          checkCount: producer ? producer.result.checks.length : null,
+          criteria: criteria ? {
+            passed: criteria.filter(item => item.verdict === 'passed').length,
+            failed: criteria.filter(item => item.verdict === 'failed').length,
+            notVerified: criteria.filter(item => item.verdict === 'not_verified').length,
+          } : null,
+          blockingFindings: storage.getOpenFindings(attemptId, entry.round + 1).filter(item => item.blocking).length,
+        };
+      });
+      let predecessor: IssueProgressPredecessor | null = null;
+      const predecessorAttemptId = capture.workspace.predecessor_attempt_id;
+      if (predecessorAttemptId) {
+        const previous = storage.getAttempt(predecessorAttemptId);
+        const previousRounds = storage.getRounds(predecessorAttemptId).entries;
+        const lastRound = previousRounds.at(-1);
+        const lastDelivery = lastRound?.producerReceiptId ? storage.getDelivery(lastRound.deliveryId).delivery : null;
+        const lastReview = lastDelivery ? storage.getReview(lastDelivery.id) : null;
+        const previousCapture = storage.getAttemptCapture(predecessorAttemptId);
+        predecessor = {
+          attemptId: previous.id, predecessorAttemptId: previousCapture.workspace.predecessor_attempt_id,
+          result: previous.result, phase: previous.phase, suspension: previous.suspension,
+          deliveryId: lastRound?.deliveryId ?? null,
+          contentIdentity: lastDelivery?.contentIdentity ?? lastRound?.contentIdentity ?? null,
+          reviewState: (lastReview?.state ?? lastRound?.reviewState ?? null) as IssueProgressPredecessor['reviewState'],
+          blockingFindings: storage.getOpenFindings(predecessorAttemptId, previous.round + 1).filter(item => item.blocking).length,
+        };
+      }
+      const detail = storage.getAttemptDetail(attemptId, { limit: '20', section: 'decisions' });
+      const decisionItems = detail.v3Details?.section === 'decisions' ? detail.v3Details.items : [];
+      const decisions: IssueProgressDecision[] = decisionItems.slice(0, 20).map(item => ({
+        id: item.id, operationId: item.operationId, action: item.action as IssueProgressDecision['action'], createdAtMs: item.createdAtMs,
+      }));
+      const initialState = capture.workspace.initial_state;
+      const contentIdentity = initialState.kind === 'pending_inherited_attempt' ? null : initialState.content_identity;
+      const sourceAttempt = initialState.kind === 'base_checkout' ? null : initialState.source_attempt_id;
+      const path = await workspaces.resolveAttemptProgressFile(attemptId);
+      await writeIssueProgressFile(path, {
+        identity: {
+          projectId: capture.workspace.identity.project_id,
+          repositoryId: capture.workspace.identity.repository_id,
+          issueId: capture.workspace.identity.issue_id,
+        },
+        issueNumber: capture.issue.number, issueTitle: capture.issue.title, updatedAtMs: Date.now(), milestone,
+        attempt: {
+          id: status.id, passageId: status.passageId, predecessorAttemptId: capture.workspace.predecessor_attempt_id,
+          round: status.round, phase: status.phase, result: status.result, suspension: status.suspension,
+        },
+        workspace: {
+          initialState: initialState.kind, sourceAttemptId: sourceAttempt,
+          initialContentIdentity: contentIdentity, comparisonBaseSha: capture.workspace.comparison_base_sha,
+        },
+        rounds, blockingFindings: storage.getOpenFindings(attemptId, status.round + 1).filter(item => item.blocking).length,
+        predecessor, decisions,
+      });
+    } catch (error) {
+      deps.logFailure(error instanceof IssueProgressError ? error.code : 'ISSUE_PROGRESS_WRITE_FAILED');
+    }
+  }
+  async function cancelAttemptAndUpdateProgress(attemptId: string, operationId: string): Promise<void> {
+    try { await execution.cancelAttempt(attemptId, operationId); }
+    finally { await updateIssueProgress(attemptId, 'attempt_cancelled'); }
+  }
   // Only live, not-yet-dispatched continuations. Restart deliberately discards these closures.
   const waitingForAuthority = new Map<string, () => Promise<void>>();
   function signalFor(id: string) {
@@ -179,6 +297,11 @@ export function createPipeline(deps: PipelineDependencies) {
     const capture: AttemptCapture = { formatVersion: 1, preparationId: p.id, preparationRevision: p.revision, summaryHash: p.summary_hash,
       accountId: config.view.settings.account_id, issue: p.issue, baseSha: p.base_sha, configuration: p.effective_configuration,
       criteria: p.criteria_preview.criteria, criteriaDigest: p.criteria_preview.digest, roleResources, tools,
+      workspace: {
+        identity: { project_id: saved.view.project_id, repository_id: p.issue.repository.id, issue_id: p.issue.id },
+        predecessor_attempt_id: p.previous_attempt_id ?? null,
+        initial_state: { kind: 'base_checkout', content_identity: p.base_sha }, inherited_base_sha: null, comparison_base_sha: p.base_sha,
+      },
       v3Delivery };
     for (const candidate of storage.terminalRecoveryCandidates()) {
       if (!execution.observeManagedTerminal && candidate.state === 'available') continue;
@@ -255,7 +378,11 @@ export function createPipeline(deps: PipelineDependencies) {
       if (!mode) return;
       const project = storage.getConfiguration(candidate.projectId).view.configuration;
       if (project.source.kind === 'github' && mode !== 'icr') return;
-      const preparation = await preparations.createPreparation(candidate.projectId, { issue_id: candidate.issueId, delivery_mode: mode, guidance: '', overrides: {} },
+      if (!project.source.repository_id) return;
+      const predecessor = storage.getLatestProjectIssueAttempt(candidate.projectId, project.source.repository_id, candidate.issueId);
+      if (predecessor?.active) return;
+      const preparation = await preparations.createPreparation(candidate.projectId, { issue_id: candidate.issueId, delivery_mode: mode, guidance: '', overrides: {},
+        ...(predecessor ? { previous_attempt_id: predecessor.id } : {}) },
         { operationId: randomUUID(), expectedRevision: undefined });
       if (closed || !storage.getSettings().automation_enabled || !storage.getConfiguration(candidate.projectId).view.configuration.automation_enabled) return;
       const prepared = await preparations.getPreparation(preparation.view.preparation.id);
@@ -275,7 +402,7 @@ export function createPipeline(deps: PipelineDependencies) {
     if (closed) return;
     for (const attemptId of storage.expireLimits()) {
       // Expiration revokes advancement. The executor records the actual stop receipt separately.
-      await execution.cancelAttempt(attemptId, randomUUID());
+      await cancelAttemptAndUpdateProgress(attemptId, randomUUID());
     }
     if (scopePolling) return;
     if (deps.github && Date.now() - lastScopePoll >= storage.getSettings().time_defaults.polling_interval_ms) {
@@ -301,7 +428,8 @@ export function createPipeline(deps: PipelineDependencies) {
     }).finally(() => { pending.delete(task); });
     pending.add(task);
   }
-  const recovery = createRecovery(deps, enqueue, revoke, () => closed);
+  const recovery = createRecovery(deps, enqueue, revoke, () => closed,
+    attemptId => updateIssueProgress(attemptId, 'attempt_cancelled'));
   const publication = deps.publication ? createPublication({ ...deps.publication, storage, enqueue, isClosed: () => closed, logFailure: deps.logFailure,
     reconcileResources: async id => {
       if (!['delivered', 'interrupted'].includes(storage.getAttempt(id).result ?? '')) return;
@@ -327,6 +455,7 @@ export function createPipeline(deps: PipelineDependencies) {
       waitingForAuthority.set(observed.delivery.attemptId,() => review(deliveryId)); return;
     }
     const claimed = storage.beginReview(deliveryId); if (!claimed) return;
+    await updateIssueProgress(observed.delivery.attemptId, 'review_started');
     await launchReview(claimed);
   }
   async function launchReview(claimed: NonNullable<ReturnType<Storage['beginReview']>>): Promise<void> {
@@ -344,6 +473,8 @@ export function createPipeline(deps: PipelineDependencies) {
         if (!previousReview || previousReview.state === 'pending') throw new ExecutionError('TRACKING_LOST');
       }
       const cwd = await workspaces.materializeReview(delivery, claimed.id);
+      const evidenceDirectory = await workspaces.resolveAttemptEvidenceDirectory?.(delivery.attemptId, delivery.id);
+      if (!evidenceDirectory) throw new CaptureError('CONTEXT_UNAVAILABLE');
       let previousDiff: Awaited<ReturnType<NonNullable<typeof workspaces.getDeliveryDiff>>>['entries'] | null = null;
       if (previousRound?.deliveryId) {
         if (!workspaces.getDeliveryDiff) throw new CaptureError('CONTEXT_UNAVAILABLE');
@@ -377,8 +508,10 @@ export function createPipeline(deps: PipelineDependencies) {
         const request: PassageRequest = { binding: passage.binding, cwd, profile: profile(reviewer), criterionIds: capture.criteria.map(c => c.id),
           previousFindingKeys: findings.map(f => f.id), previousBlockingFindingKeys: findings.filter(f => f.blocking).map(f => f.id), gitNexusRequired: false, roleResource: passage.roleResource,
           task: JSON.stringify({ formatVersion: 1, issue: { id: capture.issue.id, title: capture.issue.title, body: capture.issue.body },
-            criteria: capture.criteria, delivery,
+            criteria: capture.criteria, delivery, resultSubmission: resultSubmissionInstructions.reviewer,
              findings, disputes, producerResult: storage.getProducerResult(deliveryId), previousDelivery: previousRound?.deliveryId ?? null, previousDiff,
+            workspaceScope: { comparisonBaseSha: capture.workspace.comparison_base_sha, capturedCommitSha: delivery.commitSha,
+              instructions: workspaceScopeInstructions },
              disputeResponse: 'Respond once to every supplied disputeId in disputeResponses, with maintained/resolved, justification and evidence. Match the resolution of its findingId: maintained requires unresolved; resolved requires resolved. IDs and original version are supplied facts. A maintained dispute blocks automatic correction and requires an operator decision.',
             reviewScope: { mode: previousReview ? 'focused' : 'complete',
               prerequisites: 'First confirm that the required product files exist. If a required entry point is absent, verify the absence directly, report the affected criteria as failed with concrete evidence, and submit a rejected result promptly. Do not open a browser or repeat visual checks for a missing page. A blocked producer result requires this prerequisite check before any broader review.',
@@ -387,7 +520,7 @@ export function createPipeline(deps: PipelineDependencies) {
               repetitions: 'Reuse pertinent valid evidence from this delivery. Record every repeated command with its concrete reason and prior evidence in commandRepetitions; prior_evidence must refer to evidence supplied by the producer of this delivery.' },
             progressAssessment: 'Assess every canonical prior finding ID exactly once. For proven or partial, provide nonempty independent evidence from this version under the relevant criterion in this ReviewerResult; do not use artifact IDs or hashes alone. When evidence is absent or a technical impediment prevents assessment, use none or not_assessable, an empty evidence array, and a concrete justification. These outcomes do not reset recurrence. Never infer identity from text.',
             guidance: capture.configuration.guidance,
-            evidenceDirectory: `.factory-evidence/${claimed.id}/`,
+            evidenceDirectory,
             authority: 'Review this captured version independently in the single attempt checkout while the Implementer is stopped. Never change product content or publish. Conversation and earlier evidence are historical, never the current version. Save screenshots and reports only in the supplied evidenceDirectory, ignored locally by Git. Never overwrite earlier evidence, modify tracked files for evidence or use evidence as product code. Resolve each prior finding using findingKey equal to its supplied id. A rejection needs concrete criterion evidence or an actionable blocking finding.' }) };
         if (previousReview) await execution.continuePassage({ passageId: previousReview.passageId }, request);
         else await execution.startPassage(request, signalFor(delivery.attemptId));
@@ -413,6 +546,7 @@ export function createPipeline(deps: PipelineDependencies) {
       throw error;
     }
     if (!plan) return;
+    await updateIssueProgress(plan.review.attemptId, 'correction_started');
     await launchCorrection(plan);
   }
   async function launchCorrection(plan: NonNullable<ReturnType<Storage['beginCorrection']>>): Promise<void> {
@@ -433,7 +567,10 @@ export function createPipeline(deps: PipelineDependencies) {
       // Runtime owns and verifies the cwd and session; continuation cannot recruit a replacement.
       await execution.continuePassage({ passageId: plan.sourcePassageId }, { binding: p.binding, profile: profile(implementer),
         criterionIds: capture.criteria.map(c => c.id), previousFindingKeys: plan.findings.map(f => f.id), gitNexusRequired: false, roleResource: p.roleResource,
-        task: JSON.stringify({ formatVersion: 1, round: p.binding.round, maximumRound: 1 + capture.configuration.configuration.correction_limit,
+        task: JSON.stringify({ formatVersion: 1, resultSubmission: resultSubmissionInstructions.implementer, round: p.binding.round, maximumRound: 1 + capture.configuration.configuration.correction_limit,
+          dependencyManagement,
+          workspaceScope: workspaceScopeInstructions,
+          issueProgress: { path: '../progress.md', instruction: 'Treat this file as a navigation aid. Verify its claims against the current workspace and controller evidence, report conflicts, and never include or modify it in the delivery. If it is missing or unreadable, do not infer completion; continue from the captured issue and current state.' },
           review: plan.review, findings: plan.findings, criteria: capture.criteria,
           ...(plan.integration ? { integration: plan.integration,
             integrationInstructions: 'In this owned attempt checkout only, adapt the previously approved task delta to the supplied baseSha, already imported locally. Preserve changes present in that base, resolve conflicts within captured scope, and report additionalChangesJustification. Never touch the supplied operator localPath, never publish or change retained refs. The prior approval is historical. This round requires current criterion evidence and independent review before any delivery commit, push or PR. Do not invent check results or artifacts.' } : {}),
@@ -453,15 +590,19 @@ export function createPipeline(deps: PipelineDependencies) {
       content = await workspaces.captureDelivery(claim.input);
     } catch (error) {
       const code = error instanceof CaptureError ? error.code : 'CAPTURE_FAILED';
-      storage.finishCapture(claim, null, code); deps.logFailure(code); return;
+      storage.finishCapture(claim, null, code);
+      await updateIssueProgress(claim.input.attemptId, 'capture_failed');
+      deps.logFailure(code); return;
     }
     // Persist metadata only after the retained ref, parent/base and tree have been verified.
     try { storage.finishCapture(claim, content, null); }
     catch (error) {
       // The Git ref may already exist. Keep it and make the failure recoverable without overwriting it.
       storage.finishCapture(claim, null, 'CAPTURE_PERSISTENCE_FAILED');
+      await updateIssueProgress(claim.input.attemptId, 'capture_failed');
       throw error;
     }
+    await updateIssueProgress(claim.input.attemptId, 'delivery_captured');
     if (!closed && storage.getDelivery(claim.deliveryId).delivery.captureState === 'captured') {
       await review(claim.deliveryId);
     }
@@ -469,8 +610,12 @@ export function createPipeline(deps: PipelineDependencies) {
   const unsubscribe = storage.onResultAccepted(binding => {
     if (closed) return;
     enqueue(async () => { if (closed) return;
+      await updateIssueProgress(binding.attemptId, binding.role === 'reviewer' ? 'review_result' : 'implementer_result');
       if (binding.role === 'reviewer') {
-        if (publication && storage.getReview(binding.deliveryVersion)?.state === 'approved') await publication.publishApproved(binding.deliveryVersion);
+        if (publication && storage.getReview(binding.deliveryVersion)?.state === 'approved') {
+          await publication.publishApproved(binding.deliveryVersion);
+          await updateIssueProgress(binding.attemptId, 'review_result');
+        }
         else await correct(binding.deliveryVersion);
         return;
       }
@@ -481,26 +626,52 @@ export function createPipeline(deps: PipelineDependencies) {
       const producer = storage.getProducerResult(binding.deliveryVersion);
       if (producer?.result.checks.some(check => check.outcome === 'blocked')) {
         storage.recordImplementationBlocked(binding.attemptId);
+        await updateIssueProgress(binding.attemptId, 'validation_blocked');
         return;
       }
       const claim = storage.beginCapture(binding.deliveryVersion); if (claim) await capture(claim);
     });
   });
   async function dispatch(id: string): Promise<void> {
-    const status = storage.getAttempt(id); const capture = storage.getAttemptCapture(id);
+    const status = storage.getAttempt(id); const initialCapture = storage.getAttemptCapture(id);
     if (closed || status.suspension || status.result) return;
     if (publication && !await authorityReady(publication.observeAuthority(id))) { waitingForAuthority.set(id,() => dispatch(id)); return; }
+    await workspaces.migrateLegacyIssueHistory?.(id);
     storage.recordWorkspace(id, 'starting', false, null);
-    const workspace = await workspaces.prepareAttempt({ attemptId: id, issueNumber: capture.issue.number,
-      source: capture.configuration.configuration.source, baseSha: capture.baseSha });
-    if (!Value.Check(PreparedWorkspace, workspace) || workspace.attemptId !== id || workspace.baseSha !== capture.baseSha ||
-      workspace.branch !== `factory/${capture.issue.number}/${id}` || (workspace.state === 'prepared' && !workspace.resource.owned)) {
+    const workspaceBinding = storage.getAttemptWorkspaceBinding(id);
+    const workspace = await workspaces.prepareAttempt({ attemptId: id, workspace: workspaceBinding.workspace, issueNumber: initialCapture.issue.number,
+      source: initialCapture.configuration.configuration.source, baseSha: initialCapture.baseSha,
+      predecessorAttemptId: workspaceBinding.predecessor_attempt_id, inheritedBaseSha: workspaceBinding.inherited_base_sha });
+    if (!Value.Check(PreparedWorkspace, workspace) || workspace.attemptId !== id || workspace.baseSha !== initialCapture.baseSha ||
+      workspace.workspace.project_id !== workspaceBinding.workspace.project_id ||
+      workspace.workspace.repository_id !== workspaceBinding.workspace.repository_id ||
+      workspace.workspace.issue_id !== workspaceBinding.workspace.issue_id ||
+      workspace.branch !== `factory/${initialCapture.issue.number}/${id}` ||
+      (workspace.snapshot !== null && !validWorkspaceSnapshot(workspace.snapshot, workspaceBinding, initialCapture.baseSha)) ||
+      (workspace.state === 'prepared' && (!workspace.resource.owned || workspace.snapshot === null))) {
       throw new ExecutionError('RESOURCE_INVALID');
     }
+    if (workspaceBinding.initial_state.kind === 'pending_inherited_attempt' && workspace.snapshot) {
+      storage.recordWorkspaceSnapshot(id, workspace.snapshot);
+    }
     storage.recordWorkspace(id, workspace.state === 'prepared' ? 'ready' : 'failed', workspace.resource.owned, workspace.diagnostic?.code ?? null);
+    await updateIssueProgress(id, workspace.state === 'prepared' ? 'workspace_ready' : 'workspace_failed');
     if (workspace.state !== 'prepared' || closed || storage.getAttempt(id).result) return;
-    // Revalidate authority again after clone; never silently adopt a new base or new summary.
+    const capture = storage.getAttemptCapture(id);
+    // Revalidate authority again after workspace reuse; never silently adopt a new base or new summary.
     await preparations.revalidateSummary({ preparationId: capture.preparationId, preparationRevision: capture.preparationRevision, authorizedSummaryHash: capture.summaryHash });
+    const predecessor = capture.workspace.predecessor_attempt_id ? storage.getAttempt(capture.workspace.predecessor_attempt_id) : null;
+    const previousFindings = predecessor ? storage.getOpenFindings(predecessor.id, predecessor.round) : [];
+    const previousReview = predecessor?.deliveryId ? storage.getReview(predecessor.deliveryId) : null;
+    const previousContext = predecessor ? {
+      attemptId: predecessor.id, phase: predecessor.phase, result: predecessor.result, suspension: predecessor.suspension, diagnostic: predecessor.diagnostic,
+      review: previousReview ? { state: previousReview.state, independenceState: previousReview.independenceState,
+        findings: previousReview.findings.slice(0, 100).map(({ id, category, problem, evidence, expectedResult, blocking, priority }) =>
+          ({ id, category, problem, evidence, expectedResult, blocking, priority })) } : null,
+      unresolvedFindings: previousFindings.slice(0, 100).map(({ id, category, problem, evidence, expectedResult, blocking, priority }) =>
+        ({ id, category, problem, evidence, expectedResult, blocking, priority })),
+      findingsTruncated: previousFindings.length > 100,
+    } : null;
     const launch = async (): Promise<void> => {
       if (publication && !await authorityReady(publication.projectStage(id, 'inProgress'))) { waitingForAuthority.set(id,launch); return; }
       const current = storage.getAttempt(id);
@@ -511,20 +682,27 @@ export function createPipeline(deps: PipelineDependencies) {
       const request: PassageRequest = { binding: passage.binding, profile: profile(implementer), cwd: workspace.resource.path,
         criterionIds: capture.criteria.map(c => c.id), previousFindingKeys: [], gitNexusRequired: false, roleResource: passage.roleResource,
         task: JSON.stringify({ formatVersion: 1, issue: { id: capture.issue.id, title: capture.issue.title, url: capture.issue.url },
-          objective: capture.issue.body, criteria: capture.criteria, baseSha: capture.baseSha,
+          objective: capture.issue.body, criteria: capture.criteria, baseSha: capture.baseSha, resultSubmission: resultSubmissionInstructions.implementer,
+          workspace: capture.workspace, workspaceScope: workspaceScopeInstructions, predecessorProgress: previousContext,
+          predecessorFindings: 'Findings from the predecessor are historical context. Verify their consequences in this workspace, but do not include their IDs in findingResponses or claim to resolve them in this attempt. This first round has no current-attempt finding responses; use findingResponses: [].',
+          issueProgress: { path: '../progress.md', instruction: 'Treat this file as a navigation aid. Verify its claims against the current workspace and controller evidence, report conflicts, and never include or modify it in the delivery. If it is missing or unreadable, do not infer completion; continue from the captured issue and current state.' },
           guidance: capture.configuration.guidance,
+          dependencyManagement,
           technicalValidation: 'Run the project build, typecheck, lint and relevant tests that are available for this change. For each pertinent validation, record its command in id, observed result in outcome, and concrete evidence plus any limitation in evidence. If it was not run, record the concrete reason and limitation. These are results from this passage, not configured commands; do not invent output or claim a check ran when it did not.',
           deliveryMode: capture.configuration.configuration.default_delivery_mode,
           prerequisites: 'If a missing prerequisite prevents implementation, record a blocked check in ImplementerResult.checks with the command or validation in id, blocked result in outcome, and concrete cause and limitation in evidence. This suspends the attempt instead of starting review. Do not claim that a text answer ended the attempt; only the controller can end it.',
-          authority: 'Implement in the owned checkout. Stop all owned product writers before execution_complete. Publication is performed only by the controller.' }) };
+          authority: 'Continue from the inherited issue workspace. Preserve existing changes, added files, deletions and uncommitted work. Do not reset, clean or rebase it. Use the recorded comparison snapshot as this attempt’s starting point; address unresolved previous findings and report conflicts or external base changes explicitly. Stop all owned product writers before execution_complete. Publication is performed only by the controller.' }) };
       await execution.startPassage(request, signalFor(id));
     };
     await launch();
   }
   function schedule(id: string): void {
-    const task = new Promise<void>(resolve => setImmediate(resolve)).then(() => dispatch(id)).catch((error: unknown) => {
-      const code = error instanceof ExecutionError || error instanceof OperationError ? error.code : 'DISPATCH_FAILED';
-      try { storage.recordDispatchFailure(id, code); } catch { deps.logFailure('DISPATCH_PERSISTENCE_FAILED'); }
+    const task = new Promise<void>(resolve => setImmediate(resolve)).then(() => dispatch(id)).catch(async (error: unknown) => {
+      const code = error instanceof ExecutionError || error instanceof OperationError || error instanceof CaptureError || error instanceof ProjectStorageError ? error.code : 'DISPATCH_FAILED';
+      try {
+        storage.recordDispatchFailure(id, code);
+        await updateIssueProgress(id, 'dispatch_failed');
+      } catch { deps.logFailure('DISPATCH_PERSISTENCE_FAILED'); }
       deps.logFailure(code);
     }).finally(() => { pending.delete(task); });
     pending.add(task);
@@ -550,10 +728,11 @@ export function createPipeline(deps: PipelineDependencies) {
         ? await deps.preparations.prepareDecisionSuccessor(attemptId, body.role, body.profileId, body.profileRevision)
         : undefined;
       const accepted = storage.acceptAttemptDecision(command, successor);
+      if (accepted.created) await updateIssueProgress(attemptId, 'human_decision');
       if (accepted.created && body.action === 'guidance') enqueue(() => correct(body.deliveryId));
       if (accepted.created && body.action === 'end') {
         revoke(attemptId);
-        enqueue(async () => { await execution.cancelAttempt(attemptId, context.operationId); });
+        enqueue(async () => { await cancelAttemptAndUpdateProgress(attemptId, context.operationId); });
       }
       return accepted.operation;
     },
@@ -580,9 +759,10 @@ export function createPipeline(deps: PipelineDependencies) {
       if (closed) throw new OperationError(503, 'PIPELINE_CLOSED', 'The controller is shutting down.');
       storage.expireLimits();
       const operation = storage.recordAnswer(command);
+      await updateIssueProgress(command.attemptId, 'question_answered');
       if (command.body.action === 'end_attempt') {
         revoke(command.attemptId);
-        enqueue(async () => { await execution.cancelAttempt(command.attemptId, command.operationId); });
+        enqueue(async () => { await cancelAttemptAndUpdateProgress(command.attemptId, command.operationId); });
         return operation;
       }
       const question = storage.getQuestion(command.attemptId, command.questionId).view;

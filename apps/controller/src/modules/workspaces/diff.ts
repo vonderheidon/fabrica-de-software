@@ -1,10 +1,10 @@
 import { realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { Delivery as DeliverySchema, DeliveryDiffQuery as QuerySchema, type Delivery, type DeliveryDiff, type DeliveryDiffQuery, type DiffEntry } from '#contracts';
 import type { GitReader } from './git.js';
 import { CaptureError, gitPath, managedRoot, metadataBytes, noBorrowedObjects, nul, plainDirectory, sha256, verifyRetained } from './capture.js';
-import { requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
+import { retainedRepositoryOwner, retainedRepositoryPath, requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 
 interface Change { path: string; oldPath: string | null; status: string; oldMode: string; newMode: string; oldOid: string; newOid: string }
 export function parseChanges(raw: string): Change[] {
@@ -27,9 +27,10 @@ export function createDeliveryDiff(dataDirectory?: string, git?: GitReader, cano
     if (previous && (!Value.Check(DeliverySchema, previous) || previous.id === delivery.id || previous.attemptId !== delivery.attemptId ||
         previous.round !== delivery.round - 1 || previous.captureState !== 'captured')) throw new CaptureError('DIFF_INPUT_INVALID');
     try {
-      const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId), canonicalize); const root = resolve(data, 'git'); const repository = resolve(root, `${delivery.attemptId}.git`);
-      await plainDirectory(root, canonicalize); await plainDirectory(repository, canonicalize); await noBorrowedObjects(repository);
-      if ((await metadataBytes(resolve(repository, 'factory-owner'), 36)).toString('utf8') !== delivery.attemptId) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
+      const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId), canonicalize);
+      const repository = retainedRepositoryPath(data, delivery.attemptId, delivery.repositoryRelative);
+      await plainDirectory(dirname(repository), canonicalize); await plainDirectory(repository, canonicalize); await noBorrowedObjects(repository);
+      if ((await metadataBytes(resolve(repository, 'factory-owner'), 64)).toString('utf8') !== retainedRepositoryOwner(delivery.attemptId, delivery.repositoryRelative)) throw new CaptureError('RETAINED_REPOSITORY_INVALID');
       const run = async (args: string[]) => {
         const reply = await git(repository, ['--literal-pathspecs', `--git-dir=${repository}`, '-c', 'core.bare=true', '-c', 'diff.renames=false', ...args]);
         if (reply.exitCode !== 0) throw new CaptureError('DELIVERY_GIT_UNAVAILABLE'); return reply.stdout;

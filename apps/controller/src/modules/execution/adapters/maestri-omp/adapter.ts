@@ -300,7 +300,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       });
       entry.channel = channel;
       entry.bootstrap = await (dependencies.bootstrap ?? writeBootstrap)(options.dataDirectory, request, host, role, channel, validation.ompVersion,
-        options.projectStorageRootForAttempt, sessionCandidate.sessionDirectoryRelative);
+        options.projectStorageRootForAttempt, sessionCandidate.sessionDirectoryRelative, options.projectStorageAreaForAttempt, terminalAvailabilityConfirmed);
       if (entry.cancelled || entry.revoked || closed) return store.getPassage(initial.handle);
       if (terminalAvailabilityConfirmed) {
         const stillStopped = await host.confirmStoppedTerminal!({ workspaceId: sessionCandidate.workspaceId!, terminalId: sessionCandidate.terminalId!,

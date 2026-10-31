@@ -24,9 +24,9 @@ const physicalRecovery = () => ({ controller: 'distinct_processes_after_SIGKILL'
     stops: [201, 202].map((pid, index) => ({ pid, passageId: index === 0 ? 'implementer' : 'reviewer', exitCode: null, signal: 'SIGKILL', closeObservedAtMs: 150, receiptRecordedAtMs: 151 })) },
   recovery: { approvedRefTreeBasePreserved: true, eligibleRemoval: true, diffAfterRemovalAndRestart: true },
   persistence: {
-    cleanInitialization: { openedByNormalStoragePath: true, directoryCreatedExclusive: true, schemaVersion: 54, integrityCheck: 'ok',
+    cleanInitialization: { openedByNormalStoragePath: true, directoryCreatedExclusive: true, schemaVersion: 55, integrityCheck: 'ok',
       foreignKeyViolations: [], accountId: null, counts: { accounts: 0, profiles: 0, projects: 0, preparations: 0, attempts: 0 } },
-    integrityChecks: [101, 102, 103].map(() => ({ schemaVersion: 54, integrityCheck: 'ok', foreignKeyViolations: 0, retiredTables: [] })),
+    integrityChecks: [101, 102, 103].map(() => ({ schemaVersion: 55, integrityCheck: 'ok', foreignKeyViolations: 0, retiredTables: [] })),
     referenceSnapshots: [101, 102, 103].map(() => ({ sha256: 'a'.repeat(64), roundNumbers: [1, 2], deliveryIds: ['delivery-1', 'delivery-2'],
       passageResultReceiptIds: ['result-1', 'result-2', 'result-3', 'result-4'], operationReceiptIds: ['operation-1'],
       counts: { projectRevisions: 2, preparations: 1, attempts: 1, rounds: 2, deliveries: 2, passageResults: 4, reviews: 2, findings: 1, findingResolutions: 1 } })),

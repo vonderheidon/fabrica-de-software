@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { OperationId } from '#contracts';
+import { OperationId, passageBootstrapDirectoryReference } from '#contracts';
 import { digest, readProject } from './configuration-reads.js';
 import { projectDeletionInventory } from './project-deletion-inventory.js';
 import { readSettings } from './settings.js';
@@ -61,12 +61,34 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   const passages = db.prepare<[string], { id: string; attempt_id: string }>(
     'SELECT id,attempt_id FROM passages WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
   ).all(projectId);
+  const bootstrapRoot = resolve(dataDirectory, 'runtime', 'bootstrap');
+  for (const passage of passages) {
+    if (!Value.Check(OperationId, passage.id) || !Value.Check(OperationId, passage.attempt_id)) {
+      blockers.push({ reason: 'Uma passagem não tem identidade segura para localizar seu bootstrap.', recovery: 'Reconcilie o registro da passagem antes de tentar excluir o projeto.' });
+      continue;
+    }
+    targets.push({ key: `bootstrap:${passage.id}`, kind: 'exclusive_workspace',
+      path: resolve(dataDirectory, ...passageBootstrapDirectoryReference(passage.id).split('/')), ownerKind: 'attempt', ownerId: passage.attempt_id });
+  }
+  const otherPassages = db.prepare<[string], { id: string }>(`SELECT p.id FROM passages p JOIN attempts a ON a.id=p.attempt_id
+    WHERE a.project_id<>? ORDER BY p.id`).all(projectId);
+  const otherBootstraps: string[] = [];
+  for (const passage of otherPassages) {
+    if (!Value.Check(OperationId, passage.id)) {
+      blockers.push({ reason: 'Uma passagem de outro projeto não pode ser protegida com segurança.', recovery: 'Reconcilie o inventário de passagens antes de tentar excluir este projeto.' });
+      continue;
+    }
+    otherBootstraps.push(resolve(dataDirectory, ...passageBootstrapDirectoryReference(passage.id).split('/')));
+  }
+  const issueWorkspacePrefix = `projects/${projectId}/v1/managed/issues/`;
+  const isManagedIssueWorkspace = (reference: string) => reference.startsWith(issueWorkspacePrefix) && reference.endsWith('/workspace') &&
+    /^[1-9][0-9]*$/.test(reference.slice(issueWorkspacePrefix.length, -'/workspace'.length));
   for (const passage of passages) {
     const workspace = db.prepare<[string], { reference: string }>("SELECT reference FROM resources WHERE attempt_id=? AND kind='implementation'").get(passage.attempt_id);
     if (!workspace) {
       blockers.push({ reason: 'O recurso de implementação da passagem está ausente.', recovery: 'Confira o inventário de recursos da tentativa antes de excluir o projeto.' });
-    } else if (workspace.reference === `projects/${projectId}/v1/managed/work/${passage.attempt_id}/implementation`) {
-      // The project root is an authorized target and already contains this bootstrap.
+    } else if (isManagedIssueWorkspace(workspace.reference)) {
+      // Bootstrap directories are separate targets keyed by the passage identity above.
     } else blockers.push({ reason: 'Uma passagem não tem identidade válida.', recovery: 'Corrija o inventário antes de tentar excluir o projeto.' });
   }
   const resources = db.prepare<[string], { id: string; owned: number; reference: string; attempt_id: string; kind: string; launch_state: string }>(
@@ -84,10 +106,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   }
   for (const resource of resources) {
     if (!resource.owned && resource.launch_state === 'planned') continue;
-    const implementationReferences = [
-      `projects/${projectId}/v1/managed/work/${resource.attempt_id}/implementation`,
-    ];
-    if (!resource.owned || (resource.kind === 'implementation' && !implementationReferences.includes(resource.reference))) {
+    if (!resource.owned || (resource.kind === 'implementation' && !isManagedIssueWorkspace(resource.reference))) {
       blockers.push({ reason: 'O pertencimento de um ambiente não pôde ser comprovado.',
         recovery: 'Confira os recursos registrados antes de tentar excluir este projeto.' });
     }
@@ -114,16 +133,17 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
   const protectedPaths = [...otherOrigins.map(o => o.path), ...selectedTargets.map(t => t.local_path), ...otherDeliveryTargets.map(t => t.local_path),
     ...creations.filter(c => c.project_id !== projectId || project.source.kind !== 'local' || c.destination !== project.source.location).map(c => c.destination),
+    ...otherBootstraps,
     ...validOtherStorageLocations.map(location => resolve(installationRoot, ...location.root_relative.split('/'))),
     resolve(dataDirectory, 'factory.sqlite'), resolve(dataDirectory, 'controller-lock.sqlite')];
   const settings = readSettings(db);
   const schema = db.prepare<[], { version: number; checksum: string }>('SELECT version,checksum FROM schema_migrations ORDER BY version').all();
   // Data and install containers cannot themselves be removed.
   const containers = [resolve(dataDirectory), resolve(dataDirectory, '..'), resolve(dataDirectory, '../..'),
-    resolve(dataDirectory, 'projects'),
+    resolve(dataDirectory, 'projects'), bootstrapRoot,
     ...(settings.projects_root ? [settings.projects_root] : [])];
-  const inventoryVersion = digest({ version: 1, schema, project, keys: inventory.keys, storageLocations, otherStorageLocations,
-    resources, passages, attempts, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations,
+  const inventoryVersion = digest({ version: 2, schema, project, keys: inventory.keys, storageLocations, otherStorageLocations,
+    resources, passages, otherPassages, attempts, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations,
     installation: settings.installation_id, account: settings.account_id, containers });
   const originalProtectedPaths = [resolve(dataDirectory), resolve(dataDirectory, '../..')];
   return { projectId, projectName: project.name, projectRevision: project.revision, sourceKind: project.source.kind,

@@ -217,7 +217,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains producer/reviewer
       } finally { contentIO.restore(); }
       const files = await inventory(f.directory);
       expect(files.filter(file => file.path.startsWith('git/')).every(file => file.path === `git/${f.attemptId}.git/factory-owner`)).toBe(true);
-      for (const file of files.filter(p => !p.path.startsWith('work/') && !p.path.startsWith('git/'))) {
+      for (const file of files.filter(p => !p.path.startsWith('work/') && !p.path.startsWith('issues/') && !p.path.startsWith('git/'))) {
         assertNoContent(await readFile(join(f.directory, file.path)), markers);
          expect(['factory.sqlite', 'factory.sqlite-wal', 'factory.sqlite-shm'].includes(file.path)).toBe(true);
       }
@@ -256,7 +256,7 @@ it('measures final HTTP projections at 0/16/64 MiB and retains producer/reviewer
       if (args.includes('ls-files')) return { exitCode: 0, stdout: [...new Set([...captured.base.keys(), ...captured.untracked])].map(p => p + '\0').join('') };
       return captured.run(cwd, args, options);
     };
-    const recovery = createEnvironmentRecovery(f.directory, run, undefined, async p => p, async () => f.directory);
+    const recovery = createEnvironmentRecovery(f.directory, run, undefined, async p => p, async () => f.directory, async () => captured.implementation);
     const workspaces = { ...f.workspaces, ...recovery };
     recoveryPipeline = createPipeline({ ...f.dependencies, storage: restarted, workspaces });
     const resource = restarted.getResources(f.attemptId).entries.find(r => r.kind === 'implementation')!;

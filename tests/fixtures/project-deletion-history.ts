@@ -7,6 +7,7 @@ import { digest, readConfiguration } from '../../apps/controller/src/modules/sto
 import { readSettings } from '../../apps/controller/src/modules/storage/settings.js';
 import { serializeCapture, serializePreparationChoices } from '../../apps/controller/src/modules/storage/historical-configuration.js';
 import { loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
+import { managedWorkspaceReference } from '#contracts';
 
 interface ProjectHistoryRecord {
   projectId: string;
@@ -140,7 +141,9 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       criteria: [{ id: 'ac-1', occurrence_index: 1, explicit: true, text: 'Criterion' }],
       roleResources: [...loadRoleResources().values()].map(value => value.reference),
       tools: ['node', 'git', 'gh', 'maestri', 'omp'].map(tool => ({ tool: tool as 'node' | 'git' | 'gh' | 'maestri' | 'omp',
-        state: 'unavailable', version: null, cause: 'Fixture', affectedRequirements: [], observedAtMs: 0 })) });
+         state: 'unavailable', version: null, cause: 'Fixture', affectedRequirements: [], observedAtMs: 0 })),
+       workspace: { identity: { project_id: projectId, repository_id: 'shared-repository', issue_id: issueId },
+         predecessor_attempt_id: null, initial_state: { kind: 'base_checkout', content_identity: sha }, inherited_base_sha: null, comparison_base_sha: sha } });
     insert('attempts', { id: attemptId, operation_id: attemptOperation, project_id: projectId, project_revision_id: projectRevisionId,
       preparation_id: preparationId, preparation_revision: 1, account_id: accountId, repository_id: 'shared-repository', issue_id: issueId,
       ...(hasSearchHeaders ? { issue_number: 17, issue_title: 'Historical issue' } : {}),
@@ -228,7 +231,7 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
       base_sha: sha, repository_relative: `git/${attemptId}.git`, capture_state: 'failed' });
     insert('capture_warnings', { delivery_id: warningDelivery, attempt_id: attemptId, passage_id: warningPassage, path: 'fixture', reason: 'KNOWN_SECRET_EXCLUDED' });
     const resourceId = uuid(); const questionId = uuid();
-    insert('resources', { id: resourceId, attempt_id: attemptId, passage_id: passageId, kind: 'implementation', reference: managed ? `projects/${projectId}/v1/managed/work/${attemptId}/implementation` : `work/${attemptId}/implementation`,
+    insert('resources', { id: resourceId, attempt_id: attemptId, passage_id: passageId, kind: 'implementation', reference: managed ? managedWorkspaceReference(projectId, 17) : `work/${attemptId}/implementation`,
       owned: 1, launch_state: 'ready', stop_state: 'confirmed', removed: 1, created_at_ms: 0 });
     const questionOperation = operation('question', questionId, 'question.answer');
     insert('execution_questions', { id: questionId, passage_id: passageId, attempt_id: attemptId, question_hash: hash, question_json: '{}',
@@ -292,6 +295,9 @@ export function projectDeletionHistory(db: Database.Database, beforeAuthorizatio
   }
   const selected = history(undefined,managedSelected); const other = history();
   beforeAuthorization();
+  if (db.prepare("SELECT 1 FROM pragma_table_info('attempts') WHERE name='issue_number'").get()) {
+    db.prepare('UPDATE attempts SET issue_number=17 WHERE issue_number IS NULL').run();
+  }
   const deletionOperation = uuid();
   if (includePendingDeletion) {
     operation('project', selected.projectId, 'project.delete', deletionOperation);

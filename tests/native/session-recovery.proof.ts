@@ -53,8 +53,9 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
   const git = createGitReader({ kind: 'windows_keyring', executable: gitExecutable });
   let projectStorage = createProjectStorageInspector(f.directory, undefined, f.storage);
   const resolveAttemptRoot = (id: string, allocate?: boolean) => projectStorage.resolveAttemptRoot(id, allocate);
-  const shared = createAttemptMaterializer(f.directory, git, undefined, resolveAttemptRoot);
-  const prepare = createWorkspacePreparer(f.directory, git, undefined, resolveAttemptRoot);
+  const resolveAttemptWorkspace = (id: string) => projectStorage.resolveAttemptWorkspace(id);
+  const shared = createAttemptMaterializer(f.directory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace);
+  const prepare = createWorkspacePreparer(f.directory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace);
   const rawHost = { maestriExecutable: process.env.FACTORY_MAESTRI_EXE!, ompExecutable: process.env.FACTORY_OMP_EXE!,
     powershellExecutable: join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), inheritedEnvironment: process.env };
   let host = withWindowsTerminalJobs(rawHost, f.directory);
@@ -62,6 +63,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
   const channels: { callbacks: ChannelCallbacks; channel: PassageChannel }[] = [];
   const createAdapter = () => createMaestriOmp({ dataDirectory: f.directory, persistence: f.persistence, host,
     projectStorageRootForAttempt: resolveAttemptRoot,
+    projectStorageAreaForAttempt: projectStorage.resolveAttemptArea,
     validateReviewerResult: async binding => {
       const review = f.storage.getReview(binding.deliveryVersion)!;
       await shared(f.storage.getDelivery(binding.deliveryVersion).delivery, review.id);
@@ -106,8 +108,8 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     } };
   const workspaces = { ...f.workspaces,
     prepareAttempt: (input: Parameters<typeof prepare>[0]) => prepare({ ...input, source: { ...input.source, kind: 'local', location: seed } }),
-    captureDelivery: createCapturer(f.directory, git, undefined, resolveAttemptRoot), materializeReview: shared, getDeliveryDiff: createDeliveryDiff(f.directory, git, undefined, resolveAttemptRoot),
-    verifyRetainedDelivery: createRetainedVerifier(f.directory, git, undefined, resolveAttemptRoot), folderCapability: createEnvironmentRecovery(f.directory, git, undefined, undefined, resolveAttemptRoot).folderCapability };
+    captureDelivery: createCapturer(f.directory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace), materializeReview: shared, getDeliveryDiff: createDeliveryDiff(f.directory, git, undefined, resolveAttemptRoot),
+    verifyRetainedDelivery: createRetainedVerifier(f.directory, git, undefined, resolveAttemptRoot), folderCapability: createEnvironmentRecovery(f.directory, git, undefined, undefined, resolveAttemptRoot, resolveAttemptWorkspace).folderCapability };
   const { github: publicationGithub } = withPublicationIssueProjections(github);
   const createController = () => createPipeline({ ...f.dependencies, github, workspaces, publication: { github: publicationGithub, workspaces } });
   let pipeline = createController();
@@ -153,7 +155,7 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
       for (const handle of firstHandles) await execution.preparePassageHandoff(handle);
       setProfiles(true);
       const interrupted = await startAttempt();
-      const marker = join(await resolveAttemptRoot(interrupted, true), 'work', interrupted, 'implementation', '.factory-evidence', 'active.json');
+      const marker = join(await resolveAttemptWorkspace(interrupted), '.factory-evidence', 'active.json');
       await until('restart-active-writers', () => existsSync(marker));
       const pids = JSON.parse(readFileSync(marker, 'utf8')) as number[];
       const oldPassage = { passageId: f.storage.getAttempt(interrupted).passageId };
@@ -223,10 +225,9 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     }
     setProfiles(true);
     const cancellation = await startAttempt();
-    const managedRoot = await resolveAttemptRoot(cancellation, true);
-    const marker = (id: string) => join(managedRoot, 'work', id, 'implementation', '.factory-evidence', 'active.json');
-    await until('cancel-native-command-active', () => existsSync(marker(cancellation)));
-    const cancelPids = JSON.parse(readFileSync(marker(cancellation), 'utf8')) as number[];
+    const marker = async (id: string) => join(await resolveAttemptWorkspace(id), '.factory-evidence', 'active.json');
+    await until('cancel-native-command-active', async () => existsSync(await marker(cancellation)));
+    const cancelPids = JSON.parse(readFileSync(await marker(cancellation), 'utf8')) as number[];
     expect(cancelPids.every(alive)).toBe(true);
     const active = f.storage.getAttempt(cancellation);
     const session = f.persistence.getAttemptSession({ passageId: active.passageId });
@@ -236,8 +237,8 @@ it('proves fresh sessions, terminal reuse, native cancellation and induced track
     await until('cancel-native-command-stopped', async () => await host.confirmStoppedTerminal!(reference) && cancelPids.every(pid => !alive(pid)));
     expect(f.storage.getAttempt(cancellation).result).toBe('cancelled');
     const lost = await startAttempt();
-    await until('loss-native-command-active', () => existsSync(marker(lost)));
-    const lostPids = JSON.parse(readFileSync(marker(lost), 'utf8')) as number[];
+    await until('loss-native-command-active', async () => existsSync(await marker(lost)));
+    const lostPids = JSON.parse(readFileSync(await marker(lost), 'utf8')) as number[];
     const lostStatus = f.storage.getAttempt(lost);
     const lostSession = f.persistence.getAttemptSession({ passageId: lostStatus.passageId });
     const lostReference = { workspaceId: lostSession.workspaceId!, terminalId: lostSession.terminalId!, terminalName: lostSession.terminalName, generation: lostSession.generation };

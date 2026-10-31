@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import { connect } from 'node:net';
 import { ExecutionError } from '../../errors.js';
 import { connectWire, executionLimits, type Wire } from './wire.js';
@@ -33,7 +34,7 @@ interface ExtensionApi {
   sendUserMessage(message: string, options?: { deliverAs: 'followUp' }): void;
 }
 interface Launch {
-  protocolVersion: 1; host: '127.0.0.1'; port: number; token: string; cwd: string; ompVersion: string;
+  protocolVersion: 1; host: '127.0.0.1'; port: number; token: string; cwd: string; ompVersion: string; npmCacheDirectory: string;
   role: { reference: { sha256: string }; resultSchema: Record<string, unknown>; questionSchema: Record<string, unknown> };
   task: string; guidance: string; gitNexusRequired: boolean;
 }
@@ -65,6 +66,7 @@ function loadLaunch(): Launch {
     const raw = object(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
     if (raw.protocolVersion !== 1 || raw.host !== '127.0.0.1' || !Number.isInteger(raw.port) || Number(raw.port) < 1 || Number(raw.port) > 65535 ||
       typeof raw.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(raw.token) || typeof raw.cwd !== 'string' ||
+      typeof raw.npmCacheDirectory !== 'string' || !isAbsolute(raw.npmCacheDirectory) || /[\x00-\x1f\x7f]/.test(raw.npmCacheDirectory) ||
       typeof raw.task !== 'string' || typeof raw.guidance !== 'string' || typeof raw.ompVersion !== 'string' ||
       raw.ompVersion.length < 1 || raw.ompVersion.length > 128) throw new ExecutionError('RESOURCE_INVALID');
     const role = object(raw.role); const reference = object(role.reference);

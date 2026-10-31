@@ -84,10 +84,21 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
     getRateLimitSnapshot: vi.fn(() => null),
   };
   const workspaces = { inspectOrigin: vi.fn(async () => structuredClone(observation)),
-    prepareAttempt: vi.fn(async (input: Parameters<import('../../apps/controller/src/modules/workspaces/index.js').Workspaces['prepareAttempt']>[0]): Promise<PreparedWorkspace> => ({
-      state: 'prepared' as const, attemptId: input.attemptId, baseSha: input.baseSha, branch: `factory/${input.issueNumber}/${input.attemptId}`,
-      resource: { kind: 'implementation' as const, path: join(directory, 'work', input.attemptId, 'implementation'), owned: true }, diagnostic: null,
-    })) };
+    prepareAttempt: vi.fn(async (input: Parameters<import('../../apps/controller/src/modules/workspaces/index.js').Workspaces['prepareAttempt']>[0]): Promise<PreparedWorkspace> => {
+      const comparisonBase = input.inheritedBaseSha !== null ? 'b'.repeat(40) : input.baseSha;
+      return { state: 'prepared' as const, attemptId: input.attemptId, workspace: input.workspace, baseSha: input.baseSha, branch: `factory/${input.issueNumber}/${input.attemptId}`,
+        resource: { kind: 'implementation' as const, path: join(directory, 'projects', input.workspace.project_id, 'v1', 'managed', 'issues', String(input.issueNumber), 'workspace'), owned: true },
+        snapshot: { identity: input.workspace, predecessor_attempt_id: input.predecessorAttemptId,
+          initial_state: input.predecessorAttemptId && input.inheritedBaseSha !== null ? { kind: 'inherited_attempt' as const, source_attempt_id: input.predecessorAttemptId, content_identity: comparisonBase }
+            : { kind: 'base_checkout' as const, content_identity: comparisonBase }, inherited_base_sha: input.inheritedBaseSha, comparison_base_sha: comparisonBase },
+        diagnostic: null };
+    }),
+    async resolveAttemptEvidenceDirectory(attemptId: string, deliveryId: string) {
+      const binding = storage.getAttemptWorkspaceBinding(attemptId);
+      return join(directory, 'projects', binding.workspace.project_id, 'v1', 'managed', 'issues', String(binding.issue_number),
+        'attempts', attemptId, 'evidence', deliveryId);
+    },
+  };
   const preparations = createPreparations({ storage, github, workspaces });
   const persistence = storage.executionPersistence();
   const roles = [...loadRoleResources().values()].map(r => r.reference);
@@ -128,8 +139,11 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const observeTools = vi.fn(async () => structuredClone(tools)); const logFailure = vi.fn();
   const dependencies: PipelineDependencies = { storage, preparations, execution, workspaces, observeTools, hostName: 'test-host', logFailure };
   const pipeline = createPipeline(dependencies);
-  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr', targetKind: 'clone' | 'existing_clone' = 'existing_clone', includeIcrTarget = false, baseBranch?: string) {
-    const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '', overrides: baseBranch ? { base_branch: baseBranch } : {}, ...(deliveryMode === 'icr' && !includeIcrTarget ? {} : { publication_target: { format_version: 1, repository_id: repository.id, selection: targetKind === 'clone' ? { kind: 'clone', destination: join(directory,'target') } : { kind: 'existing_clone', path: join(directory,'target') } } }) }, { operationId: randomUUID(), expectedRevision: undefined });
+  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr', targetKind: 'clone' | 'existing_clone' = 'existing_clone', includeIcrTarget = false,
+    baseBranch?: string, previousAttemptId?: string) {
+    const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '', overrides: baseBranch ? { base_branch: baseBranch } : {},
+      ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}),
+      ...(deliveryMode === 'icr' && !includeIcrTarget ? {} : { publication_target: { format_version: 1, repository_id: repository.id, selection: targetKind === 'clone' ? { kind: 'clone', destination: join(directory,'target') } : { kind: 'existing_clone', path: join(directory,'target') } } }) }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;
     const body: StartAttempt = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true };
     return { body, context: { operationId: randomUUID(), expectedRevision: saved.etag }, saved };
@@ -140,7 +154,7 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
 export type AttemptFixture = Awaited<ReturnType<typeof attemptFixture>>;
 
 /** Controlled physical-stop observation; keep SQL occupancy and resource receipts in sync. */
-export function confirmTerminalStops(fixture: AttemptFixture, attemptId: string, persistence: AttemptFixture['persistence'] = fixture.persistence): void {
+export function confirmTerminalStops(fixture: Pick<AttemptFixture, 'db' | 'persistence'>, attemptId: string, persistence: AttemptFixture['persistence'] = fixture.persistence): void {
   const handles = fixture.db.prepare<[string], { passageId: string}>(`SELECT passage_id AS passageId FROM resources
     WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed' ORDER BY created_at_ms,id`).all(attemptId);
   for (const handle of handles) persistence.recordStop(handle, { passageId: handle.passageId, state: 'confirmed' });

@@ -1,5 +1,5 @@
 import { Type, type Static } from '@sinclair/typebox';
-import { GitHubBranch, GitHubRepository, GitHubDiagnostic } from './github.js';
+import { GitHubBranch, GitHubRepository, GitHubDiagnostic, GitHubId } from './github.js';
 import { Capability, OperationId } from './base.js';
 
 const closed = { additionalProperties: false } as const;
@@ -80,3 +80,64 @@ export const ProjectStorageRootObservation = Type.Object({
   object_identity: ProjectStorageObjectIdentity, verified_at_ms: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
 }, closed);
 export type ProjectStorageRootObservation = Static<typeof ProjectStorageRootObservation>;
+
+const objectId = Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' });
+export const WorkspaceIdentity = Type.Object({
+  project_id: OperationId, repository_id: GitHubId, issue_id: GitHubId,
+}, closed);
+export type WorkspaceIdentity = Static<typeof WorkspaceIdentity>;
+
+export function managedWorkspaceReference(projectId: string, issueNumber: number): string {
+  return `projects/${projectId}/v1/managed/issues/${issueNumber}/workspace`;
+}
+
+export function issueHistoryRepositoryReference(issueNumber: number): string {
+  return `issues/${issueNumber}/history.git`;
+}
+
+export type IssueAttemptArea = 'publication' | 'sessions' | 'evidence';
+
+export function issueAttemptAreaReference(issueNumber: number, attemptId: string, area: IssueAttemptArea): string {
+  return `issues/${issueNumber}/attempts/${attemptId}/${area}`;
+}
+
+export function issueAttemptEvidenceDirectoryReference(issueNumber: number, attemptId: string, deliveryId: string): string {
+  return `${issueAttemptAreaReference(issueNumber, attemptId, 'evidence')}/${deliveryId}`;
+}
+
+export function attemptSessionDirectoryReference(issueNumber: number, attemptId: string, role: 'implementer' | 'reviewer'): string {
+  return `${issueAttemptAreaReference(issueNumber, attemptId, 'sessions')}/${role}`;
+}
+
+export function passageBootstrapDirectoryReference(passageId: string): string {
+  return `runtime/bootstrap/${passageId}`;
+}
+
+export const WorkspaceInitialState = Type.Union([
+  Type.Object({ kind: Type.Literal('base_checkout'), content_identity: objectId }, closed),
+  Type.Object({ kind: Type.Literal('inherited_attempt'), source_attempt_id: OperationId, content_identity: objectId }, closed),
+  Type.Object({ kind: Type.Literal('pending_inherited_attempt'), source_attempt_id: OperationId }, closed),
+]);
+export type WorkspaceInitialState = Static<typeof WorkspaceInitialState>;
+export const CapturedWorkspaceInitialState = Type.Union([
+  Type.Object({ kind: Type.Literal('base_checkout'), content_identity: objectId }, closed),
+  Type.Object({ kind: Type.Literal('inherited_attempt'), source_attempt_id: OperationId, content_identity: objectId }, closed),
+]);
+export type CapturedWorkspaceInitialState = Static<typeof CapturedWorkspaceInitialState>;
+
+export const AttemptWorkspaceSnapshot = Type.Object({
+  identity: WorkspaceIdentity, predecessor_attempt_id: Type.Union([OperationId, Type.Null()]),
+  initial_state: WorkspaceInitialState, inherited_base_sha: Type.Union([objectId, Type.Null()]),
+  /** Commit present before this attempt writes; deliveries compare against this immutable commit. */
+  comparison_base_sha: Type.Union([objectId, Type.Null()]),
+}, closed);
+export type AttemptWorkspaceSnapshot = Static<typeof AttemptWorkspaceSnapshot>;
+
+export const AttemptWorkspaceBinding = Type.Object({
+  attempt_id: OperationId, workspace: WorkspaceIdentity, issue_number: Type.Integer({ minimum: 1, maximum: 2_147_483_647 }), resource_id: OperationId,
+  environment_reference: storagePath, predecessor_attempt_id: Type.Union([OperationId, Type.Null()]),
+  initial_state: WorkspaceInitialState, inherited_base_sha: Type.Union([objectId, Type.Null()]),
+  comparison_base_sha: Type.Union([objectId, Type.Null()]),
+  resolution_state: Type.Union([Type.Literal('candidate'), Type.Literal('conflict'), Type.Literal('selected')]),
+}, closed);
+export type AttemptWorkspaceBinding = Static<typeof AttemptWorkspaceBinding>;

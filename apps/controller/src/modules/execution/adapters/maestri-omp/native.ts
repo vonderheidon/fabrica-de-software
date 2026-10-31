@@ -159,6 +159,7 @@ export function launchCommand(powershell: string, bootstrapPath: string): string
   const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
   const script = `$ErrorActionPreference='Stop'; $launchPath=${quote(bootstrapPath)}; ` +
     `$launch=[System.IO.File]::ReadAllText($launchPath,[System.Text.Encoding]::UTF8)|ConvertFrom-Json; ` +
+    `$env:npm_config_cache=$launch.npmCacheDirectory; ` +
     `$env:FACTORY_PASSAGE_BOOTSTRAP=$launchPath; Set-Location -LiteralPath $launch.cwd; ` +
     `& $launch.ompExecutable @($launch.args); exit $LASTEXITCODE`;
   return `& ${quote(powershell)} -NoLogo -NoProfile -EncodedCommand ${Buffer.from(script, 'utf16le').toString('base64')}`;

@@ -5,7 +5,8 @@ import type { PipelineDependencies } from './start.js';
 
 export interface RecoveryContext { operationId: string; expectedRevision: string | undefined }
 export function createRecovery(deps: PipelineDependencies, enqueue: (task: () => Promise<void>) => void,
-  revoke: (attemptId: string) => void, isClosed: () => boolean) {
+  revoke: (attemptId: string) => void, isClosed: () => boolean,
+  onAttemptCancelled: (attemptId: string) => Promise<void>) {
   const { storage, workspaces, execution } = deps;
   const supported = () => { if (isClosed()) throw new OperationError(503, 'PIPELINE_CLOSED', 'The controller is shutting down.'); };
   const unavailable = (code: string): never => { throw new OperationError(409, code, 'This action is not currently available for the registered resource.'); };
@@ -19,7 +20,8 @@ export function createRecovery(deps: PipelineDependencies, enqueue: (task: () =>
     if (!workspaces.inspectEnvironment) throw new OperationError(503, 'REMOVAL_UNAVAILABLE', 'Environment inspection is unavailable.');
     const observation = await workspaces.inspectEnvironment(attemptId, snapshot.deliveries);
     if (storage.getResourceSnapshot(attemptId, resourceId).stamp !== snapshot.stamp) unavailable('RESOURCE_CHANGED');
-    const reason = !snapshot.stopped ? 'RESOURCE_NOT_STOPPED' : snapshot.removalPending ? 'REMOVAL_IN_PROGRESS' : !observation.exists ? 'RESOURCE_MISSING' : !observation.contentSafe ? 'RETAINED_CONTENT_AT_RISK' : null;
+    const reason = !snapshot.stopped ? 'RESOURCE_NOT_STOPPED' : snapshot.sharedWorkspace ? 'WORKSPACE_SHARED' : snapshot.removalPending ? 'REMOVAL_IN_PROGRESS' :
+      !observation.exists ? 'RESOURCE_MISSING' : !observation.contentSafe ? 'RETAINED_CONTENT_AT_RISK' : null;
     const losses = [`Todo o conteúdo da pasta de implementação, inclusive alterações locais e arquivos ignorados (${observation.fileCount} arquivos; ${observation.bytes} bytes).`,
       'O índice e metadados Git locais deste ambiente.'];
     const preservedReferences = ['Histórico, resultados oficiais e evidências de checks.', ...snapshot.deliveries.filter(d => d.captureState === 'captured').map(d => d.gitRef!)];
@@ -48,10 +50,12 @@ export function createRecovery(deps: PipelineDependencies, enqueue: (task: () =>
   return {
     async cancelAttempt(attemptId: string, body: CancelAttempt, context: RecoveryContext) {
       const command: RecoveryCommand = { ...context, attemptId, kind: 'attempt.cancel', body };
-      const old = storage.recoverRecovery(command); if (old) return old;
+      const old = storage.recoverRecovery(command);
+      if (old) { await onAttemptCancelled(attemptId); return old; }
       supported();
       // This transaction revokes all domain advancement before abort/stop can have an effect.
       const accepted = storage.acceptRecovery(command); revoke(attemptId);
+      await onAttemptCancelled(attemptId);
       if (accepted.created) enqueue(async () => { await execution.cancelAttempt(attemptId, context.operationId); });
       return accepted.operation;
     },

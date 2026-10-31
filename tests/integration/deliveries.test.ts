@@ -4,11 +4,12 @@ import { readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ImplementerResult, SessionResponse } from '#contracts';
+import { issueHistoryRepositoryReference, type ImplementerResult, type SessionResponse } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { CaptureError } from '../../apps/controller/src/modules/workspaces/index.js';
 import { openStorage, type RetryCaptureCommand } from '../../apps/controller/src/modules/storage/index.js';
+import { deliveryBaseSha } from '../../apps/controller/src/modules/storage/deliveries.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
 import { captureFixture } from '../fixtures/capture.js';
@@ -37,6 +38,24 @@ async function fixture(http = false) {
 }
 
 describe('durable immutable deliveries', () => {
+  it('uses the predecessor commit as the delivery base and keeps an integration base authoritative', async () => {
+    const f = await fixture();
+    const predecessor = randomUUID();
+    const inheritedCommit = 'b'.repeat(40);
+    const captured = f.storage.getAttemptCapture(f.a.id);
+    const capture = {
+      ...captured,
+      workspace: {
+        ...captured.workspace!,
+        predecessor_attempt_id: predecessor,
+        initial_state: { kind: 'inherited_attempt' as const, source_attempt_id: predecessor, content_identity: inheritedCommit },
+        comparison_base_sha: inheritedCommit,
+      },
+    };
+    expect(deliveryBaseSha(capture)).toBe(inheritedCommit);
+    expect(deliveryBaseSha(capture, 'c'.repeat(40))).toBe('c'.repeat(40));
+    expect(deliveryBaseSha(captured)).toBe(captured.workspace.comparison_base_sha);
+  });
   it('preserves delivery results and receipt when reopening the current schema', async () => {
     const f = await fixture(false); const reviewPlanner = vi.spyOn(f.storage, 'beginReview').mockReturnValue(null);
     const accepted = f.accept(); await f.pipeline.drain();
@@ -75,7 +94,7 @@ describe('durable immutable deliveries', () => {
     expect(f.storage.getDelivery(d).delivery.captureState).toBe('pending'); expect(f.capture).not.toHaveBeenCalled();
     await f.pipeline.drain();
     const view = f.storage.getDelivery(d); expect(view.delivery).toMatchObject({ captureState: 'captured', hasDelta: true,
-      gitRef: `refs/factory/deliveries/${d}`, repositoryRelative: `git/${f.a.id}.git`,
+      gitRef: `refs/factory/deliveries/${d}`, repositoryRelative: issueHistoryRepositoryReference(f.storage.getAttemptWorkspaceBinding(f.a.id).issue_number),
       warnings: [{ attemptId: f.a.id, passageId: f.a.passageId, deliveryId: d, path: 'cache/declared.txt', reason: 'DECLARED_NEW_FILE_IGNORED' }] });
     expect(f.storage.getAttempt(f.a.id)).toMatchObject({ deliveryId: d, resultReceiptId: accepted.receiptId, phase: 'reviewing', suspension: null });
     f.accept(); await f.pipeline.drain(); expect(f.capture).toHaveBeenCalledTimes(1);
@@ -172,6 +191,9 @@ describe('durable immutable deliveries', () => {
     const response = await app.inject({ method: 'POST', url, headers, payload: toHttpCaptureRetry(command.body) });
     expect(response.statusCode, response.body).toBe(202); expect(response.headers.location).toBe(`/api/v1/operations/${command.operationId}`);
     await f.pipeline.drain();
+    const attemptDetail = await app.inject({ url: `/api/v1/attempts/${f.a.id}`, headers: { host, cookie } });
+    expect(attemptDetail.statusCode, attemptDetail.body).toBe(200);
+    expect(attemptDetail.json().workspace_lineage).toEqual(f.storage.getAttemptCapture(f.a.id).workspace);
     const detail = await app.inject({ url: `/api/v1/deliveries/${id}`, headers: { host, cookie } }); expect(detail.statusCode).toBe(200); expect(detail.json().delivery.capture_state).toBe('captured');
     expect(detail.body).not.toContain(f.directory); expect(detail.body).not.toContain('EXCLUDED_IGNORED_BYTES');
     const diff = await app.inject({ url: `/api/v1/deliveries/${id}/diff`, headers: { host, cookie } }); expect(diff.statusCode, diff.body).toBe(200); expect(diff.json().entries.length).toBeGreaterThan(0);
@@ -183,6 +205,7 @@ describe('durable immutable deliveries', () => {
   });
   it('measures database/WAL, auxiliary bytes and summary payload/latency before and after growing ignored caches', async () => {
     const f = await fixture(); f.accept(); await f.pipeline.drain(); const id = f.binding.deliveryVersion;
+    const historyPath = join(f.directory, ...f.storage.getDelivery(id).delivery.repositoryRelative.split('/'));
     async function directoryBytes(path: string): Promise<number> {
       let bytes = 0; for (const item of await readdir(path, { withFileTypes: true })) {
         const p = join(path, item.name); bytes += item.isDirectory() ? await directoryBytes(p) : (await stat(p)).size;
@@ -196,7 +219,7 @@ describe('durable immutable deliveries', () => {
       }
       return { times, databaseBytes: (await stat(join(f.directory, 'factory.sqlite'))).size,
         walBytes: (await stat(join(f.directory, 'factory.sqlite-wal'))).size,
-        retainedMetadataBytes: await directoryBytes(join(f.directory, 'git')), payloadBytes: Buffer.byteLength(JSON.stringify(payloads)), payload: JSON.stringify(payloads) };
+        retainedMetadataBytes: await directoryBytes(historyPath), payloadBytes: Buffer.byteLength(JSON.stringify(payloads)), payload: JSON.stringify(payloads) };
     }
     const before = await measure(); await writeFile(join(f.controlled.implementation, 'cache/declared.txt'), Buffer.alloc(16_777_216, 65));
     const after = await measure();

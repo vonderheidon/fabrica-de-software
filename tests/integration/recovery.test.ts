@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ImplementerResult, SessionResponse } from '#contracts';
-import { attemptFixture, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
@@ -75,10 +75,13 @@ describe('revocation and explicit retry', () => {
     expect(f.storage.getResources(op.resource.id).entries.find(r => r.kind === 'implementation')).toMatchObject({ owned: true, launchState: 'ready', removed: false });
     expect(f.storage.getAttempt(op.resource.id).result).toBe('cancelled');
   });
-  it('starts a fresh retry outside Ready with current criteria/base, separate clone and no old authority', async () => {
+  it('starts a fresh retry outside Ready with current criteria, inherited workspace and no old authority', async () => {
     const f = await fixture(); const oldCapture = f.storage.getAttemptCapture(f.id); const oldStatus = f.storage.getAttempt(f.id);
     f.persistence.record({ passageId: oldStatus.passageId }, 'interrupted', 'TRACKING_LOST', 'tracking-lost');
     expect(f.storage.getAttempt(f.id).result).toBe('interrupted');
+    await expect(f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {}, previous_attempt_id: f.id }, f.context()))
+      .rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_NOT_STOPPED' });
+    confirmTerminalStops(f, f.id);
     f.issue.memberships[0]!.statusValues[0]!.optionId = 'PROGRESS';
     f.issue.body = f.issue.body.replace('- Same text', '- Current criterion');
     f.observation.base!.sha = 'd'.repeat(40); f.observation.remote!.branch!.sha = 'd'.repeat(40);
@@ -88,7 +91,14 @@ describe('revocation and explicit retry', () => {
     expect(p.previous_attempt_id).toBe(f.id);
     const op = await f.pipeline.startAttempt({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true }, { ...f.context(), expectedRevision: saved.etag });
     await f.pipeline.drain(); const fresh = f.storage.getAttemptCapture(op.resource.id);
+    const workspace = f.storage.getAttemptWorkspaceBinding(op.resource.id);
     expect(op.resource.id).not.toBe(f.id); expect(fresh.baseSha).toBe('d'.repeat(40)); expect(fresh.criteriaDigest).not.toBe(oldCapture.criteriaDigest);
+    expect(workspace.predecessor_attempt_id).toBe(f.id);
+    expect(workspace.initial_state).toEqual({ kind: 'inherited_attempt', source_attempt_id: f.id, content_identity: 'b'.repeat(40) });
+    expect(workspace.comparison_base_sha).toBe('b'.repeat(40));
+    expect(workspace.inherited_base_sha).toBe(oldCapture.baseSha);
+    expect(workspace.environment_reference).toBe(f.storage.getAttemptWorkspaceBinding(f.id).environment_reference);
+    expect(workspace.resolution_state).toBe('candidate');
     expect(fresh.configuration.guidance).toContain('Revised retry guidance'); expect(f.storage.getAttemptCapture(f.id)).toEqual(oldCapture);
     const sessionsFor = (attemptId: string) => f.db.prepare<[string], { id: string; role: string; directory: string }>(
       'SELECT id,role,session_directory_relative AS directory FROM attempt_sessions WHERE attempt_id=? ORDER BY role',
@@ -100,12 +110,14 @@ describe('revocation and explicit retry', () => {
     expect(newSessions.map(session => session.directory)).not.toEqual(oldSessions.map(session => session.directory));
     expect(f.storage.getAttempt(f.id).result).toBe('interrupted');
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledTimes(2); expect(f.execution.startPassage).toHaveBeenCalledTimes(2); expect(f.execution.continuePassage).not.toHaveBeenCalled();
-    expect(f.storage.getResources(f.id).cleanup).not.toBe('complete');
+    expect(f.storage.getResources(f.id).cleanup).toBe('complete');
+    expect(f.storage.getResources(f.id).entries.find(resource => resource.kind === 'implementation')?.removed).toBe(false);
     expect(() => f.persistence.confirmReady({ passageId: oldStatus.passageId }, f.profile, '18.11.1')).toThrow();
     await expect(f.preparations.createPreparation(f.projectId, { issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', overrides: {}, previous_attempt_id: op.resource.id }, f.context())).rejects.toMatchObject({ code: 'ATTEMPT_ACTIVE' });
   });
   it.each(['assignee','blocked','closed','membership'])('does not waive %s eligibility for explicit retry', async kind => {
     const f = await fixture(); f.persistence.recordCancellation(f.id, randomUUID());
+    confirmTerminalStops(f, f.id);
     if (kind === 'assignee') f.issue.assignees = [];
     if (kind === 'blocked') f.issue.blockers = [{ id: 'I_blocker', number: 3, title: 'Blocker', state: 'OPEN', url: 'https://github.com/test-org/repo/issues/3' }];
     if (kind === 'closed') f.issue.state = 'CLOSED';

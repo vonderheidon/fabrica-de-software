@@ -14,7 +14,9 @@ async function fixture(options: { fail?: 'clone' | 'checkout'; dependency?: bool
   const data = join(directory, 'data with spaces ação 😀'); const source = join(directory, 'origin português 😀');
   await mkdir(data); await mkdir(join(source, '.git'), { recursive: true });
   await writeFile(join(source, 'dirty.txt'), 'Uncommitted operator bytes á😀'); await writeFile(join(source, '.git', 'HEAD'), 'operator HEAD'); await writeFile(join(source, '.git', 'index'), Buffer.from([0, 255, 123]));
-  const input: WorkspacePreparation = { attemptId: randomUUID(), issueNumber: 17, source: { kind: 'local', location: source }, baseSha: sha };
+  const input: WorkspacePreparation = { attemptId: randomUUID(), workspace: { project_id: randomUUID(), repository_id: 'R_test', issue_id: 'I_test' },
+    issueNumber: 17, source: { kind: 'local', location: source }, baseSha: sha, predecessorAttemptId: null, inheritedBaseSha: null };
+  const implementation = join(data, 'issues', '17', 'workspace');
   const calls: { cwd: string; args: readonly string[] }[] = []; let branch = '';
   // This runner models argv/results and writes only a synthetic destination. It does not prove Git semantics.
   const git: GitReader = async (cwd, command) => {
@@ -22,6 +24,7 @@ async function fixture(options: { fail?: 'clone' | 'checkout'; dependency?: bool
     const args = [...command];
     while (args[0]?.startsWith('--git-dir=') || args[0]?.startsWith('--work-tree=') || args[0] === '-c') args.splice(0, args[0] === '-c' ? 2 : 1);
     if (args.includes('--show-toplevel')) return { exitCode: 0, stdout: `${source}\n` };
+    if (args[0] === 'config' && args[1] === '--get' && args[2] === 'remote.origin.url') return { exitCode: 0, stdout: `${source}\n` };
     if (args.includes('clone')) {
       const target = args.at(-1)!; await mkdir(join(target, '.git', 'objects', 'info'), { recursive: true });
       if (options.dependency) await writeFile(join(target, '.git', 'objects', 'info', 'alternates'), source);
@@ -40,7 +43,8 @@ async function fixture(options: { fail?: 'clone' | 'checkout'; dependency?: bool
     if (args[0] === 'rev-parse') return { exitCode: 0, stdout: `${options.changedHead && args.at(-1) === 'HEAD' ? 'b'.repeat(40) : sha}\n` };
     throw new Error('Unexpected controlled Git invocation');
   };
-  return { data, source, input, git, calls, prepare: createWorkspacePreparer(data, git, async (path) => path, async () => data) };
+  return { data, source, input, implementation, git, calls,
+    prepare: createWorkspacePreparer(data, git, async (path) => path, async () => data, async () => implementation) };
 }
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 describe('independent owned attempt workspace with controlled Git', () => {
@@ -48,7 +52,7 @@ describe('independent owned attempt workspace with controlled Git', () => {
     const f = await fixture(); const files = ['dirty.txt', '.git/HEAD', '.git/index'].map((name) => join(f.source, name));
     const before = await Promise.all(files.map((file) => readFile(file)));
     const result = await f.prepare(f.input); expect(result.state).toBe('prepared'); expect(Value.Check(PreparedWorkspace, result)).toBe(true);
-    expect(result.resource.path).toBe(join(f.data, 'work', f.input.attemptId, 'implementation'));
+    expect(result.resource.path).toBe(f.implementation);
     expect(result.branch).toBe(`factory/17/${f.input.attemptId}`);
     const clone = f.calls.find((call) => call.args.includes('clone'))!;
     expect(clone.args).toEqual(expect.arrayContaining(['--no-local', '--no-hardlinks', '--no-checkout', '--no-recurse-submodules', '--', f.source, result.resource.path]));
@@ -57,23 +61,28 @@ describe('independent owned attempt workspace with controlled Git', () => {
     expect(checkout.args).toEqual(expect.arrayContaining(['-b', result.branch, sha]));
     expect(checkout.args).toContain(`--work-tree=${result.resource.path}`);
     expect(checkout.args).toContain(`--git-dir=${join(result.resource.path, '.git')}`);
-    expect(checkout.args.some((arg) => arg.startsWith('core.hooksPath=') && arg.endsWith('.empty-hooks'))).toBe(true);
+    expect(checkout.args.some((arg) => arg.startsWith('core.hooksPath=') && arg.endsWith('empty-hooks'))).toBe(true);
     expect(f.calls.filter((call) => call.cwd === f.source).every((call) => call.args[0] === 'rev-parse')).toBe(true);
     expect(await Promise.all(files.map((file) => readFile(file)))).toEqual(before);
     await expect(readFile(join(result.resource.path, 'dirty.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
-  it('creates a separate environment for another identified attempt without touching the first', async () => {
-    const f = await fixture(); const first = await f.prepare(f.input); await writeFile(join(first.resource.path, 'own.txt'), 'first attempt');
-    const second = await f.prepare({ ...f.input, attemptId: randomUUID() });
-    expect(second.state).toBe('prepared'); expect(second.resource.path).not.toBe(first.resource.path);
-    expect(await readFile(join(first.resource.path, 'own.txt'), 'utf8')).toBe('first attempt');
-  });
-  it('never adopts an existing attempt directory', async () => {
+  it('requires an explicit predecessor before reusing the issue workspace', async () => {
     const f = await fixture(); const first = await f.prepare(f.input); const count = f.calls.length;
-    const repeated = await f.prepare(f.input);
-    expect(repeated).toMatchObject({ state: 'failed', resource: { owned: false }, diagnostic: { code: 'ATTEMPT_DIRECTORY_EXISTS' } });
+    const repeated = await f.prepare({ ...f.input, attemptId: randomUUID() });
+    expect(repeated).toMatchObject({ state: 'failed', resource: { owned: false }, diagnostic: { code: 'WORKSPACE_ALREADY_EXISTS' } });
     expect(f.calls.slice(count).some((call) => call.args.includes('clone'))).toBe(false);
     expect(await readFile(join(first.resource.path, 'committed.txt'), 'utf8')).toBe('Committed baseline á😀');
+  });
+  it('creates the first workspace when the controller attests no predecessor workspace was ever allocated', async () => {
+    const f = await fixture();
+    const predecessorAttemptId = randomUUID();
+    const result = await f.prepare({ ...f.input, predecessorAttemptId, inheritedBaseSha: null });
+    expect(result).toMatchObject({ state: 'prepared', snapshot: { predecessor_attempt_id: predecessorAttemptId,
+      initial_state: { kind: 'base_checkout', content_identity: f.input.baseSha }, inherited_base_sha: null } });
+    expect(f.calls.filter(call => call.args.includes('clone'))).toHaveLength(1);
+    const again = await f.prepare({ ...f.input, attemptId: randomUUID(), predecessorAttemptId, inheritedBaseSha: null });
+    expect(again).toMatchObject({ state: 'failed', diagnostic: { code: 'WORKSPACE_ALREADY_EXISTS' } });
+    expect(f.calls.filter(call => call.args.includes('clone'))).toHaveLength(1);
   });
   it.each(['clone', 'checkout'] as const)('preserves and identifies its own resource on partial %s failure', async (fail) => {
     const f = await fixture({ fail }); const result = await f.prepare(f.input);
@@ -86,8 +95,8 @@ describe('independent owned attempt workspace with controlled Git', () => {
   });
   it('refuses a managed root that canonicalizes outside its configured path', async () => {
     const f = await fixture();
-    const prepare = createWorkspacePreparer(f.data, f.git, async (path) => path === join(f.data, 'work') ? f.source : path, async () => f.data);
-    expect(await prepare(f.input)).toMatchObject({ state: 'failed', resource: { owned: false }, diagnostic: { code: 'MANAGED_ROOT_INVALID' } });
+    const prepare = createWorkspacePreparer(f.data, f.git, async (path) => path, async () => f.data, async () => f.source);
+    expect(await prepare(f.input)).toMatchObject({ state: 'failed', resource: { owned: false }, diagnostic: { code: 'WORKSPACE_PATH_INVALID' } });
     expect(f.calls.some((call) => call.args.includes('clone'))).toBe(false);
   });
   it('requires an authorized context before creating a resource', async () => {
@@ -99,7 +108,7 @@ describe('independent owned attempt workspace with controlled Git', () => {
     const f = await fixture();
     const prepare = createWorkspacePreparer(f.data, f.git, async path => path);
     expect(await prepare(f.input)).toMatchObject({ state: 'failed', resource: { owned: false },
-      diagnostic: { code: 'WORKSPACE_PATH_UNAVAILABLE' } });
+      diagnostic: { code: 'WORKSPACE_ROOT_UNAVAILABLE' } });
     expect(f.calls).toHaveLength(0);
   });
   it.each([{ dependency: true, code: 'CLONE_DEPENDENCY_UNSUPPORTED' }, { submodule: true, code: 'SUBMODULE_UNSUPPORTED' }, { changedHead: true, code: 'WORKSPACE_VERIFICATION_FAILED' }, { filtered: true, code: 'FILTERED_CONTENT_UNSUPPORTED' }])('rejects incomplete or dependent clones: $code', async ({ code, ...options }) => {

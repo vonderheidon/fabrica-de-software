@@ -57,13 +57,11 @@ export async function startController(hostContext: ControllerHostContext = {}, d
       ...(hostContext.githubMutationAuthorization ? { mutationAuthorization: hostContext.githubMutationAuthorization } : {}),
       ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}) });
     const workspaces = createWorkspaces({ github, dataDirectory: configuration.dataDirectory,
-      projectStorage: { getAttemptProjectId: id => storage.getAttemptProjectId(id), getAttemptWorkspaceReference: id => storage.getAttemptWorkspaceReference(id),
-        getProjectStorageView: id => storage.getProjectStorageView(id), getStorageTransition: id => storage.getStorageTransition(id),
-        recordProjectStorageLocation: observation => storage.recordProjectStorageLocation(observation),
-        assertProjectStorageLocation: observation => storage.assertProjectStorageLocation(observation) },
+      projectStorage: storage, historyMigration: storage,
       ...(gitContext ? { context: gitContext } : {}), ...(hostContext.githubMutationAuthorization ? { pushAuthorization: hostContext.githubMutationAuthorization } : {}), ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}), ...(hostContext.openFolder ? { openFolder: hostContext.openFolder } : {}) });
     execution = (dependencies.executionFactory ?? createExecution)({ dataDirectory: configuration.dataDirectory, persistence: storage.executionPersistence(),
       projectStorageRootForAttempt: workspaces.resolveAttemptRoot,
+      projectStorageAreaForAttempt: workspaces.resolveAttemptArea,
       validatePassageScope: async binding => { if (!pipeline || !await pipeline.revalidateScope(binding)) throw new ExecutionError('RESULT_INVALID'); },
       validateReviewerResult: async binding => {
         const review = storage.getReview(binding.deliveryVersion);

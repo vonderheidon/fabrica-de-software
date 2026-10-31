@@ -10,8 +10,11 @@ import type { GitReader } from '../../apps/controller/src/modules/workspaces/git
 const oid = (text: string | Buffer) => createHash('sha1').update(text).digest('hex');
 export async function captureFixture(directory?: string, identities?: Partial<CaptureInput>) {
   const root = directory ?? await mkdtemp(join(tmpdir(), 'factory-capture-'));
-  const input: CaptureInput = { attemptId: randomUUID(), passageId: randomUUID(), deliveryId: randomUUID(), baseSha: 'a'.repeat(40), declaredFiles: ['cache/declared.txt'], ...identities };
-  const implementation = resolve(root, 'work', input.attemptId, 'implementation');
+  const attemptId = randomUUID();
+  const input: CaptureInput = { attemptId, passageId: randomUUID(), deliveryId: randomUUID(), repositoryRelative: `git/${attemptId}.git`,
+    baseSha: 'a'.repeat(40), declaredFiles: ['cache/declared.txt'], ...identities };
+  if (identities?.repositoryRelative === undefined) input.repositoryRelative = `git/${input.attemptId}.git`;
+  const implementation = resolve(root, 'issues', '17', 'workspace');
   await mkdir(resolve(implementation, '.git'), { recursive: true });
   await mkdir(resolve(implementation, 'cache')); await writeFile(resolve(implementation, 'cache/declared.txt'), 'EXCLUDED_IGNORED_BYTES_987');
   await writeFile(resolve(implementation, '.env'), 'EXCLUDED_SECRET_BYTES_123');
@@ -53,7 +56,16 @@ export async function captureFixture(directory?: string, identities?: Partial<Ca
     if (command === 'ls-files' && tail.includes('-v')) return reply([...base.keys()].filter(p => !removedFromTracking.has(p)).map(p => `H ${p}\0`).join(''));
     if (command === 'ls-files') return reply(untracked.map(p => `${p}\0`).join(''));
     if (command === 'check-ignore') { const path = String(options?.input).replace(/\0$/, ''); return ignoredPaths.has(path) ? reply(`${path}\0`) : reply('', 1); }
-    if (command === 'init' || command === 'fetch' || command === 'fsck') return reply();
+    if (command === 'fetch') {
+      const refspec = tail.at(-1)!;
+      if (refspec.includes(':')) {
+        const [source, destination] = refspec.split(':');
+        if (!source || !destination || !refs.has(source)) return reply('', 1);
+        refs.set(destination, refs.get(source)!);
+      }
+      return reply();
+    }
+    if (command === 'init' || command === 'fsck') return reply();
     if (command === 'read-tree') { indexes.set(options!.indexFile!, new Map(base)); indexModes.set(options!.indexFile!, new Map(modes)); return reply(); }
     if (command === 'hash-object') {
       const hash = put(options!.input!);
@@ -94,7 +106,7 @@ export async function captureFixture(directory?: string, identities?: Partial<Ca
     }
     throw new Error(`Unexpected controlled command: ${command}`);
   };
-  const capture = createCapturer(root, run, async path => path, async () => root); const diff = createDeliveryDiff(root, run, async path => path, async () => root);
+  const capture = createCapturer(root, run, async path => path, async () => root, async () => implementation); const diff = createDeliveryDiff(root, run, async path => path, async () => root);
   return { root, input, implementation, blobs, trees, treeModes, refs, calls, untracked, base, capture, diff, run,
     setExecutable: (path: string) => { modes.set(path, '100755'); },
     removeTrackingAndIgnore: (path: string) => { removedFromTracking.add(path); ignoredPaths.add(path); },
@@ -103,5 +115,5 @@ export async function captureFixture(directory?: string, identities?: Partial<Ca
 }
 export function delivery(input: CaptureInput, content: Awaited<ReturnType<ReturnType<typeof createCapturer>>>): Delivery {
   return { ...content, id: input.deliveryId, attemptId: input.attemptId, producerPassageId: input.passageId, round: 1, baseSha: input.baseSha,
-    repositoryRelative: `git/${input.attemptId}.git`, captureState: 'captured', diagnostic: null, capturedAtMs: 1, revision: 3 };
+    repositoryRelative: input.repositoryRelative, captureState: 'captured', diagnostic: null, capturedAtMs: 1, revision: 3 };
 }

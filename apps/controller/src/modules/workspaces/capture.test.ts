@@ -80,6 +80,18 @@ describe('capture with controlled Git and real filesystem', () => {
     expect(f.calls.some(c => c.args.includes('update-ref') && c.args.at(-1) === '0'.repeat(40))).toBe(true);
     expect((await readdir(join(f.root, 'git', `${f.input.attemptId}.git`))).some(n => n.startsWith('factory-index-'))).toBe(false);
   });
+  it('compares the final content to the recorded initial commit, including new files and deletions', async () => {
+    const f = await captureFixture();
+    await rm(join(f.implementation, 'tracked.txt'));
+    const content = await f.capture(f.input);
+    const page = await f.diff(delivery(f.input, content), {});
+    expect(page.baseSha).toBe(f.input.baseSha);
+    expect(page.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'new unicode ç.txt', status: 'A' }),
+      expect.objectContaining({ path: 'tracked.txt', status: 'D' }),
+      expect.objectContaining({ path: 'deleted.txt', status: 'D' }),
+    ]));
+  });
   it.each(['file', 'index'] as const)('detects concurrent %s changes before creating an approvable ref', async kind => {
     const f = await captureFixture();
     if (kind === 'file') f.setConcurrent(() => writeFile(join(f.implementation, 'tracked.txt'), 'external writer'));

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { ProjectRevision, ScaffoldPlanV3 } from '#contracts';
+import { AttemptWorkspaceSnapshot, managedWorkspaceReference, ProjectRevision, ScaffoldPlanV3 } from '#contracts';
 import { readQueueOrderJson, readStatusOptionIds } from './configuration-json.js';
 import { digest } from './configuration-reads.js';
 import { StorageError } from './errors.js';
@@ -20,14 +20,18 @@ export interface HistoricalLedgerEntry {
 export interface SchemaRecognitionResources {
   readonly applicationId: number;
   readonly directInstallUserVersion: number;
+  readonly previousDirectInstallUserVersion: number;
   readonly currentLedgerUserVersion: number;
   readonly currentSchemaSha256: string;
+  readonly previousSchemaSha256: string;
   readonly schemaSql: string;
+  readonly upgradeMigration: HistoricalLedgerEntry;
+  readonly upgradeMigrationSql: string;
   readonly historicalLedger: readonly HistoricalLedgerEntry[];
 }
 
 export interface DatabaseRecognition {
-  readonly kind: 'empty' | 'direct' | 'historical-ledger';
+  readonly kind: 'empty' | 'direct' | 'historical-ledger' | 'previous-direct' | 'previous-ledger';
   readonly schemaVersion: number;
 }
 
@@ -35,8 +39,10 @@ interface SchemaRecognitionDocument {
   readonly format_version: 1;
   readonly application_id: number;
   readonly direct_install_user_version: number;
+  readonly previous_direct_install_user_version: number;
   readonly current_ledger_user_version: number;
   readonly current_schema_sha256: string;
+  readonly previous_schema_sha256: string;
   readonly schema_sql_sha256: string;
   readonly historical_ledger: readonly HistoricalLedgerEntry[];
 }
@@ -104,8 +110,10 @@ function parseJson(value: string, code: 'PROJECT_DATA_INVALID' | 'OPERATION_DATA
 function readRecognitionDocument(value: unknown): SchemaRecognitionDocument {
   if (!isRecord(value) || value.format_version !== 1 || value.application_id !== applicationId ||
       !Number.isSafeInteger(value.direct_install_user_version) ||
+      !Number.isSafeInteger(value.previous_direct_install_user_version) ||
       !Number.isSafeInteger(value.current_ledger_user_version) ||
       typeof value.current_schema_sha256 !== 'string' || !digestPattern.test(value.current_schema_sha256) ||
+      typeof value.previous_schema_sha256 !== 'string' || !digestPattern.test(value.previous_schema_sha256) ||
       typeof value.schema_sql_sha256 !== 'string' || !digestPattern.test(value.schema_sql_sha256) ||
       !Array.isArray(value.historical_ledger)) {
     throw new StorageError('MIGRATION_RESOURCES_INVALID');
@@ -120,6 +128,7 @@ function readRecognitionDocument(value: unknown): SchemaRecognitionDocument {
   }
   if (entries.length === 0 || value.current_ledger_user_version !== entries.length ||
       value.direct_install_user_version !== entries.length + 1 ||
+      value.previous_direct_install_user_version !== value.direct_install_user_version - 1 ||
       new Set(entries.map(entry => entry.name)).size !== entries.length) {
     throw new StorageError('MIGRATION_RESOURCES_INVALID');
   }
@@ -127,8 +136,10 @@ function readRecognitionDocument(value: unknown): SchemaRecognitionDocument {
     format_version: 1,
     application_id: applicationId,
     direct_install_user_version: value.direct_install_user_version as number,
+    previous_direct_install_user_version: value.previous_direct_install_user_version as number,
     current_ledger_user_version: value.current_ledger_user_version as number,
     current_schema_sha256: value.current_schema_sha256,
+    previous_schema_sha256: value.previous_schema_sha256,
     schema_sql_sha256: value.schema_sql_sha256,
     historical_ledger: entries,
   };
@@ -139,14 +150,22 @@ export function loadSchemaRecognitionResources(): SchemaRecognitionResources {
     const document = readRecognitionDocument(JSON.parse(
       readFileSync(new URL('schema-recognition.v1.json', resourceDirectory), 'utf8'),
     ) as unknown);
-    const schemaSql = readFileSync(new URL('initial-schema.v54.sql', resourceDirectory), 'utf8');
+    const schemaSql = readFileSync(new URL('initial-schema.v56.sql', resourceDirectory), 'utf8');
     if (sha256(schemaSql) !== document.schema_sql_sha256) throw new StorageError('MIGRATION_RESOURCES_INVALID');
+    const upgradeMigration = document.historical_ledger.at(-1);
+    if (!upgradeMigration) throw new StorageError('MIGRATION_RESOURCES_INVALID');
+    const upgradeMigrationSql = readFileSync(new URL(upgradeMigration.name, resourceDirectory), 'utf8');
+    if (sha256(upgradeMigrationSql) !== upgradeMigration.checksum) throw new StorageError('MIGRATION_RESOURCES_INVALID');
     return {
       applicationId: document.application_id,
       directInstallUserVersion: document.direct_install_user_version,
+      previousDirectInstallUserVersion: document.previous_direct_install_user_version,
       currentLedgerUserVersion: document.current_ledger_user_version,
       currentSchemaSha256: document.current_schema_sha256,
+      previousSchemaSha256: document.previous_schema_sha256,
       schemaSql,
+      upgradeMigration,
+      upgradeMigrationSql,
       historicalLedger: document.historical_ledger,
     };
   } catch (error) {
@@ -223,13 +242,27 @@ function inspectCurrentDomainData(db: Database.Database): void {
   for (const row of db.prepare<[], { capture_json: string }>('SELECT capture_json FROM attempts').iterate()) {
     readCapturedConfiguration(parseJson(row.capture_json, 'OPERATION_DATA_INVALID'));
   }
+  for (const row of db.prepare<[], { attempt_id: string; project_id: string; repository_id: string; issue_id: string;
+    capture_json: string; snapshot_json: string }>(`SELECT s.attempt_id,a.project_id,a.repository_id,a.issue_id,a.capture_json,s.snapshot_json
+    FROM attempt_workspace_snapshots s JOIN attempts a ON a.id=s.attempt_id`).iterate()) {
+    const capture = readCapturedConfiguration(parseJson(row.capture_json, 'OPERATION_DATA_INVALID'));
+    const snapshot = parseJson(row.snapshot_json, 'OPERATION_DATA_INVALID') as import('#contracts').AttemptWorkspaceSnapshot;
+    if (!Value.Check(AttemptWorkspaceSnapshot, snapshot) || capture.workspace.initial_state.kind !== 'pending_inherited_attempt' ||
+        snapshot.identity.project_id !== row.project_id || snapshot.identity.repository_id !== row.repository_id || snapshot.identity.issue_id !== row.issue_id ||
+        snapshot.predecessor_attempt_id !== capture.workspace.predecessor_attempt_id ||
+        snapshot.inherited_base_sha !== capture.workspace.inherited_base_sha || snapshot.initial_state.kind !== 'inherited_attempt' ||
+        snapshot.initial_state.source_attempt_id !== capture.workspace.predecessor_attempt_id ||
+        snapshot.comparison_base_sha === null || snapshot.comparison_base_sha !== snapshot.initial_state.content_identity) {
+      throw new StorageError('OPERATION_DATA_INVALID');
+    }
+  }
   for (const row of db.prepare<[], { choices_json: string }>('SELECT choices_json FROM preparation_revisions').iterate()) {
     readPreparationChoices(parseJson(row.choices_json, 'OPERATION_DATA_INVALID'));
   }
-  for (const row of db.prepare<[], { attempt_id: string; project_id: string; reference: string }>(
-    `SELECT r.attempt_id,a.project_id,r.reference FROM resources r JOIN attempts a ON a.id=r.attempt_id WHERE r.kind='implementation'`,
+  for (const row of db.prepare<[], { attempt_id: string; project_id: string; issue_number: number | null; reference: string }>(
+    `SELECT r.attempt_id,a.project_id,a.issue_number,r.reference FROM resources r JOIN attempts a ON a.id=r.attempt_id WHERE r.kind='implementation'`,
   ).iterate()) {
-    if (row.reference !== `projects/${row.project_id}/v1/managed/work/${row.attempt_id}/implementation`) {
+    if (row.issue_number === null || row.reference !== managedWorkspaceReference(row.project_id, row.issue_number)) {
       throw new StorageError('OPERATION_DATA_INVALID');
     }
   }
@@ -256,7 +289,10 @@ export function inspectHistory(
   }
   if (identity !== resources.applicationId) throw new StorageError('DATABASE_UNKNOWN');
   if (version > resources.directInstallUserVersion) throw new StorageError('DATABASE_NEWER_THAN_APPLICATION');
-  if (schemaDigest(db) !== resources.currentSchemaSha256) throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
+  const currentSchema = schemaDigest(db);
+  const currentSchemaMatches = currentSchema === resources.currentSchemaSha256;
+  const previousSchemaMatches = currentSchema === resources.previousSchemaSha256;
+  if (!currentSchemaMatches && !previousSchemaMatches) throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
 
   const rows = db.prepare<[], HistoricalRow>(
     'SELECT version,name,checksum,applied_at_ms FROM schema_migrations ORDER BY version',
@@ -265,11 +301,29 @@ export function inspectHistory(
     throw new StorageError('DATABASE_NEWER_THAN_APPLICATION');
   }
   if (version === resources.directInstallUserVersion) {
-    if (rows.length !== 0) throw new StorageError('MIGRATION_HISTORY_INVALID');
+    if (rows.length !== 0 || !currentSchemaMatches) throw new StorageError('MIGRATION_HISTORY_INVALID');
     inspectCurrentDomainData(db);
     const violations: unknown = db.pragma('foreign_key_check');
     if (!Array.isArray(violations) || violations.length !== 0) throw new StorageError('STORAGE_INTEGRITY_FAILED');
     return { kind: 'direct', schemaVersion: version };
+  }
+  if (version === resources.previousDirectInstallUserVersion && previousSchemaMatches && rows.length === 0) {
+    inspectCurrentDomainData(db);
+    const violations: unknown = db.pragma('foreign_key_check');
+    if (!Array.isArray(violations) || violations.length !== 0) throw new StorageError('STORAGE_INTEGRITY_FAILED');
+    return { kind: 'previous-direct', schemaVersion: version };
+  }
+  if (version === resources.currentLedgerUserVersion - 1 && previousSchemaMatches && rows.length === version) {
+    rows.forEach((row, index) => {
+      const expected = resources.historicalLedger[index];
+      if (!expected || row.version !== expected.version || row.name !== expected.name ||
+          !Number.isSafeInteger(row.applied_at_ms) || row.applied_at_ms < 0) throw new StorageError('MIGRATION_HISTORY_INVALID');
+      if (row.checksum !== expected.checksum) throw new StorageError('MIGRATION_CHECKSUM_MISMATCH');
+    });
+    inspectCurrentDomainData(db);
+    const violations: unknown = db.pragma('foreign_key_check');
+    if (!Array.isArray(violations) || violations.length !== 0) throw new StorageError('STORAGE_INTEGRITY_FAILED');
+    return { kind: 'previous-ledger', schemaVersion: version };
   }
   if (rows.length !== version || rows.length === 0) throw new StorageError('MIGRATION_HISTORY_INVALID');
   rows.forEach((row, index) => {
@@ -286,6 +340,26 @@ export function inspectHistory(
   const violations: unknown = db.pragma('foreign_key_check');
   if (!Array.isArray(violations) || violations.length !== 0) throw new StorageError('STORAGE_INTEGRITY_FAILED');
   return { kind: 'historical-ledger', schemaVersion: version };
+}
+
+export function upgradeRecognizedSchema(db: Database.Database, resources: SchemaRecognitionResources = loadSchemaRecognitionResources()): DatabaseRecognition {
+  const before = inspectHistory(db, resources);
+  if (before.kind !== 'previous-direct' && before.kind !== 'previous-ledger') return before;
+  db.transaction(() => {
+    db.exec(resources.upgradeMigrationSql);
+    if (before.kind === 'previous-ledger') {
+      db.prepare('INSERT INTO schema_migrations(version,name,checksum,applied_at_ms) VALUES (?,?,?,?)')
+        .run(resources.upgradeMigration.version, resources.upgradeMigration.name, resources.upgradeMigration.checksum, Date.now());
+      db.pragma(`user_version = ${resources.currentLedgerUserVersion}`);
+    } else {
+      db.pragma(`user_version = ${resources.directInstallUserVersion}`);
+    }
+    const upgraded = inspectHistory(db, resources);
+    if (upgraded.kind !== (before.kind === 'previous-direct' ? 'direct' : 'historical-ledger')) {
+      throw new StorageError('MIGRATION_HISTORY_INVALID');
+    }
+  }).immediate();
+  return inspectHistory(db, resources);
 }
 
 export function initializeSchema(

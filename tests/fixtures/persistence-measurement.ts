@@ -22,12 +22,14 @@ export async function inventory(root: string, directory = root): Promise<Measure
 
 export function sizes(files: MeasuredFile[]) {
   const sum = (predicate: (path: string) => boolean) => files.filter(f => predicate(f.path)).reduce((n, f) => n + f.sizeBytes, 0);
+  const workspace = (path: string) => path.startsWith('work/') || path.startsWith('issues/') || path.includes('/managed/issues/');
+  const retainedGit = (path: string) => path.startsWith('git/') || path.includes('/managed/git/');
   return {
     databaseBytes: sum(p => p === 'factory.sqlite'), walBytes: sum(p => p === 'factory.sqlite-wal'),
     sharedMemoryBytes: sum(p => p === 'factory.sqlite-shm'),
-    retainedGitDiskBytes: sum(p => p.startsWith('git/')),
-    operationalWorkBytes: sum(p => p.startsWith('work/')),
-    otherAuxiliaryBytes: sum(p => !p.startsWith('work/') && !p.startsWith('git/') && !p.startsWith('factory.sqlite')),
+    retainedGitDiskBytes: sum(retainedGit),
+    operationalWorkBytes: sum(workspace),
+    otherAuxiliaryBytes: sum(p => !workspace(p) && !retainedGit(p) && !p.startsWith('factory.sqlite')),
   };
 }
 

@@ -94,7 +94,7 @@ describe('fixed local installation', () => {
     expect(Number(db.pragma('application_id', { simple: true }))).toBe(applicationId);
     expect(Number(db.pragma('user_version', { simple: true }))).toBe(metadata.directInstallUserVersion);
     expect(digest).toBe(metadata.currentSchemaSha256);
-    expect(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type='table' AND substr(name,1,7)<>'sqlite_'").get()).toEqual({ n: 57 });
+    expect(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type='table' AND substr(name,1,7)<>'sqlite_'").get()).toEqual({ n: 59 });
     expect(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()).toEqual({ n: 0 });
     expect(db.prepare('SELECT count(*) AS n FROM factory_settings').get()).toEqual({ n: 1 });
     for (const table of ['accounts', 'execution_profiles', 'projects', 'attempts', 'attempt_sessions', 'project_creations']) {
@@ -121,7 +121,7 @@ describe('fixed local installation', () => {
       resources.push(db);
       expect(db.prepare('SELECT count(*) AS n FROM factory_settings').get()).toEqual({ n: 1 });
       expect(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()).toEqual({ n: 0 });
-      expect(inspectHistory(db)).toEqual({ kind: 'direct', schemaVersion: 54 });
+      expect(inspectHistory(db)).toEqual({ kind: 'direct', schemaVersion: 56 });
     } finally {
       exec.mockRestore();
     }
@@ -148,7 +148,7 @@ describe('fixed local installation', () => {
     const reopened = new Database(filename);
     resources.push(reopened);
     expect(Number(reopened.pragma('application_id', { simple: true }))).toBe(applicationId);
-    expect(Number(reopened.pragma('user_version', { simple: true }))).toBe(53);
+    expect(Number(reopened.pragma('user_version', { simple: true }))).toBe(loadSchemaRecognitionResources().currentLedgerUserVersion);
     expect(reopened.prepare('SELECT version,name,checksum,applied_at_ms FROM schema_migrations ORDER BY version').all()).toEqual(ledger);
     expect(reopened.pragma('foreign_key_check')).toEqual([]);
   });
@@ -165,7 +165,9 @@ describe('fixed local installation', () => {
       .run('001_initial_settings.sql', '0'.repeat(64));
     const before = snapshotFiles(filename);
     const resourcePaths = [
-      new URL('../../../../../resources/storage/initial-schema.v54.sql', import.meta.url),
+      new URL('../../../../../resources/storage/initial-schema.v55.sql', import.meta.url),
+      new URL('../../../../../resources/storage/initial-schema.v56.sql', import.meta.url),
+      new URL('../../../../../resources/storage/055_issue_history_repository_reference.sql', import.meta.url),
       new URL('../../../../../resources/storage/schema-recognition.v1.json', import.meta.url),
     ];
     const resourceHashes = resourcePaths.map(url => sha256(readFileSync(url)));
@@ -181,7 +183,7 @@ describe('fixed local installation', () => {
   });
 
   it.each([
-    ['future version', 'PRAGMA user_version = 55', 'DATABASE_NEWER_THAN_APPLICATION'],
+    ['future version', 'PRAGMA user_version = 57', 'DATABASE_NEWER_THAN_APPLICATION'],
     ['unknown identity', 'PRAGMA application_id = 1', 'DATABASE_UNKNOWN'],
     ['partial schema', 'DROP TABLE project_storage_locations', 'DATABASE_SCHEMA_INCOMPATIBLE'],
   ] as const)('refuses %s without changing the current database files', (_name, sql, code) => {

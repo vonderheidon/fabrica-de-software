@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { join, resolve } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ConfigurationView, OperationView, SessionResponse, StorageTransitionCommand } from '#contracts';
+import { ConfigurationView, OperationView, SessionResponse, StorageTransitionCommand, managedWorkspaceReference } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createGitHub } from '../../apps/controller/src/modules/github/index.js';
@@ -79,7 +79,7 @@ describe('project storage transition', () => {
       reopened = openStorage({ dataDirectory: f.directory });
       const recovered = createProjectStorageInspector(f.directory, undefined, reopened);
       expect(await recovered.resolveAttemptRoot(operation.resource.id)).toBe(managed);
-      expect(reopened.getAttemptWorkspaceReference(operation.resource.id)).toBe(`projects/${f.projectId}/v1/managed/work/${operation.resource.id}/implementation`);
+      expect(reopened.getAttemptWorkspaceReference(operation.resource.id)).toBe(managedWorkspaceReference(f.projectId, reopened.getAttemptCapture(operation.resource.id).issue.number));
     } finally {
       reopened?.close();
       await f.close();
@@ -145,8 +145,11 @@ describe('project storage transition', () => {
     expect(readFileSync(resolve(f.installRoot, ...plan.destination_relative.split('/'), 'payload.txt'), 'utf8')).toBe('preserve this project data');
     const referenceAttempt = randomUUID();
     const resolver = createProjectStorageInspector(f.dataDirectory, undefined, {
-      getAttemptProjectId: () => f.projectId,
-      getAttemptWorkspaceReference: () => `projects/${f.projectId}/v1/managed/work/${referenceAttempt}/implementation`,
+      getAttemptWorkspaceBinding: () => ({ attempt_id: referenceAttempt,
+        workspace: { project_id: f.projectId, repository_id: 'R_test', issue_id: 'I_test' }, issue_number: 17, resource_id: referenceAttempt,
+        environment_reference: managedWorkspaceReference(f.projectId, 17), predecessor_attempt_id: null,
+        initial_state: { kind: 'base_checkout' as const, content_identity: 'a'.repeat(40) }, inherited_base_sha: null,
+        comparison_base_sha: 'a'.repeat(40), resolution_state: 'candidate' as const }),
       getProjectStorageView: id => f.storage.getProjectStorageView(id),
       getStorageTransition: id => f.storage.getStorageTransition(id),
       recordProjectStorageLocation: observation => f.storage.recordProjectStorageLocation(observation),
@@ -204,8 +207,11 @@ describe('project storage transition', () => {
     expect(pending.json<ConfigurationView>().storage).toMatchObject({ state: 'uncertain', active_transition_operation_id: operationId });
     const referenceAttempt = randomUUID();
     const resolver = createProjectStorageInspector(f.dataDirectory, undefined, {
-      getAttemptProjectId: () => f.projectId,
-      getAttemptWorkspaceReference: () => `projects/${f.projectId}/v1/managed/work/${referenceAttempt}/implementation`,
+      getAttemptWorkspaceBinding: () => ({ attempt_id: referenceAttempt,
+        workspace: { project_id: f.projectId, repository_id: 'R_test', issue_id: 'I_test' }, issue_number: 17, resource_id: referenceAttempt,
+        environment_reference: managedWorkspaceReference(f.projectId, 17), predecessor_attempt_id: null,
+        initial_state: { kind: 'base_checkout' as const, content_identity: 'a'.repeat(40) }, inherited_base_sha: null,
+        comparison_base_sha: 'a'.repeat(40), resolution_state: 'candidate' as const }),
       getProjectStorageView: id => restartedStorage.getProjectStorageView(id),
       getStorageTransition: id => restartedStorage.getStorageTransition(id),
       recordProjectStorageLocation: observation => restartedStorage.recordProjectStorageLocation(observation),

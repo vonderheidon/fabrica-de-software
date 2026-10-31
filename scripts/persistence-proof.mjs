@@ -85,10 +85,10 @@ export function assertPhysicalRecovery(recovery) {
         counts.passageResults === 4 && counts.reviews === 2 && typeof counts.findings === 'number' && counts.findings >= 1 &&
         typeof counts.findingResolutions === 'number' && counts.findingResolutions >= 1;
     });
-  if (!clean || !cleanCounts || clean.openedByNormalStoragePath !== true || clean.directoryCreatedExclusive !== true || clean.schemaVersion !== 54 ||
+  if (!clean || !cleanCounts || clean.openedByNormalStoragePath !== true || clean.directoryCreatedExclusive !== true || clean.schemaVersion !== 55 ||
     clean.integrityCheck !== 'ok' || !Array.isArray(clean.foreignKeyViolations) || clean.foreignKeyViolations.length !== 0 ||
     clean.accountId !== null || cleanCounts.accounts !== 0 || cleanCounts.profiles !== 0 || cleanCounts.projects !== 0 || cleanCounts.preparations !== 0 || cleanCounts.attempts !== 0 ||
-    integrity.length !== 3 || integrity.some(item => !isRecord(item) || item.schemaVersion !== 54 || item.integrityCheck !== 'ok' ||
+    integrity.length !== 3 || integrity.some(item => !isRecord(item) || item.schemaVersion !== 55 || item.integrityCheck !== 'ok' ||
       item.foreignKeyViolations !== 0 || !Array.isArray(item.retiredTables) || item.retiredTables.length !== 0) || !referencesValid) {
     throw new Error('PROOF_PERSISTENCE_REFERENCES_MISSING');
   }

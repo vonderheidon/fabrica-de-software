@@ -29,10 +29,11 @@ function recordEvidence(evidence: string, db: Database.Database, attemptId: stri
   expect(identities).toHaveLength(6); expect(new Set(identities.map(item => item.cwd)).size).toBe(1);
   for (const role of new Set(identities.map(item => item.roleDigest))) expect(new Set(identities.filter(item => item.roleDigest === role).map(item => item.sessionId)).size).toBe(1);
   for (const item of identities) expect(item).toMatchObject({ provider: 'openai-codex', model: 'gpt-6-luna', effort: 'high' });
-  const location = db.prepare('SELECT l.root_relative FROM project_storage_locations l JOIN attempts a ON a.project_id=l.project_id WHERE a.id=? AND l.is_current=1 AND l.location_key=?').get(attemptId, 'managed') as { root_relative: string };
+  const location = db.prepare('SELECT l.root_relative,a.issue_number FROM project_storage_locations l JOIN attempts a ON a.project_id=l.project_id WHERE a.id=? AND l.is_current=1 AND l.location_key=?').get(attemptId, 'managed') as { root_relative: string; issue_number: number };
   const managedRoot = resolve(directory, '..', '..', location.root_relative);
-  expect(existsSync(join(managedRoot, 'work', attemptId, 'reviews'))).toBe(false);
-  expect(readFileSync(join(managedRoot, 'work', attemptId, 'implementation', 'value.txt'), 'utf8').trim()).toBe('3');
+  const workspace = join(managedRoot, 'issues', String(location.issue_number), 'workspace');
+  expect(existsSync(join(workspace, 'reviews'))).toBe(false);
+  expect(readFileSync(join(workspace, 'value.txt'), 'utf8').trim()).toBe('3');
   writeFileSync(join(evidence, 'result.json'), JSON.stringify({ ok: true, profile: 'openai-codex/gpt-6-luna/high', sessions, passages, singleCheckout: true,
     limits: ['GitHub authority is a controlled fixture port; Git clone/capture/diff/integrity, OMP, Maestri, SQLite, shared cwd and Windows process jobs are real.'], dataDirectory: directory }, null, 2));
 }
@@ -61,8 +62,10 @@ it('continues both real OMP conversations over three versions with native proces
   setupGit(['add', '--', 'value.txt', '.gitignore']); setupGit(['-c', 'user.name=Factory proof', '-c', 'user.email=proof@factory.invalid', 'commit', '-m', 'Proof baseline']);
   const f = await attemptFixture(evidence, setupGit(['rev-parse', 'HEAD']), 'high', 'var/factory');
   const git = createGitReader({ kind: 'windows_keyring', executable: gitExe });
-  const { resolveAttemptRoot } = createProjectStorageInspector(f.directory, undefined, f.storage);
-  const shared = createAttemptMaterializer(f.directory, git, undefined, resolveAttemptRoot);
+  const projectStorage = createProjectStorageInspector(f.directory, undefined, f.storage);
+  const { resolveAttemptRoot } = projectStorage;
+  const resolveAttemptWorkspace = (id: string) => projectStorage.resolveAttemptWorkspace(id);
+  const shared = createAttemptMaterializer(f.directory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace);
   const profileChanges = f.storage.getGlobalConfiguration().view.profiles.map(profile => ({ action: 'update' as const, id: profile.id,
     changes: { provider: 'openai-codex', model: 'gpt-6-luna', effort: 'high',
       guidance: `This is an authorized tiny runtime proof. Stay in the assigned cwd. Use native tools only. Do not use network, Git, MCPs or subagents. Do not change model or session. ${profile.profile_type === 'implementer'
@@ -85,6 +88,7 @@ it('continues both real OMP conversations over three versions with native proces
   }
   const execution = createMaestriOmp({ dataDirectory: f.directory, persistence: f.persistence, host,
     projectStorageRootForAttempt: resolveAttemptRoot,
+    projectStorageAreaForAttempt: projectStorage.resolveAttemptArea,
     validateReviewerResult: async binding => {
       const review = f.storage.getReview(binding.deliveryVersion)!;
       await shared(f.storage.getDelivery(binding.deliveryVersion).delivery, review.id);
@@ -109,10 +113,10 @@ it('continues both real OMP conversations over three versions with native proces
   execution.startPassage = (...args) => { authorizePassage(); return startPassage(...args); };
   execution.continuePassage = (...args) => { authorizePassage(); return continuePassage(...args); };
   Object.assign(f.execution, execution);
-  const prepare = createWorkspacePreparer(f.directory, git, undefined, resolveAttemptRoot);
+  const prepare = createWorkspacePreparer(f.directory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace);
   f.workspaces.prepareAttempt.mockImplementation(input => prepare({ ...input, source: { ...input.source, kind: 'local', location: seed } }));
   Object.assign(f.workspaces, {
-    captureDelivery: createCapturer(f.directory, git, undefined, resolveAttemptRoot),
+    captureDelivery: createCapturer(f.directory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace),
     materializeReview: shared,
     getDeliveryDiff: createDeliveryDiff(f.directory, git, undefined, resolveAttemptRoot),
   });
