@@ -164,6 +164,33 @@ describe('supported OMP extension on the same TUI', () => {
     expect(await pending).toMatchObject({ details: { accepted: true } });
     await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
+  it('queues cancellation at the next OMP step boundary and acknowledges only after the run drains', async () => {
+    const f = fixture(); await f.start(); await authorizeTask();
+    const operationId = randomUUID();
+    await f.handlers.get('tool_execution_start')!({ toolCallId: 'build', toolName: 'bash' }, f.context);
+    await seam.frame!({ type: 'cancel-request', operationId });
+    expect(f.api.sendUserMessage).toHaveBeenLastCalledWith(expect.stringContaining('cancelada'), { deliverAs: 'aside' });
+    expect(seam.send).not.toHaveBeenCalledWith({ type: 'cancel-settled', operationId });
+    await f.handlers.get('agent_end')!({ type: 'agent_end', messages: [] }, f.context);
+    expect(seam.send).not.toHaveBeenCalledWith({ type: 'cancel-settled', operationId });
+    await f.handlers.get('tool_execution_end')!({ toolCallId: 'build', toolName: 'bash' }, f.context);
+    await f.handlers.get('agent_end')!({ type: 'agent_end', messages: [] }, f.context);
+    expect(seam.send).toHaveBeenLastCalledWith({ type: 'cancel-settled', operationId });
+    await f.handlers.get('session_shutdown')!(undefined, f.context);
+  });
+  it('does not send an aside that would interrupt an active OMP wait', async () => {
+    const f = fixture(); await f.start(); await authorizeTask();
+    const operationId = randomUUID();
+    await f.handlers.get('tool_execution_start')!({ toolCallId: 'job-wait', toolName: 'wait' }, f.context);
+    await seam.frame!({ type: 'cancel-request', operationId });
+    expect(f.api.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(seam.send).not.toHaveBeenCalledWith({ type: 'cancel-settled', operationId });
+    await f.handlers.get('tool_execution_end')!({ toolCallId: 'job-wait', toolName: 'wait' }, f.context);
+    expect(f.api.sendUserMessage).toHaveBeenLastCalledWith(expect.stringContaining('cancelada'), { deliverAs: 'aside' });
+    await f.handlers.get('agent_end')!({ type: 'agent_end', messages: [] }, f.context);
+    expect(seam.send).toHaveBeenLastCalledWith({ type: 'cancel-settled', operationId });
+    await f.handlers.get('session_shutdown')!(undefined, f.context);
+  });
   it('registers only the two role schemas, submits the task exactly once after durable authorization and preserves native API access', async () => {
     const f = fixture(); expect([...f.tools.keys()]).toEqual(['execution_complete', 'execution_question']);
     await f.start(); expect(f.api.sendUserMessage).not.toHaveBeenCalled();

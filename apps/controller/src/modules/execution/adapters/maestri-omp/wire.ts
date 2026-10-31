@@ -3,7 +3,7 @@ import { ExecutionError, type ExecutionCode } from '../../errors.js';
 
 export const executionLimits = Object.freeze({
   frameBytes: 1_048_576, queuedFrames: 16, socketBufferBytes: 2_097_152,
-  handshakeMs: 30_000, requestMs: 15_000, cliMs: 15_000, cliBytes: 1_048_576,
+  handshakeMs: 30_000, requestMs: 15_000, cancelMs: 30_000, cliMs: 15_000, cliBytes: 1_048_576,
   connections: 4, pendingCalls: 8, passages: 128,
 });
 

@@ -16,6 +16,7 @@ const Call = Type.Object({
   tool: Type.Union([Type.Literal('execution_complete'), Type.Literal('execution_question')]), payload: Type.Unknown(),
 }, { additionalProperties: false });
 const AnswerReceipt = Type.Object({ type: Type.Literal('answer-receipt'), operationId: OperationId }, { additionalProperties: false });
+const CancelSettled = Type.Object({ type: Type.Literal('cancel-settled'), operationId: OperationId }, { additionalProperties: false });
 const Submitted = Type.Object({ type: Type.Literal('task-submitted') }, { additionalProperties: false });
 const Lost = Type.Object({ type: Type.Literal('tracking-lost') }, { additionalProperties: false });
 type Native = ReturnType<typeof createNative>;
@@ -30,7 +31,11 @@ interface LivePassage {
   idle?: { resolve: () => void; reject: () => void } | undefined;
   continuation: { resolve: (record: PassageRecord) => void; reject: () => void } | undefined;
   request: PassageRequest; channel: PassageChannel | undefined; bootstrap: Bootstrap | undefined;
-  native: Native; session: Hello | undefined; cancelled: boolean; revoked: boolean; stopped: boolean;
+  native: Native; session: Hello | undefined; readyAccepted: boolean; cancelled: boolean; revoked: boolean; stopped: boolean;
+  cancelRequested: boolean; cancelOperationId?: string; cancelTimedOut?: boolean;
+  cancelAcknowledged?: (state: 'acknowledged' | 'lost') => void;
+  cancelPromise?: Promise<StopReceipt>; cancelFinalization?: Promise<StopReceipt>;
+  cancelUncertainRecorded?: boolean;
   terminalGeneration: number;
   launchPending: boolean; launchIssued: boolean; storageFailed: boolean;
   stopResult?: Promise<StopReceipt>;
@@ -151,6 +156,63 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     })();
     return entry.stopResult;
   };
+  const finishCancellation = (entry: LivePassage): Promise<StopReceipt> => {
+    if (entry.cancelFinalization) return entry.cancelFinalization;
+    entry.cancelFinalization = (async () => {
+      entry.cancelled = true;
+      entry.revoked = true;
+      entry.idle?.reject(); entry.idle = undefined;
+      entry.continuation?.reject(); entry.continuation = undefined;
+      entry.failed('CANCELLED');
+      for (const pending of entry.answers.values()) pending.reject();
+      entry.answers.clear();
+      try { await entry.channel?.close(); }
+      catch { entry.storageFailed = true; }
+      return stop(entry);
+    })();
+    return entry.cancelFinalization;
+  };
+  const recordCancellationUncertain = (entry: LivePassage, code: ExecutionCode): StopReceipt => {
+    entry.cancelled = true; entry.revoked = true;
+    entry.idle?.reject(); entry.idle = undefined;
+    entry.continuation?.reject(); entry.continuation = undefined;
+    entry.failed(code);
+    for (const pending of entry.answers.values()) pending.reject();
+    entry.answers.clear();
+    const receipt: StopReceipt = { passageId: entry.request.binding.passageId, state: 'uncertain' };
+    if (!entry.cancelUncertainRecorded) {
+      entry.cancelUncertainRecorded = true;
+      try { store.recordStop(handleOf(receipt.passageId), receipt); }
+      catch { entry.storageFailed = true; }
+    }
+    entry.cancelAcknowledged?.('lost');
+    return receipt;
+  };
+  const requestGracefulCancellation = (entry: LivePassage, operationId: string): Promise<StopReceipt> => {
+    if (entry.cancelPromise) return entry.cancelPromise;
+    entry.cancelRequested = true; entry.cancelOperationId = operationId;
+    let acknowledge!: (state: 'acknowledged' | 'lost') => void;
+    const acknowledgement = new Promise<'acknowledged' | 'lost'>(resolve => { acknowledge = resolve; });
+    entry.cancelAcknowledged = acknowledge;
+    entry.cancelPromise = (async () => {
+      try { await entry.channel!.send({ type: 'cancel-request', operationId }); }
+      catch { return recordCancellationUncertain(entry, 'TRACKING_LOST'); }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const state = await Promise.race([
+        acknowledgement,
+        new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), executionLimits.cancelMs); }),
+      ]);
+      clearTimeout(timer);
+      if (state === 'acknowledged') return finishCancellation(entry);
+      if (state === 'lost') return recordCancellationUncertain(entry, 'TRACKING_LOST');
+      entry.cancelTimedOut = true;
+      const receipt: StopReceipt = { passageId: entry.request.binding.passageId, state: 'requested' };
+      try { store.recordStop(handleOf(receipt.passageId), receipt); }
+      catch { entry.storageFailed = true; }
+      return receipt;
+    })();
+    return entry.cancelPromise;
+  };
 
   const start = async (request: PassageRequest, signal?: AbortSignal, resumedSessionId?: string): Promise<PassageRecord> => {
     await ensureHost();
@@ -189,12 +251,13 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     let timer: ReturnType<typeof setTimeout> | undefined;
     const entry: LivePassage = {
       request, native: runtime, channel: undefined, bootstrap: undefined, session: undefined, continuation: undefined,
-      cancelled: false, revoked: false, stopped: false, launchPending: false, launchIssued: false, storageFailed: false, answers: new Map(),
+      readyAccepted: false, cancelled: false, cancelRequested: false, revoked: false, stopped: false, launchPending: false, launchIssued: false, storageFailed: false, answers: new Map(),
       terminalGeneration: sessionCandidate.generation,
       ready: () => {
         if (settled) return;
         try { store.confirmReady(initial.handle, request.profile, validation.ompVersion); }
         catch (error) { throw new ExecutionError(codeOf(error, 'STORAGE_FAILED')); }
+        entry.readyAccepted = true;
         settled = true; clearTimeout(timer); finish();
       },
       failed: (code) => {
@@ -238,6 +301,12 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           await entry.channel?.send({ type: 'run' });
         },
         frame: async (frame) => {
+          if (Value.Check(CancelSettled, frame)) {
+            if (!entry.cancelRequested || entry.cancelOperationId !== frame.operationId) throw new ExecutionError('FRAME_INVALID');
+            entry.cancelAcknowledged?.('acknowledged');
+            if (entry.cancelTimedOut) await finishCancellation(entry);
+            return;
+          }
           if (entry.cancelled || closed) throw new ExecutionError('CANCELLED');
           if (Value.Check(Lost, frame)) throw new ExecutionError('TRACKING_LOST');
           if (frame && typeof frame === 'object' && 'type' in frame && frame.type === 'continuation-idle' &&
@@ -270,19 +339,26 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
             entry.answers.delete(frame.operationId); return;
           }
           const currentHandle = handleOf(entry.request.binding.passageId);
+          if (entry.cancelRequested && Value.Check(Call, frame)) {
+            await entry.channel?.send({ type: 'reply', id: frame.id, ok: false, code: 'CANCELLED' });
+            return;
+          }
           if (!Value.Check(Call, frame) || store.getPassage(currentHandle).state !== 'ready') throw new ExecutionError('FRAME_INVALID');
           let reply: unknown;
           try {
             if (frame.tool === 'execution_complete') {
               const result = validateResult(entry.request, frame.payload);
               if (!store.getResult(currentHandle)) await options.validatePassageScope?.(entry.request.binding);
+              if (entry.cancelRequested) throw new ExecutionError('CANCELLED');
               if (entry.request.binding.role === 'reviewer' && !store.getResult(currentHandle)) {
                 if (!options.validateReviewerResult) throw new ExecutionError('RESOURCE_INVALID');
                 await options.validateReviewerResult(entry.request.binding);
               }
+              if (entry.cancelRequested) throw new ExecutionError('CANCELLED');
               const record = store.acceptResult({ binding: entry.request.binding, result, sha256: digest(result) });
               reply = { type: 'reply', id: frame.id, ok: true, receiptId: record.receiptId };
             } else {
+              if (entry.cancelRequested) throw new ExecutionError('CANCELLED');
               if (!Value.Check(ExecutionQuestion, frame.payload)) throw new ExecutionError('RESULT_INVALID');
               const question = store.raiseQuestion({ binding: entry.request.binding, question: frame.payload, sha256: digest(frame.payload) });
               reply = { type: 'reply', id: frame.id, ok: true, questionId: question.questionId };
@@ -296,7 +372,10 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           }
           await entry.channel?.send(reply);
         },
-        lost: (code) => { interrupt(entry, code); },
+        lost: (code) => {
+          if (entry.cancelRequested) { recordCancellationUncertain(entry, code); return; }
+          interrupt(entry, code);
+        },
       });
       entry.channel = channel;
       entry.bootstrap = await (dependencies.bootstrap ?? writeBootstrap)(options.dataDirectory, request, host, role, channel, validation.ompVersion,
@@ -366,7 +445,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     preparePassageHandoff: async source => {
       const entry = live.get(source.passageId); const prior = store.getPassage(source);
       if (entry?.handoff && entry.stopped && (await entry.stopResult)?.state === 'confirmed' && prior.state === 'ready') return;
-      if (closed || !entry?.session || !entry.channel || entry.cancelled || entry.idle || entry.handoff ||
+      if (closed || !entry?.session || !entry.channel || entry.cancelled || entry.cancelRequested || entry.idle || entry.handoff ||
           prior.state !== 'ready' || !store.getResult(source)) throw new ExecutionError('TRACKING_LOST');
       const session = store.getAttemptSession(source, prior.binding);
       if (session.state !== 'completed' || session.terminalState !== 'available' || session.ompSessionId !== entry.session.sessionId) throw new ExecutionError('TRACKING_LOST');
@@ -398,7 +477,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       const entry = live.get(source.passageId); const old = store.getPassage(source);
       const request = { ...input, cwd: input.cwd ?? entry?.request.cwd ?? '' };
       if (closed || !Value.Check(PassageRequest, request)) throw new ExecutionError('INPUT_INVALID');
-      if (!entry?.session || entry.cancelled || entry.continuation || !entry.channel || old.state !== 'ready' || !store.getResult(source) ||
+      if (!entry?.session || entry.cancelled || entry.cancelRequested || entry.continuation || !entry.channel || old.state !== 'ready' || !store.getResult(source) ||
         request.binding.role !== old.binding.role || request.binding.attemptId !== old.binding.attemptId || request.binding.round !== old.binding.round + 1 ||
         canonical(request.profile) !== canonical(entry.request.profile) || canonical(request.roleResource) !== canonical(entry.request.roleResource)) throw new ExecutionError('TRACKING_LOST');
       const previousSession = store.getAttemptSession(source, old.binding);
@@ -478,7 +557,7 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
     answerQuestion: async (handle, questionId, answer, operationId) => {
       if (![handle.passageId, questionId, operationId].every(id => Value.Check(OperationId, id)) || !answer.trim() || answer.length > 8192) throw new ExecutionError('INPUT_INVALID');
       const entry = live.get(handle.passageId);
-      if (!entry?.session || entry.cancelled || closed || store.getPassage(handle).state !== 'ready') throw new ExecutionError('TRACKING_LOST');
+      if (!entry?.session || entry.cancelled || entry.cancelRequested || closed || store.getPassage(handle).state !== 'ready') throw new ExecutionError('TRACKING_LOST');
       const recorded = store.recordAnswer(handle, questionId, answer, operationId);
       if (recorded.state !== 'recorded') return recorded;
       if (entry.answers.has(operationId)) return recorded;
@@ -517,6 +596,11 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
           store.recordStop(handle, receipt);
           return receipt;
         }
+        if (entry.cancelPromise) return entry.cancelPromise;
+        if (entry.stopResult) return entry.stopResult;
+        if (entry.session && entry.channel && entry.readyAccepted) {
+          return requestGracefulCancellation(entry, operationId);
+        }
         entry.cancelled = true; interrupt(entry, 'CANCELLED');
         await entry.channel?.close();
         return stop(entry);
@@ -527,11 +611,11 @@ export function createMaestriOmp(options: ExecutionOptions, roles: Map<PassageRo
       const entry = live.get(handle.passageId);
       const open = options.host?.openExistingTerminal;
       const session = entry?.session;
-      const available = Boolean(open && session && record.state === 'ready' && !entry?.cancelled && !closed);
+      const available = Boolean(open && session && record.state === 'ready' && !entry?.cancelled && !entry?.cancelRequested && !closed);
       return { kind: 'terminal', reference: record.managedTerminalName ?? record.terminalName, available,
         reason: available ? null : 'Abra a sessão existente no Maestri do host executor; abertura programática indisponível neste contexto.',
         open: available && open && session ? async () => {
-          if (closed || entry?.cancelled || store.getPassage(handle).state !== 'ready') throw new ExecutionError('INTERACTION_UNAVAILABLE');
+          if (closed || entry?.cancelled || entry?.cancelRequested || store.getPassage(handle).state !== 'ready') throw new ExecutionError('INTERACTION_UNAVAILABLE');
           await open({ terminalId: session.terminalId, workspaceId: session.workspaceId });
         } : null };
     },

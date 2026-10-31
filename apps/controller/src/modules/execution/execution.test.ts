@@ -751,13 +751,54 @@ describe('passage coordination under controlled native dependencies', () => {
     const f = fixture(); await f.start(); let release!: () => void;
     const stopped = new Promise<void>(r => { release = r; });
     f.runtime.stop.mockImplementation(async () => { await stopped; return 'uncertain'; });
-    const one = f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
+    const operationId = randomUUID();
+    const one = f.execution.cancelAttempt(f.request.binding.attemptId, operationId);
     const two = f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
+    expect(f.frames).toContainEqual({ type: 'cancel-request', operationId });
+    expect(f.runtime.stop).not.toHaveBeenCalled();
+    await f.callbacks().frame({ type: 'cancel-settled', operationId });
     await vi.waitFor(() => expect(f.runtime.stop).toHaveBeenCalledExactlyOnceWith(f.store.getAttemptSession({ passageId: f.request.binding.passageId }).terminalName,
       { workspaceId: f.hello.workspaceId, terminalId: f.hello.terminalId }, 1));
     release(); expect((await one)[0]?.state).toBe('uncertain'); expect((await two)[0]?.state).toBe('uncertain');
     await f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID()); expect(f.runtime.stop).toHaveBeenCalledTimes(1);
     expect(f.execution.interactionSurface({ passageId: f.request.binding.passageId }).available).toBe(false);
+    await f.execution.close();
+  });
+  it('waits for the OMP cancellation boundary before stopping a ready terminal', async () => {
+    const f = fixture(); await f.start();
+    const operationId = randomUUID(); f.runtime.stop.mockResolvedValue('confirmed');
+    const cancellation = f.execution.cancelAttempt(f.request.binding.attemptId, operationId);
+    expect(f.frames).toContainEqual({ type: 'cancel-request', operationId });
+    expect(f.close).not.toHaveBeenCalled(); expect(f.runtime.stop).not.toHaveBeenCalled();
+    await f.callbacks().frame({ type: 'cancel-settled', operationId });
+    expect(await cancellation).toEqual([{ passageId: f.request.binding.passageId, state: 'confirmed' }]);
+    expect(f.runtime.stop).toHaveBeenCalledOnce(); expect(f.close).toHaveBeenCalledOnce();
+    expect(f.store.recordStop).toHaveBeenLastCalledWith({ passageId: f.request.binding.passageId },
+      { passageId: f.request.binding.passageId, state: 'confirmed' });
+    await f.execution.close();
+  });
+  it('leaves the terminal alive after a cancellation timeout and stops it after a late OMP acknowledgement', async () => {
+    const f = fixture(); await f.start(); vi.useFakeTimers();
+    try {
+      const operationId = randomUUID();
+      const cancellation = f.execution.cancelAttempt(f.request.binding.attemptId, operationId);
+      await vi.advanceTimersByTimeAsync(executionLimits.cancelMs + 1);
+      expect(await cancellation).toEqual([{ passageId: f.request.binding.passageId, state: 'requested' }]);
+      expect(f.runtime.stop).not.toHaveBeenCalled(); expect(f.close).not.toHaveBeenCalled();
+      await f.callbacks().frame({ type: 'cancel-settled', operationId });
+      expect(f.runtime.stop).toHaveBeenCalledOnce();
+      expect(f.store.recordStop).toHaveBeenLastCalledWith({ passageId: f.request.binding.passageId },
+        { passageId: f.request.binding.passageId, state: 'uncertain' });
+    } finally { vi.useRealTimers(); await f.execution.close(); }
+  });
+  it('records uncertain cancellation without killing a terminal after channel loss', async () => {
+    const f = fixture(); await f.start();
+    const cancellation = f.execution.cancelAttempt(f.request.binding.attemptId, randomUUID());
+    f.callbacks().lost('CHANNEL_EOF');
+    expect(await cancellation).toEqual([{ passageId: f.request.binding.passageId, state: 'uncertain' }]);
+    expect(f.runtime.stop).not.toHaveBeenCalled();
+    expect(f.store.recordStop).toHaveBeenLastCalledWith({ passageId: f.request.binding.passageId },
+      { passageId: f.request.binding.passageId, state: 'uncertain' });
     await f.execution.close();
   });
   it('closes a lost channel and refuses further result authority without replacing its session', async () => {

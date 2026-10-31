@@ -31,7 +31,7 @@ interface ExtensionApi {
   registerTool(definition: { name: string; label: string; description: string; parameters: unknown;
     execute(id: string, payload: unknown, signal: AbortSignal, update: unknown, context: Context): Promise<ToolResult> }): void;
   getThinkingLevel(): string | undefined;
-  sendUserMessage(message: string, options?: { deliverAs: 'followUp' }): void;
+  sendUserMessage(message: string, options?: { deliverAs: 'followUp' | 'aside' }): void;
 }
 interface Launch {
   protocolVersion: 1; host: '127.0.0.1'; port: number; token: string; cwd: string; ompVersion: string; npmCacheDirectory: string;
@@ -92,6 +92,10 @@ export default function executionExtension(api: ExtensionApi): void {
   let idleCheck = false;
   let context: Context | undefined;
   let lossNotified = false;
+  let cancelOperationId: string | undefined;
+  let acknowledgedCancelOperationId: string | undefined;
+  let agentEndedAfterCancellation = false;
+  let cancellationMessageSent = false;
   const lose = () => {
     alive = false;
     awaitingTaskAuthorization = false;
@@ -105,8 +109,25 @@ export default function executionExtension(api: ExtensionApi): void {
   const currentEffort = () => api.getThinkingLevel() ?? null;
   const sameProfile = (ctx: Context) => ctx.model?.provider === initialProfile?.provider && ctx.model?.id === initialProfile?.model && currentEffort() === initialProfile?.effort;
   let initialProfile: { provider: string; model: string; effort: string | null } | undefined;
+  const reportCancellation = async () => {
+    const operationId = cancelOperationId;
+    if (!operationId || !agentEndedAfterCancellation || activeTools.size || pending.size) return;
+    if (!alive || !context || !sameSession(context) || !sameProfile(context) || !wire) throw new ExecutionError('TRACKING_LOST');
+    await wire.send({ type: 'cancel-settled', operationId });
+    cancelOperationId = undefined;
+    acknowledgedCancelOperationId = operationId;
+  };
+  const deliverCancellationMessage = () => {
+    if (!cancelOperationId || cancellationMessageSent || [...activeTools.values()].some(name => name.toLowerCase() === 'wait')) return;
+    if (!alive || !context || !sameSession(context) || !sameProfile(context)) throw new ExecutionError('TRACKING_LOST');
+    cancellationMessageSent = true;
+    api.sendUserMessage('A tentativa foi cancelada. Deixe terminar o comando e o lote de ferramentas já iniciados. Não comece novas alterações nem novos comandos; encerre esta execução sem enviar outro resultado oficial.',
+      { deliverAs: 'aside' });
+  };
   const request = async (tool: string, payload: unknown, ctx: Context): Promise<ToolResult> => {
     if (!alive || !taskAuthorized || !sameSession(ctx) || !sameProfile(ctx) || !wire) throw new ExecutionError('TRACKING_LOST');
+    if (cancelOperationId) return { content: [{ type: 'text', text: 'A tentativa foi cancelada. Encerre sem iniciar outras tarefas.' }],
+      details: { accepted: false, code: 'CANCELLED' }, isError: true };
     if (pending.size >= executionLimits.pendingCalls) throw new ExecutionError('CHANNEL_TIMEOUT');
     const id = randomUUID();
     const reply = await new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -147,6 +168,15 @@ export default function executionExtension(api: ExtensionApi): void {
   });
   api.on('tool_execution_end', (event) => {
     const e = object(event); if (typeof e.toolCallId === 'string') activeTools.delete(e.toolCallId);
+    try { deliverCancellationMessage(); }
+    catch { wire?.close('TRACKING_LOST'); lose(); return; }
+    void reportCancellation().catch(() => { wire?.close('TRACKING_LOST'); lose(); });
+  });
+  api.on('agent_end', async () => {
+    if (!cancelOperationId) return;
+    agentEndedAfterCancellation = true;
+    try { await reportCancellation(); }
+    catch { wire?.close('TRACKING_LOST'); lose(); }
   });
   api.on('session_start', async (_event, ctx) => {
     if (started || ctx.mode !== 'tui' || !ctx.hasUI || !process.stdin.isTTY || !process.stdout.isTTY || !ctx.model) {
@@ -169,6 +199,19 @@ export default function executionExtension(api: ExtensionApi): void {
         const gitNexus = launch.gitNexusRequired ? `\nGitNexus is required. Analyze and query exactly this clone root: ${launch.cwd}. Confirm that the returned root matches.` : '';
         // This is the sole task submission. No CLI prompt, stdin piping or second hidden agent.
         api.sendUserMessage(`Instruções comportamentais efetivas do perfil capturado:\n${launch.guidance}\n\nContexto da tarefa e contrato técnico capturados:\n${gitNexus}\n\n${launch.task}`);
+      } else if (frame.type === 'cancel-request' && typeof frame.operationId === 'string' && /^[a-f0-9-]{36}$/i.test(frame.operationId)) {
+        if (!alive || !taskAuthorized || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');
+        if (acknowledgedCancelOperationId === frame.operationId) {
+          await wire?.send({ type: 'cancel-settled', operationId: frame.operationId });
+          return;
+        }
+        if (cancelOperationId && cancelOperationId !== frame.operationId) throw new ExecutionError('TRACKING_LOST');
+        if (!cancelOperationId) {
+          cancelOperationId = frame.operationId;
+          agentEndedAfterCancellation = false;
+          cancellationMessageSent = false;
+          deliverCancellationMessage();
+        }
       } else if (frame.type === 'continuation-check' && typeof frame.passageId === 'string' && /^[a-f0-9-]{36}$/.test(frame.passageId)) {
         if (!ctx.isIdle || !ctx.hasPendingMessages || idleCheck || !alive || !sameSession(ctx) || !sameProfile(ctx)) throw new ExecutionError('TRACKING_LOST');
         idleCheck = true;
