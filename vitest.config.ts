@@ -10,5 +10,6 @@ export default defineConfig({
     include: ['apps/controller/src/**/*.test.ts', 'apps/web/src/**/*.test.ts', 'packages/contracts/src/**/*.test.ts', 'tests/**/*.test.ts'],
     setupFiles: ['./tests/setup.ts'],
     testTimeout: 10_000,
+    maxWorkers: 8,
   },
 });
