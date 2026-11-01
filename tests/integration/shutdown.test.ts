@@ -22,7 +22,12 @@ function setup() {
   const app = createApp(loadConfiguration({ FACTORY_DATA_DIR: directory, FACTORY_LOG_LEVEL: 'silent' }, directory), storage);
   let closed = false;
   const closeObserved = new Promise<void>(resolve => app.addHook('onClose', async () => { closed = true; resolve(); }));
-  cleanups.push(async () => { if (!closed) await app.close(); db.close(); rmSync(directory, { recursive: true, force: true }); });
+  cleanups.push(async () => {
+    // The observation hook can run before storage's onClose hook releases SQLite.
+    await app.close();
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
   return { app, db, closeObserved, isClosed: () => closed };
 }
 

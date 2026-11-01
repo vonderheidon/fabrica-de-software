@@ -8,11 +8,11 @@ import { requestJson } from '../../api/http.js';
 vi.mock('../../api/http.js', () => ({ requestJson: vi.fn() }));
 let root: ReturnType<typeof createRoot>;
 let host: HTMLDivElement;
-let onClose: ReturnType<typeof vi.fn>;
+let onClose: () => void;
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.clearAllMocks();
-  host = document.createElement('div'); document.body.append(host); root = createRoot(host); onClose = vi.fn();
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host); onClose = vi.fn<() => void>();
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 async function mount() { await act(async () => root.render(createElement(ShutdownDialog, { onClose }))); }

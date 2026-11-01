@@ -1,10 +1,9 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderIssueProgress, writeIssueProgressFile, type IssueProgressDocument } from './issue-progress.js';
 
-const directory = async () => mkdtemp(join(tmpdir(), 'factory-issue-progress-'));
+const directory = async () => mkdtemp(join(process.cwd(), '.issue-progress-'));
 const document = (): IssueProgressDocument => ({
   identity: { projectId: 'project-1', repositoryId: 'repo-1', issueId: 'issue-24' },
   issueNumber: 24, issueTitle: 'Keep retry work', updatedAtMs: Date.UTC(2026, 9, 30, 12), milestone: 'workspace_ready',
