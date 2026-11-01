@@ -22,6 +22,9 @@ function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: 
 function prerequisite(code: string): Prerequisite {
   const content = issueContentPrerequisite(code);
   if (content) return content;
+  if (code === 'OPEN_BLOCKERS') return { code,
+    message: 'Esta issue tem dependências bloqueadoras abertas.',
+    recovery: 'Conclua as dependências no GitHub e consulte a issue novamente antes de revisar e iniciar.' };
   if (code === 'PUBLICATION_TARGET_REQUIRED') return { code,
     message: 'Esta issue por URL exige um destino local para Commit local ou Pull request.',
     recovery: 'Escolha um clone existente ou um caminho para criar o clone no destino da versão aprovada, salve e revise o resumo novamente.' };
@@ -273,6 +276,8 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     async revalidateSummary(input: { preparationId: string; preparationRevision: number; authorizedSummaryHash: string }) {
       const current = await getPreparation(input.preparationId);
       if (current.view.preparation.revision !== input.preparationRevision || current.view.preparation.summary_hash !== input.authorizedSummaryHash) {
+        const blocker = current.view.preparation.prerequisites.find(item => item.code === 'OPEN_BLOCKERS');
+        if (blocker) throw new OperationError(409, 'SUMMARY_CHANGED', blocker.message, { recovery: blocker.recovery });
         fail(409, 'SUMMARY_CHANGED', 'The material start summary changed. Review the current preparation.');
       }
       return current;
@@ -281,12 +286,27 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
       if (!Value.Check(CatalogQuery, query)) fail(400, 'ISSUE_QUERY_INVALID', 'Issue query is invalid.');
       const config = storage.getConfiguration(projectId); const mapping = config.view.configuration.github_project;
       if (!mapping) return { items: [], next_cursor: null, has_more: false, event_cursor: config.view.event_cursor, completeness: 'unavailable', diagnostics: [], retry_at_ms: null, prerequisites: [prerequisite('PROJECT_REQUIRED')] };
-      const observation = await github.listProjectItems(mapping.id);
+      const [observation, identity, project] = await Promise.all([
+        github.listProjectItems(mapping.id), github.getIdentity(), github.getProject(mapping.id),
+      ]);
       if (storage.getConfiguration(projectId).etag !== config.etag) fail(412, 'REVISION_CONFLICT', 'Configuration changed during issue selection.');
       const search = (query.search ?? '').toLocaleLowerCase('en');
-      const items = (observation.data ?? []).filter((item) => item.kind === 'issue' && !item.archived &&
+      const candidates = (observation.data ?? []).filter((item) => item.kind === 'issue' && !item.archived &&
         item.status?.fieldId === mapping.status_field_id && item.status.optionId === mapping.status_option_ids.ready &&
-        (item.title ?? '').toLocaleLowerCase('en').includes(search)).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+        (item.title ?? '').toLocaleLowerCase('en').includes(search)).sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+      const eligible = [];
+      const issueObservations = [];
+      for (const item of candidates) {
+        if (!item.contentId) continue;
+        const issue = await github.getIssueContextById(item.contentId, { purpose: 'queue' });
+        issueObservations.push(issue);
+        const readiness = assessIssueReadiness({ identity, issue, project,
+          expectedAccountId: config.view.settings.account_id ?? '', repositoryId: config.view.configuration.source.repository_id ?? '',
+          projectId: mapping.id, statusFieldId: mapping.status_field_id, readyOptionId: mapping.status_option_ids.ready });
+        if (issue.data?.id === item.contentId && readiness.eligible) eligible.push(item);
+      }
+      if (storage.getConfiguration(projectId).etag !== config.etag) fail(412, 'REVISION_CONFLICT', 'Configuration changed during issue selection.');
+      const items = eligible
         .map(({ contentId, status: _status, ...item }) => ({ ...item, content_id: contentId, executable: item.kind === 'issue' && !item.archived && observation.state === 'complete',
           reasons: item.kind !== 'issue' ? ['NOT_AN_ISSUE'] : item.archived ? ['PROJECT_ITEM_ARCHIVED'] : ['ISSUE_REVALIDATION_REQUIRED'] }));
       const scope = preparationDigest([config.view.settings.installation_id, config.view.settings.account_id, projectId, config.etag, search, observation.state, items]);
@@ -298,9 +318,10 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
         offset = cursor.offset;
       }
       const limit = Number(query.limit ?? '25'); const hasMore = offset + limit < items.length;
+      const reads = [observation, identity, project, ...issueObservations];
       return { items: items.slice(offset, offset + limit), has_more: hasMore, next_cursor: hasMore ? Buffer.from(JSON.stringify({ scope, offset: offset + limit })).toString('base64url') : null,
-        event_cursor: config.view.event_cursor, completeness: observation.state === 'complete' ? 'complete' : observation.data ? 'partial' : 'unavailable',
-        diagnostics: observation.diagnostics, retry_at_ms: observation.retryAtMs, prerequisites: [prerequisite('ISSUE_REVALIDATION_REQUIRED')] };
+        event_cursor: config.view.event_cursor, completeness: reads.every(read => read.state === 'complete') ? 'complete' : observation.data ? 'partial' : 'unavailable',
+        diagnostics: reads.flatMap(read => read.diagnostics), retry_at_ms: reads.reduce<number | null>((latest, read) => read.retryAtMs === null ? latest : Math.max(latest ?? 0, read.retryAtMs), null), prerequisites: [prerequisite('ISSUE_REVALIDATION_REQUIRED')] };
     },
   };
 }

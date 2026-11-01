@@ -49,7 +49,7 @@ function fixture() {
     remote: { name: null, url: repository.url, confirmed: true, repository, branch: { repositoryId: repository.id, name: 'main', sha: baseSha } }, diagnostics: [], githubDiagnostics: [], retryAtMs: null, executionReady: false };
   const github: PreparationDependencies['github'] = {
     getIdentity: vi.fn(async () => complete({ id: 'ACCOUNT_test', login: 'test-user' })),
-    getIssueContextById: vi.fn(async () => complete(structuredClone(issue))),
+    getIssueContextById: vi.fn(async (id: string) => complete({ ...structuredClone(issue), id })),
     getProject: vi.fn(async () => complete(structuredClone(project))),
     listProjectItems: vi.fn(async () => complete([
       { id: 'ITEM_test', kind: 'issue' as const, archived: false, contentId: issue.id, title: issue.title, url: issue.url, executable: true, status: { fieldId: mapping.status_field_id, optionId: mapping.status_option_ids.ready } },
@@ -242,6 +242,24 @@ describe('persistent preparation HTTP contracts', () => {
     const second = await f.app.inject({ url: `${url}?limit=1&cursor=${page.next_cursor}`, headers }); expect(second.statusCode).toBe(200);
     const all = await f.preparations.listIssues(f.projectId, {}); expect(all.items.every((v) => v.kind === 'issue')).toBe(true);
     await expect(f.preparations.listIssues(f.projectId, { cursor: page.next_cursor, search: 'other' })).rejects.toMatchObject({ code: 'ISSUE_OPTIONS_CHANGED' });
+  });
+  it('omits open blockers and incomplete dependency reads, then restores resolved issues', async () => {
+    const f = fixture();
+    f.issue.blockers = [{ id: 'I_block', number: 9, title: 'Dependency', url: `${f.issue.repository.url}/issues/9`, state: 'OPEN' }];
+    expect((await f.preparations.listIssues(f.projectId, {})).items).toEqual([]);
+    f.issue.blockers[0]!.state = 'CLOSED';
+    expect((await f.preparations.listIssues(f.projectId, {})).items.length).toBeGreaterThan(0);
+    vi.mocked(f.github.getIssueContextById).mockResolvedValue({ ...complete(f.issue), state: 'partial' });
+    expect((await f.preparations.listIssues(f.projectId, {})).items).toEqual([]);
+  });
+  it('revalidates blockers after listing and invalidates the authorized summary', async () => {
+    const f = fixture();
+    expect((await f.preparations.listIssues(f.projectId, {})).items.length).toBeGreaterThan(0);
+    const first = await create(f); const p = first.json<PreparationCreated>().preparation;
+    f.issue.blockers = [{ id: 'I_block', number: 9, title: 'Dependency', url: `${f.issue.repository.url}/issues/9`, state: 'OPEN' }];
+    const current = await f.preparations.getPreparation(p.id);
+    expect(current.view.preparation.prerequisites.find(item => item.code === 'OPEN_BLOCKERS')?.message).toContain('dependências');
+    await expect(f.preparations.revalidateSummary({ preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash })).rejects.toMatchObject({ code: 'SUMMARY_CHANGED' });
   });
   it('only lists unarchived issues with the configured Ready status and field', async () => {
     const f = fixture();

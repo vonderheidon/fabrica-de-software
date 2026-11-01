@@ -30,6 +30,14 @@ async function start(f: AttemptFixture) {
 }
 
 describe('manual attempt composition and HTTP', () => {
+  it('rejects a blocker added after preparation without allocating a workspace or starting an agent', async () => {
+    const f = await fixture(); const command = await f.prepare();
+    f.issue.blockers = [{ id: 'I_dependency', number: 9, title: 'Dependency', url: `${f.issue.repository.url}/issues/9`, state: 'OPEN' }];
+    await expect(f.pipeline.startAttempt(command.body, command.context)).rejects.toMatchObject({ code: 'SUMMARY_CHANGED', message: expect.stringContaining('dependências') });
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+    expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 });
+  });
   it('initializes the first workspace after a predecessor failed before allocation, without inventing inherited content', async () => {
     const f = await fixture();
     Object.assign(f.workspaces, { migrateLegacyIssueHistory: vi.fn(async () => { throw new ProjectStorageError('PROJECT_STORAGE_ROOT_UNAVAILABLE'); }) });
