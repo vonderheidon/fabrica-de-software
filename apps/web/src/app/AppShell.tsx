@@ -419,9 +419,9 @@ export function AppShell() {
     </div>
     {dialog && <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDialog(); }}>
       <div className={`dialog${dialog === 'profile' ? ' profile-dialog' : ''}${dialog === 'initial-setup' ? ' initial-setup-dialog' : ''}${dialog === 'project-configuration' ? ' project-configuration-dialog' : ''}`} data-dialog={dialog} ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabIndex={-1} onClickCapture={interceptWizardNavigation}>
-        <div className="line dialog-toolbar"><span className="eyebrow">Nova Fábrica</span><button type="button" className="close-button" aria-label={dialog === 'profile' && profileClosePrompt ? 'Voltar à edição do perfil' : 'Fechar diálogo'} onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending || (dialog === 'initial-setup' || dialog === 'project-configuration') && wizardSaving}><CloseIcon /></button></div>
+        <div className="line dialog-toolbar"><span className="eyebrow">Nova Fábrica</span>{dialog !== 'shutdown' && <button type="button" className="close-button" aria-label={dialog === 'profile' && profileClosePrompt ? 'Voltar à edição do perfil' : 'Fechar diálogo'} onClick={closeDialog} disabled={dialog === 'profile' && profileSavePending || (dialog === 'initial-setup' || dialog === 'project-configuration') && wizardSaving}><CloseIcon /></button>}</div>
         <h2 id="dialog-title">{dialog === 'initial-setup' ? wizardDialogTitle : dialog === 'profile' && profileClosePrompt ? 'Descartar alterações do perfil?' : dialog === 'profile' ? (route.params.has('profileId') ? 'Editar perfil' : 'Criar perfil') : dialog === 'diagnostic' ? 'Diagnóstico de acesso' : labelForDialog(dialog)}</h2>
-        {dialog === 'shutdown' ? <ShutdownDialog onClose={closeDialog} pollingIntervalMs={deletionPollingIntervalMs} /> : dialog === 'project-configuration' ? <>
+        {dialog === 'shutdown' ? <ShutdownDialog onClose={closeDialog} /> : dialog === 'project-configuration' ? <>
           {wizardClosePrompt ? <section className="dialog-prompt" aria-labelledby="configuration-close-title">
             <span className="eyebrow">Alterações não salvas</span><h3 id="configuration-close-title">Sair da configuração do projeto?</h3>
             <p>As alterações ainda não foram salvas. Você pode continuar editando ou sair e manter o rascunho nesta sessão para retomar depois.</p>
@@ -511,7 +511,7 @@ function labelForDialog(dialog: DialogId): string {
     preparation: 'Preparar issue', 'start-confirmation': 'Confirmar início', 'enable-queue': 'Habilitar fila Ready',
     authority: 'Condições da tentativa', detail: 'Detalhe da tentativa', decision: 'Responder decisão', stop: 'Parada da tentativa',
     delivery: 'Entrega', publication: 'Reconciliação da publicação', diagnostic: 'Diagnóstico', interaction: 'Sessão operacional', profile: 'Perfil',
-    'initial-setup': 'Configuração inicial', 'project-configuration': 'Configuração do projeto', shutdown: 'Encerramento guiado',
+    'initial-setup': 'Configuração inicial', 'project-configuration': 'Configuração do projeto', shutdown: 'Encerrar controlador',
   };
   return labels[dialog];
 }

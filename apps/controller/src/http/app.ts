@@ -87,7 +87,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
   const security = installSecurity(app, configuration, storage.getSettings().installation_id, storage.controllerInstanceId);
   installEventRoutes(app, storage, security);
   installNotificationRoutes(app, storage);
-  installShutdownRoutes(app, storage);
+  installShutdownRoutes(app);
   const defaultGitHub = projectDependencies?.githubRuntime ?? createGitHub({ savedExecutablePath: storage.getGitHubExecutablePath });
   const github = projectDependencies?.github ?? defaultGitHub;
   const workspaces = projectDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub,

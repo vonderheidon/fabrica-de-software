@@ -1,8 +1,5 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { acceptShutdown, assertStartsAllowed, commitShutdown, initializeShutdown, readShutdown, type ShutdownRequest, type ShutdownToken } from './shutdown.js';
-export { shutdownETag } from './shutdown.js';
-import type { ShutdownQuery, ShutdownView } from '#contracts';
 import { claimNotification, recordNotificationReceipt, interruptNotificationDispatches, type NotificationCommand } from './notifications.js';
 export { notificationETag } from './notifications.js';
 import type { ClaimNotification, RecordNotificationReceipt, NotificationClaim, NotificationReceipt } from '#contracts';
@@ -37,7 +34,7 @@ import Database from 'better-sqlite3';
 import type { CatalogQuery, ConfigurationView, EventPage, EventQuery, FactorySettings, ProjectDetail, ProjectPage, SettingsView } from '#contracts';
 import { StorageError } from './errors.js';
 import { assertDatabaseSnapshotUnchanged, assertNoOrphanedDatabaseSidecars, captureDatabaseSnapshot, inspectExistingDatabase, type DatabaseSnapshot } from './database-inspection.js';
-import { initializeSchema, inspectHistory, loadSchemaRecognitionResources, type DatabaseRecognition } from './migrations.js';
+import { initializeSchema, inspectHistory, loadSchemaRecognitionResources, upgradeRecognizedSchema, type DatabaseRecognition } from './migrations.js';
 import { captureLocalHost, readGitHubExecutablePath, readLinkedGitHubAccount, readSettings, recordToolPreferenceValidation, seedSettings } from './settings.js';
 import { hasUncertainAccountCleanup, OperationError, readOperation, readCompletedProjectDeletion, saveTimeDefaults, settingsETag, type SaveTimeDefaults, type StoredOperation } from './operations.js';
 import { attemptEvent, createAttempt, interruptAttempts, readAttempt, readAttemptProjectId, readAttemptWorkspaceBinding, readAttemptWorkspaceReference, readCapture, recordImplementationBlocked, recordDispatchFailure, recordWorkspace, recordWorkspaceSnapshot, recoverAttempt, type AttemptCommand, type CreateAttempt } from './attempts.js';
@@ -100,10 +97,6 @@ export interface Storage {
   terminalRecoveryCandidates(): TerminalRecoveryCandidate[];
   reconcileTerminalAvailability(candidate: TerminalRecoveryCandidate, observation: 'stopped' | 'missing'): void;
   readonly controllerInstanceId: string;
-  getShutdown(query?: ShutdownQuery): ShutdownView;
-  acceptShutdown(command: ShutdownRequest): StoredOperation;
-  commitShutdown(token: ShutdownToken): boolean;
-  assertStartsAllowed(): void;
   claimNotification(command: NotificationCommand<ClaimNotification>): NotificationClaim;
   recordNotificationReceipt(command: NotificationCommand<RecordNotificationReceipt>): NotificationReceipt;
   sealDeliveryTarget(plan: DeliveryTargetPlan): ReturnType<typeof sealDeliveryTarget>;
@@ -287,9 +280,6 @@ function openStorageWithSchema(options: StorageOptions): Storage {
       snapshot = captureDatabaseSnapshot(filename);
       preflight = inspectExistingDatabase(filename, timeout, resources);
       assertDatabaseSnapshotUnchanged(filename, snapshot);
-      if (preflight && (preflight.kind === 'previous-direct' || preflight.kind === 'previous-ledger')) {
-        throw new StorageError('DATABASE_SCHEMA_INCOMPATIBLE');
-      }
     } else assertNoOrphanedDatabaseSidecars(filename);
     mkdirSync(directory, { recursive: true });
     db = new Database(filename, { timeout });
@@ -300,7 +290,8 @@ function openStorageWithSchema(options: StorageOptions): Storage {
       if (preflight && (current.kind !== preflight.kind || current.schemaVersion !== preflight.schemaVersion)) {
         throw new StorageError('DATABASE_CHANGED_DURING_OPEN');
       }
-      return current;
+      if (current.kind !== 'previous-direct' && current.kind !== 'previous-ledger') return current;
+      return upgradeRecognizedSchema(connection, resources);
     }).immediate();
     if (recognition.kind === 'empty') {
       recognition = initializeSchema(connection, () => seedSettings(connection), resources);
@@ -319,7 +310,6 @@ function openStorageWithSchema(options: StorageOptions): Storage {
     const retainedHistoryMigrations = createRetainedHistoryMigrations(connection);
     const resultListeners = new Set<(binding: PassageBinding) => void>();
     const controllerInstanceId = randomUUID();
-    initializeShutdown(connection, controllerInstanceId);
     interruptNotificationDispatches(connection);
     interruptStorageTransitions(connection);
     connection.prepare("UPDATE publication_target_selections SET state='unknown',revision=revision+1,reason='TARGET_INTERRUPTED',updated_at_ms=max(updated_at_ms,?) WHERE state='running'").run(Date.now());
@@ -328,10 +318,6 @@ function openStorageWithSchema(options: StorageOptions): Storage {
     });
     return {
       controllerInstanceId,
-      assertStartsAllowed: () => guarded(() => assertStartsAllowed(connection)),
-      getShutdown: (query = {}) => guarded(() => connection.transaction(() => readShutdown(connection, controllerInstanceId, query))()),
-      acceptShutdown: command => acceptShutdown(connection, controllerInstanceId, command),
-      commitShutdown: token => commitShutdown(connection, controllerInstanceId, token),
       deletionWorker: createDeletionWorkerPersistence(connection, directory),
       getProjectDeletionPaths: projectId => guarded(() => connection.transaction(() => readProjectDeletionPaths(connection, projectId, directory))()),
       acceptProjectDeletion: input => guarded(() => acceptProjectDeletion(connection, directory, input)),

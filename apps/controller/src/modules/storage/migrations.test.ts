@@ -22,43 +22,50 @@ function seedDirect55(db: Database.Database): void {
   db.pragma('user_version = 55');
   seedSettings(db);
 }
+function seedDirect56(db: Database.Database): void {
+  db.pragma('foreign_keys = ON');
+  db.exec(readFileSync(resolve('resources/storage/initial-schema.v56.sql'), 'utf8'));
+  db.pragma(`application_id = ${applicationId}`);
+  db.pragma('user_version = 56');
+  seedSettings(db);
+}
 afterEach(() => {
   for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 
-describe('schema 56 issue history repository reference', () => {
-  it('adds the new reference field to a direct schema 55 fixture without replacing settings', () => {
+describe('schema 57 immediate controller shutdown', () => {
+  it('removes the persisted shutdown barriers from a direct schema 56 fixture without replacing settings', () => {
     const upgraded = new Database(':memory:');
     try {
-      seedDirect55(upgraded);
+      seedDirect56(upgraded);
       const settingsBefore = upgraded.prepare('SELECT * FROM factory_settings').all();
-      expect(upgradeRecognizedSchema(upgraded)).toEqual({ kind: 'direct', schemaVersion: 56 });
-      expect(upgraded.pragma('user_version', { simple: true })).toBe(56);
-      expect(upgraded.prepare<[], { name: string }>("PRAGMA table_info('deliveries')").all().map(row => row.name))
-        .toContain('history_repository_relative');
+      expect(upgradeRecognizedSchema(upgraded)).toEqual({ kind: 'direct', schemaVersion: 57 });
+      expect(upgraded.pragma('user_version', { simple: true })).toBe(57);
+      expect(upgraded.prepare<[], { name: string }>("SELECT name FROM sqlite_schema WHERE type='trigger' AND name LIKE 'shutdown_%'").all()).toEqual([]);
+      expect(upgraded.prepare<[], { name: string }>("SELECT name FROM sqlite_schema WHERE type='index' AND name='shutdown_control_order'").all()).toEqual([]);
       expect(upgraded.prepare('SELECT * FROM factory_settings').all()).toEqual(settingsBefore);
       expect(upgraded.prepare('SELECT * FROM schema_migrations').all()).toEqual([]);
       expect(upgraded.pragma('foreign_key_check')).toEqual([]);
     } finally { upgraded.close(); }
   });
 
-  it('advances the existing migration ledger without losing its earlier entries', () => {
+  it('advances the schema 55 ledger through migration 056 without losing earlier entries', () => {
     const legacy = new Database(':memory:');
     legacy.pragma('foreign_keys = ON');
-    applyHistoricalSchemaFixture(legacy, loadMigrations().slice(0, 54), () => seedSettings(legacy));
+    applyHistoricalSchemaFixture(legacy, loadMigrations().slice(0, 55), () => seedSettings(legacy));
     const before = legacy.prepare('SELECT version,name,checksum,applied_at_ms FROM schema_migrations ORDER BY version').all();
     try {
-      expect(upgradeRecognizedSchema(legacy)).toEqual({ kind: 'historical-ledger', schemaVersion: 55 });
-      expect(legacy.pragma('user_version', { simple: true })).toBe(55);
+      expect(upgradeRecognizedSchema(legacy)).toEqual({ kind: 'historical-ledger', schemaVersion: 56 });
+      expect(legacy.pragma('user_version', { simple: true })).toBe(56);
       const ledger = legacy.prepare('SELECT version,name,checksum,applied_at_ms FROM schema_migrations ORDER BY version').all();
-      expect(ledger).toHaveLength(55);
-      expect(ledger.slice(0, 54)).toEqual(before);
-      expect(ledger[54]).toMatchObject({ version: 55, name: '055_issue_history_repository_reference.sql' });
+      expect(ledger).toHaveLength(56);
+      expect(ledger.slice(0, 55)).toEqual(before);
+      expect(ledger[55]).toMatchObject({ version: 56, name: '056_immediate_controller_shutdown.sql' });
       expect(legacy.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally { legacy.close(); }
   });
 
-  it('refuses the previous schema at runtime without modifying its database file', () => {
+  it('refuses schema 55 without modifying its database file', () => {
     const install = directory(); const dataDirectory = join(install, 'var', 'factory');
     const filename = join(dataDirectory, 'factory.sqlite'); const legacy = new Database(filename);
     seedDirect55(legacy); legacy.close();

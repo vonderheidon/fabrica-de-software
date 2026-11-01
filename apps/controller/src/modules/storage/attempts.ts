@@ -1,7 +1,6 @@
 import { serializeOperationReceipt } from './common-json.js';
 import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
-import { assertStartsAllowed } from './shutdown.js';
 import { hostname } from 'node:os';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -148,7 +147,6 @@ export function attemptEvent(db: Database.Database, id: string, type: string, pa
 export function createAttempt(db: Database.Database, input: CreateAttempt): { created: boolean; operation: StoredOperation } {
   return guarded(() => db.transaction(() => {
     const recovered = recoverAttempt(db, input.command); if (recovered) return { created: false, operation: recovered };
-    assertStartsAllowed(db);
     const capture = input.capture;
     if (!Value.Check(AttemptCapture, capture)) throw new OperationError(400, 'CAPTURE_INVALID', 'The attempt capture is invalid.');
     const preparation = readPreparation(db, input.command.body.preparationId);

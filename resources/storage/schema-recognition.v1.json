@@ -1,11 +1,11 @@
 {
   "format_version": 1,
   "application_id": 1313231665,
-  "direct_install_user_version": 56,
-  "previous_direct_install_user_version": 55,
-  "current_ledger_user_version": 55,
-  "current_schema_sha256": "30915ce935758ca9c2e1616671ef02ba420d688ac8c4beb51551ba9eb6d26266",
-  "previous_schema_sha256": "70d7ab623c1e620f1e06b470866908d08af17f7ac1563e149354edb3c7c788d0",
+  "direct_install_user_version": 57,
+  "previous_direct_install_user_version": 56,
+  "current_ledger_user_version": 56,
+  "current_schema_sha256": "069e4747a80d0322d42d326807752164f711652f9b07b1f8aca8fff3ac3b2b92",
+  "previous_schema_sha256": "30915ce935758ca9c2e1616671ef02ba420d688ac8c4beb51551ba9eb6d26266",
   "historical_ledger": [
     {
       "version": 1,
@@ -281,7 +281,12 @@
       "version": 55,
       "name": "055_issue_history_repository_reference.sql",
       "checksum": "f7146d9063ed712852bb3bebb703b08cb6430e09a71335d3d16e2405bc35723c"
+    },
+    {
+      "version": 56,
+      "name": "056_immediate_controller_shutdown.sql",
+      "checksum": "91ac968c6c2459fe5474fc09d1d2bf3fdd79fb827a058a0c3774e2b90637b5cc"
     }
   ],
-  "schema_sql_sha256": "40cbd60d3fe4c5a650c1b4ea3555662a6719b437e9b78c34f0a6877ecb46f465"
+  "schema_sql_sha256": "a9337a77974704c78836aee68e238615c1a864e17bccf9593cb57631bdb7e651"
 }

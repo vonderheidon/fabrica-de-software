@@ -242,7 +242,6 @@ export function createPipeline(deps: PipelineDependencies) {
     if (!Value.Check(StartAttempt, body)) throw new OperationError(400, 'START_INVALID', 'The start request is invalid.');
     const command = { ...context, body };
     const recovered = storage.recoverAttempt(command); if (recovered) return recovered;
-    storage.assertStartsAllowed();
     if (closed) throw new OperationError(503, 'PIPELINE_CLOSED', 'The controller is shutting down.');
     if (context.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
     const saved = storage.getPreparation(body.preparationId);

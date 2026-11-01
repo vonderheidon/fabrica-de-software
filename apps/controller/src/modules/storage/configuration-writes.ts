@@ -2,7 +2,6 @@ import { storeStatusOptions, storeQueueOrder } from './configuration-json.js';
 import { configurationCommandJson, registrationCommandJson, settingsCommandJson } from './configuration-command-json.js';
 import { serializeOperationReceipt, storeTimeDefaults, storeArtifactPolicy } from './common-json.js';
 import { randomUUID } from 'node:crypto';
-import { assertStartsAllowed } from './shutdown.js';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import {
@@ -267,7 +266,6 @@ function writeGlobals(db: Database.Database, view: SettingsView, changes: Global
   if (!Value.Check(GlobalChanges, changes)) throw new OperationError(400, 'SETTINGS_INVALID', 'Settings changes are invalid.');
   const next = mergeGlobalChanges(view.settings, changes);
   if (!Value.Check(FactorySettings, next)) throw new OperationError(400, 'SETTINGS_INVALID', 'Settings changes are invalid.');
-  if (next.automation_enabled) assertStartsAllowed(db);
   if (next.automation_enabled && (!next.account_id || !next.projects_root)) throw new OperationError(409, 'AUTOMATION_PREREQUISITES_MISSING', 'Configure an observed account and project root before enabling automation.');
   const currentConfirmation = db.prepare<[], { projects_root_confirmed_at_ms: number | null }>(
     'SELECT projects_root_confirmed_at_ms FROM factory_settings WHERE id = \'local\'',

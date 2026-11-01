@@ -78,9 +78,9 @@ Os avisos usam mensagens genéricas e o clique abre o detalhe local da tentativa
 
 ## Encerrar, reiniciar e atualizar
 
-1. Pause novos inícios da fila e confira o recibo. Fechar aba/modal não cancela trabalho.
-2. Quando quiser parar a tentativa, use Cancelar e acompanhe separadamente revogação, pedido de parada, confirmação física e limpeza. Preserve ambientes quando a parada for incerta.
-3. Ctrl+C no terminal-âncora solicita shutdown. O controlador revoga sessões/SSE, coordenadores e canais, encerra esperas com diagnóstico, aguarda IO próprio e fecha banco/lock. Encerrar o controlador não é prova de parada de todos os processos de agentes/filhos; confira recursos no Maestri.
+1. **Encerrar controlador** na interface fecha o controlador sem aguardar a contagem de trabalhos. Sessões acompanhadas podem ser interrompidas; processos sem acompanhamento podem continuar no Maestri.
+2. Para parar uma tentativa sem encerrar o controlador, use Cancelar e acompanhe separadamente a revogação, o pedido de parada, a confirmação física e a limpeza. Preserve ambientes quando a parada for incerta.
+3. Ctrl+C no terminal-âncora solicita o mesmo shutdown local. O controlador fecha sessões/SSE, coordenadores, canais, banco e lock. O encerramento não comprova que todos os processos de agentes/filhos pararam; confira os recursos no Maestri.
 4. Reinicie pelo novo terminal-âncora válido e pela **mesma raiz de instalação**. Sessões/CSRF anteriores são recusados; registros/resultados/efeitos ficam preservados. Trabalho incompleto fica interrupted/unknown, sem restaurar conversa, adotar terminal ou reenviar publicação/pergunta.
 5. Para atualizar, encerre o proprietário anterior, prepare/verifique o pacote e atualize os arquivos da mesma instalação preservando `var/factory` integralmente. Uma pasta de instalação diferente representa outra instalação; apontar uma variável para os dados antigos não faz migração. Migrations são transacionais, ordenadas e verificadas por checksum. Um pacote antigo pode recusar banco atualizado; não há downgrade automático. Mantenha o pacote anterior para diagnóstico, sem presumir reversibilidade do schema.
 

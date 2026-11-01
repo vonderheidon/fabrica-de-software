@@ -14,7 +14,7 @@ const data = mkdtempSync(join(root, '.cache', 'distribution dados-'));
 assert(!existsSync(join(directory, 'apps/controller/src')));
 assert(!existsSync(join(directory, 'dist/apps/controller/src/modules/storage/migrations')));
 assert.deepEqual(readdirSync(join(directory, 'dist/resources/storage')).sort(), [
-  '055_issue_history_repository_reference.sql', 'initial-schema.v56.sql', 'schema-recognition.v1.json',
+  '056_immediate_controller_shutdown.sql', 'initial-schema.v57.sql', 'schema-recognition.v1.json',
 ]);
 assert(!existsSync(join(directory, '.agents')));
 assert(!existsSync(join(directory, 'node_modules/typescript')));

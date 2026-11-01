@@ -1,5 +1,4 @@
 import { serializeOperationReceipt } from './common-json.js';
-import { assertStartsAllowed } from './shutdown.js';
 import { assertProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
@@ -53,7 +52,6 @@ export function saveQueueChange(db: Database.Database, command: QueueChange): St
     const recovered = recoverQueueChange(db, command); if (recovered) return recovered;
     if (command.expectedRevision === undefined) throw new OperationError(428, 'PRECONDITION_REQUIRED', 'If-Match is required.');
     const { scope, enabled } = command.body;
-    if (enabled) assertStartsAllowed(db);
     const ids = projectIds(db, scope); const settings = readSettings(db);
     if (enabled) for (const id of ids) assertProjectAvailable(db, id);
     if (queueETag(db, scope) !== command.expectedRevision) throw new OperationError(412, 'REVISION_CONFLICT', 'Queue configuration changed.');

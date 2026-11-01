@@ -4,7 +4,6 @@ import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { OperationId, OperationProgress, OperationReceipt, TimeDefaults, type OperationView, type ErrorResponse, type DeletionCompleted } from '#contracts';
 import { readSettings } from './settings.js';
-import { shutdownOperation } from './shutdown.js';
 import { StorageError } from './errors.js';
 
 export class OperationError extends Error {
@@ -76,7 +75,9 @@ export function readOperation(db: Database.Database, operationId: string): Store
     if (row.resource_type !== 'settings' || row.resource_id !== 'local' || !targetAccountId ||
       settings.account_id !== targetAccountId || !originValid) return null;
   } else if (row.account_id !== settings.account_id || row.result_account_id !== null) return null;
-  if (row.operation_kind.startsWith('shutdown.')) return shutdownOperation(db, '', operationId);
+  if (row.operation_kind.startsWith('shutdown.')) return {
+    operation_id: operationId, kind: row.operation_kind, resource: { type: row.resource_type, id: row.resource_id }, state: 'unknown',
+  };
   // Each domain command adds its own projection here. Unknown kinds never imply success.
   const event = db.prepare<[string], { entity_revision: number; seq: number; entity_type: string; entity_id: string; event_type: string; operation_id: string }>(
     'SELECT entity_revision, seq, entity_type, entity_id, event_type, operation_id FROM events WHERE operation_id = ? ORDER BY seq LIMIT 1',
@@ -130,7 +131,7 @@ export function readOperation(db: Database.Database, operationId: string): Store
     return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'attempt', id: row.resource_id }, receipt,
       state: selection.state === 'confirmed' ? 'succeeded' : selection.state === 'failed_known' ? 'failed' : selection.state,
       progress: { kind: 'publication_target', state: selection.state, target_selection: selection,
-        cause: selection.reason, recovery: selection.recovery, decision: null, shutdown: null, transition_step: null } };
+        cause: selection.reason, recovery: selection.recovery, decision: null, transition_step: null } };
   }
   if (isBindingOperation) {
     const expectedEvent = row.operation_kind === 'settings.account.bind' ? 'settings.account.bound' : 'settings.account.switched';
