@@ -168,9 +168,23 @@ it('keeps the selected passage and producer result after an inverted section res
   const refresh = button('Atualizar tentativa'); refresh.focus();
   await act(async () => refresh.click());
   expect(document.activeElement).toBe(refresh);
+  expect(container.textContent).not.toContain('Atualizando; os registros');
+  expect(container.textContent).toContain('A revisão desta versão não registrou achados.');
   await show(b);
   const old = attempt(a); old.details = { section: 'passages', items: [{ id: a, attempt_id: id, delivery_id: a, round: 1, role: 'implementer', state: 'ready', tracking: 'tracked', diagnostic: null, result_receipt_id: id, created_at_ms: 1 }] as NonNullable<HttpAttemptDetail['details']>['items'], next_cursor: null, has_more: false, event_cursor: '1' };
   await act(async () => late.resolve({ data: old, etag: '"old"' }));
   expect(container.textContent).not.toContain('TypeScript evidence A');
   expect(container.textContent).toContain('TypeScript evidence B');
+});
+
+it('keeps the stage summary stable while its current observation refreshes', async () => {
+  await mount();
+  const pending = deferred<{ data: HttpAttemptDetail; etag: string }>();
+  const previous = metadata.getMockImplementation()!;
+  metadata.mockImplementation((path: string) => path.startsWith(`/api/v1/attempts/${id}`) && !path.includes('section=') ? pending.promise : previous(path));
+  const summary = container.querySelector('.attempt-stage-summary');
+  await act(async () => button('Atualizar tentativa').click());
+  expect(container.querySelector('.attempt-stage-summary')).toBe(summary);
+  expect(summary?.querySelector('.stale-note')).toBeNull();
+  await act(async () => pending.resolve({ data: attempt(a), etag: '"2"' }));
 });

@@ -56,8 +56,8 @@ export function QueuePanel({ load, linkedAccountId, pageNotice, pauseNotice, pau
         ? account.id === linkedAccountId ? account.login ? `@${account.login} confirmada` : 'Vínculo salvo · conta confirmada' : account.login ? `Divergente · @${account.login} observada` : 'Divergente · conta observada'
         : account?.id === linkedAccountId && account.login
           ? `Vínculo salvo · última @${account.login}` : 'Vínculo salvo · confirmação indisponível';
-  const retryAt = current ? observation?.polling.retry_at_ms ?? null : null;
-  const rateLimited = current && observation?.diagnostics.some((item) => item.code === 'RATE_LIMITED') === true;
+  const retryAt = observation?.polling.retry_at_ms ?? null;
+  const rateLimited = observation?.diagnostics.some((item) => item.code === 'RATE_LIMITED') === true;
   const canPause = current && load.etag !== null && observation?.enabled === true;
   const queryError = load.status === 'error' ? load.message : load.status === 'loading' ? load.previousError?.message : null;
   const stateLabel = pauseUncertain ? 'Alteração sem confirmação'
@@ -79,7 +79,7 @@ export function QueuePanel({ load, linkedAccountId, pageNotice, pauseNotice, pau
         <div><dt>Conta GitHub</dt><dd>{accountLabel}</dd></div>
         <div><dt>Entrega autorizada</dt><dd>{observation?.modes_by_project.length ? [...new Set(observation.modes_by_project.map((item) => modeLabel(item.mode)))].join(', ') : 'Nenhum modo disponível'}</dd></div>
       </dl>
-      {current && observation && !observation.account.login && <p className="muted">A consulta não confirmou a conta GitHub. Revalide a fila para conferir a identidade.</p>}
+      {observation && !observation.account.login && <p className="muted">A consulta não confirmou a conta GitHub. Revalide a fila para conferir a identidade.</p>}
       {observation && !observation.complete && <div className="notice queue-degraded" role="status"><b>Consulta incompleta</b><p>{observation.valid ? 'Há projetos bloqueados. Os candidatos confirmados dos demais continuam disponíveis; o total global não foi confirmado.' : 'Confira as orientações por projeto abaixo e revalide a fila.'}</p></div>}
       {rateLimited && <div className="notice queue-degraded queue-rate-limit" role="status"><b>Consulta ao GitHub pausada pelo limite de uso</b><p>{retryAt === null ? 'O horário da próxima consulta ainda não foi confirmado.' : `Nova consulta prevista a partir de ${new Date(retryAt).toLocaleString('pt-BR')}.`} Esse horário não garante que o GitHub responderá com sucesso.</p></div>}
 

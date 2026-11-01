@@ -16,6 +16,7 @@ export function useProjects(search: string, enabled = true) {
   const [reload, setReload] = useState(0);
   useAppliedObservation(enabled, state.loading, Boolean(state.error), state);
   const requestVersion = useRef(0);
+  const loadedQuery = useRef<string | null>(null);
   const query = search.trim();
 
   useEffect(() => {
@@ -46,7 +47,9 @@ export function useProjects(search: string, enabled = true) {
     if (!enabled) { setState({ page: null, loading: false, error: null }); return; }
     let active = true;
     const controller = new AbortController();
-    setState({ page: null, loading: true, error: null });
+    const sameQuery = loadedQuery.current === query;
+    loadedQuery.current = query;
+    setState((current) => sameQuery ? { ...current, loading: true } : { page: null, loading: true, error: null });
     const params = new URLSearchParams({ limit: '25' });
     if (query) params.set('search', query);
     requestJson<ProjectPage>(`/api/v1/projects?${params.toString()}`, { signal: controller.signal }).then((page) => {
@@ -54,10 +57,10 @@ export function useProjects(search: string, enabled = true) {
       if (active && requestVersion.current === version) setState({ page: { ...page, items: page.items.filter((item) => !isProjectDeletionCompleted(item.id)) }, loading: false, error: null });
     }).catch((error: unknown) => {
       if (!active || requestVersion.current !== version || (error instanceof DOMException && error.name === 'AbortError')) return;
-      setState({ page: null, loading: false, error: {
+      setState((current) => ({ ...current, loading: false, error: {
         message: error instanceof HttpError ? error.message : 'Não foi possível consultar o catálogo de projetos.',
         requestId: error instanceof HttpError ? error.requestId : null,
-      } });
+      } }));
     });
     return () => { active = false; controller.abort(); };
   }, [enabled, query, reload]);
@@ -83,6 +86,6 @@ export function useProjects(search: string, enabled = true) {
     }
   }, [query, state.loading, state.page]);
 
-  const page = state.page ? { ...state.page, items: state.page.items.filter((item) => !isProjectDeletionCompleted(item.id)) } : null;
+  const page = enabled && loadedQuery.current === query && state.page ? { ...state.page, items: state.page.items.filter((item) => !isProjectDeletionCompleted(item.id)) } : null;
   return { ...state, page, retry: () => setReload((value) => value + 1), loadMore };
 }

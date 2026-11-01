@@ -87,7 +87,7 @@ function usePanelData(route: HashRoute, search: string, reloadKey: number): Load
 }
 
 function LoadMessage({ state, retry }: { state: LoadState<ReadData>; retry: () => void }) {
-  if (state.status === 'loading') return <div className="card read-state" role="status"><span className="eyebrow">Controlador local</span><p>Consultando dados atuais…</p></div>;
+  if (state.status === 'loading') return state.previous !== undefined ? null : <div className="card read-state" role="status"><span className="eyebrow">Controlador local</span><p>Consultando dados atuais…</p></div>;
   if (state.status === 'read-error') return <div className="card read-state" role="alert"><h2>Não foi possível carregar</h2><p>{state.message}</p><p><strong>Próxima ação:</strong> tente consultar novamente; os dados confirmados anteriormente continuam preservados.</p><button type="button" onClick={retry}>Tentar novamente</button></div>;
   return <></>;
 }

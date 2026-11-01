@@ -34,6 +34,15 @@ function render(load: QueueLoad, linkedAccountId: string | null = 'account'): st
   return renderToStaticMarkup(createElement(QueuePanel, props));
 }
 
+it('retains rate-limit and identity warnings while refreshing the same observation', () => {
+  const data = observation(); data.account = { id: null, login: null };
+  data.diagnostics = [{ code: 'RATE_LIMITED', message: 'Aguarde.', recovery: 'Consultar depois.' }];
+  data.polling.retry_at_ms = 123456;
+  const html = render({ status: 'loading', observation: data, etag: '"1"', previousError: null });
+  expect(html).toContain('Consulta ao GitHub pausada pelo limite de uso');
+  expect(html).toContain('A consulta não confirmou a conta GitHub');
+});
+
 it('explains a ticket content blocker in the existing queue situation cell', () => {
   const data = observation();
   data.page.items[0] = { ...data.page.items[0]!, ready: true, eligible: false, consumption: 'available', attempt_id: null,

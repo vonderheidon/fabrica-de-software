@@ -43,6 +43,23 @@ it('keeps prior data explicitly identified after a failed refresh and resets pag
   expect(props.onPageChange).toHaveBeenCalledWith('');
   expect(host.textContent).toContain('Dados da consulta anterior'); expect(host.textContent).toContain('Histórica');
 });
+it('refreshes controller events without inserting a loading row or replacing the table', async () => {
+  let resolve!: (value: unknown) => void;
+  request.mockResolvedValueOnce({ data: page('active') }).mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+  await render();
+  const table = host.querySelector('table');
+  const detail = host.querySelector('[data-attempt-trigger="active"]');
+  await act(async () => window.dispatchEvent(new CustomEvent('factory-controller-event', { detail: {
+    attempt_id: 'active', project_id: 'project', entity: { type: 'attempt', id: 'active' },
+  } })));
+  expect(request).toHaveBeenCalledTimes(2);
+  expect(host.textContent).not.toContain('Atualizando histórico');
+  expect(host.querySelector('table')).toBe(table);
+  expect(host.querySelector('[data-attempt-trigger="active"]')).toBe(detail);
+  await act(async () => resolve({ data: { ...page('active'), items: [{ ...row('active'), issue_title: 'Atualizada' }] } }));
+  expect(host.textContent).toContain('Atualizada');
+  expect(host.querySelector('table')).toBe(table);
+});
 it('keeps applied filters while moving back and separates them from the search draft', async () => {
   request.mockResolvedValueOnce({ data: page('first', true) })
     .mockResolvedValueOnce({ data: page('second') })

@@ -252,6 +252,7 @@ it('records coincident timer, event and resync without assuming recurring operat
 it('discards stale operation and active-attempt results and errors after their replacements render', async () => {
   await render('dashboard'); await useful('dashboard'); automatic = false;
   await event('attempt'); const oldOperation = matching('/api/v1/operation').at(-1)!; const oldActive = matching('/api/v1/attempts').at(-1)!;
+  expect(container.textContent).not.toContain('Dados da consulta anterior. Consulte novamente');
   await event('resync');
   await finish(matching('/api/v1/operation').at(-1)!, operation('new-account'));
   await finish(matching('/api/v1/attempts').at(-1)!, { ...page, items: [attempt(2)] });

@@ -53,8 +53,8 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
   const onboardingView = onboarding.load.snapshot?.settings.onboarding;
 
   const conditions = dashboardConditions([
-    ...(summary?.impediments.filter(item => item.state !== 'passed').map(item => ({ ...item, previous: operation.stale || operation.refreshing })) ?? []),
-    ...(onboardingView?.prerequisites.map(item => ({ code: item.code, cause: item.message, recovery: item.recovery, previous: Boolean(onboarding.load.error) || onboarding.load.refreshing })) ?? []),
+    ...(summary?.impediments.filter(item => item.state !== 'passed').map(item => ({ ...item, previous: Boolean(operation.error) })) ?? []),
+    ...(onboardingView?.prerequisites.map(item => ({ code: item.code, cause: item.message, recovery: item.recovery, previous: Boolean(onboarding.load.error) })) ?? []),
     ...(queueObservation?.diagnostics.map(item => ({ code: item.code, cause: item.message, recovery: item.recovery, previous: Boolean(queueFailure), ...((item.code.startsWith('PROJECT_') && queueObservation.scope.project_ids.length === 1) ? { facts: { project_id: queueObservation.scope.project_ids[0]! } } : {}) })) ?? []),
   ]);
 
@@ -81,7 +81,7 @@ export function DashboardPanel({ projects, projectsLoad, onRefreshProjects, onbo
       <section className="card dashboard-active">
         <div className="line panel-title"><div><span className="eyebrow">Agora</span><h2>Tentativa ativa</h2></div></div>
         <RequestNote loading={active.loading && !active.valid} refreshing={active.refreshing} error={active.error} stale={active.stale} empty={active.valid && !active.data ? 'Nenhuma tentativa ativa.' : undefined} label="a tentativa ativa" />
-        {active.data && <AttemptStageSummary activity={summary?.active_attempt?.id === active.data.id ? summary.stage_activity : null} stale={active.stale || active.refreshing || operation.stale || operation.refreshing} />}
+        {active.data && <AttemptStageSummary activity={summary?.active_attempt?.id === active.data.id ? summary.stage_activity : null} stale={Boolean(active.error || operation.error)} />}
         {active.data && <div className="dashboard-record"><b>Issue #{active.data.issue_number}</b><p>Resultado: {operatorState(active.data.result ?? 'running').label}{active.data.suspension && !['HUMAN_DECISION', 'TRACKING_LOST'].includes(active.data.suspension) ? ` · ${operatorCodeLabel(active.data.suspension)}` : ''}</p>{[active.data.phase, ...(active.data.result ? [active.data.result] : [])].filter((value) => !operatorState(value).known).map((value) => <UnknownState key={value} value={value} />)}<button type="button" onClick={() => onAttempt(active.data!.id, active.data!.project_id)}>Abrir detalhe e ações disponíveis</button></div>}
       </section>
 

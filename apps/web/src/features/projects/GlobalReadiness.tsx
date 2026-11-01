@@ -18,14 +18,15 @@ export function globalConditionSection(item: HttpContextDiagnostic): 'github' | 
 }
 
 export function GlobalConditions({ diagnostic, section }: { diagnostic: GlobalDiagnostics; section: ReturnType<typeof globalConditionSection> }) {
+  const previousRead = Boolean(diagnostic.error) || diagnostic.stale && !diagnostic.refreshing;
   const select = (items: readonly HttpContextDiagnostic[]) => {
     const relevant = items.filter((item) => globalConditionSection(item) === section);
     return section === 'profiles' && relevant.some((item) => item.code === 'PROFILES_REQUIRED')
       ? relevant.filter((item) => !/^(ONBOARDING_)?(IMPLEMENTER|REVIEWER)_PROFILE_REQUIRED$/.test(item.code)) : relevant;
   };
   return <div className="global-readiness-conditions">
-    {select(diagnostic.view?.diagnostics ?? []).some((item) => item.code === 'PROFILES_REQUIRED') && <div className="notice" role="status"><b>Nenhum perfil de execução cadastrado</b><p>{diagnostic.stale || diagnostic.refreshing ? 'A leitura anterior não encontrava perfis.' : 'Cadastre um perfil Implementador e um perfil Revisor em Perfis para preparar novas execuções.'}</p></div>}
-    <CurrentDiagnosticNotices items={select(diagnostic.view?.diagnostics ?? []).filter((item) => item.code !== 'PROFILES_REQUIRED')} previous={diagnostic.stale || diagnostic.refreshing} projectId={null} />
+    {select(diagnostic.view?.diagnostics ?? []).some((item) => item.code === 'PROFILES_REQUIRED') && <div className="notice" role="status"><b>Nenhum perfil de execução cadastrado</b><p>{previousRead ? 'A leitura anterior não encontrava perfis.' : 'Cadastre um perfil Implementador e um perfil Revisor em Perfis para preparar novas execuções.'}</p></div>}
+    <CurrentDiagnosticNotices items={select(diagnostic.view?.diagnostics ?? []).filter((item) => item.code !== 'PROFILES_REQUIRED')} previous={previousRead} projectId={null} />
   </div>;
 }
 

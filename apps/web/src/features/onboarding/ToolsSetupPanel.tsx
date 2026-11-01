@@ -91,7 +91,7 @@ function ToolsSetupContent({ onboarding, disabled = false, resetKey = 0, compact
   return <section className="card form-section tools-setup" aria-label="Ferramentas desta instalação">
     <div className={compactHeading ? 'tools-detection-action' : 'settings-section-heading'}>{!compactHeading && <div><span className="eyebrow">Instalação</span><h3>Ferramentas desta instalação</h3></div>}<button type="button" onClick={() => void refresh()} disabled={loading || busy}>Detectar novamente</button></div>
     {!compactHeading && <p>As opções válidas são usadas automaticamente. Corrija somente ferramentas ausentes ou com escolha pendente.</p>}
-    {loading && <p role="status">{observation ? 'Revalidando; o resumo anterior permanece visível.' : 'Detectando as ferramentas instaladas…'}</p>}
+    {loading && !observation && <p role="status">Detectando as ferramentas instaladas…</p>}
     {error && <p role="alert" className="error">{error}</p>}
     {onboarding.load.error && <div role="alert"><p>A leitura da configuração falhou. As escolhas salvas exibidas são da leitura anterior; seus rascunhos foram mantidos.</p><button type="button" onClick={() => void onboarding.refresh()}>Atualizar escolhas salvas</button></div>}
     <div className="tools-summary">{tools.map(tool => {

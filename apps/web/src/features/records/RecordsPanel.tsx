@@ -37,7 +37,7 @@ export function RecordsPanel({ filters, onFilterChange }: Props) {
     <section className="card records-events" aria-labelledby="records-heading">
       <div className="line panel-title"><div><span className="eyebrow">Eventos</span><h2 id="records-heading">Histórico de atividades</h2></div>{records.page && <span className="records-count">{records.page.items.length} {records.page.items.length === 1 ? 'evento nesta página' : 'eventos nesta página'}</span>}</div>
       {records.loading && !records.page && <p className="muted" role="status">Consultando registros…</p>}
-      {(records.refreshing || records.stale) && <p className="stale-note" role="status">Atualizando. A página anterior continua visível e pode estar desatualizada.</p>}
+      {records.error && records.page && <p className="stale-note" role="status">A página anterior continua visível e pode estar desatualizada.</p>}
       {records.error && <div className="queue-error" role="alert"><b>{records.page ? 'Não foi possível carregar a continuação' : 'Falha ao consultar registros'}</b><p>{records.error}</p><p><strong>Próxima ação:</strong> tente consultar esta página novamente.</p><div className="row"><button type="button" onClick={records.refresh}>Tentar novamente nesta página</button></div></div>}
       <div className="records-event-list">{records.page?.items.map((event) => {
         const context = event.context;

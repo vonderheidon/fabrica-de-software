@@ -201,7 +201,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attemptError && <div className="queue-error" role="alert"><h3>Falha ao consultar esta tentativa</h3><p>{attemptError}</p><p><strong>Próxima ação:</strong> consulte novamente antes de agir sobre os dados anteriores.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar novamente</button></div>}
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
-      <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError) || attemptRefreshing} blocked={!attempt.result && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED'} />
+      <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError)} blocked={!attempt.result && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED'} />
       <div className="attempt-detail-heading"><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
       {delivery && <PublicationDialog key={delivery.delivery.id}
         projectId={attempt.project_id}
@@ -264,11 +264,10 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         return <details className="card attempt-section attempt-disclosure" key={section} open={section === 'questions' && Boolean(attempt.pending_question_id) || Boolean(sectionState.error)}><summary>{labels[section]} <span className="muted">{sectionState.page?.items.length ?? '…'}{sectionState.page?.has_more ? '+' : ''}</span></summary>
           <div className="line">{section === 'criteria' && deliveryState === 'not-captured' && <span className="pill neutral">Sem versão</span>}</div>
           {sectionState.loading && !sectionState.page && <p className="muted" role="status">Consultando {(labels[section] ?? section).toLocaleLowerCase('pt-BR')}…</p>}
-          {sectionState.loading && sectionState.page && <p className="stale-note" role="status">Atualizando; os registros da mesma versão continuam visíveis.</p>}
           {sectionState.error && <div className="queue-error" role="alert"><b>Não foi possível carregar esta seção</b><p>{sectionState.error}</p><p><strong>Próxima ação:</strong> consulte novamente esta rodada e versão.</p><button type="button" onClick={() => retrySection(section)} disabled={sectionState.loading}>Tentar carregar novamente</button></div>}
-          {section === 'reviews' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'A revisão não foi realizada porque esta rodada ainda não tem uma versão capturada.' : 'Esta versão ainda não tem parecer de revisão.'}</p>}
-          {section === 'findings' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">A revisão desta versão não registrou achados.</p>}
-          {section === 'criteria' && !sectionState.loading && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'Critérios indisponíveis: esta versão ainda não foi capturada.' : 'Nenhum critério foi retornado para esta versão.'}</p>}
+          {section === 'reviews' && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'A revisão não foi realizada porque esta rodada ainda não tem uma versão capturada.' : 'Esta versão ainda não tem parecer de revisão.'}</p>}
+          {section === 'findings' && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">A revisão desta versão não registrou achados.</p>}
+          {section === 'criteria' && !sectionState.error && sectionState.page?.items.length === 0 && <p className="muted">{deliveryState === 'not-captured' ? 'Critérios indisponíveis: esta versão ainda não foi capturada.' : 'Nenhum critério foi retornado para esta versão.'}</p>}
           {sectionState.page && sectionState.page.items.length > 0 && <div className="attempt-record-list">{sectionState.page.items.map((item, index) => section === 'questions'
             ? asRecord(item).state === 'pending'
               ? <button key={String(asRecord(item).id ?? index)} type="button" onClick={() => openPendingDecision(attemptId, String(asRecord(item).id))}>Responder decisão pendente</button>
