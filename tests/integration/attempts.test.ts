@@ -18,7 +18,8 @@ const fixtures: AttemptFixture[] = [];
 const apps: ReturnType<typeof createApp>[] = [];
 const host = '127.0.0.1:4310';
 const origin = `http://${host}`;
-async function fixture() { const f = await attemptFixture(); fixtures.push(f); return f; }
+// The managed Windows runner denies atomic renames under os.tmpdir(); keep fixtures inside the writable workspace.
+async function fixture() { const f = await attemptFixture(process.cwd()); fixtures.push(f); return f; }
 afterEach(async () => {
   for (const app of apps.splice(0)) await app.close();
   for (const f of fixtures.splice(0)) await f.close();

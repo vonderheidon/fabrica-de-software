@@ -17,7 +17,7 @@ import type { AuthorizeUpgrade, CompletePublication, ReconcilePublication, MakeA
 
 export interface PipelineDependencies {
   github?: Pick<GitHub, 'getIssueContextById'>;
-  storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'createPreparation' | 'getPreparation' | 'prepareDecisionSuccessor'>; execution: Execution;
+  storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'prepareReadyStart' | 'prepareDecisionSuccessor'>; execution: Execution;
   queue?: Pick<Queue, 'observe' | 'revalidateForDispatch'>;
   workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment' | 'importIntegrationBase' | 'resolveAttemptEvidenceDirectory' | 'resolveAttemptProgressFile' | 'migrateLegacyIssueHistory'>>;
   observeTools: () => Promise<ToolObservation[]>;
@@ -380,14 +380,13 @@ export function createPipeline(deps: PipelineDependencies) {
       if (!project.source.repository_id) return;
       const predecessor = storage.getLatestProjectIssueAttempt(candidate.projectId, project.source.repository_id, candidate.issueId);
       if (predecessor?.active) return;
-      const preparation = await preparations.createPreparation(candidate.projectId, { issue_id: candidate.issueId, delivery_mode: mode, guidance: '', overrides: {},
+      const prepared = await preparations.prepareReadyStart(candidate.projectId, { issue_id: candidate.issueId, delivery_mode: mode, guidance: '', overrides: {},
         ...(predecessor ? { previous_attempt_id: predecessor.id } : {}) },
         { operationId: randomUUID(), expectedRevision: undefined });
       if (closed || !storage.getSettings().automation_enabled || !storage.getConfiguration(candidate.projectId).view.configuration.automation_enabled) return;
-      const prepared = await preparations.getPreparation(preparation.view.preparation.id);
-      if (closed) return;
-      await startAttempt({ preparationId: prepared.view.preparation.id, preparationRevision: prepared.view.preparation.revision,
-        authorizedSummaryHash: prepared.view.preparation.summary_hash, authorized: true }, { operationId: randomUUID(), expectedRevision: prepared.etag },
+      let attemptOperationId = randomUUID();
+      while (attemptOperationId === prepared.operationId) attemptOperationId = randomUUID();
+      await startAttempt(prepared.body, { operationId: attemptOperationId, expectedRevision: prepared.expectedRevision },
         { accountId: current.observation.account.id!, projectId: candidate.projectId, issueId: candidate.issueId, cycleNumber: cycle.cycleNumber },
         { scan, candidate });
     } catch (error) {

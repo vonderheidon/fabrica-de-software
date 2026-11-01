@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { OriginRequest, PreparationCreated, type GitHubProjectDetails, type GitHubQueryResult, type IssueContext, type OriginInspection, type PreparationChoices, type PreparationUpdate, type SessionResponse } from '#contracts';
+import { OriginRequest, PreparationCreated, StartAttempt, type GitHubProjectDetails, type GitHubQueryResult, type IssueContext, type OriginInspection, type PreparationChoices, type PreparationUpdate, type SessionResponse } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createPreparations, type PreparationDependencies } from '../../apps/controller/src/modules/projects/index.js';
@@ -275,5 +275,216 @@ describe('persistent preparation HTTP contracts', () => {
     vi.mocked(f.github.listProjectItems).mockResolvedValue(complete(items));
     expect((await f.preparations.listIssues(f.projectId, {})).items.map((item) => item.id)).toEqual(['READY']);
     expect((await f.preparations.listIssues(f.projectId, { search: 'absent' })).items).toEqual([]);
+  });
+});
+
+describe('Ready start preparation envelope', () => {
+  it('returns the durable receipt and one coherent StartAttempt from a single complete observation', async () => {
+    const f = fixture(); const operationId = randomUUID();
+    const result = await f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined });
+    const stored = f.storage.getPreparation(result.body.preparationId);
+
+    expect(Value.Check(StartAttempt, result.body)).toBe(true);
+    expect(result.body).toEqual({ preparationId: stored.view.id, preparationRevision: stored.view.revision,
+      authorizedSummaryHash: expect.any(String), authorized: true });
+    expect(result.expectedRevision).toBe(stored.etag);
+    expect(result.operationId).toBe(operationId);
+    expect(result.receipt).toEqual(f.storage.getOperation(operationId)?.receipt);
+    expect(f.storage.getOperation(operationId)).toMatchObject({ kind: 'preparation.create', state: 'succeeded', resource: { id: stored.view.id } });
+    expect(f.github.getIdentity).toHaveBeenCalledTimes(1);
+    expect(f.github.getIssueContextById).toHaveBeenCalledTimes(2);
+    expect(f.github.getProject).toHaveBeenCalledTimes(1);
+    expect(f.workspaces.inspectOrigin).toHaveBeenCalledTimes(1);
+    expect(f.github.listProjectItems).not.toHaveBeenCalled();
+    expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 });
+  });
+
+  it('preserves PREPARATION_INVALID and rejects an unavailable pre-write issue observation', async () => {
+    const f = fixture(); const invalidOperationId = randomUUID();
+    const invalidChoices = { ...choices, guidance: 'x'.repeat(8193) } as PreparationChoices;
+    await expect(f.preparations.prepareReadyStart(f.projectId, invalidChoices,
+      { operationId: invalidOperationId, expectedRevision: undefined })).rejects.toMatchObject({ statusCode: 400, code: 'PREPARATION_INVALID' });
+    expect(f.storage.getOperation(invalidOperationId)).toBeNull();
+
+    const operationId = randomUUID();
+    const unavailable: GitHubQueryResult<IssueContext> = { state: 'inaccessible', data: null, diagnostics: [], retryAtMs: null };
+    vi.mocked(f.github.getIssueContextById).mockResolvedValueOnce(unavailable);
+    await expect(f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined }))
+      .rejects.toMatchObject({ statusCode: 404, code: 'ISSUE_UNAVAILABLE' });
+    expect(f.storage.getOperation(operationId)).toBeNull();
+    expect(f.db.prepare('SELECT count(*) AS n FROM preparations').get()).toEqual({ n: 0 });
+    expect(f.workspaces.inspectOrigin).not.toHaveBeenCalled();
+  });
+
+  it('recovers an explicitly repeated command after observation failure without duplicating its record or event', async () => {
+    const f = fixture(); const operationId = randomUUID(); const failure = new Error('synthetic post-commit observation failure');
+    const issueRead = vi.mocked(f.github.getIssueContextById);
+    issueRead.mockImplementationOnce(async () => complete(f.issue));
+    issueRead.mockRejectedValueOnce(failure);
+
+    await expect(f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined })).rejects.toBe(failure);
+    const committed = f.storage.getOperation(operationId);
+    expect(committed).toMatchObject({ kind: 'preparation.create', state: 'succeeded', receipt: expect.any(Object) });
+    const preparationId = committed!.resource.id;
+    const eventCount = f.db.prepare<[string], { n: number }>("SELECT count(*) AS n FROM events WHERE entity_type='preparation' AND entity_id=?").get(preparationId)!.n;
+    const legacyRead = await f.preparations.getPreparation(preparationId);
+    expect(legacyRead.view.preparation.id).toBe(preparationId);
+
+    const recovered = await f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined });
+    expect(recovered.body.preparationId).toBe(preparationId);
+    expect(recovered.operationId).toBe(operationId);
+    expect(recovered.receipt).toEqual(committed!.receipt);
+    expect(f.db.prepare<[string], { n: number }>("SELECT count(*) AS n FROM events WHERE entity_type='preparation' AND entity_id=?").get(preparationId)!.n).toBe(eventCount);
+    expect(f.db.prepare<[string], { n: number }>('SELECT count(*) AS n FROM operation_requests WHERE operation_id=?').get(operationId)!.n).toBe(1);
+    await expect(f.preparations.prepareReadyStart(f.projectId, { ...choices, guidance: 'Different payload' },
+      { operationId, expectedRevision: undefined })).rejects.toMatchObject({ statusCode: 409, code: 'IDEMPOTENCY_CONFLICT' });
+  });
+
+  it.each(['identity', 'issue', 'project', 'origin'] as const)('preserves incomplete %s observations, digest and retry time', async (source) => {
+    const f = fixture(); const operationId = randomUUID(); const retryAtMs = 99_999;
+    const partialIdentity: GitHubQueryResult<{ id: string; login: string }> = { state: 'partial', data: null, diagnostics: [], retryAtMs };
+    const partialIssue: GitHubQueryResult<IssueContext> = { state: 'partial', data: null, diagnostics: [], retryAtMs };
+    const partialProject: GitHubQueryResult<GitHubProjectDetails> = { state: 'partial', data: f.project, diagnostics: [], retryAtMs };
+    const expectedPrerequisite = source === 'origin' ? 'REMOTE_UNCONFIRMED' : 'READ_INCOMPLETE';
+    if (source === 'identity') vi.mocked(f.github.getIdentity).mockResolvedValue(partialIdentity);
+    if (source === 'issue') {
+      vi.mocked(f.github.getIssueContextById).mockImplementationOnce(async () => complete(f.issue));
+      vi.mocked(f.github.getIssueContextById).mockResolvedValue(partialIssue);
+    }
+    if (source === 'project') vi.mocked(f.github.getProject).mockResolvedValue(partialProject);
+    if (source === 'origin') vi.mocked(f.workspaces.inspectOrigin).mockResolvedValue({ ...f.observation, state: 'unavailable', retryAtMs });
+
+    const envelope = await f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined });
+    const current = await f.preparations.getPreparation(envelope.body.preparationId);
+    expect(current.view.preparation.summary_hash).toBe(envelope.body.authorizedSummaryHash);
+    expect(current.view.preparation.retry_at_ms).toBe(retryAtMs);
+    expect(current.view.preparation.prerequisites.map(item => item.code)).toContain(expectedPrerequisite);
+  });
+
+  it.each(['identity', 'issue', 'project', 'origin'] as const)('rejects without an envelope when %s observation throws', async (source) => {
+    const f = fixture(); const operationId = randomUUID(); const failure = new Error(`synthetic ${source} read failure`);
+    if (source === 'identity') vi.mocked(f.github.getIdentity).mockRejectedValueOnce(failure);
+    if (source === 'issue') {
+      vi.mocked(f.github.getIssueContextById).mockImplementationOnce(async () => complete(f.issue));
+      vi.mocked(f.github.getIssueContextById).mockRejectedValueOnce(failure);
+    }
+    if (source === 'project') vi.mocked(f.github.getProject).mockRejectedValueOnce(failure);
+    if (source === 'origin') vi.mocked(f.workspaces.inspectOrigin).mockRejectedValueOnce(failure);
+
+    await expect(f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined })).rejects.toBe(failure);
+    expect(f.storage.getOperation(operationId)).toMatchObject({ kind: 'preparation.create', state: 'succeeded', receipt: expect.any(Object) });
+    expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 });
+  });
+
+  it('preserves the existing storage error when a recovered operation has no usable receipt', async () => {
+    const f = fixture(); const operationId = randomUUID();
+    await f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined });
+    f.db.prepare('UPDATE operation_requests SET receipt_json=NULL WHERE operation_id=?').run(operationId);
+    await expect(f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined }))
+      .rejects.toMatchObject({ code: 'OPERATION_DATA_INVALID' });
+  });
+
+  it.each(['preparation', 'configuration'] as const)('rejects a post-observation %s conflict without returning stale data', async (changed) => {
+    const f = fixture(); const operationId = randomUUID();
+    vi.mocked(f.github.getIdentity).mockImplementationOnce(async () => {
+      if (changed === 'preparation') {
+        const operation = f.storage.getOperation(operationId)!;
+        const saved = f.storage.getPreparation(operation.resource.id);
+        const config = f.storage.getConfiguration(f.projectId);
+        f.storage.savePreparation({ command: { kind: 'preparation.update', preparationId: saved.view.id,
+          operationId: randomUUID(), expectedRevision: saved.etag, body: { changes: { guidance: 'Concurrent edit' } } }, configurationETag: config.etag });
+      } else {
+        const settings = f.storage.getSettings();
+        f.storage.saveTimeDefaults({ operationId: randomUUID(), expectedRevision: f.storage.getSettingsETag(),
+          timeDefaults: { ...settings.time_defaults, passage_active_time_ms: settings.time_defaults.passage_active_time_ms + 1 } });
+      }
+      return complete({ id: 'ACCOUNT_test', login: 'test-user' });
+    });
+
+    await expect(f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined }))
+      .rejects.toMatchObject({ statusCode: 412, code: 'REVISION_CONFLICT' });
+    expect(f.storage.getOperation(operationId)).toMatchObject({ kind: 'preparation.create', state: 'succeeded', receipt: expect.any(Object) });
+    expect(f.db.prepare('SELECT count(*) AS n FROM attempts').get()).toEqual({ n: 0 });
+  });
+
+  it('does not query a GitHub Project when the configuration has none', async () => {
+    const f = fixture(); const current = f.storage.getConfiguration(f.projectId);
+    const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
+    f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
+      body: { project_changes: { github_project: null } }, configuration: { ...configuration, github_project: null }, globalChanges: {} });
+
+    const result = await f.preparations.prepareReadyStart(f.projectId, choices, { operationId: randomUUID(), expectedRevision: undefined });
+    const currentPreparation = await f.preparations.getPreparation(result.body.preparationId);
+    expect(f.github.getProject).not.toHaveBeenCalled();
+    expect(currentPreparation.view.preparation.prerequisites.map(item => item.code)).toContain('PROJECT_REQUIRED');
+  });
+
+  it('keeps concurrent envelopes tied to their commands when observations finish in reverse order', async () => {
+    const f = fixture();
+    const releases: Array<(result: GitHubQueryResult<{ id: string; login: string }>) => void> = [];
+    vi.mocked(f.github.getIdentity).mockImplementation(() => new Promise(resolve => releases.push(resolve)));
+    const firstOperationId = randomUUID(); const secondOperationId = randomUUID();
+    const firstPromise = f.preparations.prepareReadyStart(f.projectId, { ...choices, guidance: 'First call' },
+      { operationId: firstOperationId, expectedRevision: undefined });
+    await vi.waitFor(() => expect(releases).toHaveLength(1));
+    const secondPromise = f.preparations.prepareReadyStart(f.projectId, { ...choices, guidance: 'Second call' },
+      { operationId: secondOperationId, expectedRevision: undefined });
+    await vi.waitFor(() => expect(releases).toHaveLength(2));
+
+    releases[1]!(complete({ id: 'ACCOUNT_test', login: 'test-user' }));
+    const second = await secondPromise;
+    releases[0]!(complete({ id: 'ACCOUNT_test', login: 'test-user' }));
+    const first = await firstPromise;
+
+    const pair = [[first, firstOperationId], [second, secondOperationId]] as const;
+    for (const [result, operationId] of pair) {
+      const stored = f.storage.getPreparation(result.body.preparationId);
+      expect(stored.view.project_id).toBe(f.projectId);
+      expect(result.body.preparationRevision).toBe(stored.view.revision);
+      expect(result.expectedRevision).toBe(stored.etag);
+      expect(result.operationId).toBe(operationId);
+      expect(result.receipt).toEqual(f.storage.getOperation(operationId)?.receipt);
+      expect(f.storage.getOperation(operationId)?.resource.id).toBe(result.body.preparationId);
+    }
+    expect(first.body.preparationId).not.toBe(second.body.preparationId);
+    expect(first.body.authorizedSummaryHash).not.toBe(second.body.authorizedSummaryHash);
+
+    vi.mocked(f.github.getIdentity).mockImplementation(async () => complete({ id: 'ACCOUNT_test', login: 'test-user' }));
+    const secondObserved = await f.preparations.getPreparation(second.body.preparationId);
+    const firstObserved = await f.preparations.getPreparation(first.body.preparationId);
+    expect(secondObserved.view.preparation.summary_hash).toBe(second.body.authorizedSummaryHash);
+    expect(firstObserved.view.preparation.summary_hash).toBe(first.body.authorizedSummaryHash);
+  });
+
+  it('renews observations and keeps the preparation readable after reopening Storage', async () => {
+    const f = fixture(); const operationId = randomUUID();
+    const envelope = await f.preparations.prepareReadyStart(f.projectId, choices, { operationId, expectedRevision: undefined });
+    expect(f.github.getIdentity).toHaveBeenCalledTimes(1);
+    expect(f.github.getIssueContextById).toHaveBeenCalledTimes(2);
+    expect(f.github.getProject).toHaveBeenCalledTimes(1);
+    expect(f.workspaces.inspectOrigin).toHaveBeenCalledTimes(1);
+    await f.preparations.revalidateSummary({ preparationId: envelope.body.preparationId,
+      preparationRevision: envelope.body.preparationRevision, authorizedSummaryHash: envelope.body.authorizedSummaryHash });
+    expect(f.github.getIdentity).toHaveBeenCalledTimes(2);
+    expect(f.github.getIssueContextById).toHaveBeenCalledTimes(3);
+    expect(f.github.getProject).toHaveBeenCalledTimes(2);
+    expect(f.workspaces.inspectOrigin).toHaveBeenCalledTimes(2);
+
+    f.storage.close();
+    const reopened = openStorage({ dataDirectory: f.directory }); resources.push(reopened);
+    const reopenedPreparations = createPreparations({ storage: reopened, github: f.github, workspaces: f.workspaces });
+    const current = await reopenedPreparations.getPreparation(envelope.body.preparationId);
+    expect(current.view.preparation).toMatchObject({ project_id: f.projectId, id: envelope.body.preparationId,
+      revision: envelope.body.preparationRevision, guidance: choices.guidance });
+    expect(current.etag).toBe(envelope.expectedRevision);
+    expect(reopened.getOperation(operationId)).toMatchObject({ kind: 'preparation.create', state: 'succeeded', receipt: envelope.receipt });
+    expect(f.github.getIdentity).toHaveBeenCalledTimes(3);
+    expect(f.github.getIssueContextById).toHaveBeenCalledTimes(4);
+    expect(f.github.getProject).toHaveBeenCalledTimes(3);
+    expect(f.workspaces.inspectOrigin).toHaveBeenCalledTimes(3);
+
+    const updated = await reopenedPreparations.updatePreparation(envelope.body.preparationId, { changes: { guidance: 'Legacy update path' } },
+      { operationId: randomUUID(), expectedRevision: envelope.expectedRevision });
+    expect(updated.view.preparation.guidance).toBe('Legacy update path');
   });
 });

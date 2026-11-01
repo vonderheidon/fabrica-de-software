@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { HttpQueueObservation, ProjectItem, QueueCommand, QueueObservation } from '#contracts';
+import type { HttpQueueObservation, ProjectConfiguration, ProjectItem, QueueCommand, QueueObservation } from '#contracts';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
@@ -10,7 +11,7 @@ import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { createGitHub } from '../../apps/controller/src/modules/github/index.js';
 import { createWorkspaces } from '../../apps/controller/src/modules/workspaces/index.js';
-import { attemptFixture, complete, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, complete, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
 import { toHttpQueueObservation } from '../../apps/controller/src/http/observation-views.js';
 import { QueuePanel } from '../../apps/web/src/features/queue/QueuePanel.js';
 import { observationWire } from '../fixtures/observation-wire.js';
@@ -35,6 +36,12 @@ async function fixture(enabled = true) {
   const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
   f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue });
   return { f, queue, automation };
+}
+function saveProjectConfiguration(f: AttemptFixture, changes: Partial<ProjectConfiguration>): void {
+  const current = f.storage.getConfiguration(f.projectId);
+  const { id: _id, project_id: _project, revision: _revision, created_at_ms: _created, ...configuration } = current.view.configuration;
+  f.storage.saveConfiguration({ operationId: randomUUID(), expectedRevision: current.etag, projectId: f.projectId,
+    body: { project_changes: changes }, configuration: { ...configuration, ...changes }, globalChanges: {} });
 }
 it('slows automatic queue polling as the reported GitHub quota approaches its reserve', async () => {
   const { f, queue } = await fixture(false);
@@ -108,8 +115,8 @@ describe('authorized queue changes', () => {
         if (change === 'criteria') f.issue.body += '\n- Newly added acceptance criterion';
         if (change === 'configuration') automation(f.projectId, false);
       };
-      const preparations = { ...f.preparations, getPreparation: async (id: string) => {
-        const prepared = await f.preparations.getPreparation(id); mutate(); return prepared;
+      const preparations = { ...f.preparations, prepareReadyStart: async (...args: Parameters<typeof f.preparations.prepareReadyStart>) => {
+        const prepared = await f.preparations.prepareReadyStart(...args); mutate(); return prepared;
       } };
       f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue: { observe, revalidateForDispatch } });
       await f.pipeline.tick(); await f.pipeline.drain();
@@ -122,6 +129,205 @@ describe('authorized queue changes', () => {
       expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: change === 'none' ? 1 : 0 });
     },
   );
+  it.each(['base_sha', 'base_branch', 'project_mapping', 'profile_guidance', 'global_pause', 'project_pause', 'preparation_revision',
+    'delivery_mode', 'destination', 'repository_identity'] as const)(
+    'rejects a %s change made after the Ready envelope and before acceptance', async change => {
+      const { f, queue, automation } = await fixture(); await f.pipeline.close();
+      let envelope: Awaited<ReturnType<typeof f.preparations.prepareReadyStart>> | undefined;
+      const mutate = async () => {
+        if (change === 'base_sha') {
+          f.observation.base = { branch: 'main', sha: 'b'.repeat(40), observedFrom: 'github' };
+          f.observation.remote!.branch = { repositoryId: f.issue.repository.id, name: 'main', sha: 'b'.repeat(40) };
+        }
+        if (change === 'base_branch') saveProjectConfiguration(f, { base_branch: 'release' });
+        if (change === 'project_mapping') {
+          const mapping = f.storage.getConfiguration(f.projectId).view.configuration.github_project;
+          if (!mapping) throw new Error('PROJECT_MAPPING_FIXTURE_INCOMPLETE');
+          saveProjectConfiguration(f, { github_project: { ...mapping, id: 'PVT_changed' } });
+        }
+        if (change === 'profile_guidance') {
+          const global = f.storage.getGlobalConfiguration();
+          f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: global.etag, changes: {}, body: { changes: {}, profile_changes: [
+            { action: 'update', id: f.profile.id, changes: { guidance: 'Changed after the Ready envelope.' } },
+          ] } });
+        }
+        if (change === 'global_pause') {
+          const current = f.storage.getGlobalConfiguration();
+          f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: current.etag, changes: { automation_enabled: false }, body: { changes: { automation_enabled: false } } });
+        }
+        if (change === 'project_pause') automation(f.projectId, false);
+        if (change === 'preparation_revision') {
+          await f.preparations.updatePreparation(envelope!.body.preparationId, { changes: { guidance: 'Updated after envelope.' } },
+            { operationId: randomUUID(), expectedRevision: envelope!.expectedRevision });
+        }
+        if (change === 'delivery_mode') {
+          await f.preparations.updatePreparation(envelope!.body.preparationId, { changes: { delivery_mode: 'commit', publication_target: {
+            format_version: 1, repository_id: f.issue.repository.id, selection: { kind: 'existing_clone', path: join(f.directory, 'target') },
+          } } }, { operationId: randomUUID(), expectedRevision: envelope!.expectedRevision });
+        }
+        if (change === 'destination') {
+          await f.preparations.updatePreparation(envelope!.body.preparationId, { changes: { publication_target: {
+            format_version: 1, repository_id: f.issue.repository.id, selection: { kind: 'existing_clone', path: join(f.directory, 'alternate-target') },
+          } } }, { operationId: randomUUID(), expectedRevision: envelope!.expectedRevision });
+        }
+        if (change === 'repository_identity') f.issue.repository = { ...f.issue.repository, id: 'R_changed' };
+      };
+      const preparations = { ...f.preparations, prepareReadyStart: async (...args: Parameters<typeof f.preparations.prepareReadyStart>) => {
+        envelope = await f.preparations.prepareReadyStart(...args);
+        await mutate();
+        return envelope;
+      } };
+      f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue });
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(envelope).toBeDefined();
+      expect(f.storage.getOperation(envelope!.operationId)).toMatchObject({ kind: 'preparation.create', state: 'succeeded', resource: { id: envelope!.body.preparationId } });
+      expect(f.storage.listAttempts({}).items).toHaveLength(0);
+      expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 0 });
+      expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+      expect(f.execution.startPassage).not.toHaveBeenCalled();
+      if (change === 'global_pause' || change === 'project_pause') expect(f.logFailure).not.toHaveBeenCalled();
+      else expect(f.logFailure).toHaveBeenCalledWith(change === 'preparation_revision' || change === 'delivery_mode' || change === 'destination'
+        ? 'REVISION_CONFLICT' : 'SUMMARY_CHANGED');
+    },
+  );
+  it('rejects a preparation ETag change after renewal and before transactional acceptance', async () => {
+    const { f, queue } = await fixture(); await f.pipeline.close();
+    let envelope: Awaited<ReturnType<typeof f.preparations.prepareReadyStart>> | undefined;
+    const originalPrepare = f.preparations.prepareReadyStart.bind(f.preparations);
+    const preparations = { ...f.preparations, prepareReadyStart: async (...args: Parameters<typeof f.preparations.prepareReadyStart>) => {
+      envelope = await originalPrepare(...args); return envelope;
+    } };
+    const originalObserveTools = f.observeTools.getMockImplementation();
+    if (!originalObserveTools) throw new Error('TOOLS_FIXTURE_INCOMPLETE');
+    f.observeTools.mockImplementation(async () => {
+      const current = f.storage.getPreparation(envelope!.body.preparationId);
+      await f.preparations.updatePreparation(envelope!.body.preparationId, { changes: { guidance: 'Changed after renewal.' } },
+        { operationId: randomUUID(), expectedRevision: current.etag });
+      return originalObserveTools();
+    });
+    f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue });
+    await f.pipeline.tick(); await f.pipeline.drain();
+    expect(envelope).toBeDefined();
+    expect(f.logFailure).toHaveBeenCalledWith('REVISION_CONFLICT');
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 0 });
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+  });
+
+  it('abandons a durable Ready preparation when the controller closes during preparation I/O', async () => {
+    const { f, queue } = await fixture(); await f.pipeline.close();
+    const originalPrepare = f.preparations.prepareReadyStart.bind(f.preparations);
+    let entered!: () => void;
+    const preparationEntered = new Promise<void>(resolve => { entered = resolve; });
+    let release!: () => void;
+    const hold = new Promise<void>(resolve => { release = resolve; });
+    let envelope: Awaited<ReturnType<typeof f.preparations.prepareReadyStart>> | undefined;
+    const preparations = { ...f.preparations, prepareReadyStart: async (...args: Parameters<typeof f.preparations.prepareReadyStart>) => {
+      envelope = await originalPrepare(...args); entered(); await hold; return envelope;
+    } };
+    f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue });
+    const tick = f.pipeline.tick();
+    await preparationEntered;
+    await f.pipeline.close();
+    release();
+    await tick; await f.pipeline.drain();
+    expect(envelope).toBeDefined();
+    expect(f.storage.getOperation(envelope!.operationId)).toMatchObject({ state: 'succeeded', resource: { id: envelope!.body.preparationId } });
+    expect(f.storage.listAttempts({}).items).toHaveLength(0);
+    expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 0 });
+    expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
+    expect(f.execution.startPassage).not.toHaveBeenCalled();
+    expect(f.execution.cancelAttempt).not.toHaveBeenCalled();
+    expect(f.logFailure).not.toHaveBeenCalled();
+  });
+
+  it('blocks overlapping Ready ticks while dispatching and allows a later tick after failure', async () => {
+    const { f, queue } = await fixture(); await f.pipeline.close();
+    const interval = f.storage.getSettings().time_defaults.polling_interval_ms;
+    const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    const originalPrepare = f.preparations.prepareReadyStart.bind(f.preparations);
+    let entered!: () => void;
+    const firstEntered = new Promise<void>(resolve => { entered = resolve; });
+    let rejectFirst!: () => void;
+    const firstFailure = new Promise<void>((_resolve, reject) => { rejectFirst = () => reject(new Error('controlled preparation failure')); });
+    let preparationCalls = 0;
+    const preparations = { ...f.preparations, prepareReadyStart: async (...args: Parameters<typeof f.preparations.prepareReadyStart>) => {
+      preparationCalls += 1;
+      if (preparationCalls === 1) { entered(); await firstFailure; }
+      return originalPrepare(...args);
+    } };
+    const observe = vi.spyOn(queue, 'observe');
+    f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue });
+    try {
+      const firstTick = f.pipeline.tick();
+      await firstEntered;
+      await f.pipeline.tick();
+      expect(preparationCalls).toBe(1);
+      expect(observe).toHaveBeenCalledOnce();
+      rejectFirst();
+      await firstTick; await f.pipeline.drain();
+      expect(f.logFailure).toHaveBeenCalledWith('QUEUE_DISPATCH_FAILED');
+      clock.mockReturnValue(base + interval + 1);
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(preparationCalls).toBe(2);
+      expect(observe).toHaveBeenCalledTimes(2);
+      expect(f.storage.listAttempts({}).items).toHaveLength(1);
+      expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 1 });
+    } finally { await f.pipeline.close(); clock.mockRestore(); }
+  });
+  it('preserves the automatic delivery mode and predecessor choice through the Ready envelope', async () => {
+    const { f, queue } = await fixture();
+    const interval = f.storage.getSettings().time_defaults.polling_interval_ms;
+    const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    try {
+      await f.pipeline.tick(); await f.pipeline.drain();
+      const previous = f.db.prepare<[], { id: string }>("SELECT id FROM attempts WHERE source='automatic'").get();
+      expect(previous).toBeDefined();
+      await f.pipeline.close();
+      confirmTerminalStops(f, previous!.id);
+      let choices: Parameters<typeof f.preparations.prepareReadyStart>[1] | undefined;
+      const originalPrepare = f.preparations.prepareReadyStart.bind(f.preparations);
+      const preparations = { ...f.preparations, prepareReadyStart: async (...args: Parameters<typeof f.preparations.prepareReadyStart>) => {
+        choices = structuredClone(args[1]);
+        return originalPrepare(...args);
+      } };
+      f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue });
+      f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
+      clock.mockReturnValue(base + interval + 1);
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(f.db.prepare("SELECT count(*) AS n FROM attempts WHERE source='automatic'").get()).toEqual({ n: 1 });
+      f.issue.memberships[0]!.statusValues[0]!.optionId = 'READY';
+      clock.mockReturnValue(base + interval * 2 + 2);
+      await f.pipeline.tick(); await f.pipeline.drain();
+      const attempts = f.db.prepare<[], { id: string }>("SELECT id FROM attempts WHERE source='automatic' ORDER BY created_at_ms,id").all();
+      expect(attempts).toHaveLength(2);
+      expect(choices).toMatchObject({ issue_id: f.issue.id, delivery_mode: 'icr', guidance: '', previous_attempt_id: previous!.id, overrides: {} });
+      expect(f.storage.getAttemptCapture(attempts[1]!.id).workspace.predecessor_attempt_id).toBe(previous!.id);
+      expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 2 });
+    } finally { await f.pipeline.close(); clock.mockRestore(); }
+  });
+  it('accepts only the first consumer when another scheduler consumes the cycle during final revalidation', async () => {
+    const { f, queue } = await fixture(); await f.pipeline.close();
+    const competitor = createPipeline({ ...f.dependencies, github: f.github, queue });
+    const originalRevalidate = queue.revalidateForDispatch.bind(queue);
+    let revalidations = 0;
+    const revalidateForDispatch = async (...args: Parameters<typeof queue.revalidateForDispatch>) => {
+      const current = await originalRevalidate(...args);
+      if (++revalidations === 2) { await competitor.tick(); await competitor.drain(); }
+      return current;
+    };
+    f.pipeline = createPipeline({ ...f.dependencies, github: f.github, queue: { observe: queue.observe, revalidateForDispatch } });
+    try {
+      await f.pipeline.tick(); await f.pipeline.drain();
+      expect(f.storage.listAttempts({}).items).toHaveLength(1);
+      expect(f.db.prepare('SELECT source FROM attempts').get()).toEqual({ source: 'automatic' });
+      expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 1 });
+      expect(f.workspaces.prepareAttempt).toHaveBeenCalledOnce();
+      expect(f.execution.startPassage).toHaveBeenCalledOnce();
+      expect(f.logFailure).not.toHaveBeenCalled();
+    } finally { await competitor.close(); }
+  });
   it('revalidates only the ordered prefix through the first candidate', async () => {
     const { f } = await fixture(); await f.pipeline.close();
     const items: ProjectItem[] = Array.from({ length: 20 }, (_, index) => ({
@@ -187,20 +393,22 @@ describe('authorized queue changes', () => {
       url: secondIssue.url, executable: true, position: 2, status: { fieldId: 'FIELD_test', optionId: 'READY' } };
     vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([firstItem, secondItem]));
     const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
-    let preparationReads = 0;
-    const preparations = { ...f.preparations, getPreparation: async (id: string) => {
-      const result = await f.preparations.getPreparation(id);
-      if (++preparationReads === 1) vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([
+    let preparations = 0;
+    const wrappedPreparations = { ...f.preparations, prepareReadyStart: async (...args: Parameters<typeof f.preparations.prepareReadyStart>) => {
+      const result = await f.preparations.prepareReadyStart(...args);
+      if (++preparations === 1) vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([
         { ...secondItem, position: 1 }, { ...firstItem, position: 2 },
       ]));
       return result;
     } };
     const interval = f.storage.getSettings().time_defaults.polling_interval_ms;
     const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
-    f.pipeline = createPipeline({ ...f.dependencies, preparations, github: f.github, queue });
+    f.pipeline = createPipeline({ ...f.dependencies, preparations: wrappedPreparations, github: f.github, queue });
     try {
       await f.pipeline.tick(); await f.pipeline.drain();
       expect(f.storage.listAttempts({}).items).toHaveLength(0);
+      expect(f.db.prepare('SELECT count(*) AS n FROM queue_consumptions').get()).toEqual({ n: 0 });
+      expect(f.logFailure).not.toHaveBeenCalled();
       clock.mockReturnValue(base + interval + 1);
       await f.pipeline.tick(); await f.pipeline.drain();
       expect(f.storage.listAttempts({}).items.map(item => item.issueId)).toEqual([secondId]);
@@ -569,6 +777,7 @@ describe('durable scheduler', () => {
     const { f, queue } = await fixture(); const original = f.workspaces.prepareAttempt.getMockImplementation()!;
     f.workspaces.prepareAttempt.mockImplementation(async input => {
       expect(f.db.prepare('SELECT attempt_id FROM queue_consumptions').get()).toEqual({ attempt_id: input.attemptId });
+      expect(f.db.prepare('SELECT id FROM attempts WHERE id=?').get(input.attemptId)).toEqual({ id: input.attemptId });
       return original(input);
     });
     await Promise.all([f.pipeline.tick(), f.pipeline.tick(), f.pipeline.tick()]); await f.pipeline.drain();

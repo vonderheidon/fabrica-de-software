@@ -1,7 +1,7 @@
 import { Value } from '@sinclair/typebox/value';
 import {
   CatalogQuery, PreparationChoices, PreparationUpdate,
-  type ConfigurationView, type EffectiveConfiguration, type IssueOptions, type Preparation, type StoredExecutionProfile,
+  type ConfigurationView, type EffectiveConfiguration, type IssueOptions, type Preparation, type StartAttempt, type StoredExecutionProfile,
   type PreparationRecord, type Prerequisite, type IssueContext,
 } from '#contracts';
 import { assessIssueReadiness, type GitHub } from '../github/index.js';
@@ -231,6 +231,10 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     if (!operation.receipt || operation.state !== 'succeeded') fail(503, 'OPERATION_NOT_DURABLE', 'The preparation could not be confirmed.');
     return { ...await getPreparation(operation.resource.id), operationId: operation.operation_id, receipt: operation.receipt };
   }
+  async function createPreparation(projectId: string, body: PreparationChoices, context: CommandContext) {
+    if (!Value.Check(PreparationChoices, body)) fail(400, 'PREPARATION_INVALID', 'Preparation choices are invalid.');
+    return save({ ...context, kind: 'preparation.create', projectId, body });
+  }
   return {
     getPreparation,
     async prepareDecisionSuccessor(attemptId: string, role: 'implementer' | 'reviewer', profileId: string, profileRevision: number) {
@@ -265,9 +269,22 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
         storage.getAttemptBlock(attemptId)?.id !== block.id) fail(412, 'REVISION_CONFLICT', 'The attempt or project changed while preparing its successor.');
       return { projectId: previous.project_id, configurationETag: config.etag, body: choices };
     },
-    async createPreparation(projectId: string, body: PreparationChoices, context: CommandContext) {
-      if (!Value.Check(PreparationChoices, body)) fail(400, 'PREPARATION_INVALID', 'Preparation choices are invalid.');
-      return save({ ...context, kind: 'preparation.create', projectId, body });
+    createPreparation,
+    async prepareReadyStart(projectId: string, body: PreparationChoices, context: CommandContext) {
+      const saved = await createPreparation(projectId, body, context);
+      const preparation = saved.view.preparation;
+      const startAttempt: StartAttempt = {
+        preparationId: preparation.id,
+        preparationRevision: preparation.revision,
+        authorizedSummaryHash: preparation.summary_hash,
+        authorized: true,
+      };
+      return {
+        body: startAttempt,
+        expectedRevision: saved.etag,
+        operationId: saved.operationId,
+        receipt: saved.receipt,
+      };
     },
     async updatePreparation(preparationId: string, body: PreparationUpdate, context: CommandContext) {
       if (!Value.Check(PreparationUpdate, body)) fail(400, 'PREPARATION_INVALID', 'Preparation changes are invalid.');
