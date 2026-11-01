@@ -188,3 +188,21 @@ it('keeps the stage summary stable while its current observation refreshes', asy
   expect(summary?.querySelector('.stale-note')).toBeNull();
   await act(async () => pending.resolve({ data: attempt(a), etag: '"2"' }));
 });
+
+it('does not offer a planned delivery identity before the version can be consulted', async () => {
+  await mount();
+  const previous = metadata.getMockImplementation()!;
+  metadata.mockImplementation(async (path: string) => {
+    if (!path.startsWith(`/api/v1/attempts/${id}`)) return previous(path);
+    const data = attempt(a);
+    data.selected_delivery_id = null;
+    const section = new URL(path, 'http://local').searchParams.get('section');
+    if (section) data.details = { section: section as NonNullable<HttpAttemptDetail['details']>['section'], items: section === 'rounds' ? [{ round: 1, delivery_id: a, content_identity: null }] as NonNullable<HttpAttemptDetail['details']>['items'] : [], has_more: false, next_cursor: null, event_cursor: '1' };
+    return { data, etag: '"2"' };
+  });
+  await act(async () => root!.render(createElement(AttemptDetailDialog, { attemptId: id, selectedRound: '1', selectedDeliveryId: null, onSelectionChange: () => {}, onRetry: () => {} })));
+  const selector = container.querySelector<HTMLButtonElement>('#attempt-version')!;
+  expect(selector.textContent).toContain('Aguardando captura da versão');
+  await act(async () => selector.click());
+  expect(container.textContent).not.toContain('Versão pendente');
+});

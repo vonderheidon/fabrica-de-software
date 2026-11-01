@@ -217,14 +217,14 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
         </label><CustomSelect id="attempt-round" value={selectedRoundValue} onChange={(event) => {
           const value = event.currentTarget.value;
           const selected = roundItems.map(asRecord).find((item) => String(item.round) === value);
-          onSelectionChange(value, typeof selected?.delivery_id === 'string' ? selected.delivery_id : null);
+          onSelectionChange(value, selected?.content_identity && typeof selected.delivery_id === 'string' ? selected.delivery_id : null);
         }}>
           {Array.from({ length: attempt.round }, (_, index) => String(index + 1)).map((round) => <option key={round} value={round}>Rodada {round}</option>)}
         </CustomSelect>
       </div><div className="form-field"><label htmlFor="attempt-version">Versão
         </label><CustomSelect id="attempt-version" value={effectiveDeliveryId ?? ''} onChange={(event) => onSelectionChange(selectedRoundValue, event.currentTarget.value || null)}>
-          {!effectiveDeliveryId && <option value="">Versão planejada ou não capturada</option>}
-          {roundItems.map(asRecord).filter((item) => String(item.round) === selectedRoundValue && typeof item.delivery_id === 'string').map((item) => <option key={String(item.delivery_id)} value={String(item.delivery_id)}>Versão {item.content_identity ? 'capturada' : 'pendente'}</option>)}
+          {!effectiveDeliveryId && <option value="">Aguardando captura da versão</option>}
+          {roundItems.map(asRecord).filter((item) => String(item.round) === selectedRoundValue && typeof item.delivery_id === 'string' && (item.content_identity || item.delivery_id === effectiveDeliveryId)).map((item) => <option key={String(item.delivery_id)} value={String(item.delivery_id)}>{item.content_identity ? 'Versão capturada' : 'Captura não concluída'}</option>)}
         </CustomSelect>
       </div></div>
 
