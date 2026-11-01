@@ -60,6 +60,14 @@ function ToolsSetupContent({ onboarding, disabled = false, resetKey = 0, compact
   useEffect(() => () => callback.current?.(false, false), []);
   useEffect(() => { setDrafts({}); for (const tool of tools) selection.clearCandidate(`${tool}_executable`); }, [resetKey]);
   useEffect(() => {
+    for (const tool of tools) {
+      const path = selection.candidates[`${tool}_executable`];
+      if (!path) continue;
+      setDrafts(current => ({ ...current, [tool]: path }));
+      selection.clearCandidate(`${tool}_executable`);
+    }
+  }, [selection.candidates]);
+  useEffect(() => {
     if (operation.status !== 'confirmed' || operation.kind !== 'tools') return;
     const sent = submitted.current;
     if (sent) {
@@ -89,25 +97,26 @@ function ToolsSetupContent({ onboarding, disabled = false, resetKey = 0, compact
     <div className="tools-summary">{tools.map(tool => {
       const item = observation?.tools[tool];
       const saved = tool === 'gh' ? null : onboarding.load.snapshot?.settings.tool_preferences[tool].preferred_path;
-      const candidate = selection.candidates[`${tool}_executable`];
       const manual = item && (item.state !== 'available' || Boolean(saved && saved !== item.selected_path));
-      return <article key={tool} className="tool-summary">
-        <div><b>{labels[tool]}</b><span>{!item ? 'Aguardando detecção' : item.state === 'available' ? 'Localizado e validado' : item.state === 'ambiguous' ? 'Escolha pendente' : 'Não disponível'}</span></div>
+      const hasCandidates = Boolean(item?.candidates.length);
+      const showPath = Boolean(manual && !hasCandidates) || Boolean(drafts[tool]?.trim());
+      return <article key={tool} className="tool-summary" data-state={manual ? 'pending' : item?.state}>
+        <div><b>{labels[tool]}</b><span className="tool-status">{!item ? 'Aguardando detecção' : item.state === 'available' ? 'Localizado e validado' : item.state === 'ambiguous' ? 'Escolha pendente' : 'Não disponível'}</span></div>
         {item?.selected_path && <p className="tool-path">{item.selected_path} <small>{item.candidates.find(option => option.path === item.selected_path)?.version}</small></p>}
         {saved && saved !== item?.selected_path && <p className="tool-path">Caminho salvo: {saved}. A leitura atual não confirmou esse caminho.</p>}
         {manual && <>
-          <p>{item.state === 'ambiguous' ? 'Há mais de uma opção ou a busca ficou incompleta.' : 'Nenhum executável válido foi confirmado.'} {item.recovery || 'Selecione o executável correto e salve para validar.'}</p>
-          {item.candidates.length > 0 && <div className="form-field"><label htmlFor={`tool-${tool}-candidate`}>Opções de {labels[tool]}</label><CustomSelect id={`tool-${tool}-candidate`} value={drafts[tool] ?? ''} disabled={disabled || pending || busy} onChange={event => { const path = event.currentTarget.value; setDrafts(current => ({ ...current, [tool]: path })); }}><option value="">Selecione…</option>{item.candidates.map(option => <option key={option.path} value={option.path}>{option.path} · {option.version}</option>)}</CustomSelect></div>}
-          <button type="button" disabled={disabled || pending || busy} onClick={() => void selection.select(`${tool}_executable`)}>Selecionar executável de {labels[tool]}</button>
+          {!hasCandidates && <p className="tool-hint">Não encontramos o {labels[tool]}.</p>}
+          {item.candidates.length > 0 && <div className="form-field"><label htmlFor={`tool-${tool}-candidate`}>Opções de {labels[tool]}</label><CustomSelect id={`tool-${tool}-candidate`} searchable={false} value={drafts[tool] ?? ''} disabled={disabled || pending || busy} onChange={event => { const path = event.currentTarget.value; setDrafts(current => ({ ...current, [tool]: path })); }}><option value="">Selecione…</option>{item.candidates.map(option => <option key={option.path} value={option.path}>{option.path} · {option.version}</option>)}</CustomSelect></div>}
         </>}
-        {candidate && <p className="tool-path">Candidato: {candidate} <button type="button" disabled={disabled || pending || busy} onClick={() => { setDrafts(current => ({ ...current, [tool]: candidate })); selection.clearCandidate(`${tool}_executable`); }}>Usar candidato de {labels[tool]}</button></p>}
-        {(manual || drafts[tool] !== undefined) && <div className="form-field"><label htmlFor={`tool-${tool}-path`}>Caminho escolhido de {labels[tool]}</label><input id={`tool-${tool}-path`} value={drafts[tool] ?? ''} disabled={disabled || pending || busy} onChange={event => { const path = event.currentTarget.value; setDrafts(current => ({ ...current, [tool]: path })); }} /><small>Use o seletor ou informe o caminho absoluto do executável. Salvar valida a escolha no controlador.</small><button type="button" disabled={disabled || pending || busy || !drafts[tool]?.trim()} onClick={() => save(tool)}>Validar e salvar {labels[tool]}</button></div>}
+        {(manual || drafts[tool] !== undefined) && <div className="form-field">
+          {showPath && <><label htmlFor={`tool-${tool}-path`}>Caminho escolhido de {labels[tool]}</label><div className="tool-path-picker"><input id={`tool-${tool}-path`} placeholder="Caminho absoluto do executável" value={drafts[tool] ?? ''} disabled={disabled || pending || busy} onChange={event => { const path = event.currentTarget.value; setDrafts(current => ({ ...current, [tool]: path })); }} /><button type="button" aria-label={`Procurar ${hasCandidates || drafts[tool]?.trim() ? 'outro ' : ''}executável de ${labels[tool]}`} disabled={disabled || pending || busy} onClick={() => void selection.select(`${tool}_executable`)}>{hasCandidates || drafts[tool]?.trim() ? 'Procurar outro executável…' : 'Procurar executável…'}</button></div></>}
+          <button className="primary" type="button" disabled={disabled || pending || busy || !drafts[tool]?.trim()} onClick={() => save(tool)}>Validar e salvar {labels[tool]}</button>
+        </div>}
       </article>;
     })}</div>
     {selectionMessage && <p role="status">{selectionMessage}</p>}
-    {observation?.maestri_connection.state !== 'connected' && <div className="notice"><b>Conexão Maestri</b><p>{!observation || observation.maestri_connection.state === 'not_checked' ? 'Conexão ainda não verificada. Inicie pelo terminal-âncora do Maestri e detecte novamente.' : 'Conexão não confirmada. Inicie pelo terminal-âncora do Maestri e detecte novamente.'} Localizar o executável não confirma a conexão nem uma execução OMP.</p></div>}
     {operation.status === 'failed' && operation.kind === 'tools' && <p role="alert" className="error">A escolha não foi salva. {operation.message} Confira o executável e tente novamente; seu rascunho foi mantido.</p>}
-    {operation.status === 'confirmed' && operation.kind === 'tools' && <p role="status">Escolha salva com recibo. Confira a revalidação atual acima. Ferramentas de execução alteradas serão usadas na próxima inicialização.</p>}
+    {operation.status === 'confirmed' && operation.kind === 'tools' && <div className="save-success" role="status"><p>Executável salvo com sucesso. A alteração será usada na próxima inicialização.</p></div>}
     {operation.status === 'uncertain' && operation.kind === 'tools' && <div role="alert"><p>A gravação está sem confirmação. Consulte a operação original antes de salvar outra escolha.</p><button type="button" onClick={() => void onboarding.recover()}>Consultar gravação das ferramentas</button>{operation.canResend && <button type="button" onClick={() => void onboarding.recover(true)}>Reapresentar a mesma gravação</button>}{operation.recoveryError && <p>{operation.recoveryError}</p>}</div>}
   </section>;
 }

@@ -403,7 +403,7 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
         <small id="profile-model-help" className="field-guidance">Modelo do provedor selecionado. A troca pode redefinir o esforço.</small>
       </div>
       <div className="form-field"><label htmlFor="profile-effort">Esforço</label>
-        <CustomSelect id="profile-effort" value={draft.effort ?? ''} disabled={!canEditSelections || !currentModel} aria-describedby="profile-effort-help" onChange={(event) => { const value = event.currentTarget.value || null; updateDraft((current) => ({ ...current, effort: value })); }}>
+        <CustomSelect id="profile-effort" searchable={false} value={draft.effort ?? ''} disabled={!canEditSelections || !currentModel} aria-describedby="profile-effort-help" onChange={(event) => { const value = event.currentTarget.value || null; updateDraft((current) => ({ ...current, effort: value })); }}>
           <option value="" disabled={Boolean(currentModel && currentModel.efforts.length > 0)}>Não se aplica</option>
           {draft.effort && !effortExists && <option value={draft.effort}>{draft.effort} · fora do catálogo atual</option>}
           {effortOptions.map((effort) => <option value={effort} key={effort}>{effort}</option>)}
@@ -414,8 +414,8 @@ export function ProfileForm({ projectId, profileId, onClose, onSavingChange, onS
       <div className="form-field field-full">
         <div className="profile-guidance-heading"><label htmlFor="profile-guidance">Instruções comportamentais</label>{!editingGuidance && <button type="button" aria-controls="profile-guidance" disabled={saveState.status === 'saving' || Boolean(uncertainId)} onClick={() => { setEditingGuidance(true); requestAnimationFrame(() => document.getElementById('profile-guidance')?.focus()); }}>Editar</button>}</div>
         <textarea id="profile-guidance" value={draft.guidance} readOnly={!editingGuidance || saveState.status === 'saving' || Boolean(uncertainId)} rows={12} aria-invalid={guidanceExcessive || bodyExcessive || saveState.status === 'error' && saveState.fieldErrors?.some(error => error.field.includes('guidance'))} aria-describedby="profile-guidance-help profile-guidance-count profile-guidance-limit profile-field-errors" onChange={(event) => { if (!editingGuidance) return; const value = event.currentTarget.value; updateDraft((current) => ({ ...current, guidance: value })); }} />
-        <small id="profile-guidance-help" className="field-guidance">Estas são as instruções comportamentais efetivas do perfil nas novas tentativas. Até 8.192 caracteres; não inclua credenciais. O texto não altera papel, critérios, permissões, schemas de resultado ou limites técnicos.</small>
-        <small id="profile-guidance-count">{guidanceLength.toLocaleString('pt-BR')} / 8.192 caracteres. Tentativas iniciadas mantêm as instruções capturadas.</small>
+        <small id="profile-guidance-help" className="field-guidance">Oriente como o agente deve trabalhar, sem incluir senhas ou tokens. As alterações valem para novas tentativas e preservam as regras e permissões do perfil.</small>
+        <small id="profile-guidance-count">{guidanceLength.toLocaleString('pt-BR')} / 8.192 caracteres</small>
         <span id="profile-guidance-limit">{guidanceExcessive ? <span role="alert">As instruções excedem 8.192 caracteres. Reduza o texto antes de salvar; o rascunho foi preservado.</span> : bodyExcessive ? <span role="alert">{configurationBodyLimitMessage} O rascunho foi preservado.</span> : null}</span>
       </div>
     </div>

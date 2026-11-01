@@ -70,7 +70,7 @@ async function firstActiveAttemptId(): Promise<string | null> {
 function accountOperationFromView(operationId: string, targetLogin: string | null, warnings: readonly OperationWarning[]): GitHubSettingsOperation {
   return {
     status: 'confirmed', operationId,
-    message: targetLogin ? `O vínculo da conta @${targetLogin} foi confirmado pelo recibo.` : 'O recibo original confirmou a operação de vínculo.',
+    message: targetLogin ? `Conta @${targetLogin} vinculada com sucesso.` : 'Vínculo da conta confirmado.',
     warnings,
   };
 }
@@ -185,7 +185,7 @@ export function useGitHubSetup(input: {
       }
       finishConfigurationSave(operationId);
       if (kind === 'github-account-binding') setAccountOperation(accountOperationFromView(operationId, targetLogin, response.data.warnings ?? []));
-      else setExecutableOperation({ status: 'confirmed', operationId, message: 'O caminho foi validado pelo controlador e salvo com recibo.', warnings: response.data.warnings ?? [], ...(targetPath ? { savedPath: targetPath } : {}) });
+      else setExecutableOperation({ status: 'confirmed', operationId, message: 'Caminho do executável salvo com sucesso.', warnings: response.data.warnings ?? [], ...(targetPath ? { savedPath: targetPath } : {}) });
       if (kind === 'github-account-binding') setVerification({ status: 'idle', data: null, settingsEtag: null, error: null });
       current.onSettingsSaved();
     } catch (error: unknown) {
@@ -234,7 +234,7 @@ export function useGitHubSetup(input: {
         finishConfigurationSave(operation.operationId);
         const next = kind === 'github-account-binding'
           ? accountOperationFromView(operation.operationId, operation.targetLogin, result.warnings ?? [])
-          : { status: 'confirmed' as const, operationId: operation.operationId, message: 'O recibo original confirmou o caminho salvo.', warnings: result.warnings ?? [], ...(operation.targetPath ? { savedPath: operation.targetPath } : {}) };
+          : { status: 'confirmed' as const, operationId: operation.operationId, message: 'Caminho do executável salvo com sucesso.', warnings: result.warnings ?? [], ...(operation.targetPath ? { savedPath: operation.targetPath } : {}) };
         if (kind === 'github-account-binding') {
           setAccountOperation(next);
           setVerification({ status: 'idle', data: null, settingsEtag: null, error: null });

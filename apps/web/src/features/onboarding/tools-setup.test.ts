@@ -35,13 +35,12 @@ async function mount() {
   await act(async () => root.render(createElement(Harness)));
 }
 async function click(text: string) {
-  const button = [...container.querySelectorAll('button')].find(item => item.textContent === text);
+  const button = [...container.querySelectorAll('button')].find(item => item.textContent === text || item.getAttribute('aria-label') === text);
   expect(button, text).toBeDefined(); expect(button!.disabled, text).toBe(false);
   await act(async () => button!.click());
 }
 async function choose() {
-  await click('Selecionar executável de Git');
-  await click('Usar candidato de Git');
+  await click('Procurar executável de Git');
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -98,19 +97,19 @@ it('renders clean installation, explicit correction, receipt and restart revalid
   wizard = true; await mount();
   expect(container.querySelector('#onboarding-step-title')?.textContent).toBe('Ferramentas');
   expect(container.textContent).toContain('Localizado e validado');
-  expect(container.textContent).toContain('Conexão não confirmada');
-  expect(container.textContent).not.toContain('Selecionar executável de OMP');
+  expect(container.textContent).not.toContain('Conexão Maestri');
+  expect(container.querySelector('[aria-label="Procurar outro executável de OMP"]')).toBeNull();
   await choose(); expect(writes).toHaveLength(0);
   await click('Validar e salvar Git');
   expect(writes).toHaveLength(1);
   expect(writes[0]).toEqual({ changes: {}, tool_preferences: { ...settings.tool_preferences, git: { preferred_path: path, last_validated_at_ms: null } } });
-  expect(container.textContent).toContain('Escolha salva com recibo');
+  expect(container.querySelector('.save-success')?.textContent).toContain('Executável salvo com sucesso');
   await act(async () => root.unmount());
   options.tools.git = { state: 'unavailable', candidates: [], selected_path: null, diagnostic: 'TOOL_NOT_FOUND', recovery: 'Escolha outro executável.' };
   await mount();
   expect(container.textContent).toContain(`Caminho salvo: ${path}`);
   expect(container.textContent).toContain('não confirmou esse caminho');
-  expect(container.textContent).toContain('Selecionar executável de Git');
+  expect(container.querySelector('[aria-label="Procurar executável de Git"]')).not.toBeNull();
   expect(writes).toHaveLength(1);
 });
 
@@ -123,10 +122,10 @@ it('preserves draft and saved path on cancellation, unavailable picker and faile
   await click('Continuar configurando');
   expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe(path);
   selection = { state: 'cancelled', kind: 'git_executable' };
-  await click('Selecionar executável de Git');
+  await click('Procurar outro executável de Git');
   expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe(path);
   selection = { state: 'unavailable', kind: 'git_executable', diagnostic: 'NATIVE_SELECTION_UNAVAILABLE' };
-  await click('Selecionar executável de Git');
+  await click('Procurar outro executável de Git');
   expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe(path);
   failSave = 'known'; await click('Validar e salvar Git');
   expect(container.textContent).toContain('A escolha não foi salva');
@@ -207,7 +206,15 @@ it('shows unresolved ambiguity as a manual choice without selecting or saving au
   await mount();
   expect(container.textContent).toContain('Escolha pendente');
   expect(container.querySelector('#tool-git-candidate')).not.toBeNull();
-  expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe('');
+  expect(container.querySelector('#tool-git-path')).toBeNull();
+  expect(container.querySelector('.tool-path-picker')).toBeNull();
+  const save = [...container.querySelectorAll('button')].find(button => button.textContent === 'Validar e salvar Git')!;
+  expect(save.disabled).toBe(true);
+  await act(async () => (container.querySelector('#tool-git-candidate') as HTMLButtonElement).click());
+  await click(`${path} · 1`);
+  expect(container.querySelector<HTMLInputElement>('#tool-git-path')?.value).toBe(path);
+  expect(container.querySelector('[aria-label="Procurar outro executável de Git"]')).not.toBeNull();
+  expect(save.disabled).toBe(false);
   expect(writes).toHaveLength(0);
 });
 

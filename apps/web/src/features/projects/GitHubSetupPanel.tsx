@@ -98,7 +98,7 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
     {ghCandidate && <div className="github-executable-candidate">
       <p><strong>{ghCandidateSaved ? 'Caminho salvo' : 'Candidato escolhido'}:</strong> <span className="mono">{ghCandidate}</span></p>
       {ghCandidateSaved
-        ? <p role="status">O recibo confirmou o save. Verifique novamente o status para confirmar que este executável está ativo.</p>
+        ? <p className="muted">Consulte o status para conferir o executável ativo.</p>
         : <><p className="muted">A escolha ainda não foi salva. O controlador validará o executável antes de gravar.</p><button type="button" onClick={() => void setup.saveExecutable(ghCandidate)} disabled={disabled || operationBusy || setup.executableOperation.status === 'uncertain'}>
           {setup.executableOperation.status === 'saving' ? 'Validando e salvando…' : 'Validar e salvar caminho'}
         </button></>}
@@ -120,8 +120,8 @@ export function GitHubDiagnostics({ options }: { options: GitHubSetupOptions }) 
 
 function GitHubOperationFeedback({ operation, kind, onConsult }: { operation: GitHubSettingsOperation; kind: 'binding' | 'executable'; onConsult: () => void }) {
   if (operation.status === 'idle' || operation.status === 'saving') return null;
-  if (operation.status === 'confirmed') return <div className="notice" role="status">
-    <b>{operation.message}</b>
+  if (operation.status === 'confirmed') return <div className="save-success" role="status">
+    <p>{operation.message}</p>
     {operation.warnings.map((warning, index) => <p key={`${warning.code}-${index}`}>{warning.message}</p>)}
   </div>;
   if (operation.status === 'uncertain') return <div className="notice" role="alert">

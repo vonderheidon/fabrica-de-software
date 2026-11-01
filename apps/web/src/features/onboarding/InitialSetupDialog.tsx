@@ -314,7 +314,7 @@ export function InitialSetupDialog({
           saveError={onboarding.operation.status === 'failed' && onboarding.operation.kind === 'projects-root' ? { message: onboarding.operation.message, requestId: onboarding.operation.requestId } : null}
           disabled={commandBlocked}
         />
-        {onboarding.operation.status === 'confirmed' && onboarding.operation.kind === 'projects-root' && <div className="onboarding-receipt" role="status"><p>Pasta salva e confirmada pelo recibo do controlador.</p></div>}
+        {onboarding.operation.status === 'confirmed' && onboarding.operation.kind === 'projects-root' && <div className="save-success" role="status"><p>Pasta dos projetos salva com sucesso.</p></div>}
         {onboarding.operation.status === 'failed' && onboarding.operation.kind === 'projects-root' && <p className="error" role="alert">{onboarding.operation.message}</p>}
       </>}
       {activeStep === 'profiles' && <>
@@ -330,7 +330,7 @@ export function InitialSetupDialog({
             </article>;
           })}
         </div>
-        {profileReceipt && <div className="onboarding-receipt" role="status"><p>O perfil de {profileReceipt.role === 'implementer' ? 'Implementador' : 'Revisor'} foi salvo com recibo confirmado. {latestProfileReceipt ? 'A coleção foi atualizada.' : 'Consultando a coleção atual antes de prosseguir.'}</p>{profileReceiptPending && <button type="button" onClick={() => void onboarding.refresh()}>Atualizar perfis</button>}</div>}
+        {profileReceipt && <div className="save-success" role="status"><p>Perfil de {profileReceipt.role === 'implementer' ? 'Implementador' : 'Revisor'} salvo com sucesso.{!latestProfileReceipt && ' Consultando os perfis atualizados…'}</p>{profileReceiptPending && <button type="button" onClick={() => void onboarding.refresh()}>Atualizar perfis</button>}</div>}
         {profileFormOpen && missingProfileType && <ProfileForm
           key={`${profileFormKey}:${profileType}`}
           projectId={null}
