@@ -76,27 +76,20 @@ it('locates project conditions and keeps one configuration action without verifi
   expect(container.textContent).toContain('Perfis disponíveis: nenhum Implementador e nenhum Revisor');
   expect(container.querySelector('[aria-label="Configuração do projeto"]')?.textContent).toContain('Confirme o repositório GitHub');
   expect(container.textContent).not.toContain('Bloqueado · Revise os pré-requisitos');
-  expect([...container.querySelectorAll('button')].filter((item) => item.textContent === 'Verificar condições do projeto')).toHaveLength(1);
+  expect(container.textContent).not.toContain('Verificar condições do projeto');
+  expect(container.textContent).not.toContain('Verifica o projeto salvo');
+  expect(container.textContent).not.toContain('Conta, origem, issue e executor serão revalidados');
+  expect(container.querySelector('[aria-label="Atualizar leitura do projeto"]')).toBeNull();
   expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
   expect(metadata.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
-  await act(async () => button(container, 'Verificar condições do projeto').click());
-  const posts = request.mock.calls.filter(([, init]) => init?.method === 'POST');
-  expect(posts).toHaveLength(1); expect(posts[0]![0]).toBe(`/api/v1/diagnostics?scope=project&id=${projectId}`);
-  expect(JSON.parse(posts[0]![1].body)).toEqual({ checks: ['configuration'] });
-  const operationId = new Headers(posts[0]![1].headers).get('Idempotency-Key');
-  vi.useFakeTimers();
-  await act(async () => button(container, 'Consultar resultado').click());
-  await act(async () => vi.advanceTimersByTimeAsync(500));
-  expect(request.mock.calls.some(([path]) => path === `/api/v1/operations/${operationId}`)).toBe(true);
-  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(1);
 });
 it('omits manual check controls and preserves project edits, DOM and focused refresh without a save', async () => {
   const container = await mount();
   const field = [...container.querySelectorAll('input')].find((item) => item.value.startsWith('C:'))!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'C:\\source-updated'); field.dispatchEvent(new Event('input', { bubbles: true })); });
-  const refresh = container.querySelector<HTMLButtonElement>('[aria-label="Atualizar leitura do projeto"]')!; refresh.focus();
-  await act(async () => refresh.click());
-  expect(field.isConnected).toBe(true); expect(field.value).toBe('C:\\source-updated'); expect(document.activeElement).toBe(refresh);
+  field.focus();
+  await act(async () => window.dispatchEvent(new Event('factory-controller-resync')));
+  expect(field.isConnected).toBe(true); expect(field.value).toBe('C:\\source-updated'); expect(document.activeElement).toBe(field);
   expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
   expect(container.textContent).not.toContain('Adicionar check');
   expect(container.textContent).not.toContain('cwd relativo do check');
@@ -157,10 +150,10 @@ it('restores current project edits and ignores unsupported draft paths', async (
   expect(payload.project_changes.queue_order).toEqual({ use_board_position: false });
   expect(JSON.stringify(payload)).not.toMatch(/priority_field_id|priority_direction/);
 });
-it('keeps editing locked while the read-only verification remains available', async () => {
+it('keeps editing locked without manual verification controls', async () => {
   const container = await mount(true);
   expect(container.querySelector<HTMLFieldSetElement>('[aria-label="Configuração do projeto"]')!.disabled).toBe(true);
-  expect(button(container, 'Verificar condições do projeto').disabled).toBe(false);
+  expect(container.textContent).not.toContain('Verificar condições do projeto');
   expect(button(container, 'Salvar configuração').disabled).toBe(true);
 });
 it.each([

@@ -27,7 +27,7 @@ import { FieldHelp, fieldGuidanceFor } from './FieldHelp.js';
 import { OperatorDiagnosticCard } from '../../app/OperatorSupport.js';
 import { ProjectDeletionAction } from './ProjectDeletionAction.js';
 import { GlobalConditions, useGlobalDiagnostics } from './GlobalReadiness.js';
-import { ProjectConditions, ProjectVerification, useProjectDiagnostics } from './ProjectReadiness.js';
+import { ProjectConditions, useProjectDiagnostics } from './ProjectReadiness.js';
 
 type EditableView = EditableConfigurationView;
 type EditableProfile = ExecutionProfile & { id?: string };
@@ -710,8 +710,6 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       <ProjectConditions diagnostic={projectDiagnostic} section="global" projectId={projectId} />
       <ProjectConditions diagnostic={projectDiagnostic} section="configuration" projectId={projectId} />
       <ProjectConditions diagnostic={projectDiagnostic} section="issue" projectId={projectId} />
-      <ProjectConditions diagnostic={projectDiagnostic} section="information" projectId={projectId} />
-      <ProjectVerification diagnostic={projectDiagnostic} />
     </section>}
     {projectId && isConfigurationView(load.view) && <section className="card project-danger-zone"><div><h3>Exclusão do projeto</h3><p>Remova o cadastro e os dados locais após conferir o que será perdido. Os recursos do GitHub serão preservados.</p></div><ProjectDeletionAction key={`${projectId}:${accountId ?? ''}`} projectId={projectId} projectRevision={load.view.configuration.revision}
       installationId={load.view.settings.installation_id} accountId={accountId} hasUnsavedChanges={draft.dirty.length > 0}
