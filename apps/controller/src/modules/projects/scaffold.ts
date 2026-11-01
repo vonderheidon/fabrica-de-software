@@ -219,8 +219,8 @@ export function createScaffold({ storage, github, workspaces, logFailure, resour
         projectsRoot, creationModes: [{ mode: 'remote_push', capability: {
           available: pending.length === 0 && observed.state === 'complete' && observed.id === configuration.view.settings.account_id &&
             Boolean(workspaces.executeScaffoldGit && github.scaffoldRemoteCapability?.(undefined,observed.id!,true).available && github.scaffoldBoardCapability),
-          reason_code: 'CREATION_TARGET_NOT_AUTHORIZED', reason: 'Complete project creation requires an authorized repository, initial push and Kanban board.',
-          recovery: 'Configure the host authorization for the selected owner, name, visibility and push.'
+          reason_code: 'CREATION_TARGET_NOT_AUTHORIZED', reason: 'A criação completa do projeto exige autorização para criar o repositório, publicar o commit inicial e criar o quadro Kanban.',
+          recovery: 'Configure a autorização do host para o proprietário, nome e visibilidade escolhidos, incluindo o push inicial.'
         } }],
         account: observed, prerequisites: pending, eventCursor: configuration.view.event_cursor };
     },
