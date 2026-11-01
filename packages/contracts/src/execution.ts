@@ -6,6 +6,11 @@ import { ExecutionProfileValue } from './projects.js';
 
 const closed = { additionalProperties: false } as const;
 const text = (maxLength = 4096) => Type.String({ minLength: 1, maxLength, pattern: '.*\\S.*' });
+const declaredPathSegment = String.raw`(?!(?:\.{1,2}|[.][gG][iI][tT])(?:/|$))[^/\u0000\\:]+`;
+export const DeclaredFilePath = Type.String({ minLength: 1, maxLength: 4096,
+  pattern: `^${declaredPathSegment}(?:/${declaredPathSegment})*/?$`,
+  description: 'Checkout-relative file or directory path using /. A directory may end in one /. Absolute paths, empty segments, ., .. and .git segments are forbidden.',
+});
 export const PassageRole = Type.Union([Type.Literal('implementer'), Type.Literal('reviewer')]);
 export type PassageRole = Static<typeof PassageRole>;
 export const PassageBinding = Type.Object({

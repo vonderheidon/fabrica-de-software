@@ -9,6 +9,20 @@ afterEach(async () => { for (const path of paths.splice(0)) await rm(path, { rec
 async function captureFixture() { const f = await createFixture(); paths.push(f.root); return f; }
 
 describe('capture with controlled Git and real filesystem', () => {
+  it.each(['../outside', '/absolute', 'C:/absolute', 'dir\\file', 'dir//file', 'dir//', './file',
+    'dir/../file', '.git/', 'dir/.GIT/config', 'file\0name'])('rejects unsafe declarations before Git IO: %s', async path => {
+    const f = await captureFixture();
+    await expect(f.capture({ ...f.input, declaredFiles: [path] })).rejects.toThrow('CAPTURE_INPUT_INVALID');
+    expect(f.calls).toHaveLength(0);
+  });
+  it('accepts declared directories without collecting ignored content or changing the implementation index', async () => {
+    const f = await captureFixture(); f.removeTrackingAndIgnore('cache/');
+    const index = await readFile(join(f.implementation, '.git/index'));
+    const result = await f.capture({ ...f.input, declaredFiles: ['cache/'] });
+    expect(result.warnings).toMatchObject([{ path: 'cache/', reason: 'DECLARED_NEW_FILE_IGNORED' }]);
+    expect([...f.blobs.values()].some(bytes => bytes.toString().includes('EXCLUDED_IGNORED_BYTES'))).toBe(false);
+    expect(await readFile(join(f.implementation, '.git/index'))).toEqual(index);
+  });
   it('compares the current retained review version to its immediate predecessor and verifies both refs', async () => {
     const f = await captureFixture();
     const first = await f.capture(f.input); const previous = delivery(f.input, first);

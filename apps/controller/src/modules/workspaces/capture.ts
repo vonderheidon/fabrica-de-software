@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, realpath, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { GitObjectId, OperationId, Delivery, type CaptureWarning } from '#contracts';
+import { DeclaredFilePath, GitObjectId, OperationId, Delivery, type CaptureWarning } from '#contracts';
 import type { GitInput, GitReader } from './git.js';
 import { retainedRepositoryOwner, retainedRepositoryPath, requireAttemptRootResolver, requireAttemptWorkspacePathResolver, type AttemptRootResolver, type AttemptWorkspacePathResolver } from './project-storage.js';
 
@@ -74,7 +74,7 @@ function createCaptureRunner(dataDirectory?: string, git?: GitReader, canonicali
   return async (input: CaptureInput, expectedDelivery?: Delivery,
     purpose: { kind: 'delivery' } | { kind: 'workspace_snapshot'; snapshotId: string } = { kind: 'delivery' }): Promise<CapturedContent> => {
     if (!Value.Check(OperationId, input.attemptId) || !Value.Check(OperationId, input.passageId) || !Value.Check(OperationId, input.deliveryId) ||
-      !Value.Check(GitObjectId, input.baseSha) || input.declaredFiles.length > 1000 || input.declaredFiles.some(p => !gitPath(p))) throw new CaptureError('CAPTURE_INPUT_INVALID');
+      !Value.Check(GitObjectId, input.baseSha) || input.declaredFiles.length > 1000 || input.declaredFiles.some(p => !Value.Check(DeclaredFilePath, p))) throw new CaptureError('CAPTURE_INPUT_INVALID');
     if (!dataDirectory || !git) throw new CaptureError('CONTEXT_UNAVAILABLE');
     let temporaryIndex: string | undefined;
     const run = async (cwd: string, args: string[], options?: GitInput) => {

@@ -50,7 +50,7 @@ describe('durable official results', () => {
     try { expect(reopened.executionPersistence().getResult(f.handle)).toEqual(accepted); expect(reopened.executionPersistence().acceptResult({ binding: f.binding, result: f.result, sha256: digest(f.result) })).toEqual(accepted); }
     finally { reopened.close(); }
   });
-  it.each(['duplicate', 'missing', 'unknown', 'evidence', 'schema', 'writes', 'hash', 'binding'] as const)('refuses %s without occupying result or receipt and accepts the correction', async target => {
+  it.each(['duplicate', 'missing', 'unknown', 'evidence', 'schema', 'writes', 'hash', 'binding', 'path'] as const)('refuses %s without occupying result or receipt and accepts the correction', async target => {
     const f = await fixture(); const value = structuredClone(f.result); let binding = f.binding;
     if (target === 'duplicate') value.criteria[1]!.criterionId = 'ac-1';
     if (target === 'missing') value.criteria.pop();
@@ -59,7 +59,12 @@ describe('durable official results', () => {
     if (target === 'schema') Object.assign(value, { privateIdentity: randomUUID() });
     if (target === 'writes') Object.assign(value, { writesStopped: false });
     if (target === 'binding') binding = { ...binding, deliveryVersion: randomUUID() };
-    expect(() => f.persistence.acceptResult({ binding, result: value, sha256: target === 'hash' ? '0'.repeat(64) : digest(value) })).toThrow('RESULT_INVALID');
+    if (target === 'path') value.declaredFiles = ['../outside'];
+    const rules = { duplicate: 'criterion_ids_must_be_unique', missing: 'must_match_captured_criterion_ids',
+      unknown: 'must_match_captured_criterion_ids', evidence: 'must_match_role_result_schema', schema: 'must_match_role_result_schema',
+      writes: 'must_match_role_result_schema', hash: 'must_match_result_digest', binding: 'must_match_stored_passage', path: 'must_be_checkout_relative_file_or_directory' };
+    expect(() => f.persistence.acceptResult({ binding, result: value, sha256: target === 'hash' ? '0'.repeat(64) : digest(value) }))
+      .toThrow(expect.objectContaining({ code: 'RESULT_INVALID', issues: [expect.objectContaining({ rule: rules[target] })] }));
     expect(f.persistence.getResult(f.handle)).toBeNull();
     expect(f.db.prepare('SELECT count(*) AS n FROM passage_results').get()).toEqual({ n: 0 });
     expect(f.accept().receiptId).toMatch(/^[a-f0-9-]{36}$/);
@@ -181,6 +186,18 @@ describe('private adapter with real SQL persistence', () => {
         criteria: request.criterionIds.map(criterionId => ({ criterionId, verdict: 'passed', evidence: ['Observed'] })), checks: [] };
       const call = async (payload: unknown) => { await callbacks.frame({ type: 'call', id: randomUUID(), tool: 'execution_complete', payload }); return frames.at(-1); };
       expect(await call({ summary: 'Turn ended' })).toMatchObject({ ok: false, code: 'RESULT_INVALID' });
+      expect(await call({ ...result, declaredFiles: ['../outside'] })).toMatchObject({ ok: false, code: 'RESULT_INVALID',
+        validationIssues: [expect.objectContaining({ path: '/declaredFiles/0' })] });
+      expect(f.persistence.getResult({ passageId: status.passageId })).toBeNull();
+      const question = { formatVersion: 1 as const, decision: 'Choose scope', context: 'Decision required', alternatives: ['A', 'B'] };
+      const pending = f.persistence.raiseQuestion({ binding: request.binding, question, sha256: digest(question) });
+      expect(await call(result)).toMatchObject({ ok: false, code: 'RESULT_INVALID',
+        validationIssues: [{ path: '/questions', rule: 'all_answers_must_be_delivered' }] });
+      expect(f.persistence.getResult({ passageId: status.passageId })).toBeNull();
+      const answerId = randomUUID();
+      f.persistence.recordAnswer({ passageId: status.passageId }, pending.questionId, 'A', answerId);
+      f.persistence.confirmAnswer({ passageId: status.passageId }, answerId, 'delivery_unknown');
+      f.persistence.confirmAnswer({ passageId: status.passageId }, answerId, 'delivered');
       f.db.exec("CREATE TRIGGER fail_result BEFORE INSERT ON events BEGIN SELECT RAISE(ABORT,'fixture'); END");
       expect(await call(result)).toMatchObject({ ok: false, code: 'STORAGE_FAILED' });
       expect(f.persistence.getResult({ passageId: status.passageId })).toBeNull(); f.db.exec('DROP TRIGGER fail_result');

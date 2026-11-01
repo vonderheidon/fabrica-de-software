@@ -2,7 +2,7 @@ import { Type } from '@sinclair/typebox';
 import { Value, ValueErrorType } from '@sinclair/typebox/value';
 import { ExecutionQuestion, OperationId, PassageRequest, type PassageResult, type PassageRole } from '#contracts';
 import type { AnswerRecord, Execution, ExecutionOptions, PassageHandle, PassageRecord, StopReceipt } from '../../index.js';
-import { ExecutionError, type ExecutionCode } from '../../errors.js';
+import { ExecutionError, ResultValidationError, type ResultValidationIssue, type ExecutionCode } from '../../errors.js';
 import { canonical, digest, resultSchemaFor, type RoleResource } from '../../roles.js';
 import { createNative, launchCommand, runCli } from './native.js';
 import type { ToolObservation } from '#contracts';
@@ -22,10 +22,6 @@ const Lost = Type.Object({ type: Type.Literal('tracking-lost') }, { additionalPr
 type Native = ReturnType<typeof createNative>;
 const profileValue = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/;
 export interface AdapterDependencies { native?: Native; channel?: ChannelFactory; bootstrap?: BootstrapWriter; runCli?: typeof runCli }
-interface ResultValidationIssue { path: string; rule: string }
-class ResultValidationError extends ExecutionError {
-  constructor(readonly issues: readonly ResultValidationIssue[]) { super('RESULT_INVALID'); }
-}
 interface LivePassage {
   handoff?: boolean;
   idle?: { resolve: () => void; reject: () => void } | undefined;

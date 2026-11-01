@@ -6,7 +6,7 @@ export type PassageHandle = Readonly<{ passageId: string }>;
 import type { ExecutionCode } from './errors.js';
 import type { ToolObservation } from '#contracts';
 import type { AttemptAreaResolver } from '../workspaces/index.js';
-export { ExecutionError, type ExecutionCode } from './errors.js';
+export { ExecutionError, ResultValidationError, type ResultValidationIssue, type ExecutionCode } from './errors.js';
 export type PassageState = 'starting' | 'ready' | 'partial' | 'interrupted' | 'cancelled';
 export interface PassageRecord {
   handle: PassageHandle; binding: PassageBinding; requestHash: string; state: PassageState;

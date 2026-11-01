@@ -4,6 +4,7 @@ import { Value } from '@sinclair/typebox/value';
 import { AttemptBlock, type ReviewerResult } from '#contracts';
 import { readAttempt, readCapture, attemptEvent } from './attempts.js';
 import { ExecutionError } from '../execution/index.js';
+import { ResultValidationError } from '../execution/index.js';
 
 export function readAttemptBlock(db: Database.Database, attemptId: string): AttemptBlock {
   const row = db.prepare<[string], { block_json: string }>('SELECT block_json FROM attempt_blocks WHERE attempt_id=?').get(attemptId);
@@ -24,28 +25,28 @@ export function readAttemptBlock(db: Database.Database, attemptId: string): Atte
 /** Inside the accepted result transaction; omitted assessments never imply progress. */
 export function recordAssessments(db: Database.Database, reviewId: string, result: ReviewerResult, roots: string[]): void {
   const supplied = result.assessments ?? [];
-  if (new Set(supplied.map(x => x.findingId)).size !== supplied.length || supplied.some(x => !roots.includes(x.findingId))) throw new ExecutionError('RESULT_INVALID');
+  if (new Set(supplied.map(x => x.findingId)).size !== supplied.length || supplied.some(x => !roots.includes(x.findingId))) throw new ResultValidationError([{ path: '/assessments', rule: 'must_use_unique_root_finding_ids' }]);
   const review = db.prepare<[string], { attempt_id: string; independence_state: string }>('SELECT attempt_id,independence_state FROM reviews WHERE id=?').get(reviewId)!;
   if (review.independence_state !== 'valid') {
-    if (supplied.length) throw new ExecutionError('RESULT_INVALID');
+    if (supplied.length) throw new ResultValidationError([{ path: '/assessments', rule: 'requires_valid_review_independence' }]);
     return;
   }
-  if (supplied.length !== roots.length) throw new ExecutionError('RESULT_INVALID');
+  if (supplied.length !== roots.length) throw new ResultValidationError([{ path: '/assessments', rule: 'must_cover_all_root_findings' }]);
   for (const findingId of roots) {
     const item = supplied.find(x => x.findingId === findingId);
-    if (!item) throw new ExecutionError('RESULT_INVALID');
+    if (!item) throw new ResultValidationError([{ path: '/assessments', rule: 'must_cover_all_root_findings' }]);
     if (item.evidence.some(e => {
       const value = e.trim();
       return value.length === 0 || value.toLowerCase().startsWith('artifact:') ||
         (value.length !== 40 && value.length !== 64 ? false : /^[a-f0-9]+$/i.test(value));
-    })) throw new ExecutionError('RESULT_INVALID');
+    })) throw new ResultValidationError([{ path: '/assessments', rule: 'evidence_must_describe_observed_behavior' }]);
     if (['proven', 'partial'].includes(item.progress)) {
       const finding = db.prepare<[string], { criterion_ids_json: string }>('SELECT criterion_ids_json FROM findings WHERE id=?').get(findingId);
       const criterionIds: unknown = finding ? JSON.parse(finding.criterion_ids_json) : null;
       if (!Array.isArray(criterionIds) || !item.evidence.length || !item.evidence.every(e =>
         e.trim().length > 0 && !/^(?:[a-f0-9]{40}|[a-f0-9]{64}|artifact:[^\s]+)$/i.test(e.trim()) &&
         result.criteria.some(c => (criterionIds.length === 0 || criterionIds.includes(c.criterionId)) && c.evidence.includes(e)))) {
-        throw new ExecutionError('RESULT_INVALID');
+        throw new ResultValidationError([{ path: '/assessments', rule: 'progress_evidence_must_match_criterion_evidence' }]);
       }
     }
     db.prepare(`INSERT INTO finding_assessments(id,attempt_id,finding_id,review_id,progress,evidence_json,justification,created_at_ms) VALUES (?,?,?,?,?,?,?,?)`)

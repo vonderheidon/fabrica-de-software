@@ -7,6 +7,7 @@ import { readDelivery } from './deliveries.js';
 import { guarded } from './configuration-reads.js';
 import { OperationError } from './operations.js';
 import { ExecutionError } from '../execution/index.js';
+import { ResultValidationError } from '../execution/index.js';
 
 import { blockCorrection, readAttemptBlock, recordAssessments } from './progress.js';
 import { respondToDisputes } from './disputes.js';
@@ -117,26 +118,26 @@ export function readRounds(db: Database.Database, attemptId: string): RoundHisto
 /** Called inside acceptResult's transaction. No IO and no provider calls. */
 export function acceptReview(db: Database.Database, binding: PassageBinding, result: ReviewerResult): void {
   const r = readReview(db, binding.deliveryVersion); const a = readAttempt(db, binding.attemptId);
-  if (!r || r.passageId !== binding.passageId || r.state !== 'pending' || r.independenceState === 'pending' || a.deliveryId !== r.deliveryId) throw new ExecutionError('RESULT_INVALID');
+  if (!r || r.passageId !== binding.passageId || r.state !== 'pending' || r.independenceState === 'pending' || a.deliveryId !== r.deliveryId) throw new ResultValidationError([{ path: '/review', rule: 'requires_current_pending_review_and_independence_check' }]);
   if (result.verdict === 'approved' && result.criteria.some(c => c.evidence.some(e =>
-    /^(?:[a-f0-9]{40}|[a-f0-9]{64}|artifact:[^\s]+)$/i.test(e.trim())))) throw new ExecutionError('RESULT_INVALID');
+    /^(?:[a-f0-9]{40}|[a-f0-9]{64}|artifact:[^\s]+)$/i.test(e.trim())))) throw new ResultValidationError([{ path: '/criteria', rule: 'approval_evidence_must_describe_observed_behavior' }]);
   const prior = openFindings(db, a.id, binding.round);
   for (const repetition of result.commandRepetitions ?? []) {
     if (!repetition.prior_evidence.length || !repetition.prior_evidence.every(e => db.prepare(`
       SELECT 1 FROM passage_results p,json_each(p.summary_json,'$.checks') c
-      WHERE p.passage_id=? AND json_extract(c.value,'$.evidence')=?`).get(r.implementerPassageId, e))) throw new ExecutionError('RESULT_INVALID');
+      WHERE p.passage_id=? AND json_extract(c.value,'$.evidence')=?`).get(r.implementerPassageId, e))) throw new ResultValidationError([{ path: '/commandRepetitions', rule: 'must_reference_producer_check_evidence' }]);
   }
   if (prior.length > 1000 || result.resolutions.length !== prior.length || result.resolutions.some(x => !prior.some(f => f.id === x.findingKey)) ||
     new Set(result.resolutions.map(x => x.findingKey)).size !== prior.length ||
-    (result.verdict === 'rejected' && !result.findings.some(f => f.blocking) && !result.criteria.some(c => c.verdict !== 'passed') && !result.resolutions.some(x => x.verdict === 'unresolved'))) throw new ExecutionError('RESULT_INVALID');
+    (result.verdict === 'rejected' && !result.findings.some(f => f.blocking) && !result.criteria.some(c => c.verdict !== 'passed') && !result.resolutions.some(x => x.verdict === 'unresolved'))) throw new ResultValidationError([{ path: '/resolutions', rule: 'must_cover_prior_findings_and_justify_rejection' }]);
   for (const f of result.findings) {
     if (f.originFindingId) {
       const origin = prior.find(x => x.id === f.originFindingId);
       if (!origin || origin.originFindingId !== null || !result.resolutions.some(x => x.findingKey === origin.id && x.verdict === 'unresolved') ||
-        digestCriteria(origin.criterionIds) !== digestCriteria(f.criterionIds) || origin.category !== f.category) throw new ExecutionError('RESULT_INVALID');
+        digestCriteria(origin.criterionIds) !== digestCriteria(f.criterionIds) || origin.category !== f.category) throw new ResultValidationError([{ path: '/findings', rule: 'origin_must_match_unresolved_root_finding' }]);
     }
   }
-  if (new Set(result.findings.flatMap(f => f.originFindingId ? [f.originFindingId] : [])).size !== result.findings.filter(f => f.originFindingId).length) throw new ExecutionError('RESULT_INVALID');
+  if (new Set(result.findings.flatMap(f => f.originFindingId ? [f.originFindingId] : [])).size !== result.findings.filter(f => f.originFindingId).length) throw new ResultValidationError([{ path: '/findings', rule: 'origin_finding_ids_must_be_unique' }]);
   for (const f of result.findings) db.prepare(`INSERT INTO findings(id,review_id,attempt_id,finding_key,criterion_ids_json,category,problem,evidence_json,expected_result,blocking,priority,origin_finding_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(randomUUID(), r.id, a.id, f.key, JSON.stringify(f.criterionIds), f.category, f.problem, JSON.stringify(f.evidence), f.expectedResult, f.blocking ? 1 : 0, f.priority ?? null, f.originFindingId ?? null);
   for (const x of result.resolutions) db.prepare('INSERT INTO finding_resolutions(finding_id,review_id,attempt_id,verdict,evidence_json) VALUES (?,?,?,?,?)')

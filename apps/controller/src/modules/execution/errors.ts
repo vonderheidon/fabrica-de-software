@@ -5,3 +5,7 @@ export type ExecutionCode = 'CONTEXT_MISSING' | 'CONTEXT_STALE' | 'CLI_UNAVAILAB
 export class ExecutionError extends Error {
   constructor(readonly code: ExecutionCode) { super(code); this.name = 'ExecutionError'; }
 }
+export interface ResultValidationIssue { path: string; rule: string }
+export class ResultValidationError extends ExecutionError {
+  constructor(readonly issues: readonly ResultValidationIssue[]) { super('RESULT_INVALID'); }
+}

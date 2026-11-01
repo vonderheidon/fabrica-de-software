@@ -38,6 +38,17 @@ async function fixture(http = false) {
 }
 
 describe('durable immutable deliveries', () => {
+  it('retries a previously failed capture with declared directories using the same immutable result and receipt', async () => {
+    const f = await fixture(); f.result.declaredFiles = ['cache/']; f.controlled.removeTrackingAndIgnore('cache/');
+    f.capture.mockRejectedValueOnce(new CaptureError('CAPTURE_INPUT_INVALID'));
+    const accepted = f.accept(); await f.pipeline.drain();
+    expect(f.storage.getAttempt(f.a.id)).toMatchObject({ suspension: 'CAPTURE_FAILED', diagnostic: 'CAPTURE_INPUT_INVALID' });
+    await f.pipeline.retryCapture(f.retry()); await f.pipeline.drain();
+    expect(f.persistence.getResult({ passageId: f.a.passageId })).toEqual(accepted);
+    expect(f.storage.getDelivery(f.binding.deliveryVersion).delivery).toMatchObject({ captureState: 'captured',
+      warnings: [{ path: 'cache/', reason: 'DECLARED_NEW_FILE_IGNORED' }] });
+    expect(f.storage.getAttempt(f.a.id)).toMatchObject({ phase: 'reviewing', suspension: null, resultReceiptId: accepted.receiptId });
+  });
   it('uses the predecessor commit as the delivery base and keeps an integration base authoritative', async () => {
     const f = await fixture();
     const predecessor = randomUUID();

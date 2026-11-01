@@ -49,6 +49,8 @@
         "items": {
           "minLength": 1,
           "maxLength": 4096,
+          "pattern": "^(?!(?:\\.{1,2}|[.][gG][iI][tT])(?:/|$))[^/\\u0000\\\\:]+(?:/(?!(?:\\.{1,2}|[.][gG][iI][tT])(?:/|$))[^/\\u0000\\\\:]+)*/?$",
+          "description": "Checkout-relative file or directory path using /. A directory may end in one /. Absolute paths, empty segments, ., .. and .git segments are forbidden.",
           "type": "string"
         }
       },

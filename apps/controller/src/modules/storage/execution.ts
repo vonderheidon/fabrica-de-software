@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { ResultValidationError } from '../execution/index.js';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { ExecutionQuestion, ImplementerResult, OperationId, PassageBinding, ReviewerResult, ScopeChange, type ExecutionProfileValue, type PassageResult } from '#contracts';
+import { DeclaredFilePath, ExecutionQuestion, ImplementerResult, OperationId, PassageBinding, ReviewerResult, ScopeChange, type ExecutionProfileValue, type PassageResult } from '#contracts';
 import { ExecutionError, type AnswerRecord, type AttemptSessionIdentity, type ExecutionCode, type ExecutionEvent, type ExecutionPersistence, type PassageHandle, type PassageRecord, type QuestionRecord, type ResultRecord } from '../execution/index.js';
 import { attemptEvent, readAttempt, readCapture } from './attempts.js';
 import { digest } from './configuration-reads.js';
@@ -48,9 +49,9 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
       effectiveProfile: p.effective_profile_json ? JSON.parse(p.effective_profile_json) as ExecutionProfileValue : null, executorVersion: p.executor_version };
   }
   function assertBinding(binding: PassageBinding): PassageRow {
-    if (!Value.Check(PassageBinding, binding)) throw new ExecutionError('RESULT_INVALID');
+    if (!Value.Check(PassageBinding, binding)) throw new ResultValidationError([{ path: '/binding', rule: 'must_match_passage_binding_schema' }]);
     const p = row({ passageId: binding.passageId });
-    if (p.attempt_id !== binding.attemptId || p.round_number !== binding.round || p.role !== binding.role || p.delivery_version !== binding.deliveryVersion) throw new ExecutionError('RESULT_INVALID');
+    if (p.attempt_id !== binding.attemptId || p.round_number !== binding.round || p.role !== binding.role || p.delivery_version !== binding.deliveryVersion) throw new ResultValidationError([{ path: '/binding', rule: 'must_match_stored_passage' }]);
     return p;
   }
   function event(p: PassageRow, type: ExecutionEvent['type'], code: ExecutionCode | null): void {
@@ -259,30 +260,42 @@ export function createExecutionPersistence(db: Database.Database, onResultAccept
       atomic(() => expireLimits(db));
       const accepted = atomic(() => {
       const p = assertBinding(input.binding); const result = input.result;
-      if (!Value.Check(p.role === 'implementer' ? ImplementerResult : ReviewerResult, result) || digest(result) !== input.sha256) throw new ExecutionError('RESULT_INVALID');
+      if (!Value.Check(p.role === 'implementer' ? ImplementerResult : ReviewerResult, result)) throw new ResultValidationError([{ path: '/', rule: 'must_match_role_result_schema' }]);
+      if (digest(result) !== input.sha256) throw new ResultValidationError([{ path: '/sha256', rule: 'must_match_result_digest' }]);
       const ids = result.criteria.map(c => c.criterionId);
       const required = db.prepare<[string], { id: string }>('SELECT criterion_id AS id FROM attempt_criteria WHERE attempt_id=? ORDER BY criterion_id').all(p.attempt_id).map(c => c.id);
-      if (new Set(ids).size !== ids.length || digest([...ids].sort()) !== digest(required)) throw new ExecutionError('RESULT_INVALID');
-      if ('checks' in result && new Set(result.checks.map(c => c.id)).size !== result.checks.length) throw new ExecutionError('RESULT_INVALID');
+      if (new Set(ids).size !== ids.length) throw new ResultValidationError([{ path: '/criteria', rule: 'criterion_ids_must_be_unique' }]);
+      if (digest([...ids].sort()) !== digest(required)) throw new ResultValidationError([{ path: '/criteria', rule: 'must_match_captured_criterion_ids' }]);
+      if ('checks' in result && new Set(result.checks.map(c => c.id)).size !== result.checks.length) throw new ResultValidationError([{ path: '/checks', rule: 'check_ids_must_be_unique' }]);
       if ('checks' in result && p.round_number > 1) {
         const requiredFindings = openFindings(db, p.attempt_id, p.round_number).map(f => f.id).sort();
         const responses = (result.findingResponses ?? []).map(f => f.findingId).sort();
-        if (new Set(responses).size !== responses.length || digest(requiredFindings) !== digest(responses)) throw new ExecutionError('RESULT_INVALID');
+        if (new Set(responses).size !== responses.length) throw new ResultValidationError([{ path: '/findingResponses', rule: 'finding_ids_must_be_unique' }]);
+        if (digest(requiredFindings) !== digest(responses)) throw new ResultValidationError([{ path: '/findingResponses', rule: 'must_match_open_finding_ids' }]);
       }
       if ('findings' in result) {
         const blockingKeys = new Set(openFindings(db, p.attempt_id, p.round_number).filter(f => f.blocking).map(f => f.id));
-        if (new Set(result.findings.map(f => f.key)).size !== result.findings.length || new Set(result.resolutions.map(r => r.findingKey)).size !== result.resolutions.length ||
-          (p.round_number === 1 && result.resolutions.length !== 0) ||
-          result.findings.some(f => f.criterionIds.some(id => !required.includes(id))) ||
-          (result.verdict === 'approved' && (result.criteria.some(c => c.verdict !== 'passed') || result.findings.some(f => f.blocking) || result.resolutions.some(r => r.verdict !== 'resolved' && blockingKeys.has(r.findingKey))))) throw new ExecutionError('RESULT_INVALID');
+        if (new Set(result.findings.map(f => f.key)).size !== result.findings.length) throw new ResultValidationError([{ path: '/findings', rule: 'finding_keys_must_be_unique' }]);
+        if (new Set(result.resolutions.map(r => r.findingKey)).size !== result.resolutions.length) throw new ResultValidationError([{ path: '/resolutions', rule: 'finding_keys_must_be_unique' }]);
+        if (p.round_number === 1 && result.resolutions.length !== 0) throw new ResultValidationError([{ path: '/resolutions', rule: 'must_be_empty_in_first_round' }]);
+        if (result.findings.some(f => f.criterionIds.some(id => !required.includes(id)))) throw new ResultValidationError([{ path: '/findings', rule: 'must_use_captured_criterion_ids' }]);
+        if (result.verdict === 'approved') {
+          if (result.criteria.some(c => c.verdict !== 'passed')) throw new ResultValidationError([{ path: '/criteria', rule: 'must_be_passed_for_approval' }]);
+          if (result.findings.some(f => f.blocking)) throw new ResultValidationError([{ path: '/findings', rule: 'must_not_be_blocking_for_approval' }]);
+          if (result.resolutions.some(r => r.verdict !== 'resolved' && blockingKeys.has(r.findingKey))) throw new ResultValidationError([{ path: '/resolutions', rule: 'prior_blocking_findings_must_be_resolved' }]);
+        }
       }
       const previous = getResult({ passageId: p.id });
       if (previous) { if (previous.sha256 !== input.sha256) throw new ExecutionError('RESULT_CONFLICT'); return previous; }
-      if ('checks' in result && p.round_number > 1 && result.additionalChangesJustification === undefined) throw new ExecutionError('RESULT_INVALID');
-      if ('findings' in result && result.findings.some(f => f.priority === undefined)) throw new ExecutionError('RESULT_INVALID');
-      if (p.state === 'ready' && db.prepare("SELECT id FROM execution_questions WHERE passage_id=? AND state<>'delivered'").get(p.id)) throw new ExecutionError('RESULT_INVALID');
+      if ('checks' in result) {
+        const invalidPath = result.declaredFiles?.findIndex(path => !Value.Check(DeclaredFilePath, path)) ?? -1;
+        if (invalidPath !== -1) throw new ResultValidationError([{ path: `/declaredFiles/${invalidPath}`, rule: 'must_be_checkout_relative_file_or_directory' }]);
+      }
+      if ('checks' in result && p.round_number > 1 && result.additionalChangesJustification === undefined) throw new ResultValidationError([{ path: '/additionalChangesJustification', rule: 'required_in_correction_round' }]);
+      if ('findings' in result && result.findings.some(f => f.priority === undefined)) throw new ResultValidationError([{ path: '/findings', rule: 'priority_required' }]);
+      if (p.state === 'ready' && db.prepare("SELECT id FROM execution_questions WHERE passage_id=? AND state<>'delivered'").get(p.id)) throw new ResultValidationError([{ path: '/questions', rule: 'all_answers_must_be_delivered' }]);
       active(p);
-      if (p.state !== 'ready') throw new ExecutionError('RESULT_INVALID');
+      if (p.state !== 'ready') throw new ResultValidationError([{ path: '/passage/state', rule: 'must_be_ready' }]);
       const receiptId = randomUUID(); const { criteria: _criteria, ...summary } = result;
       checkpoint(db, p.id, 'stopped');
       db.prepare('INSERT INTO passage_results(passage_id,attempt_id,result_hash,receipt_id,summary_json,accepted_at_ms) VALUES (?,?,?,?,?,?)')

@@ -3,7 +3,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { Type } from '@sinclair/typebox';
-import { ExecutionQuestion, ImplementerResult, ReviewerResult, type PassageRole, type RoleResourceReference } from '#contracts';
+import { DeclaredFilePath, ExecutionQuestion, ImplementerResult, ReviewerResult, type PassageRole, type RoleResourceReference } from '#contracts';
 import { ExecutionError } from './errors.js';
 
 export function canonical(value: unknown): string {
@@ -23,6 +23,7 @@ export const digest = (value: unknown) => createHash('sha256').update(canonical(
 export function resultSchemaFor(role: PassageRole) {
   // Archived envelopes remain readable without rewriting their accepted hashes.
   return role === 'implementer' ? Type.Object({ ...ImplementerResult.properties,
+    declaredFiles: Type.Optional(Type.Array(DeclaredFilePath, { maxItems: 1000, uniqueItems: true })),
     findingResponses: Type.Optional(Type.Array(Type.Object({ ...ImplementerResult.properties.findingResponses.items.properties,
       responseType: Type.Optional(ImplementerResult.properties.findingResponses.items.properties.responseType, false),
     }, { additionalProperties: false }), { maxItems: 1000 })),
