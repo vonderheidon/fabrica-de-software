@@ -8,7 +8,7 @@ function conditionKey(item: HttpContextDiagnostic): string {
   return JSON.stringify([item.check, item.code, item.cause, item.recovery, facts.expected_account_id,
     facts.observed_account_id, facts.project_id, facts.creation_id, facts.attempt_id, facts.expected_host, facts.observed_host]);
 }
-export function CurrentDiagnosticNotices({ items, previous, projectId }: { items: readonly HttpContextDiagnostic[]; previous: boolean; projectId: string | null }) {
+export function CurrentDiagnosticNotices({ items, previous, projectId, inProjectConfiguration = false }: { items: readonly HttpContextDiagnostic[]; previous: boolean; projectId: string | null; inProjectConfiguration?: boolean }) {
   const unique = new Map<string, HttpContextDiagnostic>();
   const emphasis = { passed: 0, unavailable: 1, blocked: 2 } as const;
   for (const item of items) {
@@ -17,7 +17,7 @@ export function CurrentDiagnosticNotices({ items, previous, projectId }: { items
     // Consolidate presentation only; keep any reported restriction visible.
     if (!prior || emphasis[item.state] >= emphasis[prior.state]) unique.set(key, item);
   }
-  return <>{[...unique].map(([key, item]) => <OperatorDiagnosticCard key={key} code={item.code} state={item.state} cause={item.cause} recovery={item.recovery} previous={previous} projectId={projectId} />)}</>;
+  return <>{[...unique].map(([key, item]) => <OperatorDiagnosticCard key={key} code={item.code} state={item.state} cause={item.cause} recovery={item.recovery} previous={previous} projectId={projectId} inProjectConfiguration={inProjectConfiguration} />)}</>;
 }
 export function DiagnosticHistory({ reports, compact = false }: { reports: readonly HttpDiagnosticReport[]; compact?: boolean }) {
   const groups = new Map<string, { item: HttpContextDiagnostic; occurrences: { at: number; state: string }[] }>();

@@ -31,12 +31,19 @@ export function ConditionNotices({ items, section, projectId }: { items: readonl
 export function useProjectDiagnostics(projectId: string | null) {
   return useDiagnostics(projectId ? { scope: 'project', id: projectId } : null);
 }
-export function ProjectConditions({ diagnostic, section, projectId }: { diagnostic: ReturnType<typeof useProjectDiagnostics>; section: ConditionSection; projectId: string }) {
+export function ProjectConditions({ diagnostic, section, projectId, missingProfileRoles }: { diagnostic: ReturnType<typeof useProjectDiagnostics>; section: ConditionSection; projectId: string; missingProfileRoles?: readonly string[] }) {
   const select = (items: NonNullable<typeof diagnostic.view>['diagnostics']) => items.filter((item) => item.check === 'configuration' && conditionSection(item.code) === section);
   const reports = (diagnostic.view?.reports ?? []).map((report) => ({ ...report, diagnostics: select(report.diagnostics) })).filter((report) => report.diagnostics.length > 0);
-  const items = select(diagnostic.view?.diagnostics ?? []);
+  const items = select(diagnostic.view?.diagnostics ?? []).filter(item => !(missingProfileRoles && item.code === 'PROFILES_REQUIRED'));
   if (section === 'information') return <div className="muted" role="note">{items.length > 0 && <p>{diagnostic.stale || diagnostic.refreshing ? 'Leitura anterior: ' : ''}Conta, origem, issue e executor serão revalidados na preparação e no início.</p>}</div>;
-  return <div className="field-full"><CurrentDiagnosticNotices items={items} previous={diagnostic.stale || diagnostic.refreshing} projectId={projectId} /><DiagnosticHistory reports={reports} />
+  return <div className="field-full">
+    {section === 'profiles' && missingProfileRoles && missingProfileRoles.length > 0 && <article className="diagnostic-record" role="status" aria-label="Associações de perfis pendentes">
+      <div className="line"><b>Associe os perfis do projeto</b><span className="pill warn">Pendente</span></div>
+      <p>Associação ainda não salva: {missingProfileRoles.join(' e ')}.</p>
+      <p className="muted">{missingProfileRoles.length === 2 ? 'Selecione nos campos Perfil implementador e Perfil revisor acima' : `Selecione no campo Perfil ${missingProfileRoles[0]!.toLocaleLowerCase('pt-BR')} acima`} e salve a configuração.</p>
+      <a className="button-link" href="#principal/perfis">Criar ou gerenciar perfis</a>
+    </article>}
+    <CurrentDiagnosticNotices items={items} previous={diagnostic.stale || diagnostic.refreshing} projectId={projectId} inProjectConfiguration /><DiagnosticHistory reports={reports} />
     {section === 'global' && items.length > 0 && <a href="#principal/configuracao">Corrigir na Configuração</a>}
   </div>;
 }

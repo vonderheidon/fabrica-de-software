@@ -18,7 +18,7 @@ const prerequisite = (code: string): Prerequisite => ({ code, message: `Condiç�
 const projectId = 'ed0ae84a-3f5b-47c3-bfc5-d6e135880356';
 let sequence = 0;
 let savedConfiguration: ConfigurationView;
-async function mount(locked = false, mapped = false, savedDraft?: DraftValue) {
+async function mount(locked = false, mapped = false, savedDraft?: DraftValue, withProfiles = false) {
   const identity = configurationDraftIdentity(null, projectId);
   clearDraft(identity, 'project-configuration');
   if (savedDraft !== undefined) setDraft(identity, 'project-configuration', savedDraft);
@@ -43,6 +43,11 @@ async function mount(locked = false, mapped = false, savedDraft?: DraftValue) {
       correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
       queue_order: { use_board_position: true }, guidance: '' },
   };
+  if (withProfiles) configuration.profiles = (['implementer', 'reviewer'] as const).map((role, index) => ({
+    id: `00000000-0000-4000-8000-00000000000${index + 1}`, name: role === 'implementer' ? 'Implementador teste' : 'Revisor teste',
+    profile_type: role, executor: 'maestri-omp', provider: 'test', model: 'test', effort: null, guidance: 'Test guidance',
+    revision: 1, composition_version: 1, created_at_ms: 1, updated_at_ms: 1,
+  }));
   savedConfiguration = configuration;
   const diagnostics: HttpDiagnosticsView = { context: { scope: 'project', id: projectId }, supported_checks: ['configuration'], event_cursor: '1', reports: [],
     diagnostics: ['REMOTE_UNCONFIRMED', 'PROJECT_REQUIRED', 'PROFILES_REQUIRED', 'EXECUTION_REVALIDATION_REQUIRED'].map((code) => ({ code, cause: prerequisite(code).message, recovery: prerequisite(code).recovery, check: 'configuration', state: 'blocked', facts: {}, affected_requirements: [], observed_at_ms: 1 })) };
@@ -64,7 +69,10 @@ afterEach(async () => { if (root) await act(async () => root!.unmount()); root =
 function button(container: HTMLElement, text: string) { const node = [...container.querySelectorAll('button')].find((item) => item.textContent === text); if (!node) throw new Error(`Missing ${text}`); return node; }
 it('locates project conditions and keeps one configuration action without verification on navigation', async () => {
   const container = await mount();
-  expect(container.textContent).toContain('selecione um perfil ativo para cada papel');
+  expect(container.textContent).toContain('Selecione nos campos Perfil implementador e Perfil revisor acima');
+  expect(container.textContent).not.toContain('Abra a configuração do projeto e selecione');
+  expect(container.textContent).not.toContain('Configurar este projeto');
+  expect(container.textContent).not.toContain('Abra a configuração do projeto');
   expect(container.textContent).toContain('Perfis disponíveis: nenhum Implementador e nenhum Revisor');
   expect(container.querySelector('[aria-label="Configuração do projeto"]')?.textContent).toContain('Confirme o repositório GitHub');
   expect(container.textContent).not.toContain('Bloqueado · Revise os pré-requisitos');
@@ -97,6 +105,34 @@ it('omits manual check controls and preserves project edits, DOM and focused ref
   expect([...container.querySelectorAll('label')].map((item) => item.textContent)).not.toEqual(expect.arrayContaining([
     expect.stringContaining('Comando do check'), expect.stringContaining('Timeout do check'),
   ]));
+});
+it('keeps missing associations through draft selection and a failed save, then updates only after a receipt', async () => {
+  const container = await mount(false, false, undefined, true);
+  const notice = () => container.querySelector('[aria-label="Associações de perfis pendentes"]');
+  expect(notice()?.textContent).toContain('Implementador e Revisor');
+  expect(notice()?.querySelector('a')?.getAttribute('href')).toBe('#principal/perfis');
+  for (const [label, choice] of [['Perfil implementador', 'Implementador teste'], ['Perfil revisor', 'Revisor teste']]) {
+    const field = [...container.querySelectorAll('label')].find(item => item.textContent === label)!;
+    await act(async () => container.querySelector<HTMLButtonElement>(`#${field.htmlFor}`)!.click());
+    await act(async () => button(container, choice!).click());
+  }
+  expect(notice()?.textContent).toContain('Implementador e Revisor');
+  metadata.mockRejectedValueOnce(new HttpError(400, 'CONFIGURATION_INVALID', 'Falha ao salvar.', 'request', [], null, null, null));
+  await act(async () => button(container, 'Salvar configuração').click());
+  expect(notice()?.textContent).toContain('Implementador e Revisor');
+  expect(container.textContent).toContain('Falha ao salvar');
+  const saved = structuredClone(savedConfiguration);
+  saved.configuration.implementer_profile_id = saved.profiles[0]!.id;
+  metadata.mockResolvedValueOnce({ data: { ...saved, operation_id: crypto.randomUUID(), receipt: { revision: 2, event_cursor: '2' } }, etag: '"saved"' });
+  await act(async () => button(container, 'Salvar configuração').click());
+  expect(notice()?.textContent).toContain('Associação ainda não salva: Revisor.');
+  expect(notice()?.textContent).not.toContain('Associação ainda não salva: Implementador');
+  saved.configuration.reviewer_profile_id = saved.profiles[1]!.id;
+  const checkbox = [...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')][0]!;
+  await act(async () => checkbox.click());
+  metadata.mockResolvedValueOnce({ data: { ...saved, operation_id: crypto.randomUUID(), receipt: { revision: 3, event_cursor: '3' } }, etag: '"saved-3"' });
+  await act(async () => button(container, 'Salvar configuração').click());
+  expect(notice()).toBeNull();
 });
 it('restores current project edits and ignores unsupported draft paths', async () => {
   const container = await mount(false, false, {

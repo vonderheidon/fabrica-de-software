@@ -538,6 +538,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       setDraft(nextDraft); persistEditedFields(draftScope, nextDraft);
       setLoad({ status: 'ready', identity, view: saved, etag }); setConflictView(null);
       setSaveState({ status: 'saved', operationId, message: 'Salvo após confirmação do recibo.' });
+      projectDiagnostic.refresh();
       if (Object.hasOwn(globalChanges, 'projects_root')) {
         setProjectsRootSaveError(null);
         if (nativeSelection.candidates.projects_root === saved.settings.projects_root) nativeSelection.clearCandidate('projects_root');
@@ -598,6 +599,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       setUncertainId(null); setCanResend(false);
       setRecoveryMessage('O recibo original foi recuperado. Consulte os valores atuais para comparar com seu rascunho.');
       await refreshCurrent(operation);
+      projectDiagnostic.refresh();
     } catch (error: unknown) {
       if (!saveLifecycleRef.current.isCurrent(identityRef.current, operation)) return;
       setRecoveryMessage(error instanceof Error ? error.message : 'Não foi possível consultar a operação.');
@@ -609,6 +611,10 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
   if (!draft) return <section className="card read-state" role="status"><p>Preparando edição…</p></section>;
   const implementerProfiles = profilesForRole(draft.profiles, 'implementer');
   const reviewerProfiles = profilesForRole(draft.profiles, 'reviewer');
+  const savedProject = isConfigurationView(load.view) ? load.view.configuration : null;
+  const missingProfileRoles = savedProject ? (['implementer', 'reviewer'] as const)
+    .filter(role => !profilesForRole(load.view.profiles, role).some(profile => profile.id === savedProject[`${role}_profile_id`]))
+    .map(role => role === 'implementer' ? 'Implementador' : 'Revisor') : [];
   const configurationLock = isConfigurationView(load.view) ? load.view.configuration_lock : null;
   const implementerProfileAvailable = implementerProfiles.some((profile) => profile.id === draft.project?.implementer_profile_id);
   const reviewerProfileAvailable = reviewerProfiles.some((profile) => profile.id === draft.project?.reviewer_profile_id);
@@ -683,7 +689,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
         <ProjectConditions diagnostic={projectDiagnostic} section="origin" projectId={projectId} />
         <SelectField label="Perfil implementador" value={implementerProfileAvailable ? draft.project.implementer_profile_id ?? '' : ''} onChange={(value) => updateProject((current) => ({ ...current, implementer_profile_id: value || null }))} options={implementerProfiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
         <SelectField label="Perfil revisor" value={reviewerProfileAvailable ? draft.project.reviewer_profile_id ?? '' : ''} onChange={(value) => updateProject((current) => ({ ...current, reviewer_profile_id: value || null }))} options={reviewerProfiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
-        <ProjectConditions diagnostic={projectDiagnostic} section="profiles" projectId={projectId} />
+        <ProjectConditions diagnostic={projectDiagnostic} section="profiles" projectId={projectId} missingProfileRoles={missingProfileRoles} />
         <NumberField label="Limite de correções" value={draft.project.correction_limit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correction_limit: Math.max(0, Math.min(5, value)) }))} />
         <SelectField searchable={false} label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: deliveryModeLabel.icr }, { value: 'commit', label: deliveryModeLabel.commit }, { value: 'pr', label: deliveryModeLabel.pr }]} />
         <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
