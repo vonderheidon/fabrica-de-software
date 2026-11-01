@@ -66,11 +66,12 @@ it('keeps the observed queue visible and labels it while refreshing', () => {
   expect(html).not.toContain('queue-degraded');
 });
 
-it('shows the compact server order in both queue summaries without numeric priority text', () => {
+it('shows the server order in the enable summary without repeating it in the queue panel', () => {
   const data = observation();
   const panel = render({ status: 'ready', observation: data, etag: 'revision' });
   const enableSummary = renderToStaticMarkup(createElement(QueueEnableSummary, { observation: data }));
-  expect(panel).toContain(data.order.description);
+  expect(panel).not.toContain(data.order.description);
+  expect(panel).toContain('<span>01</span>');
   expect(enableSummary).toContain(data.order.description);
   expect(`${panel}${enableSummary}`.toLowerCase()).not.toContain('prioridade');
 });
@@ -81,6 +82,24 @@ it('preserves a genuine query failure throughout a retry', () => {
   expect(html).toContain('Não foi possível atualizar a fila');
   expect(html).toContain(previousError.message);
   expect(html).toContain('Os dados da última consulta foram mantidos');
+});
+
+it('presents an occupied queue as normal waiting while preserving actual diagnostic warnings', () => {
+  const data = observation();
+  data.diagnostics = [{ code: 'QUEUE_OCCUPIED', message: 'Já existe uma tentativa ativa.', recovery: 'A fila pode consumir o próximo candidato quando a tentativa terminar.' }];
+  const waiting = render({ status: 'ready', observation: data, etag: 'revision' });
+  expect(waiting).toContain('Aguardando a tentativa em andamento');
+  expect(waiting).toContain('<span class="pill neutral">Em espera</span>');
+  expect(waiting).toContain(data.diagnostics[0]!.recovery);
+  expect(waiting).not.toContain('Atenção necessária');
+  expect(waiting).not.toContain('Indisponível');
+
+  data.diagnostics.push({ code: 'READ_INCOMPLETE', message: 'Falha na leitura do projeto.', recovery: 'Revalide a fila.' });
+  const failed = render({ status: 'ready', observation: data, etag: 'revision' });
+  expect(failed).toContain('Aguardando a tentativa em andamento');
+  expect(failed).toContain('Leitura incompleta');
+  expect(failed).toContain('Indisponível');
+  expect(failed).toContain('pill warn');
 });
 
 it('marks the preserved list stale after refresh failure', () => {

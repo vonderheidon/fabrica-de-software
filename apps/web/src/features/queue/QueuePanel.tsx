@@ -107,7 +107,13 @@ export function QueuePanel({ load, linkedAccountId, pageNotice, pauseNotice, pau
         </tr>)}
       </tbody></table></div> : <div className="queue-empty" role="status"><h3>{load.status !== 'ready' && observation?.complete ? 'Nenhum item na última leitura' : observation?.complete ? 'Nenhum item nesta página' : 'Aguardando leitura válida'}</h3><p>{observation?.complete ? 'A consulta completa não retornou candidatos visíveis.' : 'Itens não são considerados ausentes enquanto a consulta estiver parcial ou indisponível.'}</p></div>}
       <div className="queue-pagination"><button type="button" onClick={onPreviousPage} disabled={!canGoBack || !current || !canRefresh}>Página anterior</button><span>{observation?.page.has_more ? 'Há mais itens nesta observação.' : 'Fim dos itens observados.'}</span><button type="button" onClick={onNextPage} disabled={!observation?.page.has_more || !current || !canRefresh}>Próxima página</button></div>
-      {observation?.diagnostics.map((item) => <OperatorDiagnosticCard key={`${item.code}:${item.message}`} code={item.code} state="unavailable" cause={item.message} recovery={item.recovery} />)}
+      {observation?.diagnostics.map((item) => item.code === 'QUEUE_OCCUPIED'
+        ? <article key={item.code} className="diagnostic-record" role="status">
+          <div className="line"><b>Aguardando a tentativa em andamento</b><span className="pill neutral">Em espera</span></div>
+          <p>{item.message}</p>
+          <p className="muted">{item.recovery}</p>
+        </article>
+        : <OperatorDiagnosticCard key={`${item.code}:${item.message}`} code={item.code} state="unavailable" cause={item.message} recovery={item.recovery} />)}
     </div>
   </section>;
 }
