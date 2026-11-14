@@ -46,6 +46,11 @@ export async function startController(hostContext: ControllerHostContext = {}, d
       : undefined);
     const gitContext = hostContext.git ?? (detectedTools?.git.selected_path && githubAccess
       ? { kind: 'windows_keyring' as const, executable: detectedTools.git.selected_path, cwd: githubAccess.cwd } : undefined);
+    // Boot detection can be ambiguous (e.g. cmd\git.exe and mingw64\bin\git.exe); the operator's saved choice must take effect without a restart.
+    const resolveGitContext = hostContext.git || !hostContext.discoverTools || !githubAccess ? undefined : () => {
+      const executable = storage.getGlobalConfiguration().view.tool_preferences.git.preferred_path ?? detectedTools?.git.selected_path;
+      return executable ? { kind: 'windows_keyring' as const, executable, cwd: githubAccess.cwd } : undefined;
+    };
     const executionHost = hostContext.execution ?? (detectedTools?.maestri.selected_path && detectedTools.omp.selected_path && detectedTools.powershell.selected_path
       ? { maestriExecutable: detectedTools.maestri.selected_path, ompExecutable: detectedTools.omp.selected_path,
         powershellExecutable: detectedTools.powershell.selected_path, inheritedEnvironment: process.env } : undefined);
@@ -58,7 +63,7 @@ export async function startController(hostContext: ControllerHostContext = {}, d
       ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}) });
     const workspaces = createWorkspaces({ github, dataDirectory: configuration.dataDirectory,
       projectStorage: storage, historyMigration: storage,
-      ...(gitContext ? { context: gitContext } : {}), ...(hostContext.githubMutationAuthorization ? { pushAuthorization: hostContext.githubMutationAuthorization } : {}), ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}), ...(hostContext.openFolder ? { openFolder: hostContext.openFolder } : {}) });
+      ...(resolveGitContext ? { resolveContext: resolveGitContext } : gitContext ? { context: gitContext } : {}), ...(hostContext.githubMutationAuthorization ? { pushAuthorization: hostContext.githubMutationAuthorization } : {}), ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}), ...(hostContext.openFolder ? { openFolder: hostContext.openFolder } : {}) });
     execution = (dependencies.executionFactory ?? createExecution)({ dataDirectory: configuration.dataDirectory, persistence: storage.executionPersistence(),
       projectStorageRootForAttempt: workspaces.resolveAttemptRoot,
       projectStorageAreaForAttempt: workspaces.resolveAttemptArea,

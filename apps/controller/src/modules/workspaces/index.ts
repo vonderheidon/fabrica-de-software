@@ -1,5 +1,5 @@
 import type { GitHub } from '../github/index.js';
-import { createGitReader, type GitContext } from './git.js';
+import { createGitReader, GitReadError, type GitContext, type GitReader } from './git.js';
 import { createInspector } from './inspect.js';
 import { createBranchLister } from './branches.js';
 export { validBranch } from './inspect.js';
@@ -42,9 +42,13 @@ export { gitSafety } from './git.js';
 export { TargetError } from './publication-target.js';
 export type { TargetIdentity } from './publication-target.js';
 export type { DeliveryTaskInput, DeliveryTargetInspection, TargetCommitResult } from './delivery-target.js';
-export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'> & Partial<Pick<GitHub,'listBranches'>>; context?: GitContext; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization; projectStorage?: ProjectStoragePersistence; historyMigration?: RetainedHistoryMigrationStore }
+export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'> & Partial<Pick<GitHub,'listBranches'>>; context?: GitContext; resolveContext?: () => GitContext | undefined; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization; projectStorage?: ProjectStoragePersistence; historyMigration?: RetainedHistoryMigrationStore }
 export function createWorkspaces(options: WorkspaceOptions) {
-  const git = options.context ? createGitReader(options.context) : undefined;
+  const resolveContext = options.resolveContext;
+  const git: GitReader | undefined = resolveContext
+    ? (cwd, args, input) => { const context = resolveContext(); return context ? createGitReader(context)(cwd, args, input) : Promise.reject(new GitReadError('CONTEXT_UNAVAILABLE')); }
+    : options.context ? createGitReader(options.context) : undefined;
+  const hasContext = () => resolveContext ? resolveContext() !== undefined : options.context !== undefined;
   const listBranches = createBranchLister(options.github,git);
   const deletionPlatform = process.platform === 'win32' ? windowsReferenceDeletionPlatform() : nativeDeletionInspectionPlatform();
   const projectStorage = createProjectStorageInspector(options.dataDirectory ?? resolve('.'), undefined, options.projectStorage);
@@ -54,7 +58,7 @@ export function createWorkspaces(options: WorkspaceOptions) {
   const migrateLegacyIssueHistory = createRetainedHistoryMigrator(options.dataDirectory, git, options.historyMigration, resolveAttemptRoot);
   const deliveryTargetWorkspace = createDeliveryTargetWorkspace(options.github,options.dataDirectory,git,undefined,resolveAttemptRoot);
   const sharedAttempt = createAttemptMaterializer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace);
-  return { ...createPublicationTargetWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot, resolveAttemptWorkspace), ...projectStorage, ...projectStorageTransition,
+  return { ...createPublicationTargetWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...(resolveContext ? { scaffoldCapability: () => createLocalScaffolder(hasContext() ? git : undefined).scaffoldCapability() } : {}), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot, resolveAttemptWorkspace), ...projectStorage, ...projectStorageTransition,
     ...(options.historyMigration ? { migrateLegacyIssueHistory } : {}), prepareAttempt: createWorkspacePreparer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace),
     captureDelivery: createCapturer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git, undefined, resolveAttemptRoot),
     listBranches,
@@ -66,7 +70,7 @@ export function createWorkspaces(options: WorkspaceOptions) {
     verifyDeliveryTarget: deliveryTargetWorkspace.verifyDeliveryTarget,
     createTargetCommit: deliveryTargetWorkspace.createLocalCommit,
     reconcileTargetCommit: deliveryTargetWorkspace.reconcileLocalCommit,
-    ...createRemotePublisher(options.dataDirectory,git,options.pushAuthorization,undefined,options.context ? { kind: 'confirmed_attempt' } : undefined, resolveAttemptRoot),
+    ...createRemotePublisher(options.dataDirectory,git,options.pushAuthorization,undefined,options.context || resolveContext ? { kind: 'confirmed_attempt' } : undefined, resolveAttemptRoot),
     materializeReview: sharedAttempt,
     async validateReview(delivery: import('#contracts').Delivery, reviewId: string): Promise<boolean> {
       try { await sharedAttempt(delivery, reviewId); return true; }

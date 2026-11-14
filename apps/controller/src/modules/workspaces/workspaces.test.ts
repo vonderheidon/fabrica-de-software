@@ -109,6 +109,13 @@ describe('local origin inspection with controlled Git responses', () => {
     const view = await createWorkspaces({ github: createGitHub() }).inspectOrigin({ source: { kind: 'local', location: join(tmpdir(), 'origin') }, baseBranch: 'main' });
     expect(view).toMatchObject({ state: 'unavailable', diagnostics: [{ code: 'CONTEXT_UNAVAILABLE' }] });
   });
+  it('picks up a Git context chosen after boot without recreating the workspaces', async () => {
+    let context: { kind: 'windows_keyring'; executable: string } | undefined;
+    const workspaces = createWorkspaces({ github: createGitHub(), resolveContext: () => context });
+    expect(workspaces.scaffoldCapability()).toMatchObject({ available: false, reason_code: 'CONTEXT_UNAVAILABLE' });
+    context = { kind: 'windows_keyring', executable: 'C:\\Program Files\\Git\\cmd\\git.exe' };
+    expect(workspaces.scaffoldCapability()).toMatchObject({ available: true });
+  });
   it('keeps the selected local commit even when it has not been pushed', async () => {
     const directory = join(tmpdir(), 'origin');
     const remote = { ...github(), resolveBranch: async () => complete({ repositoryId: repo.id, name: 'main', sha: 'b'.repeat(40) }) };
