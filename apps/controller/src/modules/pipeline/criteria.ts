@@ -25,14 +25,15 @@ export function issueContentPrerequisite(code: string): Prerequisite | null {
   return diagnostic ? { code, ...diagnostic } : null;
 }
 
-/** Only the issue body introduces criteria. Comments and task-list check marks are not authority. */
-export function interpretIssue(input: { title: string; body: string }): CriteriaPreview {
-  const reasons: string[] = []; const entries: string[] = []; const objective: string[] = [];
+/** Walks the body once; `lines` holds the source line index where each entry starts. */
+function scanBody(source: string): { entries: string[]; lines: number[]; objective: string[] } {
+  const entries: string[] = []; const lines: number[] = []; const objective: string[] = [];
   let section: 'criteria' | 'objective' | 'other' = 'objective'; let sectionDepth = 7;
   let fence: { character: string; length: number } | null = null; let comment = false;
   let active = -1;
-  const body = input.body.replace(/^([^\n]+)\r?\n(={3,}|-{3,})\s*$/gm, (_match, title: string, underline: string) => `${underline[0] === '=' ? '#' : '##'} ${title}`);
-  for (const raw of body.split(/\r?\n/)) {
+  // Setext headings keep their underline as an empty line so indexes match the source lines.
+  const body = source.replace(/^([^\n]+?)(\r?\n)(={3,}|-{3,})[ \t]*(?=\r?$)/gm, (_match, title: string, eol: string, underline: string) => `${underline[0] === '=' ? '#' : '##'} ${title}${eol}`);
+  for (const [index, raw] of body.split(/\r?\n/).entries()) {
     // Ignore fenced examples and HTML comments instead of treating example lists as requirements.
     const delimiter = /^\s{0,3}(`{3,}|~{3,})/.exec(raw)?.[1];
     if (delimiter) {
@@ -59,10 +60,17 @@ export function interpretIssue(input: { title: string; body: string }): Criteria
     if (section === 'objective' && line.trim() && !/^\s*(?:>|!\[|\[.+\]:)/.test(line)) objective.push(line.trim());
     if (section !== 'criteria') continue;
     const item = /^\s{0,3}(?:[-+*]|\d+[.)])\s+(?:\[[ xX]\]\s*)?(.*)$/.exec(line);
-    if (item) { entries.push((item[1] ?? '').trim()); active = entries.length - 1; }
+    if (item) { entries.push((item[1] ?? '').trim()); lines.push(index); active = entries.length - 1; }
     else if (/^\s{2,}\S/.test(line) && active >= 0) entries[active] += `\n${line.trim()}`;
     else if (line.trim()) active = -1;
   }
+  return { entries, lines, objective };
+}
+
+/** Only the issue body introduces criteria. Comments and task-list check marks are not authority. */
+export function interpretIssue(input: { title: string; body: string }): CriteriaPreview {
+  const reasons: string[] = [];
+  const { entries, objective } = scanBody(input.body);
   if (!input.title.trim()) reasons.push('ISSUE_TITLE_REQUIRED');
   const scope = objective.join('\n').trim();
   if (!scope) reasons.push('ISSUE_OBJECTIVE_REQUIRED');
@@ -88,4 +96,25 @@ export function interpretIssue(input: { title: string; body: string }): Criteria
   const captured = valid ? criteria : [];
   return { executable: valid, objective: scope, criteria: captured,
     digest: preparationDigest(captured.map(({ id, text }) => ({ id, text }))), reasons: [...new Set(reasons)] };
+}
+
+export interface CriteriaMarking { body: string; marked: string[]; alreadyChecked: string[]; missing: string[] }
+const checkbox = /^(\s{0,3}(?:[-+*]|\d+[.)])\s+)\[([ xX])\]/;
+
+/** Checks `[ ]` only for criteria whose current ID and text equal the wanted ones. Never unchecks and never adds a checkbox. */
+export function markCriteria(input: { title: string; body: string }, wanted: readonly { id: string; text: string }[]): CriteriaMarking {
+  const current = interpretIssue(input).criteria;
+  const { lines: starts } = scanBody(input.body);
+  const parts = input.body.split(/(\r?\n)/);
+  const result: CriteriaMarking = { body: input.body, marked: [], alreadyChecked: [], missing: [] };
+  for (const { id, text } of wanted) {
+    const found = current.find(c => c.id === id);
+    const line = found && found.text === text ? starts[found.occurrence_index - 1] : undefined;
+    const state = line === undefined ? null : checkbox.exec(parts[line * 2] ?? '');
+    if (!state) result.missing.push(id);
+    else if (state[2] !== ' ') result.alreadyChecked.push(id);
+    else { parts[line! * 2] = parts[line! * 2]!.replace(checkbox, '$1[x]'); result.marked.push(id); }
+  }
+  result.body = parts.join('');
+  return result;
 }

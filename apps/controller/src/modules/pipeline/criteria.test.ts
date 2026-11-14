@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Value } from '@sinclair/typebox/value';
 import { CriteriaPreview } from '#contracts';
-import { interpretIssue } from './index.js';
+import { interpretIssue, markCriteria } from './index.js';
 
 const parse = (list: string, heading = 'Critérios de aceite') => interpretIssue({ title: 'Implement feature', body: `## Objetivo / Escopo\nDeliver an observable feature.\n## ${heading}\n${list}` });
 describe('criteria captured from the issue body by occurrence', () => {
@@ -53,5 +53,34 @@ describe('criteria captured from the issue body by occurrence', () => {
   it('rejects excess instead of returning an executable truncated list', () => {
     const result = parse(Array.from({ length: 1001 }, () => '- Requirement').join('\n'));
     expect(result).toMatchObject({ executable: false, criteria: [] });
+  });
+});
+
+describe('marking approved criteria in the issue body', () => {
+  const issue = (list: string, eol = '\n') => ({ title: 'Task', body: ['## Objetivo', 'Deliver.', '## Critérios de aceite', ...list.split('\n')].join(eol) });
+  it('checks only wanted open boxes and keeps every other byte', () => {
+    const input = issue('- [ ] ac-1: First\n- [ ] ac-2: Second\n  continued\n- [x] ac-3: Third');
+    const result = markCriteria(input, [{ id: 'ac-1', text: 'First' }, { id: 'ac-3', text: 'Third' }]);
+    expect(result).toMatchObject({ marked: ['ac-1'], alreadyChecked: ['ac-3'], missing: [] });
+    expect(result.body).toBe(input.body.replace('- [ ] ac-1', '- [x] ac-1'));
+  });
+  it('preserves CRLF and generated IDs', () => {
+    const input = issue('- [ ] First\n- [ ] Second', '\r\n');
+    const result = markCriteria(input, [{ id: 'ac-2', text: 'Second' }]);
+    expect(result.body).toBe(input.body.replace('- [ ] Second', '- [x] Second'));
+  });
+  it('skips changed criteria, items without checkbox, fences and comments', () => {
+    const input = issue('<!--\n- [ ] ac-1: First\n-->\n```\n- [ ] ac-1: First\n```\n- [ ] ac-1: Changed\n- ac-2: Plain');
+    const result = markCriteria(input, [{ id: 'ac-1', text: 'First' }, { id: 'ac-2', text: 'Plain' }]);
+    expect(result).toMatchObject({ body: input.body, marked: [], missing: ['ac-1', 'ac-2'] });
+  });
+  it('keeps line positions after Setext headings', () => {
+    const input = { title: 'Task', body: 'Objective\n===\nGoal\nAcceptance criteria\n---\n- [ ] ac-1: Valid' };
+    expect(markCriteria(input, [{ id: 'ac-1', text: 'Valid' }]).body).toBe(input.body.replace('[ ]', '[x]'));
+  });
+  it('does not change the criteria digest', () => {
+    const input = issue('- [ ] ac-1: First');
+    const marked = markCriteria(input, [{ id: 'ac-1', text: 'First' }]);
+    expect(interpretIssue({ title: 'Task', body: marked.body }).digest).toBe(interpretIssue(input).digest);
   });
 });

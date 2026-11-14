@@ -14,11 +14,14 @@ const commentMutation = `mutation FactoryComment($input:AddCommentInput!) {
 const statusMutation = `mutation FactoryStatus($input:UpdateProjectV2ItemFieldValueInput!) {
   updateProjectV2ItemFieldValue(input:$input) { clientMutationId projectV2Item { id } }
 }`;
+const issueBodyMutation = `mutation FactoryIssueBody($input:UpdateIssueInput!) {
+  updateIssue(input:$input) { clientMutationId issue { id repository { id } } }
+}`;
 export function createEffectWriter(reader: GraphQLReader, authorization?: GitHubMutationAuthorization, attemptEffectAuthorization?: AttemptEffectAuthorization) {
   return async ({ effect, accountId, body, authorize }: GitHubEffectRequest): Promise<GitHubMutationResult> => {
     const denied = (reason: string): GitHubMutationResult => ({ state: 'failed_known', receipt: null, reason, retryAtMs: null });
     if (!Value.Check(EffectView, effect) || !Value.Check(OperationId, effect.operationId) || !Value.Check(GitHubId, accountId) || effect.state !== 'running') return denied('EFFECT_INPUT_INVALID');
-    if (!['issue_comment','project_status','pull_request'].includes(effect.kind) || !effect.attemptId || effect.creationId) return denied('EFFECT_INPUT_INVALID');
+    if (!['issue_comment','issue_body','project_status','pull_request'].includes(effect.kind) || !effect.attemptId || effect.creationId) return denied('EFFECT_INPUT_INVALID');
     const identity = effect.expectedIdentity;
     const confirmedEffect = attemptEffectAuthorization?.kind === 'confirmed_attempt' && effect.authorized && !!authorize;
     const trustedTarget = authorization?.accountId === accountId && authorization.repositoryIds.includes(identity.repositoryId ?? '') &&
@@ -43,6 +46,17 @@ export function createEffectWriter(reader: GraphQLReader, authorization?: GitHub
       if (!sent) return { ...denied(authorizationDenied ? 'EFFECT_AUTHORITY_REVOKED' : response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED'),retryAtMs: response.retryAtMs };
       // A mutation response alone never confirms PR identity or the remote head SHA.
       return inspectPullRequest(scope,effect,accountId,false);
+    }
+    if (effect.kind === 'issue_body') {
+      // The body is derived from a fresh read by the caller; only check marks of approved criteria may differ from it.
+      if (!identity.issueId || !identity.criterionIds?.length || typeof body !== 'string' || body.length > 65_536) return denied('EFFECT_INPUT_INVALID');
+      let sent = false;
+      const response = await reader.scope().query(issueBodyMutation, { input: { id: identity.issueId, body, clientMutationId: effect.operationId } }, () => { sent = true; },1,
+        beforeSend ? { beforeSend } : undefined);
+      if (!sent && authorizationDenied) return denied('EFFECT_AUTHORITY_REVOKED');
+      if (!sent) return { ...denied(response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED'), retryAtMs: response.retryAtMs };
+      // Check marks are confirmed by a subsequent complete read, never by the mutation payload.
+      return { state: 'unknown', receipt: null, reason: 'ISSUE_BODY_READBACK_REQUIRED', retryAtMs: response.retryAtMs };
     }
     if (effect.kind === 'project_status' && (!identity.projectId || !identity.itemId || !identity.fieldId || !identity.optionId)) return denied('EFFECT_INPUT_INVALID');
     const input = effect.kind === 'issue_comment' ? { subjectId: identity.issueId, body, clientMutationId: effect.operationId }

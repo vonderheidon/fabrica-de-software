@@ -22,6 +22,7 @@ export const EffectIdentity = Type.Object({
   taskDescription: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   commitTime: Type.Optional(Type.Integer({ minimum: 1, maximum: 253402300799 })),
   marker: Type.Optional(text), bodyHash: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
+  criterionIds: Type.Optional(Type.Array(Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), { minItems: 1, maxItems: 1000 })),
   projectId: Type.Optional(GitHubId), itemId: Type.Optional(GitHubId), fieldId: Type.Optional(GitHubId),
   optionId: Type.Optional(GitHubId), previousOptionId: Type.Optional(nullable(GitHubId)),
 }, closed);
@@ -35,7 +36,7 @@ export const EffectReceipt = Type.Object({ id: GitHubId, url: Type.Optional(text
 export type EffectReceipt = Static<typeof EffectReceipt>;
 export const EffectView = Type.Object({
   operationId: OperationId, attemptId: nullable(OperationId), creationId: nullable(OperationId), deliveryId: nullable(OperationId),
-  kind: Type.Union([Type.Literal('issue_comment'), Type.Literal('project_status'), Type.Literal('local_commit'), Type.Literal('push'), Type.Literal('pull_request'), Type.Literal('create_repository'), Type.Literal('associate_origin'), Type.Literal('baseline_push')]), scopeKey: text,
+  kind: Type.Union([Type.Literal('issue_comment'), Type.Literal('issue_body'), Type.Literal('project_status'), Type.Literal('local_commit'), Type.Literal('push'), Type.Literal('pull_request'), Type.Literal('create_repository'), Type.Literal('associate_origin'), Type.Literal('baseline_push')]), scopeKey: text,
   state: Type.Union(['not_requested', 'not_started', 'running', 'confirmed', 'failed_known', 'unknown', 'not_applicable'].map(v => Type.Literal(v))),
   expectedIdentity: EffectIdentity, confirmedIdentity: nullable(EffectReceipt), receipt: nullable(EffectReceipt),
   reason: nullable(Type.String({ maxLength: 128 })), authorized: Type.Boolean(), revision: Type.Integer({ minimum: 1 }),

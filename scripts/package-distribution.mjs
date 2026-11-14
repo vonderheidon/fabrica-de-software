@@ -13,7 +13,7 @@ export function createDistribution() {
   for (const file of ['dist/apps/controller/src/main.js', 'dist/web/index.html', 'dist/web/favicon.ico',
     'dist/packages/contracts/src/index.js', 'dist/resources/roles/implementer.v1.json',
     'dist/resources/roles/reviewer.v1.json', 'dist/resources/templates/catalog.v1.json',
-    'dist/resources/storage/056_immediate_controller_shutdown.sql', 'dist/resources/storage/initial-schema.v57.sql',
+    'dist/resources/storage/057_issue_body_effect.sql', 'dist/resources/storage/initial-schema.v58.sql',
     'dist/resources/storage/schema-recognition.v1.json']) {
     if (!existsSync(join(root, file))) throw new Error('DISTRIBUTION_BUILD_REQUIRED');
   }

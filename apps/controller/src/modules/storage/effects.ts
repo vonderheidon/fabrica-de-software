@@ -45,7 +45,7 @@ function explicitGrant(db: Database.Database, attemptId: string, deliveryId: str
 function validateAttemptEffect(db: Database.Database, attemptId: string, deliveryId: string | null, kind: EffectView['kind'], identity: EffectIdentity, sourceOperationId: string): void {
   assertAttemptProjectAvailable(db, attemptId);
   const a = readAttempt(db,attemptId); const capture = readCapture(db,attemptId);
-  if (!['issue_comment','project_status','local_commit','push','pull_request'].includes(kind)) throw new OperationError(409,'EFFECT_NOT_AUTHORIZED','Creation effects cannot originate in an attempt.');
+  if (!['issue_comment','issue_body','project_status','local_commit','push','pull_request'].includes(kind)) throw new OperationError(409,'EFFECT_NOT_AUTHORIZED','Creation effects cannot originate in an attempt.');
   const explicit = explicitGrant(db,attemptId,deliveryId,sourceOperationId);
   if (identity.issueId !== capture.issue.id || identity.repositoryId !== capture.issue.repository.id ||
     (a.result && a.result !== 'delivered' && !(a.result === 'interrupted' && explicit)) || a.suspension || a.pendingQuestionId ||
@@ -67,6 +67,10 @@ function validateAttemptEffect(db: Database.Database, attemptId: string, deliver
             : identity.branchRef !== `refs/heads/factory/${capture.issue.number}/${attemptId}`)) {
         throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','O commit deve corresponder à versão, base e branch seladas do destino.');
       }
+    }
+    if (kind === 'issue_body' && (!identity.criterionIds?.length || new Set(identity.criterionIds).size !== identity.criterionIds.length ||
+      !identity.criterionIds.every(criterionId => capture.criteria.some(c => c.id === criterionId)))) {
+      throw new OperationError(409,'EFFECT_IDENTITY_CONFLICT','Only captured criteria can be checked in the issue body.');
     }
     if (kind === 'issue_comment' && mode === 'pr') throw new OperationError(409,'EFFECT_NOT_AUTHORIZED','PR mode records results in its pull request.');
     if (kind === 'issue_comment' && mode === 'commit' && !db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id=? AND kind='local_commit' AND state IN ('confirmed','not_applicable')").get(attemptId,deliveryId)) {
@@ -133,7 +137,7 @@ export function recordEffectIntent(db: Database.Database, input: EffectIntent): 
     const s = readSettings(db); const { origin, authorization } = input;
     if (!Value.Check(EffectIdentity, input.expectedIdentity) || !Value.Check(OperationId, origin.attemptId ?? origin.creationId) ||
       !Value.Check(OperationId, authorization.sourceOperationId) || authorization.accountId !== s.account_id || !['icr','commit','pr','remote_push'].includes(authorization.mode) ||
-      !['issue_comment','project_status','local_commit','push','pull_request','create_repository','associate_origin','baseline_push'].includes(input.kind) || input.scopeKey.length < 1 || input.scopeKey.length > 4096 ||
+      !['issue_comment','issue_body','project_status','local_commit','push','pull_request','create_repository','associate_origin','baseline_push'].includes(input.kind) || input.scopeKey.length < 1 || input.scopeKey.length > 4096 ||
       (['local_commit','push','pull_request'].includes(input.kind) && (input.scopeKey !== origin.deliveryId || !origin.attemptId)) ||
       (origin.attemptId !== undefined) === (origin.creationId !== undefined)) {
       throw new OperationError(400, 'EFFECT_INTENT_INVALID', 'The effect identity or authorization is invalid.');
@@ -231,7 +235,11 @@ export function finishEffect(db: Database.Database, id: string, revision: number
       (e.kind === 'pull_request' && receipt.baseBranch !== e.expectedIdentity.baseBranch))) {
       throw new OperationError(409,'EFFECT_RECEIPT_INVALID','The remote receipt differs from its durable repository, ref, SHA or base.');
     }
-    if (state === 'not_applicable' && (!['local_commit','push','pull_request'].includes(e.kind) || reason !== 'APPROVED_NO_DELTA' ||
+    if (receipt && e.kind === 'issue_body' && receipt.id !== e.expectedIdentity.issueId) {
+      throw new OperationError(409,'EFFECT_RECEIPT_INVALID','The issue body receipt does not match the intended issue.');
+    }
+    // An unobserved check mark is terminal and non-blocking: the body is never edited again for this delivery.
+    if (state === 'not_applicable' && !(e.kind === 'issue_body' && reason === 'CRITERIA_NOT_MARKED') && (!['local_commit','push','pull_request'].includes(e.kind) || reason !== 'APPROVED_NO_DELTA' ||
       db.prepare<[string],{ has_delta: number }>('SELECT has_delta FROM deliveries WHERE id=?').get(e.deliveryId!)?.has_delta !== 0)) {
       throw new OperationError(409,'EFFECT_RECEIPT_INVALID','Only a verified approved delivery without changes skips its local commit.');
     }

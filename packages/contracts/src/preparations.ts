@@ -74,7 +74,7 @@ export const EffectiveConfiguration = Type.Object({
 }, closed);
 export type EffectiveConfiguration = Static<typeof EffectiveConfiguration>;
 export const PreparationEffect = Type.Object({
-  kind: Type.Union((['clone', 'execute', 'local_commit', 'push', 'pull_request', 'issue_comment', 'project_status', 'publication_target'] as const).map((kind) => Type.Literal(kind))),
+  kind: Type.Union((['clone', 'execute', 'local_commit', 'push', 'pull_request', 'issue_comment', 'issue_body', 'project_status', 'publication_target'] as const).map((kind) => Type.Literal(kind))),
   requested: Type.Boolean(), description: text(2048),
 }, closed);
 export const Preparation = Type.Object({

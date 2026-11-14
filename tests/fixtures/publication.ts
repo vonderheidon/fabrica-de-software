@@ -76,6 +76,10 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
       f.issue.memberships[0]!.statusValues[0]!.optionId = identity.optionId!;
       return { state: 'unknown', receipt: null, reason: 'STATUS_READBACK_REQUIRED', retryAtMs: null };
     }
+    if (effect.kind === 'issue_body') {
+      f.issue.body = body!;
+      return { state: 'unknown', receipt: null, reason: 'ISSUE_BODY_READBACK_REQUIRED', retryAtMs: null };
+    }
     if (effect.kind === 'pull_request') {
       const result: GitHubMutationResult = { state: 'confirmed',receipt: { id: 'PR_test',url: `https://github.com/${identity.repositoryOwner}/${identity.repositoryName}/pull/123`,commitSha: identity.commitSha!,branchRef: identity.branchRef!,repositoryId: identity.repositoryId!,baseBranch: identity.baseBranch!, ...(identity.targetOperationId ? { targetOperationId:identity.targetOperationId,taskType:identity.taskType!,taskDescription:identity.taskDescription! } : {}) },reason: null,retryAtMs: null };
       remotePRs.set(effect.operationId,result); return result;

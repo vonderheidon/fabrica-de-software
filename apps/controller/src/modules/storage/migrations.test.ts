@@ -22,45 +22,48 @@ function seedDirect55(db: Database.Database): void {
   db.pragma('user_version = 55');
   seedSettings(db);
 }
-function seedDirect56(db: Database.Database): void {
+function seedDirect57(db: Database.Database): void {
   db.pragma('foreign_keys = ON');
-  db.exec(readFileSync(resolve('resources/storage/initial-schema.v56.sql'), 'utf8'));
+  db.exec(readFileSync(resolve('resources/storage/initial-schema.v57.sql'), 'utf8'));
   db.pragma(`application_id = ${applicationId}`);
-  db.pragma('user_version = 56');
+  db.pragma('user_version = 57');
   seedSettings(db);
 }
 afterEach(() => {
   for (const path of directories.splice(0)) rmSync(path, { recursive: true, force: true });
 });
+const effectObjects = (db: Database.Database) => db.prepare<[], { type: string; name: string }>(
+  "SELECT type,name FROM sqlite_schema WHERE tbl_name='effects' ORDER BY type,name").all();
 
-describe('schema 57 immediate controller shutdown', () => {
-  it('removes the persisted shutdown barriers from a direct schema 56 fixture without replacing settings', () => {
+describe('schema 58 issue body effect', () => {
+  it('accepts the issue body effect on a direct schema 57 fixture, keeping settings and every effect index and trigger', () => {
     const upgraded = new Database(':memory:');
     try {
-      seedDirect56(upgraded);
+      seedDirect57(upgraded);
       const settingsBefore = upgraded.prepare('SELECT * FROM factory_settings').all();
-      expect(upgradeRecognizedSchema(upgraded)).toEqual({ kind: 'direct', schemaVersion: 57 });
-      expect(upgraded.pragma('user_version', { simple: true })).toBe(57);
-      expect(upgraded.prepare<[], { name: string }>("SELECT name FROM sqlite_schema WHERE type='trigger' AND name LIKE 'shutdown_%'").all()).toEqual([]);
-      expect(upgraded.prepare<[], { name: string }>("SELECT name FROM sqlite_schema WHERE type='index' AND name='shutdown_control_order'").all()).toEqual([]);
+      const objectsBefore = effectObjects(upgraded);
+      expect(upgradeRecognizedSchema(upgraded)).toEqual({ kind: 'direct', schemaVersion: 58 });
+      expect(upgraded.pragma('user_version', { simple: true })).toBe(58);
+      expect(upgraded.prepare<[], { sql: string }>("SELECT sql FROM sqlite_schema WHERE type='table' AND name='effects'").get()?.sql.match(/'issue_body'/g)).toHaveLength(2);
+      expect(effectObjects(upgraded)).toEqual(objectsBefore);
       expect(upgraded.prepare('SELECT * FROM factory_settings').all()).toEqual(settingsBefore);
       expect(upgraded.prepare('SELECT * FROM schema_migrations').all()).toEqual([]);
       expect(upgraded.pragma('foreign_key_check')).toEqual([]);
     } finally { upgraded.close(); }
   });
 
-  it('advances the schema 55 ledger through migration 056 without losing earlier entries', () => {
+  it('advances the schema 56 ledger through migration 057 without losing earlier entries', () => {
     const legacy = new Database(':memory:');
     legacy.pragma('foreign_keys = ON');
-    applyHistoricalSchemaFixture(legacy, loadMigrations().slice(0, 55), () => seedSettings(legacy));
+    applyHistoricalSchemaFixture(legacy, loadMigrations().slice(0, 56), () => seedSettings(legacy));
     const before = legacy.prepare('SELECT version,name,checksum,applied_at_ms FROM schema_migrations ORDER BY version').all();
     try {
-      expect(upgradeRecognizedSchema(legacy)).toEqual({ kind: 'historical-ledger', schemaVersion: 56 });
-      expect(legacy.pragma('user_version', { simple: true })).toBe(56);
+      expect(upgradeRecognizedSchema(legacy)).toEqual({ kind: 'historical-ledger', schemaVersion: 57 });
+      expect(legacy.pragma('user_version', { simple: true })).toBe(57);
       const ledger = legacy.prepare('SELECT version,name,checksum,applied_at_ms FROM schema_migrations ORDER BY version').all();
-      expect(ledger).toHaveLength(56);
-      expect(ledger.slice(0, 55)).toEqual(before);
-      expect(ledger[55]).toMatchObject({ version: 56, name: '056_immediate_controller_shutdown.sql' });
+      expect(ledger).toHaveLength(57);
+      expect(ledger.slice(0, 56)).toEqual(before);
+      expect(ledger[56]).toMatchObject({ version: 57, name: '057_issue_body_effect.sql' });
       expect(legacy.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
     } finally { legacy.close(); }
   });

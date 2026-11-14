@@ -111,7 +111,8 @@ function effects(mode: PreparationChoices['delivery_mode'], target: PreparationR
     { kind: 'local_commit', requested: mode !== 'icr', description: 'Create a local delivery commit after approval, when there is a delta.' },
     { kind: 'push', requested: mode === 'pr', description: 'Push the approved version to its own remote branch.' },
     { kind: 'pull_request', requested: mode === 'pr', description: 'Create a pull request for the approved version when applicable.' },
-    { kind: 'issue_comment', requested: mode !== 'pr', description: 'Record the delivery result in an issue comment for modes without a pull request, without editing criteria.' },
+    { kind: 'issue_comment', requested: mode !== 'pr', description: 'Record the delivery result in an issue comment for modes without a pull request.' },
+    { kind: 'issue_body', requested: true, description: 'Check the approved criteria in the issue body after delivery, without unchecking or rewriting other text.' },
     { kind: 'project_status', requested: true, description: 'Project the attempt progress and completed delivery to the configured Project.' },
     { kind: 'publication_target', requested: urlSource && mode !== 'icr' && target !== null, description: !urlSource && target
       ? 'Projetos locais usam o clone cadastrado; limpe a intenção de destino adicional.'

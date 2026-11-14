@@ -1,11 +1,11 @@
 {
   "format_version": 1,
   "application_id": 1313231665,
-  "direct_install_user_version": 57,
-  "previous_direct_install_user_version": 56,
-  "current_ledger_user_version": 56,
-  "current_schema_sha256": "069e4747a80d0322d42d326807752164f711652f9b07b1f8aca8fff3ac3b2b92",
-  "previous_schema_sha256": "30915ce935758ca9c2e1616671ef02ba420d688ac8c4beb51551ba9eb6d26266",
+  "direct_install_user_version": 58,
+  "previous_direct_install_user_version": 57,
+  "current_ledger_user_version": 57,
+  "current_schema_sha256": "2af5e851f776ab32ff22a63ffa41178bd0d5a6331eb7c24ba9db4c0204cbe2ca",
+  "previous_schema_sha256": "069e4747a80d0322d42d326807752164f711652f9b07b1f8aca8fff3ac3b2b92",
   "historical_ledger": [
     {
       "version": 1,
@@ -286,7 +286,12 @@
       "version": 56,
       "name": "056_immediate_controller_shutdown.sql",
       "checksum": "91ac968c6c2459fe5474fc09d1d2bf3fdd79fb827a058a0c3774e2b90637b5cc"
+    },
+    {
+      "version": 57,
+      "name": "057_issue_body_effect.sql",
+      "checksum": "3a348b663accaa717c93df631dfdffa35efe33b5f46d4df8de42d2f707c2c716"
     }
   ],
-  "schema_sql_sha256": "a9337a77974704c78836aee68e238615c1a864e17bccf9593cb57631bdb7e651"
+  "schema_sql_sha256": "9a8337f372b742286b5cf5c6cdb6eee3562de4719c752775e5ff080c8edbdec6"
 }

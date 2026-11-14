@@ -21,6 +21,7 @@ export const EffectIdentity = Type.Object({
     repository_owner: Type.Optional(text), repository_name: Type.Optional(text), base_branch: Type.Optional(text), title: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
     commit_time: Type.Optional(Type.Integer({ minimum: 1, maximum: 253402300799 })),
     marker: Type.Optional(text), body_hash: Type.Optional(Type.String({ pattern: '^[a-f0-9]{64}$' })),
+    criterion_ids: Type.Optional(Type.Array(Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), { minItems: 1, maxItems: 1000 })),
     project_id: Type.Optional(GitHubId), item_id: Type.Optional(GitHubId), field_id: Type.Optional(GitHubId),
     option_id: Type.Optional(GitHubId), previous_option_id: Type.Optional(nullable(GitHubId)),
 }, closed);
@@ -34,7 +35,7 @@ export const EffectReceipt = Type.Object({ id: GitHubId, url: Type.Optional(text
 export type EffectReceipt = Static<typeof EffectReceipt>;
 export const EffectView = Type.Object({
     operation_id: OperationId, attempt_id: nullable(OperationId), creation_id: nullable(OperationId), delivery_id: nullable(OperationId),
-    kind: Type.Union([Type.Literal('issue_comment'), Type.Literal('project_status'), Type.Literal('local_commit'), Type.Literal('push'), Type.Literal('pull_request'), Type.Literal('create_repository'), Type.Literal('associate_origin'), Type.Literal('baseline_push')]), scope_key: text,
+    kind: Type.Union([Type.Literal('issue_comment'), Type.Literal('issue_body'), Type.Literal('project_status'), Type.Literal('local_commit'), Type.Literal('push'), Type.Literal('pull_request'), Type.Literal('create_repository'), Type.Literal('associate_origin'), Type.Literal('baseline_push')]), scope_key: text,
     state: Type.Union(['not_requested', 'not_started', 'running', 'confirmed', 'failed_known', 'unknown', 'not_applicable'].map(v => Type.Literal(v))),
     expected_identity: EffectIdentity, confirmed_identity: nullable(EffectReceipt), receipt: nullable(EffectReceipt),
     reason: nullable(Type.String({ maxLength: 128 })), authorized: Type.Boolean(), revision: Type.Integer({ minimum: 1 }),

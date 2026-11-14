@@ -121,7 +121,7 @@ describe('fixed local installation', () => {
       resources.push(db);
       expect(db.prepare('SELECT count(*) AS n FROM factory_settings').get()).toEqual({ n: 1 });
       expect(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()).toEqual({ n: 0 });
-      expect(inspectHistory(db)).toEqual({ kind: 'direct', schemaVersion: 57 });
+      expect(inspectHistory(db)).toEqual({ kind: 'direct', schemaVersion: 58 });
     } finally {
       exec.mockRestore();
     }
@@ -168,8 +168,10 @@ describe('fixed local installation', () => {
       new URL('../../../../../resources/storage/initial-schema.v55.sql', import.meta.url),
       new URL('../../../../../resources/storage/initial-schema.v56.sql', import.meta.url),
       new URL('../../../../../resources/storage/initial-schema.v57.sql', import.meta.url),
+      new URL('../../../../../resources/storage/initial-schema.v58.sql', import.meta.url),
       new URL('../../../../../resources/storage/055_issue_history_repository_reference.sql', import.meta.url),
       new URL('../../../../../resources/storage/056_immediate_controller_shutdown.sql', import.meta.url),
+      new URL('../../../../../resources/storage/057_issue_body_effect.sql', import.meta.url),
       new URL('../../../../../resources/storage/schema-recognition.v1.json', import.meta.url),
     ];
     const resourceHashes = resourcePaths.map(url => sha256(readFileSync(url)));
@@ -185,7 +187,7 @@ describe('fixed local installation', () => {
   });
 
   it.each([
-    ['future version', 'PRAGMA user_version = 58', 'DATABASE_NEWER_THAN_APPLICATION'],
+    ['future version', 'PRAGMA user_version = 59', 'DATABASE_NEWER_THAN_APPLICATION'],
     ['unknown identity', 'PRAGMA application_id = 1', 'DATABASE_UNKNOWN'],
     ['partial schema', 'DROP TABLE project_storage_locations', 'DATABASE_SCHEMA_INCOMPATIBLE'],
   ] as const)('refuses %s without changing the current database files', (_name, sql, code) => {

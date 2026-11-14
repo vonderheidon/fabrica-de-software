@@ -6,6 +6,7 @@ import type { Workspaces } from '../workspaces/index.js';
 import { createTargetSelections, type TargetWorkspaces } from './targets.js';
 import type { DeliveryTargetPlan } from '../storage/index.js';
 import { CaptureError } from '../workspaces/index.js';
+import { markCriteria } from '../pipeline/index.js';
 
 type Stage = 'inProgress' | 'inReview' | 'delivered';
 const statusKey = (stage: Stage) => stage === 'inProgress' ? 'in_progress' : stage === 'inReview' ? 'in_review' : 'delivered';
@@ -159,6 +160,18 @@ export function createPublication(deps: PublicationDependencies) {
       storage.finishEffect(effect.operationId, effect.revision, 'confirmed', { id: comment.id, url: comment.url }, null);
       return;
     }
+    if (effect.kind === 'issue_body') {
+      const wanted = effect.expectedIdentity;
+      if (!wanted.issueId || !wanted.criterionIds) return;
+      const issue = await readIssueBody(wanted.issueId);
+      if (!issue || issue.repository.id !== wanted.repositoryId) return;
+      const criteria = capture.criteria.filter(c => wanted.criterionIds!.includes(c.id));
+      const observed = markCriteria(issue, criteria);
+      // Confirmed only when every planned criterion is checked; anything else is final and never edited again.
+      if (observed.alreadyChecked.length === criteria.length) storage.finishEffect(effect.operationId, effect.revision, 'confirmed', { id: wanted.issueId }, null);
+      else storage.finishEffect(effect.operationId, effect.revision, 'not_applicable', null, 'CRITERIA_NOT_MARKED');
+      return;
+    }
     if (effect.kind === 'project_status') {
       if (!effect.expectedIdentity.issueId) return;
       const response = await github.getIssueContextById(effect.expectedIdentity.issueId, { purpose: 'status_confirmation' });
@@ -197,12 +210,12 @@ export function createPublication(deps: PublicationDependencies) {
     } }); }
     catch { result = { state: 'unknown', receipt: null, reason: 'EFFECT_TRANSPORT_LOST', retryAtMs: null }; }
     if (!['confirmed','failed_known','unknown'].includes(result.state)) throw new OperationError(503,'EFFECT_RESPONSE_INVALID','The effect returned an invalid outcome.');
-    const requiresReadback = kind === 'issue_comment' || kind === 'project_status';
+    const requiresReadback = kind === 'issue_comment' || kind === 'issue_body' || kind === 'project_status';
     const awaitingReadback = requiresReadback && result.state !== 'failed_known';
     storage.finishEffect(running.operationId, running.revision,
       awaitingReadback ? 'unknown' : result.state === 'confirmed' ? 'confirmed' : result.state === 'failed_known' ? 'failed_known' : 'unknown',
       awaitingReadback ? null : result.receipt,
-      awaitingReadback ? result.reason ?? (kind === 'issue_comment' ? 'COMMENT_READBACK_REQUIRED' : 'STATUS_READBACK_REQUIRED') : result.reason);
+      awaitingReadback ? result.reason ?? (kind === 'issue_comment' ? 'COMMENT_READBACK_REQUIRED' : kind === 'issue_body' ? 'ISSUE_BODY_READBACK_REQUIRED' : 'STATUS_READBACK_REQUIRED') : result.reason);
     if (awaitingReadback) await reconcileEffect(storage.getEffect(effect.operationId));
     return storage.getEffect(effect.operationId).state === 'confirmed';
   }
@@ -228,7 +241,65 @@ export function createPublication(deps: PublicationDependencies) {
     // Projection failure preserves local work. send() prevents any later remote mutation until reconciliation.
     return storage.getAttempt(id).suspension === null;
   }
-  function commentBody(snapshot: Snapshot): string {
+  async function readIssueBody(issueId: string) {
+    const response = await github.getIssueContextById(issueId);
+    const issue = response.data;
+    return response.state === 'complete' && issue && 'body' in issue && issue.id === issueId ? issue : null;
+  }
+  const passedCriteria = (s: Snapshot) => {
+    const review = storage.getReview(s.delivery!.id)!;
+    return s.capture.criteria.filter(c => review.criteria.some(r => r.criterionId === c.id && r.verdict === 'passed'));
+  };
+  /** The plan is frozen once recorded, so the delivery comment and the body edit always describe the same criteria. */
+  async function issueBodyPlan(s: Snapshot): Promise<{ criterionIds: string[]; skipped: string[] }> {
+    const passed = passedCriteria(s).map(c => c.id); const deliveryId = s.delivery!.id;
+    const recorded = s.effects.find(e => e.kind === 'issue_body' && e.deliveryId === deliveryId)?.expectedIdentity.criterionIds;
+    let present: readonly string[] = recorded ?? [];
+    if (!recorded && passed.length && !s.effects.some(e => e.kind === 'issue_comment' && e.deliveryId === deliveryId)) {
+      const issue = await readIssueBody(s.capture.issue.id);
+      if (!issue) blocked('ISSUE_BODY_UNAVAILABLE');
+      const marking = markCriteria(issue!, passedCriteria(s));
+      present = [...marking.marked, ...marking.alreadyChecked];
+    }
+    return { criterionIds: passed.filter(c => present.includes(c)), skipped: passed.filter(c => !present.includes(c)) };
+  }
+  function issueBodyIdentity(s: Snapshot, criterionIds: string[]): EffectIdentity {
+    return { repositoryId: s.capture.issue.repository.id, issueId: s.capture.issue.id, contentIdentity: s.delivery!.contentIdentity!, criterionIds };
+  }
+  async function recordIssueBodyPlan(s: Snapshot, command: PublicationCommand): Promise<string[]> {
+    const plan = await issueBodyPlan(s);
+    if (plan.criterionIds.length && !s.effects.some(e => e.kind === 'issue_body' && e.deliveryId === s.delivery!.id)) {
+      try {
+        storage.recordEffectIntent({ origin: { attemptId: s.status.id, deliveryId: s.delivery!.id }, kind: 'issue_body', scopeKey: s.delivery!.id,
+          expectedIdentity: issueBodyIdentity(s, plan.criterionIds), authorization: { accountId: s.capture.accountId, mode: s.mode, sourceOperationId: command.operationId } });
+      } catch (error) {
+        // Without a recorded plan nothing is checked, and the comment reports every approved criterion as unchecked.
+        deps.logFailure(error instanceof OperationError ? error.code : 'ISSUE_BODY_FAILED');
+        return [...plan.criterionIds, ...plan.skipped];
+      }
+    }
+    return plan.skipped;
+  }
+  /** Checks approved criteria in the issue body. Never blocks the delivery: failures stay recorded on the effect. */
+  async function markIssueBody(id: string, deliveryId: string, command: PublicationCommand): Promise<void> {
+    try {
+      const snapshot = storage.getPublicationSnapshot(id, deliveryId);
+      const effect = snapshot.effects.find(e => e.kind === 'issue_body' && e.deliveryId === deliveryId);
+      if (!effect || !['not_started','failed_known'].includes(effect.state) || !effect.expectedIdentity.criterionIds) return;
+      const issue = await readIssueBody(snapshot.capture.issue.id);
+      if (!issue) return;
+      const marking = markCriteria(issue, snapshot.capture.criteria.filter(c => effect.expectedIdentity.criterionIds!.includes(c.id)));
+      if (!marking.marked.length) {
+        // Nothing left to edit: the readback decides between confirmed and not marked, without a mutation.
+        if (storage.claimEffect(effect.operationId, effect.revision, command.operationId)) await reconcileEffect(storage.getEffect(effect.operationId));
+        return;
+      }
+      await send(id, 'issue_body', deliveryId, effect.expectedIdentity, command.operationId, marking.body);
+    } catch (error) {
+      deps.logFailure(error instanceof OperationError ? error.code : 'ISSUE_BODY_FAILED');
+    }
+  }
+  function commentBody(snapshot: Snapshot, skipped: readonly string[] = []): string {
     const d = snapshot.delivery!; const review = storage.getReview(d.id)!;
     const marker = `<!-- factory:${snapshot.mode}:${snapshot.settings.installation_id}:${snapshot.status.id}:${d.id} -->`;
     const commit = snapshot.effects.find(e => e.kind === 'local_commit' && e.deliveryId === d.id);
@@ -238,6 +309,7 @@ export function createPublication(deps: PublicationDependencies) {
       commitMode ? (commit?.state === 'not_applicable' ? 'Commit: not_applicable (APPROVED_NO_DELTA). Entrega revisada sem alterações; nenhum commit vazio foi criado.' : `Commit local: ${commit?.receipt?.id}; ${commit?.expectedIdentity.taskType ?? 'branch'} ${commit?.expectedIdentity.taskDescription ?? ''}; branch: ${commit?.expectedIdentity.branchRef}.`) : 'Versão aprovada para entrega local ICR. Alterações e ambiente preservados, sem commit de entrega ou push.',
       ...(commitMode ? ['Publicação local, sem push, PR ou fechamento da issue.'] : []), '', 'Critérios verificados:',
        ...review.criteria.map(c => `- ${c.criterionId}: ${c.verdict}; ${c.evidence.length} referência(s) de evidência no resultado oficial.`),
+      ...(skipped.length ? [`Não marcados na issue (critério alterado desde a captura ou sem caixa de seleção): ${skipped.join(', ')}.`] : []),
       '', `Detalhe local: GET /api/v1/deliveries/${d.id}`, `Diff sob demanda: GET /api/v1/deliveries/${d.id}/diff`,
       `Achados não impeditivos desta revisão: ${review.findings.filter(f => !f.blocking).length}.`];
     const body = lines.join('\n');
@@ -454,14 +526,20 @@ export function createPublication(deps: PublicationDependencies) {
       storage.assertPublicationEligible(id,deliveryId,true);
       snapshot = storage.getPublicationSnapshot(id,deliveryId);
     }
+    // The check-mark plan is recorded before the comment, which reports the approved criteria left unchecked.
+    const skipped = await recordIssueBodyPlan(snapshot, command);
+    snapshot = storage.getPublicationSnapshot(id, deliveryId);
     if (snapshot.mode === 'pr') await completeRemote(snapshot,command);
     else if (!snapshot.effects.some(e => e.kind === 'issue_comment' && e.deliveryId === deliveryId && e.state === 'confirmed')) {
-    const body = commentBody(snapshot); const old = snapshot.effects.find(e => e.kind === 'issue_comment' && e.deliveryId === deliveryId);
+    const old = snapshot.effects.find(e => e.kind === 'issue_comment' && e.deliveryId === deliveryId);
+    // A comment recorded before check marks existed keeps its original body.
+    const body = [commentBody(snapshot, skipped), commentBody(snapshot)].find(candidate => !old || old.expectedIdentity.bodyHash === hash(candidate)) ?? commentBody(snapshot, skipped);
     const identity: EffectIdentity = old?.expectedIdentity ?? { repositoryId: snapshot.capture.issue.repository.id, issueId: snapshot.capture.issue.id,
       contentIdentity: snapshot.delivery!.contentIdentity!, marker: body.split('\n')[0]!, bodyHash: hash(body) };
     if (identity.bodyHash !== hash(body)) blocked('COMMENT_IDENTITY_CHANGED');
     if (!await send(id, 'issue_comment', deliveryId, identity, command.operationId, body)) blocked('COMMENT_PENDING');
     }
+    await markIssueBody(id, deliveryId, command);
     if (!await observeAuthority(id)) blocked('PUBLICATION_BLOCKED');
     snapshot = storage.getPublicationSnapshot(id, deliveryId);
     storage.finalizeICR(id, deliveryId, snapshot.stamp, true);

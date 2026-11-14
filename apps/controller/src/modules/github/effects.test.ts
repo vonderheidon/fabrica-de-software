@@ -70,6 +70,19 @@ it('requires project authorization and only sends the exact mapped single-select
   expect(request.variables.input).toEqual({ projectId: 'P',itemId: 'ITEM',fieldId: 'FIELD',value: { singleSelectOptionId: 'DELIVERED' },clientMutationId: effect.operationId });
   expect(request.query).not.toContain('updateIssue');
 });
+it('edits the issue body only for the issue body effect, with mandatory readback', async () => {
+  const f = fixture();
+  const effect: EffectView = { ...f.effect,kind: 'issue_body',expectedIdentity: { repositoryId: 'R',issueId: 'I',criterionIds: ['ac-1'] } };
+  const writer = createEffectWriter(f.reader,f.authorization);
+  expect(await writer({ effect: { ...effect,expectedIdentity: { repositoryId: 'R',issueId: 'I' } },accountId: 'A',body: 'x' })).toMatchObject({ state: 'failed_known',reason: 'EFFECT_INPUT_INVALID' });
+  expect(await writer({ effect,accountId: 'A' })).toMatchObject({ state: 'failed_known',reason: 'EFFECT_INPUT_INVALID' });
+  expect(f.run).not.toHaveBeenCalled();
+  f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { exitCode: 0,stdout: 'HTTP/2 200 OK\r\nx:test\r\n\r\n'+JSON.stringify({ data: { updateIssue: { clientMutationId: effect.operationId,issue: { id: 'I',repository: { id: 'R' } } } } }) }; });
+  expect(await writer({ effect,accountId: 'A',body: '- [x] ac-1: Done' })).toMatchObject({ state: 'unknown',reason: 'ISSUE_BODY_READBACK_REQUIRED' });
+  const request = JSON.parse(f.run.mock.calls[0]![0]) as { query: string; variables: { input: object } };
+  expect(request.query).toContain('updateIssue');
+  expect(request.variables.input).toEqual({ id: 'I',body: '- [x] ac-1: Done',clientMutationId: effect.operationId });
+});
 it('shares query rate-limit cooldown with mutations and does not send a second request during the delay', async () => {
   const f = fixture(); f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { exitCode: 1,stdout: 'HTTP/2 429 Too Many Requests\r\nretry-after: 120\r\n\r\n{}' }; });
   const writer = createEffectWriter(f.reader,f.authorization);

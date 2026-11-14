@@ -77,6 +77,61 @@ it('completes ICR from the approved version with durable comment/status intentio
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
 });
 
+it('checks approved criteria in the issue body after the comment, keeping every other byte and the captured scope', async () => {
+  const f = await fixture(); await f.implement();
+  const original = '## Objetivo\nDeliver a feature.\n## Critérios de aceite\n- [ ] Same text\n- [ ] Same text\n## Notas\n- [ ] Unrelated';
+  f.issue.body = original;
+  await f.approve();
+  expect(f.status()).toMatchObject({ result: 'delivered', suspension: null });
+  expect(f.issue.body).toBe(original.replace('- [ ] Same text\n- [ ] Same text', '- [x] Same text\n- [x] Same text'));
+  expect(f.mutateEffect.mock.calls.map(([input]) => input.effect.kind)).toEqual(['project_status','project_status','issue_comment','issue_body','project_status']);
+  expect(f.storage.getEffects(f.attemptId).find(e => e.kind === 'issue_body')).toMatchObject({ state: 'confirmed', expectedIdentity: { criterionIds: ['ac-1','ac-2'] } });
+  expect(f.issue.comments[0]!.body).not.toContain('Não marcados na issue');
+  expect(f.storage.getAttempt(f.attemptId).pendingQuestionId).toBeNull();
+});
+
+it('reports changed or checkbox-less criteria in the comment and never unchecks a human mark', async () => {
+  const f = await fixture(); await f.implement();
+  f.issue.body = '## Objetivo\nDeliver a feature.\n## Critérios de aceite\n- [x] Same text\n- Same text';
+  await f.approve();
+  expect(f.status().result).toBe('delivered');
+  expect(f.issue.body).toBe('## Objetivo\nDeliver a feature.\n## Critérios de aceite\n- [x] Same text\n- Same text');
+  expect(f.mutateEffect.mock.calls.some(([input]) => input.effect.kind === 'issue_body')).toBe(false);
+  expect(f.storage.getEffects(f.attemptId).find(e => e.kind === 'issue_body')).toMatchObject({ state: 'confirmed', expectedIdentity: { criterionIds: ['ac-1'] } });
+  expect(f.issue.comments[0]!.body).toContain('Não marcados na issue (critério alterado desde a captura ou sem caixa de seleção): ac-2.');
+});
+
+it('finishes the delivery when the issue body edit is not observed, without editing it again', async () => {
+  const f = await fixture(); await f.implement();
+  f.issue.body = '## Objetivo\nDeliver a feature.\n## Critérios de aceite\n- [ ] Same text\n- [ ] Same text';
+  const write = f.mutateEffect.getMockImplementation()!;
+  f.mutateEffect.mockImplementation(async input => input.effect.kind === 'issue_body'
+    ? { state: 'unknown', receipt: null, reason: 'TIMEOUT_AFTER_SEND', retryAtMs: null } : write(input));
+  await f.approve();
+  expect(f.status()).toMatchObject({ result: 'delivered', suspension: null });
+  expect(f.issue.memberships[0]!.statusValues[0]!.optionId).toBe('DELIVERED');
+  expect(f.storage.getEffects(f.attemptId).find(e => e.kind === 'issue_body')).toMatchObject({ state: 'not_applicable', reason: 'CRITERIA_NOT_MARKED' });
+  expect(f.mutateEffect.mock.calls.filter(([input]) => input.effect.kind === 'issue_body')).toHaveLength(1);
+});
+
+it.each(['commit','pr'] as const)('checks approved criteria in %s mode', async mode => {
+  const f = await publicationFixture(true, mode); fixtures.push(f); await f.implement();
+  f.issue.body = '## Objetivo\nDeliver a feature.\n## Critérios de aceite\n- [ ] Same text\n- [ ] Same text';
+  await f.approve();
+  expect(f.status().result).toBe('delivered');
+  expect(f.issue.body).toContain('- [x] Same text\n- [x] Same text');
+  expect(f.storage.getEffects(f.attemptId).find(e => e.kind === 'issue_body')?.state).toBe('confirmed');
+});
+
+it('does not touch the issue body when the review rejects the version', async () => {
+  const f = await fixture(); await f.implement();
+  const original = '## Objetivo\nDeliver a feature.\n## Critérios de aceite\n- [ ] Same text\n- [ ] Same text';
+  f.issue.body = original;
+  await f.approve(false);
+  expect(f.issue.body).toBe(original);
+  expect(f.storage.getEffects(f.attemptId).some(e => e.kind === 'issue_body')).toBe(false);
+});
+
 it('keeps a confirmed comment mutation pending until the exact projected comment is observed', async () => {
   const f = await fixture(); await f.implement();
   const mutate = f.mutateEffect.getMockImplementation();

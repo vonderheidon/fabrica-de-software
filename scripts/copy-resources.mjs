@@ -7,8 +7,8 @@ const oldMigrationTarget = new URL('../dist/apps/controller/src/modules/storage/
 if (existsSync(oldMigrationTarget)) rmSync(oldMigrationTarget, { recursive: true, force: true });
 const storageResources = new URL('../resources/storage/', import.meta.url);
 const distributedStorageResources = new URL('../dist/resources/storage/', import.meta.url);
-const storageResourceNames = ['056_immediate_controller_shutdown.sql', 'initial-schema.v57.sql', 'schema-recognition.v1.json'];
-const historicalStorageResourceNames = ['055_issue_history_repository_reference.sql', 'initial-schema.v54.sql', 'initial-schema.v55.sql', 'initial-schema.v56.sql'];
+const storageResourceNames = ['057_issue_body_effect.sql', 'initial-schema.v58.sql', 'schema-recognition.v1.json'];
+const historicalStorageResourceNames = ['055_issue_history_repository_reference.sql', '056_immediate_controller_shutdown.sql', 'initial-schema.v57.sql', 'initial-schema.v54.sql', 'initial-schema.v55.sql', 'initial-schema.v56.sql'];
 const availableStorageResourceNames = readdirSync(storageResources).sort();
 if (!storageResourceNames.every(name => availableStorageResourceNames.includes(name)) ||
     availableStorageResourceNames.some(name => ![...storageResourceNames, ...historicalStorageResourceNames].includes(name))) {
