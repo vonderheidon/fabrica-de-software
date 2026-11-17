@@ -1,5 +1,5 @@
 async (page) => {
-  const output = 'C:/Users/jeffe/Documents/Apps/nova-fabrica-software/.playwright-mcp/sprint039';
+  const output = '.playwright-mcp/sprint039';
   const origin = 'http://127.0.0.1:4310';
   const result = { controlled: {}, native: {}, errors: [] };
   const assert = (value, message) => { if (!value) throw new Error(message); };

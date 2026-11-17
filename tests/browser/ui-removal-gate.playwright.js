@@ -2,7 +2,7 @@
 // Run against the compiled bundle at http://127.0.0.1:4310; every API response is controlled.
 async (page) => {
   const origin = 'http://127.0.0.1:4310';
-  const output = 'C:/Users/jeffe/Documents/Apps/nova-fabrica-software/.cache/ui-removal-gate-20261028';
+  const output = '.cache/ui-removal-gate-20261028';
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   const id = value => `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`;
   const now = Date.UTC(2026, 9, 28, 12, 0, 0);

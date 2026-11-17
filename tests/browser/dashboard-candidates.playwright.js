@@ -3,7 +3,7 @@ async (page) => {
   const origin = new URL(page.url()).origin;
   const assert = (condition, message) => { if (!condition) throw Error(message); };
   const projectId = 'abcdef12-1234-4123-8123-123456789012';
-  const candidate = { project_id: projectId, project_name: 'teste667', item_id: 'item', kind: 'issue', issue_id: 'issue', number: 1, title: 'Criar landing page estática básica para Aula IA', url: null, assignees: [{ id: 'account', login: 'vonderheidon' }], status: 'Ready', ready: true, ready_eligible: true, eligible: false, reasons: ['AUTOMATION_DISABLED'], consumption: 'available', attempt_id: null, order: { position: 1, criterion: 'issue-number' } };
+  const candidate = { project_id: projectId, project_name: 'teste667', item_id: 'item', kind: 'issue', issue_id: 'issue', number: 1, title: 'Criar landing page estática básica para Aula IA', url: null, assignees: [{ id: 'account', login: 'octocat' }], status: 'Ready', ready: true, ready_eligible: true, eligible: false, reasons: ['AUTOMATION_DISABLED'], consumption: 'available', attempt_id: null, order: { position: 1, criterion: 'issue-number' } };
   let items = [candidate];
   const writes = [];
   const handler = async route => {
@@ -13,7 +13,7 @@ async (page) => {
     if (request.method() !== 'GET') { writes.push(`${request.method()} ${path}`); return route.abort(); }
     if (path === '/api/v1/events') return reply({ items: [], has_more: false, next_cursor: null, event_cursor: '1' });
     if (path === '/api/v1/projects') return reply({ items: [], has_more: false, next_cursor: null, event_cursor: '1' });
-    if (path === '/api/v1/queue') return route.fulfill({ headers: { etag: '"test"' }, json: { scope: { kind: 'account', project_ids: [projectId] }, enabled: false, valid: true, complete: true, observation_id: projectId, summary_hash: 'a'.repeat(64), observed_at_ms: 1792432190073, eligible_total: items.filter(item => item.eligible).length, modes_by_project: [{ project_id: projectId, mode: 'icr' }], account: { id: 'account', login: 'vonderheidon' }, host: { expected: 'local', observed: 'local', matches: true }, order: { criterion: 'number', description: 'Número da issue' }, page: { items, has_more: false, next_cursor: null, event_cursor: '1' }, diagnostics: [], event_cursor: '1' } });
+    if (path === '/api/v1/queue') return route.fulfill({ headers: { etag: '"test"' }, json: { scope: { kind: 'account', project_ids: [projectId] }, enabled: false, valid: true, complete: true, observation_id: projectId, summary_hash: 'a'.repeat(64), observed_at_ms: 1792432190073, eligible_total: items.filter(item => item.eligible).length, modes_by_project: [{ project_id: projectId, mode: 'icr' }], account: { id: 'account', login: 'octocat' }, host: { expected: 'local', observed: 'local', matches: true }, order: { criterion: 'number', description: 'Número da issue' }, page: { items, has_more: false, next_cursor: null, event_cursor: '1' }, diagnostics: [], event_cursor: '1' } });
     return route.fulfill({ status: 503, json: { code: 'CONTROLLED_TEST_RESOURCE', message: 'Fora deste cenário de teste.' } });
   };
   await page.route('**/api/v1/**', handler);
