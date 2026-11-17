@@ -60,7 +60,7 @@ npm.cmd run test:distribution
 | `packages/contracts/` | Contratos compartilhados |
 | `resources/` | Recursos usados no build e na execução |
 | `scripts/`, `tests/` | Build, empacotamento e validações |
-| `docs/operation/` | Manual de operação |
+| `docs/` | Manual de operação, manutenção do Maestri e roadmap |
 | `var/` | Dados locais da instalação; não tratar como cache descartável |
 | `dist/`, `build/` | Compilação e distribuições geradas |
 
