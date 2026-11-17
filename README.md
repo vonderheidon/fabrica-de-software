@@ -68,3 +68,7 @@ npm.cmd run test:distribution
 
 - [GLOSSARY.md](GLOSSARY.md): termos e estados.
 - [AGENTS.md](AGENTS.md): regras de trabalho no repositório.
+
+## Licença
+
+[MIT](LICENSE).
