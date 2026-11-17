@@ -41,3 +41,6 @@ Desktop.ini
 .playwright-mcp/
 .codegraph/
 .lionclaw
+
+# Browser test evidence
+tests/browser/evidence/
