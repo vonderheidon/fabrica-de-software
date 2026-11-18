@@ -201,7 +201,7 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
     {attemptError && <div className="queue-error" role="alert"><h3>Falha ao consultar esta tentativa</h3><p>{attemptError}</p><p><strong>Próxima ação:</strong> consulte novamente antes de agir sobre os dados anteriores.</p><button type="button" onClick={() => setReload((value) => value + 1)}>Consultar novamente</button></div>}
     {!attempt && !attemptError && <p role="status">Carregando o detalhe da tentativa…</p>}
     {attempt && <>
-      <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError)} blocked={!attempt.result && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED'} />
+      <AttemptStageSummary activity={attempt.stage_activity} stale={Boolean(attemptError)} blocked={!attempt.result && attempt.diagnostic === 'IMPLEMENTATION_BLOCKED'} publicationFailed={Boolean(attempt.delivery_summary?.publication_failure)} />
       <div className="attempt-detail-heading"><h3>#{attempt.issue.number} · {attempt.issue.title}</h3><div className="row"><a href={attempt.issue.url} target="_blank" rel="noreferrer">Abrir issue no GitHub</a><a href={`#principal/registros?attemptId=${encodeURIComponent(attempt.id)}`}>Abrir Registros</a></div></div>
       {delivery && <PublicationDialog key={delivery.delivery.id}
         projectId={attempt.project_id}

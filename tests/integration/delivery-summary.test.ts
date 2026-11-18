@@ -112,6 +112,25 @@ it('preserves legacy commit facts without inventing a local destination', async 
   expect(summary(f).limitations.join(' ')).toContain('histórico não informa o destino local');
 });
 
+it('exposes the diagnostic of a failed publication request only while the attempt is unfinished', async () => {
+  const f = await publicationFixture(false,'commit'); fixtures.push(f); await f.implement(); await f.approve();
+  const d = f.storage.getDelivery(f.status().deliveryId!).delivery;
+  expect(summary(f).publication_failure ?? null).toBeNull();
+  const accept = () => {
+    const context = f.context();
+    f.storage.acceptPublication({ ...context,attemptId:f.attemptId,kind:'publication.complete',body:{ deliveryId:d.id,authorizedMode:'commit',authorized:true } });
+    return context.operationId;
+  };
+  f.storage.finishPublicationRequest(accept(),'failed','DELIVERY_BRANCH_IN_USE');
+  expect(summary(f).publication_failure).toBe('DELIVERY_BRANCH_IN_USE');
+  expect(Value.Check(DeliverySummaryView,summary(f))).toBe(true);
+  const listed = () => f.storage.listAttempts({}).items.find(item => item.id === f.attemptId)!;
+  expect(listed().publicationFailure).toBe('DELIVERY_BRANCH_IN_USE');
+  f.storage.finishPublicationRequest(accept(),'succeeded',null);
+  expect(summary(f).publication_failure ?? null).toBeNull();
+  expect(listed().publicationFailure ?? null).toBeNull();
+});
+
 it('rejects crossed attempt IDs and keeps authenticated refreshes read-only and bounded', async () => {
   const f = await fixture('pr'); await f.implement(); await f.approve();
   const other = await fixture(); await other.implement();

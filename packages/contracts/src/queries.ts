@@ -38,6 +38,7 @@ export const AttemptSummary = Type.Object({
   id: OperationId, projectId: OperationId, issueId: Type.String(), issueNumber: nullable(Type.Integer({ minimum: 1 })), issueTitle: Type.Optional(nullable(Type.String({ maxLength: 65536 }))),
   phase: AttemptStatus.properties.phase, result: AttemptStatus.properties.result, suspension: AttemptStatus.properties.suspension,
   revision: Type.Integer(), createdAtMs: Type.Integer(), updatedAtMs: Type.Integer(),
+  publicationFailure: Type.Optional(nullable(Type.String({ maxLength: 128 }))),
 }, closed);
 export type AttemptSummary = Static<typeof AttemptSummary>;
 export const AttemptPage = Page(AttemptSummary);

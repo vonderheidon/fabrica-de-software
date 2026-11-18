@@ -55,6 +55,9 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
   if (confirmedCommit && !commit.path) limitations.push('O histórico não informa o destino local do commit; consulte os registros antes de continuar.');
   if (!resource && !confirmedCommit) limitations.push('Localização de código indisponível neste resumo; consulte a referência fixa e os recursos retidos.');
   if (confirmedCommit) limitations.push('Commit confirmado em branch própria; o checkout do operador não foi atualizado.');
+  const lastRequest = db.prepare<[string, string], { state: string; diagnostic: string | null }>(`SELECT state,diagnostic FROM publication_requests
+    WHERE attempt_id=? AND delivery_id=? ORDER BY rowid DESC LIMIT 1`).get(attemptId,deliveryId);
+  const publicationFailure = attempt.result === null && lastRequest && ['failed','unknown'].includes(lastRequest.state) ? lastRequest.diagnostic : null;
   const completed = approved && publication.localState === 'completed' && pending.length === 0;
   const progress = confirmedCommit || publication.push?.state === 'confirmed' || publication.pullRequest?.state === 'confirmed' ||
     publication.mode !== 'icr' && Boolean(db.prepare("SELECT 1 FROM effects WHERE attempt_id=? AND delivery_id=? AND kind='issue_comment' AND state='confirmed'").get(attemptId,deliveryId));
@@ -69,5 +72,6 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
     pull_request_url:publication.pullRequest?.state === 'confirmed' ? publication.pullRequest.receipt?.url ?? null : null,
     checkout_updated:false,pending_effects:pending,limitations,criteria_satisfied:satisfied,criteria_total:total,
     resolved_findings:resolved,details_url:`/api/v1/deliveries/${deliveryId}`,
+    publication_failure:publicationFailure,
   };
 }

@@ -37,6 +37,7 @@ export const AttemptSummary = Type.Object({
     diagnostic: Type.Optional(AttemptStatus.properties.diagnostic),
     phase: AttemptStatus.properties.phase, result: AttemptStatus.properties.result, suspension: AttemptStatus.properties.suspension,
     revision: Type.Integer(), created_at_ms: Type.Integer(), updated_at_ms: Type.Integer(),
+    publication_failure: Type.Optional(nullable(Type.String({ maxLength: 128 }))),
 }, closed);
 export type AttemptSummary = Static<typeof AttemptSummary>;
 export const AttemptPage = Page(AttemptSummary);

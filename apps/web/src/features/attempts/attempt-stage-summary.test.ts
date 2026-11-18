@@ -8,9 +8,9 @@ import { AttemptStageSummary } from './AttemptStageSummary.js';
 let root: ReturnType<typeof createRoot> | undefined;
 let host: HTMLDivElement;
 const activity: StageActivity = { stage: 'implementing', started_at_ms: 1000, elapsed_ms: 60_000, last_activity_at_ms: 1000, observed_at_ms: 61_000, deadline_at_ms: null, remaining_ms: null, tracking_state: 'tracked', availability: 'known', reason: null };
-async function render(value: StageActivity | null = activity, stale = false, blocked = false) {
+async function render(value: StageActivity | null = activity, stale = false, blocked = false, publicationFailed = false) {
   if (!root) { host = document.createElement('div'); document.body.append(host); root = createRoot(host); }
-  await act(async () => root!.render(createElement(AttemptStageSummary, { activity: value, stale, blocked })));
+  await act(async () => root!.render(createElement(AttemptStageSummary, { activity: value, stale, blocked, publicationFailed })));
 }
 afterEach(async () => { if (root) await act(async () => root!.unmount()); root = undefined; host?.remove(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 it('updates only the visual elapsed clock without changing observed activity or announcing every tick', async () => {
@@ -38,4 +38,13 @@ it('shows a prerequisite block instead of asking for a nonexistent operator deci
   await render({ ...activity, stage: 'waiting_decision' }, false, true);
   expect(host.querySelector('h3')?.textContent).toBe('Bloqueada por pré-requisito');
   expect(host.textContent).not.toContain('Aguardando decisão');
+});
+it('stops the clock and drops "in progress" when the publication already failed', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.useFakeTimers(); vi.setSystemTime(61_000);
+  await render({ ...activity, stage: 'publishing' }, false, false, true);
+  expect(host.querySelector('h3')?.textContent).toBe('Publicação interrompida');
+  const frozen = host.textContent;
+  await act(async () => vi.advanceTimersByTime(3000)); expect(host.textContent).toBe(frozen);
+  await render({ ...activity, stage: 'implementing' }, false, false, true);
+  expect(host.querySelector('h3')?.textContent).toBe('Implementação em andamento');
 });

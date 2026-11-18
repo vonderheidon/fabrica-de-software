@@ -13,9 +13,10 @@ export function formatStageDuration(milliseconds: number): string {
   return hours ? `${hours} h ${minutes} min` : `${minutes} min ${seconds % 60} s`;
 }
 
-export function AttemptStageSummary({ activity, stale = false, blocked = false }: { activity: StageActivity | null | undefined; stale?: boolean; blocked?: boolean }) {
+export function AttemptStageSummary({ activity, stale = false, blocked = false, publicationFailed = false }: { activity: StageActivity | null | undefined; stale?: boolean; blocked?: boolean; publicationFailed?: boolean }) {
   const [now, setNow] = useState(Date.now);
-  const ticking = Boolean(activity?.availability === 'known' && activity.stage !== 'finished' && !stale);
+  const halted = publicationFailed && activity?.stage === 'publishing';
+  const ticking = Boolean(activity?.availability === 'known' && activity.stage !== 'finished' && !stale && !halted);
   useEffect(() => {
     setNow(Date.now());
     if (!ticking) return;
@@ -26,7 +27,7 @@ export function AttemptStageSummary({ activity, stale = false, blocked = false }
   const elapsed = activity?.elapsed_ms === null || activity?.elapsed_ms === undefined ? null : activity.elapsed_ms + delta;
   const remaining = activity?.remaining_ms === null || activity?.remaining_ms === undefined ? null : Math.max(0, activity.remaining_ms - delta);
   return <section className="attempt-stage-summary" aria-label="Etapa e atividade da tentativa">
-    <h3>{blocked ? 'Bloqueada por pré-requisito' : activity ? labels[activity.stage] : 'Etapa indisponível'}</h3>
+    <h3>{blocked ? 'Bloqueada por pré-requisito' : halted ? 'Publicação interrompida' : activity ? labels[activity.stage] : 'Etapa indisponível'}</h3>
     {stale && <p className="stale-note">Dados da consulta anterior. Consulte novamente para atualizar.</p>}
     {activity?.stage === 'tracking_lost' && <p>A última atividade observada não comprova parada física. Consulte o diagnóstico da tentativa.</p>}
     <dl className="preparation-facts">

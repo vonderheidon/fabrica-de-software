@@ -92,7 +92,9 @@ export function readAttemptPage(db: Database.Database, query: AttemptListQuery):
   const pageKey = "printf('%020d',a.created_at_ms)||':'||a.id";
   const buildStatement = (after: boolean) => db.prepare<AttemptPageBindings, AttemptPageRow>(`SELECT a.id,a.project_id AS projectId,a.issue_id AS issueId,
     a.issue_number AS issueNumber,a.issue_title AS issueTitle,a.phase,a.result,a.suspension,a.diagnostic,a.revision,
-    a.created_at_ms AS createdAtMs,a.updated_at_ms AS updatedAtMs,${pageKey} AS pageKey
+    a.created_at_ms AS createdAtMs,a.updated_at_ms AS updatedAtMs,
+    (SELECT CASE WHEN a.result IS NULL AND l.state IN ('failed','unknown') THEN l.diagnostic END FROM publication_requests l
+      WHERE l.attempt_id=a.id ORDER BY l.rowid DESC LIMIT 1) AS publicationFailure,${pageKey} AS pageKey
     FROM attempts a WHERE ${[...clauses, ...(after ? ['(a.created_at_ms<@afterAt OR (a.created_at_ms=@afterAt AND a.id<@afterId))'] : [])].join(' AND ')}
     ORDER BY a.created_at_ms DESC,a.id DESC LIMIT @batch`);
   const firstPageStatement = buildStatement(false);

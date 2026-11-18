@@ -15,5 +15,6 @@ export const DeliverySummaryView = Type.Object({
   pending_effects: Type.Array(text(128), { maxItems: 10 }), limitations: Type.Array(text(2048), { maxItems: 10 }),
    criteria_satisfied: count, criteria_total: count,
   resolved_findings: count, details_url: text(512),
+  publication_failure: Type.Optional(nullable(text(128))),
 }, { additionalProperties: false });
 export type DeliverySummaryView = Static<typeof DeliverySummaryView>;

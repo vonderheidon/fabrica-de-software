@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { DeliverySummaryView } from '#contracts';
 import { deliveryModeLabel } from '../../app/delivery-modes.js';
+import { operatorErrorMessage } from '../../app/operator-language.js';
 
 const outcomeLabel: Record<DeliverySummaryView['outcome'], string> = {
   pending:'Entrega pendente',blocked:'Entrega impedida',icr_approved:'ICR aprovado',partial:'Entrega parcial',complete:'Entrega concluída',unavailable:'Versão indisponível',
@@ -19,6 +20,7 @@ export function DeliverySummary({ value, stale = false }: { value: DeliverySumma
       {value.pull_request_url && <a className="delivery-result-link" href={value.pull_request_url} target="_blank" rel="noreferrer">Ver PR</a>}
     </div>
     {stale && <p className="stale-note" role="status">Última consulta desta versão. Atualize os dados antes de continuar a entrega.</p>}
+    {value.publication_failure && <div className="queue-error" role="alert"><p><strong>A última tentativa de publicação falhou:</strong> {operatorErrorMessage(value.publication_failure, '')}</p></div>}
     <dl className="delivery-result-facts">
       <div><dt>Modo autorizado</dt><dd>{deliveryModeLabel[value.authorized_mode]}</dd></div>
       <div><dt>Critérios comprovados</dt><dd>{value.criteria_satisfied} de {value.criteria_total}</dd></div>

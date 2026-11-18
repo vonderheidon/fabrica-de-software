@@ -21,6 +21,7 @@ function database(): Database.Database {
     );
     CREATE TABLE operation_requests (operation_id TEXT, installation_id TEXT, account_id TEXT);
     CREATE TABLE events (seq INTEGER, operation_id TEXT);
+    CREATE TABLE publication_requests (attempt_id TEXT, state TEXT, diagnostic TEXT);
     CREATE TABLE attempts (
       id TEXT, account_id TEXT, project_id TEXT, issue_id TEXT, issue_number INTEGER, issue_title TEXT,
       phase TEXT, result TEXT, suspension TEXT, diagnostic TEXT, revision INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER
