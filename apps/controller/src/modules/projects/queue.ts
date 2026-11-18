@@ -15,6 +15,10 @@ export interface QueueResult { observation: QueueObservation; etag: string; item
 export class QueueSummaryChanged extends OperationError {
   constructor(readonly current: QueueResult) { super(409, 'QUEUE_SUMMARY_CHANGED', 'The queue observation changed. Review the updated summary before enabling.'); }
 }
+// Fechar um bloqueador não altera o updatedAt da issue bloqueada, então o cache expira por tempo mesmo sem mudança visível.
+const OBSERVATION_CONTEXT_TTL_MS = 5 * 60_000;
+const DISPATCH_CONTEXT_TTL_MS = 60_000;
+const ISSUE_CONTEXT_CACHE_LIMIT = 2000;
 const hash = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const problem = (status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never => { throw new OperationError(status, code, message); };
 function effectivePollingInterval(intervalMs: number, maximumMs: number, rateLimit: GitHubRateLimitSnapshot | null, nowMs: number): number {
@@ -67,13 +71,14 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
   // Only overlapping observations share work; completed display reads never grant authority.
   const observations = new Map<string, Promise<QueueResult>>();
   const displayReads = new Map<string, { expires: number; promise: Promise<QueueResult> }>();
+  const issueContextCache = new Map<string, { key: string; at: number; result: GitHubQueryResult<IssueQueueContext | ProjectItem> }>();
   let retryAtMs = 0;
   let failureDelayMs = 0;
   const projectBackoff = new Map<string, { retryAtMs: number; delayMs: number; etag: string }>();
   function observeFresh(query: QueueQueryType): Promise<QueueResult>;
-  function observeFresh(query: QueueQueryType, boundary: DispatchBoundary): Promise<QueueResult | null>;
-  function observeFresh(query: QueueQueryType, boundary: undefined, issueReadLimit: number): Promise<QueueResult>;
-  async function observeFresh(query: QueueQueryType, boundary?: DispatchBoundary, issueReadLimit = 3): Promise<QueueResult | null> {
+  function observeFresh(query: QueueQueryType, boundary: DispatchBoundary, issueReadLimit?: number, cacheTtlMs?: number): Promise<QueueResult | null>;
+  function observeFresh(query: QueueQueryType, boundary: undefined, issueReadLimit: number, cacheTtlMs?: number): Promise<QueueResult>;
+  async function observeFresh(query: QueueQueryType, boundary?: DispatchBoundary, issueReadLimit = 3, cacheTtlMs = 0): Promise<QueueResult | null> {
     if (!Value.Check(QueueQuery, query)) problem(400, 'QUEUE_QUERY_INVALID', 'Queue query is invalid.');
     if (query.projectId && query.projectIds) problem(400, 'QUEUE_SCOPE_INVALID', 'Select one project scope.');
     const selectedIds = query.projectId ? [query.projectId] : query.projectIds?.split(',').sort();
@@ -206,7 +211,12 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         if (candidateIndex < 0) return null;
         projectItems = projectItems.slice(0, candidateIndex + 1);
       }
-      const issueItems = projectItems.filter(item => item.kind === 'issue' && item.contentId);
+      // Só issues em Ready podem virar candidatas; as demais dispensam as ~5 consultas GraphQL de contexto por issue.
+      const statusFieldId = configuration.github_project.status_field_id;
+      const readyOptionId = configuration.github_project.status_option_ids.ready;
+      const statusOptions = details?.singleSelectFields.find((field) => field.id === statusFieldId)?.options ?? [];
+      const outsideReady = (item: ProjectItem): boolean => mappingValid && item.status !== undefined && !(item.status.fieldId === statusFieldId && item.status.optionId === readyOptionId);
+      const issueItems = projectItems.filter(item => item.kind === 'issue' && item.contentId && !outsideReady(item));
       const issues = new Map<string, GitHubQueryResult<IssueQueueContext | ProjectItem>>();
       let nextIssue = 0;
       await Promise.all(Array.from({ length: Math.min(issueReadLimit, issueItems.length) }, async () => {
@@ -214,7 +224,21 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
           const item = issueItems[nextIssue++]!;
           let issueRead = issueReads.get(item.contentId!);
           if (!issueRead) {
-            issueRead = github.getIssueContextById(item.contentId!, { purpose: 'queue' });
+            // Reaproveita o contexto lido em ciclos anteriores enquanto a issue (updatedAt) e o Status no quadro não mudarem.
+            // O candidato do despacho nunca usa o cache.
+            const cacheKey = item.updatedAt === undefined ? null : `${item.updatedAt}|${item.status?.optionId ?? ''}`;
+            const hit = cacheKey !== null && item.id !== boundary?.candidate.itemId ? issueContextCache.get(item.id) : undefined;
+            if (hit && cacheKey !== null && hit.key === cacheKey && Date.now() - hit.at < cacheTtlMs) {
+              issueRead = Promise.resolve(hit.result);
+            } else {
+              const read = github.getIssueContextById(item.contentId!, { purpose: 'queue' });
+              issueRead = read;
+              if (cacheKey !== null) void read.then((result) => {
+                if (result.state !== 'complete' || !result.data || result.diagnostics.length > 0 || result.retryAtMs) { issueContextCache.delete(item.id); return; }
+                if (issueContextCache.size >= ISSUE_CONTEXT_CACHE_LIMIT && !issueContextCache.has(item.id)) issueContextCache.delete(issueContextCache.keys().next().value!);
+                issueContextCache.set(item.id, { key: cacheKey, at: Date.now(), result });
+              }, () => undefined);
+            }
             issueReads.set(item.contentId!, issueRead);
           }
           issues.set(item.id, await issueRead);
@@ -239,6 +263,11 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
         if (kind !== 'issue') {
           reasons = [kind === 'draft' ? 'DRAFT_ITEM' : kind === 'pull_request' ? 'PULL_REQUEST' : 'READ_INCOMPLETE'];
           if (kind === 'inaccessible') projectComplete = false;
+        } else if (item.contentId && outsideReady(item)) {
+          issueId = item.contentId;
+          number = Number(item.url?.match(/\/issues\/(\d+)$/)?.[1]) || null;
+          status = statusOptions.find((option) => option.id === item.status?.optionId)?.name ?? null;
+          reasons = ['STATUS_MISMATCH'];
         } else if (item.contentId) {
           const issue = issues.get(item.id)!;
           projectRetryAtMs = Math.max(projectRetryAtMs, issue.retryAtMs ?? 0);
@@ -401,7 +430,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     const prefixIds = expectedProjectIds.filter((id) => compareId(id, candidate.projectId) <= 0 &&
       storage.getConfiguration(id).view.configuration.automation_enabled);
     if (!prefixIds.includes(candidate.projectId)) return null;
-    const current = await observeFresh({ projectIds: prefixIds.join(','), limit: '100' }, { expectedItems: scan.items, candidate });
+    const current = await observeFresh({ projectIds: prefixIds.join(','), limit: '100' }, { expectedItems: scan.items, candidate }, 3, DISPATCH_CONTEXT_TTL_MS);
     if (!current?.observation.valid || !current.observation.enabled || current.observation.account.id !== scan.observation.account.id ||
         current.observation.eventCursor !== expectedEventCursor || storage.getGlobalConfiguration().view.event_cursor !== expectedEventCursor) return null;
     return current;
@@ -439,7 +468,7 @@ export function createQueue({ storage, github, workspaces, hostName = hostname()
     let pending = observations.get(key);
     if (!pending) {
       if (observations.size >= 8) observations.delete(observations.keys().next().value!);
-      pending = observeFresh({ ...scope, limit: '100' }, undefined, issueReadLimit);
+      pending = observeFresh({ ...scope, limit: '100' }, undefined, issueReadLimit, OBSERVATION_CONTEXT_TTL_MS);
       observations.set(key, pending);
       const current = pending;
       const release = () => { if (observations.get(key) === current) observations.delete(key); };

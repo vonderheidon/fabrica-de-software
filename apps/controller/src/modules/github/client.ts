@@ -267,6 +267,7 @@ export function createClient(rootReader: GraphQLReader) {
       const status = node.status ? object(node.status) : null;
       return checked(ProjectItem, { id: node.id, archived: node.isArchived, kind, contentId: content?.id ?? null,
         ...(status?.field ? { status: { fieldId: object(status.field).id, optionId: status.optionId ?? null } } : {}),
+        ...(kind === 'issue' && typeof content?.updatedAt === 'string' ? { updatedAt: content.updatedAt } : {}),
         title: content?.title ?? null, url: content?.url ?? null, executable: kind === 'issue' && node.isArchived === false });
     });
     if (response.data?.some((item) => item.kind === 'inaccessible')) return result('partial', response.data, [...response.diagnostics.map((entry) => entry.code), 'REFERENCE_INACCESSIBLE'], response.retryAtMs);

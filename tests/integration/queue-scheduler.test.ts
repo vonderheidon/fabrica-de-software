@@ -379,6 +379,91 @@ describe('authorized queue changes', () => {
     expect(f.workspaces.prepareAttempt).toHaveBeenCalledOnce();
   });
 
+  it('does not read issue context for board items whose Status is not Ready', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const readyItem: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title,
+      url: f.issue.url, executable: true, position: 1, status: { fieldId: 'FIELD_test', optionId: 'READY' } };
+    const doneItem: ProjectItem = { id: 'ITEM_done', archived: false, kind: 'issue', contentId: 'I_done', title: 'Done issue',
+      url: `${f.issue.repository.url}/issues/40`, executable: true, position: 2, status: { fieldId: 'FIELD_test', optionId: 'DONE' } };
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([readyItem, doneItem]));
+    vi.mocked(f.github.getIssueContextById).mockClear();
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    const { items } = await queue.observe({});
+    expect(vi.mocked(f.github.getIssueContextById).mock.calls.map(([id]) => id)).toEqual([f.issue.id]);
+    const done = items.find((row) => row.itemId === 'ITEM_done')!;
+    expect(done).toMatchObject({ issueId: 'I_done', number: 40, eligible: false, ready: false });
+    expect(done.reasons).toContain('STATUS_MISMATCH');
+  });
+
+  it('reuses issue context across observations until updatedAt or Status changes, and never for the dispatch candidate', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const item: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title,
+      url: f.issue.url, executable: true, position: 1, status: { fieldId: 'FIELD_test', optionId: 'READY' }, updatedAt: '2026-11-17T20:00:00Z' };
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([item]));
+    vi.mocked(f.github.getIssueContextById).mockClear();
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    const reads = () => vi.mocked(f.github.getIssueContextById).mock.calls.length;
+
+    const first = await queue.observe({});
+    await queue.observe({});
+    expect(reads()).toBe(1);
+
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([{ ...item, updatedAt: '2026-11-17T20:05:00Z' }]));
+    await queue.observe({});
+    expect(reads()).toBe(2);
+
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([{ ...item, updatedAt: '2026-11-17T20:05:00Z', status: { fieldId: 'FIELD_test', optionId: 'READY2' } }]));
+    await queue.observe({});
+    expect(reads()).toBe(2);
+
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([{ ...item, updatedAt: '2026-11-17T20:05:00Z' }]));
+    const candidate = first.items.find((row) => row.itemId === item.id)!;
+    await queue.revalidateForDispatch(first, candidate);
+    expect(reads()).toBe(3);
+  });
+
+  it('revalidates for dispatch by rereading only the candidate while earlier items reuse recent context', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const secondIssue = structuredClone(f.issue);
+    secondIssue.id = 'I_second'; secondIssue.number = 18; secondIssue.url = `${f.issue.repository.url}/issues/18`;
+    secondIssue.memberships = secondIssue.memberships.map((membership) => ({ ...membership, itemId: 'ITEM_second' }));
+    vi.mocked(f.github.getIssueContextById).mockImplementation(async id => complete(structuredClone(id === 'I_second' ? secondIssue : f.issue)));
+    const firstItem: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title,
+      url: f.issue.url, executable: true, position: 1, status: { fieldId: 'FIELD_test', optionId: 'READY' }, updatedAt: '2026-11-17T20:00:00Z' };
+    const secondItem: ProjectItem = { id: 'ITEM_second', archived: false, kind: 'issue', contentId: 'I_second', title: secondIssue.title,
+      url: secondIssue.url, executable: true, position: 2, status: { fieldId: 'FIELD_test', optionId: 'READY' }, updatedAt: '2026-11-17T20:00:00Z' };
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([firstItem, secondItem]));
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    const scan = await queue.observe({});
+    vi.mocked(f.github.getIssueContextById).mockClear();
+    const candidate = scan.items.find((row) => row.itemId === 'ITEM_second')!;
+    await queue.revalidateForDispatch(scan, candidate);
+    expect(vi.mocked(f.github.getIssueContextById).mock.calls.map(([id]) => id)).toEqual(['I_second']);
+  });
+
+  it('does not reuse issue context for items without updatedAt or after the cache expires', async () => {
+    const { f } = await fixture(); await f.pipeline.close();
+    const item: ProjectItem = { id: 'ITEM_test', archived: false, kind: 'issue', contentId: f.issue.id, title: f.issue.title,
+      url: f.issue.url, executable: true, position: 1, status: { fieldId: 'FIELD_test', optionId: 'READY' } };
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([item]));
+    vi.mocked(f.github.getIssueContextById).mockClear();
+    const queue = createQueue({ storage: f.storage, github: f.github, workspaces: f.workspaces, hostName: 'test-host' });
+    await queue.observe({});
+    await queue.observe({});
+    expect(vi.mocked(f.github.getIssueContextById)).toHaveBeenCalledTimes(2);
+
+    vi.mocked(f.github.listProjectItems).mockResolvedValue(complete([{ ...item, updatedAt: '2026-11-17T20:00:00Z' }]));
+    vi.mocked(f.github.getIssueContextById).mockClear();
+    const base = Date.now(); const clock = vi.spyOn(Date, 'now').mockReturnValue(base);
+    await queue.observe({});
+    await queue.observe({});
+    expect(vi.mocked(f.github.getIssueContextById)).toHaveBeenCalledTimes(1);
+    clock.mockReturnValue(base + 6 * 60_000);
+    await queue.observe({});
+    expect(vi.mocked(f.github.getIssueContextById)).toHaveBeenCalledTimes(2);
+    clock.mockRestore();
+  });
+
   it('defers when the queue order changes during preparation and selects the new first item on the next poll', async () => {
     const { f } = await fixture(); await f.pipeline.close();
     const secondId = 'I_second';
