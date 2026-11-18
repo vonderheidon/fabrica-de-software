@@ -76,7 +76,9 @@ export function GitHubSetupPanel({ settings, settingsEtag, setup, selection, dis
           </button>
         </div>
       </div>}
-      {setup.eligibleAccounts.length === 0 && verificationReady && <p className="empty">Nenhuma conta ativa, válida e confirmada está disponível para vínculo.</p>}
+      {setup.eligibleAccounts.length === 0 && verificationReady && (options.retry_at_ms !== null
+        ? <p className="empty">A conta não pôde ser confirmada agora: o GitHub limitou as consultas temporariamente. Tente de novo após o horário previsto.</p>
+        : <p className="empty">Nenhuma conta ativa, válida e confirmada está disponível para vínculo.</p>)}
 
       <GitHubDiagnostics options={options} />
     </>}
