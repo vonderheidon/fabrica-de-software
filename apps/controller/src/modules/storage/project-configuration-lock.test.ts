@@ -48,6 +48,19 @@ describe('project configuration execution barrier', () => {
     expect(() => f.storage.saveConfiguration(command(f))).not.toThrow();
   });
 
+  it('releases configuration after a restart interrupts a workspace preparation of an already cancelled attempt', async () => {
+    const f = fixture = await attemptFixture(); const prepared = await f.prepare();
+    const operation = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
+    const attemptId = operation.resource.id;
+    f.db.prepare("UPDATE resources SET launch_state='starting' WHERE attempt_id=? AND kind='implementation'").run(attemptId);
+    f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(attemptId);
+    confirmTerminalStops(f, attemptId);
+    expect(projectConfigurationLock(f.db, f.projectId)).not.toBeNull();
+    f.storage.interruptAttempts();
+    expect(projectConfigurationLock(f.db, f.projectId)).toBeNull();
+    expect(() => f.storage.saveConfiguration(command(f))).not.toThrow();
+  });
+
   it('blocks pending publication after the attempt ends without treating historical receipts as active work', async () => {
     const f = fixture = await attemptFixture(); const prepared = await f.prepare();
     const operation = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();

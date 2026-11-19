@@ -159,3 +159,16 @@ export function confirmTerminalStops(fixture: Pick<AttemptFixture, 'db' | 'persi
     WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed' ORDER BY created_at_ms,id`).all(attemptId);
   for (const handle of handles) persistence.recordStop(handle, { passageId: handle.passageId, state: 'confirmed' });
 }
+
+/** Models a Reviewer whose OMP stop cannot be confirmed after the given number of healthy review passages. */
+export function leaveReviewerStopUnconfirmed(fixture: Pick<AttemptFixture, 'db' | 'persistence' | 'execution'>, healthyReviews = 0): void {
+  const seen = new Set<string>();
+  vi.mocked(fixture.execution.preparePassageHandoff).mockImplementation(async source => {
+    const row = fixture.db.prepare<[string], { role: string }>('SELECT role FROM passages WHERE id=?').get(source.passageId);
+    if (row?.role === 'reviewer') {
+      seen.add(source.passageId);
+      if (seen.size > healthyReviews) throw new Error('Reviewer stop unconfirmed');
+    }
+    fixture.persistence.recordStop(source, { passageId: source.passageId, state: 'confirmed' });
+  });
+}

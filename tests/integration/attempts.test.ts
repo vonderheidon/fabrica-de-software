@@ -1,7 +1,7 @@
 import { toHttpStartAttempt } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { ProjectStorageError } from '../../apps/controller/src/modules/workspaces/project-storage.js';
 import { createRetainedHistoryMigrator } from '../../apps/controller/src/modules/workspaces/retained-history-migration.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -236,6 +236,20 @@ describe('manual attempt composition and HTTP', () => {
       predecessorProgress: { attemptId: first.id, result: 'cancelled', unresolvedFindings: [], findingsTruncated: false } });
     expect(retryTask.workspaceScope).toEqual(expect.stringContaining('workspace.comparison_base_sha'));
     expect(retryTask.dependencyManagement).toMatchObject({ managerSelection: expect.stringContaining('packageManager') });
+  });
+  it.each([{ folder: 'missing', inherits: false }, { folder: 'present', inherits: true }])('with the predecessor issue folder $folder, inherits=$inherits', async ({ folder, inherits }) => {
+    const f = await fixture();
+    const first = await start(f);
+    confirmTerminalStops(f, first.id);
+    f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(first.id);
+    const issueFolder = join(f.directory, 'issues', '29');
+    if (folder === 'present') await mkdir(issueFolder, { recursive: true });
+    Object.assign(f.workspaces, { resolveAttemptWorkspace: vi.fn(async () => join(issueFolder, 'workspace')) });
+    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const operation = await f.pipeline.startAttempt(command.body, command.context);
+    const workspace = f.storage.getAttemptCapture(operation.resource.id).workspace;
+    if (inherits) expect(workspace).toMatchObject({ initial_state: { kind: 'pending_inherited_attempt' }, inherited_base_sha: first.capture.baseSha });
+    else expect(workspace).toMatchObject({ predecessor_attempt_id: first.id, initial_state: { kind: 'base_checkout' }, inherited_base_sha: null });
   });
   it('preserves the original repository base across multiple inherited attempts after the observed main advances', async () => {
     const f = await fixture();

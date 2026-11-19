@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { lstat } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type AttemptWorkspaceBinding, type AttemptWorkspaceSnapshot, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueItem } from '#contracts';
 import { isLocalAbsoluteTargetPath, OperationError, publicationTargetHash, publicationTargetPath, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
@@ -19,7 +21,7 @@ export interface PipelineDependencies {
   github?: Pick<GitHub, 'getIssueContextById'>;
   storage: Storage; preparations: Pick<Preparations, 'revalidateSummary' | 'prepareReadyStart' | 'prepareDecisionSuccessor'>; execution: Execution;
   queue?: Pick<Queue, 'observe' | 'revalidateForDispatch'>;
-  workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment' | 'importIntegrationBase' | 'resolveAttemptEvidenceDirectory' | 'resolveAttemptProgressFile' | 'migrateLegacyIssueHistory'>>;
+  workspaces: Pick<Workspaces, 'prepareAttempt'> & Partial<Pick<Workspaces, 'resolveAttemptWorkspace' | 'captureDelivery' | 'getDeliveryDiff' | 'materializeReview' | 'inspectEnvironment' | 'removeEnvironment' | 'folderCapability' | 'openEnvironment' | 'importIntegrationBase' | 'resolveAttemptEvidenceDirectory' | 'resolveAttemptProgressFile' | 'migrateLegacyIssueHistory'>>;
   observeTools: () => Promise<ToolObservation[]>;
   publication?: Pick<PublicationDependencies, 'github' | 'workspaces'>;
   hostName?: string;
@@ -333,7 +335,11 @@ export function createPipeline(deps: PipelineDependencies) {
         throw new OperationError(409, 'QUEUE_SELECTION_CHANGED', 'The first eligible queue item changed before attempt acceptance.');
       }
     }
-    const accepted = storage.createAttempt({ command, capture, configurationETag: config.etag, preparationETag: current.etag, ...(queueCycle ? { queueCycle } : {}) });
+    const workspaceAvailable = p.previous_attempt_id && workspaces.resolveAttemptWorkspace
+      ? await lstat(dirname(await workspaces.resolveAttemptWorkspace(p.previous_attempt_id))).then(() => true, error => (error as NodeJS.ErrnoException).code !== 'ENOENT')
+      : true;
+    const accepted = storage.createAttempt({ command, capture, configurationETag: config.etag, preparationETag: current.etag,
+      ...(workspaceAvailable ? {} : { workspaceAvailable: false }), ...(queueCycle ? { queueCycle } : {}) });
     if (accepted.created) schedule(accepted.operation.resource.id);
     return accepted.operation;
   }
@@ -610,6 +616,9 @@ export function createPipeline(deps: PipelineDependencies) {
     enqueue(async () => { if (closed) return;
       await updateIssueProgress(binding.attemptId, binding.role === 'reviewer' ? 'review_result' : 'implementer_result');
       if (binding.role === 'reviewer') {
+        // Stop the Reviewer OMP (session stays resumable) so a live process cannot block the next startAttempt.
+        try { await execution.preparePassageHandoff({ passageId: binding.passageId }); }
+        catch (error) { deps.logFailure(error instanceof ExecutionError ? error.code : 'REVIEW_HANDOFF_FAILED'); }
         if (publication && storage.getReview(binding.deliveryVersion)?.state === 'approved') {
           await publication.publishApproved(binding.deliveryVersion);
           await updateIssueProgress(binding.attemptId, 'review_result');

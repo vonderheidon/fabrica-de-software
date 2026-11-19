@@ -4,7 +4,7 @@ import { publicationFixture, type PublicationFixture } from '../fixtures/publica
 import { createApp } from '../../apps/controller/src/http/app.js';
 import { loadConfiguration } from '../../apps/controller/src/config.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
-import { complete, confirmTerminalStops } from '../fixtures/attempt.js';
+import { complete, confirmTerminalStops, leaveReviewerStopUnconfirmed } from '../fixtures/attempt.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { createQueue } from '../../apps/controller/src/modules/projects/index.js';
 import { observationWire } from '../fixtures/observation-wire.js';
@@ -31,7 +31,7 @@ function publicationServiceFixture(f: PublicationFixture, storage = f.storage) {
 }
 
 it('requires explicit current authorization and reconciled resources after restart without restoring an agent session', async () => {
-  const f = await fixture(); await f.implement();
+  const f = await fixture(); leaveReviewerStopUnconfirmed(f); await f.implement();
   const write = f.mutateEffect.getMockImplementation()!;
   f.mutateEffect.mockImplementation(input => input.effect.kind === 'issue_comment' ? Promise.resolve({ state: 'failed_known',receipt: null,reason: 'MUTATION_NOT_AUTHORIZED',retryAtMs: null }) : write(input));
   await f.approve(); const deliveryId = f.status().deliveryId!; const identity = f.storage.getSettings().installation_id;
@@ -638,4 +638,19 @@ it('returns the durable 202 receipt for a replay whose remote outcome is unknown
     expect(op.state).toBe('unknown'); expect(op.error.code).toBe('EFFECT_UNRESOLVED'); expect(op.error.request_id).toBe(op.request_id);
     expect(f.mutateEffect.mock.calls.filter(([input]) => input.effect.kind === 'issue_comment')).toHaveLength(1);
   } finally { await app.close(); }
+});
+
+it('stops the Reviewer terminal on approval so it cannot block the next attempt', async () => {
+  const f = await fixture(); await f.implement(); await f.approve();
+  const reviewerPassages = f.db.prepare<[string], { id: string }>("SELECT id FROM passages WHERE attempt_id=? AND role='reviewer'").all(f.attemptId);
+  expect(reviewerPassages).toHaveLength(1);
+  expect(vi.mocked(f.execution.preparePassageHandoff).mock.calls.map(([source]) => source.passageId)).toContain(reviewerPassages[0]!.id);
+  expect(f.status().result).toBe('delivered');
+  expect(f.db.prepare("SELECT 1 FROM resources WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed'").all(f.attemptId)).toEqual([]);
+});
+
+it('still publishes the approved delivery when the Reviewer stop cannot be confirmed', async () => {
+  const f = await fixture(); leaveReviewerStopUnconfirmed(f); await f.implement(); await f.approve();
+  expect(f.status().result).toBe('delivered');
+  expect(f.db.prepare("SELECT 1 FROM resources WHERE attempt_id=? AND kind='terminal' AND stop_state<>'confirmed'").all(f.attemptId)).not.toEqual([]);
 });

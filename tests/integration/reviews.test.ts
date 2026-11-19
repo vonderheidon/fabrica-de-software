@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { attemptSessionDirectoryReference, managedWorkspaceReference, ReviewerResult, type ImplementerResult, type ReviewerResult as ReviewerResultType } from '#contracts';
 import { Value } from '@sinclair/typebox/value';
-import { attemptFixture, confirmTerminalStops, type AttemptFixture } from '../fixtures/attempt.js';
+import { attemptFixture, confirmTerminalStops, leaveReviewerStopUnconfirmed, type AttemptFixture } from '../fixtures/attempt.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -68,8 +68,8 @@ async function disputedFixture(limit = 5, count = 1) {
   return { ...f, original, initialReceipt };
 }
 
-async function noProgressBlockedFixture(limit = 4) {
-  const f = await fixture(limit);
+async function noProgressBlockedFixture(limit = 4, reviewerStopUnconfirmed = false) {
+  const f = await fixture(limit); if (reviewerStopUnconfirmed) leaveReviewerStopUnconfirmed(f, 2);
   for (let round = 1; round <= 3; round++) {
     f.implement(); await f.pipeline.drain(); f.accept(f.result(false)); await f.pipeline.drain();
   }
@@ -433,7 +433,7 @@ it.each([0, 1, 2, 3, 4, 5])('exhausts correctionLimit=%i only after reviewing th
   expect(new Set(reviews).size).toBe(1 + used);
   expect(f.execution.continuePassage).toHaveBeenCalledTimes(2 * used);
   expect(f.execution.startPassage).toHaveBeenCalledTimes(2); // One initial launch per role.
-  expect(f.execution.preparePassageHandoff).toHaveBeenCalledTimes(1 + 2 * used);
+  expect(f.execution.preparePassageHandoff).toHaveBeenCalledTimes(2 + 3 * used);
   expect(f.captureDelivery).toHaveBeenCalledTimes(1 + used);
   for (const id of reviews) expect(f.storage.getReview(id)?.state).toBe('rejected');
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
@@ -865,7 +865,7 @@ it('records guidance immutably, preserves the capture, and resumes the same atte
 });
 
 it('prepares a role-matched successor without ending or starting the blocked attempt, then ends through cancellation', async () => {
-  const f = await noProgressBlockedFixture(4);
+  const f = await noProgressBlockedFixture(4, true);
   const global = f.storage.getGlobalConfiguration();
   f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: global.etag, changes: {}, body: { changes: {}, profile_changes: [
     { action: 'create', profile: { name: 'Successor Implementer', profile_type: 'implementer', executor: 'maestri-omp', provider: 'provider-next', model: 'model-next', effort: 'high', guidance: 'New profile guidance' } },

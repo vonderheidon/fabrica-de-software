@@ -21,6 +21,7 @@ import { isLocalAbsoluteTargetPath, publicationTargetHash, publicationTargetPath
 export interface AttemptCommand { operationId: string; expectedRevision: string | undefined; body: StartAttempt }
 export interface CreateAttempt {
   command: AttemptCommand; capture: AttemptCapture; configurationETag: string; preparationETag: string;
+  workspaceAvailable?: boolean;
   queueCycle?: { accountId: string; projectId: string; issueId: string; cycleNumber: number };
 }
 export class AttemptConflict extends OperationError {
@@ -239,7 +240,7 @@ export function createAttempt(db: Database.Database, input: CreateAttempt): { cr
         OR EXISTS(SELECT 1 FROM attempt_workspace_snapshots s WHERE s.attempt_id=a.id)
         OR EXISTS(SELECT 1 FROM deliveries d WHERE d.attempt_id=a.id)) LIMIT 1`)
       .get(preparation.view.project_id, capture.issue.repository.id, capture.issue.id);
-    const inheritWorkspace = predecessorCapture !== null && workspaceStarted !== undefined;
+    const inheritWorkspace = predecessorCapture !== null && workspaceStarted !== undefined && input.workspaceAvailable !== false;
     const id = randomUUID(); const passageId = randomUUID(); const deliveryVersion = randomUUID(); const now = Date.now();
     const persistedCapture: AttemptCapture = { ...capture, workspace: {
       identity: { project_id: preparation.view.project_id, repository_id: capture.issue.repository.id, issue_id: capture.issue.id },
@@ -380,6 +381,8 @@ export function interruptAttempts(db: Database.Database): void {
     db.prepare("UPDATE resource_removals SET state='unknown',diagnostic='REMOVAL_INTERRUPTED' WHERE state='accepted'").run();
     db.prepare("UPDATE native_open_requests SET state='unknown' WHERE state='accepted'").run();
     db.prepare("UPDATE resources SET stop_state='uncertain',diagnostic='TRACKING_LOST' WHERE kind='terminal' AND owned=1 AND stop_state<>'confirmed'").run();
+    // At boot no workspace preparation is in flight; a leftover 'starting' (even for a finished attempt) would lock project configuration forever.
+    db.prepare("UPDATE resources SET launch_state='failed',diagnostic='WORKSPACE_PREPARATION_INTERRUPTED' WHERE kind='implementation' AND launch_state='starting'").run();
     db.prepare("UPDATE terminal_occupancies SET state='uncertain',reason='TRACKING_LOST' WHERE state='occupied'").run();
     db.prepare("UPDATE managed_terminals SET state='uncertain',updated_at_ms=? WHERE state='occupied'").run(Date.now());
     db.prepare("UPDATE attempt_sessions SET state='interrupted',updated_at_ms=? WHERE state IN ('reserved','active')").run(Date.now());

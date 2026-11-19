@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AuthorizeUpgrade, EffectView } from '#contracts';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
-import { confirmTerminalStops } from '../fixtures/attempt.js';
+import { confirmTerminalStops, leaveReviewerStopUnconfirmed } from '../fixtures/attempt.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -274,7 +274,7 @@ it('requires a finished approved current delivery and refuses upgrade rollback o
 });
 
 it('does not restore publication on restart and explicitly completes an authorized upgrade with old resources reconciled', async () => {
-  const f = await fixture('commit'); await f.implement(); await f.approve();
+  const f = await fixture('commit'); leaveReviewerStopUnconfirmed(f); await f.implement(); await f.approve();
   f.workspaces.pushApproved.mockResolvedValueOnce({ state: 'failed_known',receipt: null,reason: 'PUSH_NOT_AUTHORIZED' });
   await f.pipeline.authorizePublicationUpgrade(f.attemptId,upgrade(f,'pr'),f.context()); await f.pipeline.drain();
   const deliveryId = f.status().deliveryId!;
