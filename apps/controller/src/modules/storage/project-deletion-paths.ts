@@ -23,7 +23,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   const project = authorized ? { id: authorized.id, name: authorized.name, revision: authorized.revision,
     source: { kind: authorized.source_kind, location: authorized.source_location } } : readProject(db, projectId).project;
   const inventory = projectDeletionInventory(db, projectId);
-  const blockers = inventory.blockers.map(({ reason, recovery }) => ({ reason, recovery }));
+  const blockers: { reason: string; recovery: string; advisory?: boolean }[] = inventory.blockers.map(({ reason, recovery }) => ({ reason, recovery }));
   const targets: { key: string; kind: 'original_directory' | 'exclusive_workspace';
     path: string; ownerKind: 'project' | 'attempt'; ownerId: string }[] = [];
   if (project.source.kind === 'local') targets.push({ key: `original:${projectId}`, kind: 'original_directory',
@@ -36,7 +36,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     const expectedPrefix = `var/factory/projects/${projectId}/`;
     if (!location.root_relative.startsWith(expectedPrefix) || location.root_relative.includes('\\') ||
       location.root_relative.split('/').some(part => part === '' || part === '.' || part === '..')) {
-      blockers.push({ reason: 'Uma localização gerenciada não corresponde à identidade do projeto.', recovery: 'Confira a localização registrada antes de tentar excluir o projeto.' });
+      blockers.push({ reason: 'Uma localização gerenciada não corresponde à identidade do projeto.', recovery: 'Confira a localização registrada antes de tentar excluir o projeto.', advisory: true });
       continue;
     }
     targets.push({ key: `managed:${location.location_key}:${location.id}`, kind: 'exclusive_workspace',
@@ -48,7 +48,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     for (const [label, relativePath] of [['source', transition.source_relative], ['destination', transition.destination_relative]] as const) {
       if (!relativePath.startsWith(`var/factory/projects/${projectId}/`) || relativePath.includes('\\') ||
           relativePath.split('/').some(part => part === '' || part === '.' || part === '..')) {
-        blockers.push({ reason: 'Uma localização do diário de transição não pôde ser protegida.', recovery: 'Reconcilie a transição antes de tentar excluir este projeto.' });
+        blockers.push({ reason: 'Uma localização do diário de transição não pôde ser protegida.', recovery: 'Reconcilie a transição antes de tentar excluir este projeto.', advisory: true });
         continue;
       }
       if (knownStoragePaths.has(relativePath)) continue;
@@ -64,7 +64,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   const bootstrapRoot = resolve(dataDirectory, 'runtime', 'bootstrap');
   for (const passage of passages) {
     if (!Value.Check(OperationId, passage.id) || !Value.Check(OperationId, passage.attempt_id)) {
-      blockers.push({ reason: 'Uma passagem não tem identidade segura para localizar seu bootstrap.', recovery: 'Reconcilie o registro da passagem antes de tentar excluir o projeto.' });
+      blockers.push({ reason: 'Uma passagem não tem identidade segura para localizar seu bootstrap.', recovery: 'Reconcilie o registro da passagem antes de tentar excluir o projeto.', advisory: true });
       continue;
     }
     targets.push({ key: `bootstrap:${passage.id}`, kind: 'exclusive_workspace',
@@ -86,10 +86,10 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   for (const passage of passages) {
     const workspace = db.prepare<[string], { reference: string }>("SELECT reference FROM resources WHERE attempt_id=? AND kind='implementation'").get(passage.attempt_id);
     if (!workspace) {
-      blockers.push({ reason: 'O recurso de implementação da passagem está ausente.', recovery: 'Confira o inventário de recursos da tentativa antes de excluir o projeto.' });
+      blockers.push({ reason: 'O recurso de implementação da passagem está ausente.', recovery: 'Confira o inventário de recursos da tentativa antes de excluir o projeto.', advisory: true });
     } else if (isManagedIssueWorkspace(workspace.reference)) {
       // Bootstrap directories are separate targets keyed by the passage identity above.
-    } else blockers.push({ reason: 'Uma passagem não tem identidade válida.', recovery: 'Corrija o inventário antes de tentar excluir o projeto.' });
+    } else blockers.push({ reason: 'Uma passagem não tem identidade válida.', recovery: 'Corrija o inventário antes de tentar excluir o projeto.', advisory: true });
   }
   const resources = db.prepare<[string], { id: string; owned: number; reference: string; attempt_id: string; kind: string; launch_state: string }>(
     'SELECT id,owned,reference,attempt_id,kind,launch_state FROM resources WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) ORDER BY id',
@@ -98,7 +98,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     FROM delivery_targets t JOIN attempts a ON a.id=t.attempt_id WHERE a.project_id=? ORDER BY t.operation_id`).all(projectId);
   for (const target of deliveryTargets) {
     if (!Value.Check(OperationId,target.operation_id) || !Value.Check(OperationId,target.attempt_id) || !/^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(target.local_path)) {
-      blockers.push({ reason: 'Um clone de entrega não tem identidade de caminho válida.', recovery: 'Confira o destino registrado antes de tentar excluir o projeto.' });
+      blockers.push({ reason: 'Um clone de entrega não tem identidade de caminho válida.', recovery: 'Confira o destino registrado antes de tentar excluir o projeto.', advisory: true });
       continue;
     }
     const original = project.source.kind === 'local' && resolve(project.source.location).toLowerCase() === resolve(target.local_path).toLowerCase();
@@ -108,7 +108,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     if (!resource.owned && resource.launch_state === 'planned') continue;
     if (!resource.owned || (resource.kind === 'implementation' && !isManagedIssueWorkspace(resource.reference))) {
       blockers.push({ reason: 'O pertencimento de um ambiente não pôde ser comprovado.',
-        recovery: 'Confira os recursos registrados antes de tentar excluir este projeto.' });
+        recovery: 'Confira os recursos registrados antes de tentar excluir este projeto.', advisory: true });
     }
   }
   // Protect current origins only; never turn historical revisions into targets.

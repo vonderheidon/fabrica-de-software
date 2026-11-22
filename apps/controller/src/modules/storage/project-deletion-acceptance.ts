@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { DeletionConfirmation, DeletionPending, OperationId, type DeletionStatus } from '#contracts';
+import { blocksDeletion, DeletionConfirmation, DeletionPending, OperationId, type DeletionStatus } from '#contracts';
 import type { DeletionInspection } from '../workspaces/index.js';
 import { digest, readProject } from './configuration-reads.js';
 import { serializeOperationReceipt } from './common-json.js';
@@ -94,7 +94,7 @@ export function acceptProjectDeletion(db: Database.Database, dataDirectory: stri
     }
     const snapshot = readProjectDeletionPaths(db, project.id, dataDirectory);
     const inspection = input.inspection;
-    if (!inspection.preview.can_confirm || inspection.preview.blockers.length || snapshot.blockers.length ||
+    if (!inspection.preview.can_confirm || blocksDeletion(inspection.preview.blockers) || blocksDeletion(snapshot.blockers) ||
       inspection.inventoryVersion !== snapshot.inventoryVersion || inspection.preview.project_id !== project.id ||
       inspection.preview.project_revision !== project.revision || inspection.preview.source_kind !== project.source.kind ||
       inspection.preview.authorization_digest !== command.body.authorization_digest ||

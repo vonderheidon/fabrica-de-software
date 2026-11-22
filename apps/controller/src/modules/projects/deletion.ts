@@ -1,3 +1,4 @@
+import { blocksDeletion } from '#contracts';
 import type { Storage } from '../storage/index.js';
 import { OperationError } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
@@ -32,7 +33,7 @@ export function createDeletionCoordinator({ storage, workspaces, logFailure, pre
         storage.deletionWorker.assertQuiescent(worker);
         const inspection = await workspaces.reconcileProjectDeletion(snapshot.input, authorization);
         const latest = storage.deletionWorker.snapshot(worker);
-        if (latest.input.inventoryVersion !== snapshot.input.inventoryVersion || latest.input.blockers.length) {
+        if (latest.input.inventoryVersion !== snapshot.input.inventoryVersion || blocksDeletion(latest.input.blockers)) {
           throw new OperationError(409, 'PROJECT_DELETION_TARGETS_CHANGED', 'Os vínculos ou a atividade mudaram durante a conferência.', {
             recovery: 'Confira o encerramento dos recursos e tente novamente.',
           });

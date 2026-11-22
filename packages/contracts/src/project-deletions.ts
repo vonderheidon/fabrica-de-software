@@ -20,8 +20,14 @@ export const DeletionTarget = Type.Object({
   state: Type.Union([Type.Literal('pending'), Type.Literal('removing'), Type.Literal('removed'), Type.Literal('blocked')]),
 }, closed);
 export type DeletionTarget = Static<typeof DeletionTarget>;
-export const DeletionBlocker = Type.Object({ reason: text(2048), recovery: text(2048) }, closed);
+export const DeletionBlocker = Type.Object({ reason: text(2048), recovery: text(2048), advisory: Type.Optional(Type.Boolean()) }, closed);
 export type DeletionBlocker = Static<typeof DeletionBlocker>;
+/** Advisory blockers describe only this project's own unresolved bookkeeping; they never
+ * protect another project, the installation or a shared resource. Confirmation must still
+ * stop on every non-advisory blocker. */
+export function blocksDeletion(blockers: readonly DeletionBlocker[]): boolean {
+  return blockers.some(blocker => !blocker.advisory);
+}
 export const DeletionPreview = Type.Object({
   project_id: OperationId, project_name: ProjectSummary.properties.name, project_revision: revision,
   authorization_digest: digest, source_kind: Type.Union([Type.Literal('local'), Type.Literal('github')]),

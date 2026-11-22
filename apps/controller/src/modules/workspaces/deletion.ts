@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import { win32, posix } from 'node:path';
-import type { DeletionBlocker, DeletionPreview, DeletionTarget } from '#contracts';
+import { blocksDeletion, type DeletionBlocker, type DeletionPreview, type DeletionTarget } from '#contracts';
 import { observeWindowsReference, observeWindowsReferences, removeWindowsReference } from './windows-reference.js';
 
 export interface DeletionPathClaim {
@@ -166,9 +166,9 @@ export function createDeletionInspector(platform: DeletionInspectionPlatform = n
       safeReferenceRemoval: platform.safeReferenceRemoval, source: input.sourceKind, claims, observations, protectedObservations });
     return { policyVersion: platform.policyVersion, inventoryVersion: input.inventoryVersion, observations, claims,
       preview: { project_id: input.projectId, project_name: input.projectName, project_revision: input.projectRevision,
-        source_kind: input.sourceKind, authorization_digest: authorizationDigest, can_confirm: blockers.length === 0,
+        source_kind: input.sourceKind, authorization_digest: authorizationDigest, can_confirm: !blocksDeletion(blockers),
         blockers, targets: claims.map(c => ({ target_key: c.key, target_kind: c.kind, path: c.path,
-          state: blockers.length ? 'blocked' : observations.find(o => normalize(o.path) === normalize(c.path))?.kind === 'absent'
+          state: blocksDeletion(blockers) ? 'blocked' : observations.find(o => normalize(o.path) === normalize(c.path))?.kind === 'absent'
             ? 'removed' : 'pending' })) } };
   }
   /** Always reobserve every authorized path, including persisted removed targets.

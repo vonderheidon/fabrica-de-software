@@ -89,7 +89,7 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
     };
   }, [returnFocusTarget]);
   async function confirm() {
-    if (submitting.current || stale || phase !== 'preview' || preview.loading || !preview.preview?.canConfirm || !preview.etag || preview.preview.blockers.length) return;
+    if (submitting.current || stale || phase !== 'preview' || preview.loading || !preview.preview?.canConfirm || !preview.etag || preview.preview.blockers.some((blocker) => !blocker.advisory)) return;
     submitting.current = true;
     const id = crypto.randomUUID();
     setSubmittedTargets(preview.preview.targets);
@@ -126,6 +126,7 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
   }
   const rawBlockers = status && status.state !== 'succeeded' ? status.blockers : phase === 'preview' ? preview.preview?.blockers ?? [] : [];
   const blockers = [...new Map(rawBlockers.map((blocker) => [`${blocker.reason}\n${blocker.recovery}`, blocker])).values()];
+  const blockingBlockers = blockers.filter((blocker) => !blocker.advisory);
   return createPortal(<dialog ref={dialogRef} className="profile-delete-dialog project-deletion-dialog" aria-modal="true" aria-labelledby="project-deletion-title"
     onCancel={(event) => { event.preventDefault(); onClose(); }} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     onKeyDown={(event) => {
@@ -143,7 +144,7 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
       <ProjectDeletionWarnings sourceKind={preview.preview?.sourceKind ?? 'local'} hasUnsavedChanges={hasUnsavedChanges} />
     </>}
     {(message || preview.error || observation.error) && <p role="alert">{message || preview.error || observation.error}</p>}
-    {blockers.length > 0 && <div role="alert">{blockers.map((blocker, index) => <div key={index}><p>{blocker.reason}</p><p><b>Próxima ação:</b> {blocker.recovery}</p></div>)}</div>}
+    {blockers.length > 0 && <div role="alert">{blockers.map((blocker, index) => <div key={index}><p>{blocker.reason}{blocker.advisory && <span className="muted"> · Não impede a exclusão.</span>}</p><p><b>Próxima ação:</b> {blocker.recovery}</p></div>)}</div>}
     {phase === 'preview' && preview.preview && !preview.preview.canConfirm && blockers.length === 0 && <p role="alert">A conferência não permite excluir. Atualize a conferência antes de tentar novamente.</p>}
     {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && <p>Itens já removidos não serão restaurados. Pendências seguras retomam após reinício; caminhos que exigem nova conferência aguardam nova tentativa.</p>}
     {operationId && phase === 'accepted' && <p><a href={`#principal/registros?operationId=${encodeURIComponent(operationId)}`}>Consultar inventário detalhado nos Registros</a></p>}
@@ -157,7 +158,7 @@ export function ProjectDeletionDialog({ originContext, currentRevision, installa
       </button>}
       {status && (status.state === 'pending' || status.state === 'reconfirmation_required') && status.canRetry && <button type="button" disabled={retrying} onClick={() => void resume()}>{retrying ? 'Solicitando retomada…' : 'Tentar novamente'}</button>}
       {phase === 'uncertain' && <button type="button" disabled={querying} onClick={() => void query()}>{querying ? 'Consultando…' : 'Consultar andamento'}</button>}
-      {phase === 'preview' && <button type="button" className="danger-button" disabled={stale || preview.loading || !preview.preview?.canConfirm || !preview.etag || blockers.length > 0} onClick={() => void confirm()}>Excluir definitivamente</button>}
+      {phase === 'preview' && <button type="button" className="danger-button" disabled={stale || preview.loading || !preview.preview?.canConfirm || !preview.etag || blockingBlockers.length > 0} onClick={() => void confirm()}>Excluir definitivamente</button>}
     </div>
   </dialog>, document.body);
 }
