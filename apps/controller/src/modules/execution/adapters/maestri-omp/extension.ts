@@ -147,7 +147,12 @@ export default function executionExtension(api: ExtensionApi): void {
       return { content: [{ type: 'text', text: `Payload recusado pelo controlador.${diagnostic} Corrija os argumentos e tente novamente; a sessão continua operacional.` }],
         details: { accepted: false, code: typeof reply.code === 'string' ? reply.code : 'RESULT_INVALID', ...(validationIssues.length ? { validationIssues } : {}) }, isError: true };
     }
-    return { content: [{ type: 'text', text: 'Recebido e persistido pela fábrica.' }], details: { accepted: true, ...(typeof reply.receiptId === 'string' ? { receiptId: reply.receiptId } : {}), ...(typeof reply.questionId === 'string' ? { questionId: reply.questionId } : {}) } };
+    const receiptId = typeof reply.receiptId === 'string' ? reply.receiptId : undefined;
+    const questionId = typeof reply.questionId === 'string' ? reply.questionId : undefined;
+    // OMP only forwards `content` to the model, so the confirmation the agent must cite has to be in the text.
+    const confirmation = ['accepted: true', ...(receiptId ? [`receiptId: ${receiptId}`] : []), ...(questionId ? [`questionId: ${questionId}`] : [])].join('; ');
+    return { content: [{ type: 'text', text: `Recebido e persistido pela fábrica. ${confirmation}.` }],
+      details: { accepted: true, ...(receiptId ? { receiptId } : {}), ...(questionId ? { questionId } : {}) } };
   };
   for (const [name, schema] of [['execution_complete', launch.role.resultSchema], ['execution_question', launch.role.questionSchema]] as const) {
     api.registerTool({ name, label: name, description: name === 'execution_complete' ? 'Deliver the official result for this passage using the versioned role contract.' : 'Record a human decision with context and alternatives. The TUI remains available.',

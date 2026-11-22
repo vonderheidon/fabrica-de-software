@@ -160,8 +160,20 @@ describe('supported OMP extension on the same TUI', () => {
     await f.handlers.get('tool_execution_end')!({ toolCallId: 'writer', toolName: 'bash' }, f.context);
     const pending = f.call('execution_complete', { corrected: true });
     const request = seam.send.mock.calls.at(-1)![0] as { id: string };
-    await seam.frame!({ type: 'reply', id: request.id, ok: true, receiptId: randomUUID() });
-    expect(await pending).toMatchObject({ details: { accepted: true } });
+    const receiptId = randomUUID();
+    await seam.frame!({ type: 'reply', id: request.id, ok: true, receiptId });
+    expect(await pending).toMatchObject({ details: { accepted: true, receiptId } });
+    await f.handlers.get('session_shutdown')!(undefined, f.context);
+  });
+  it('shows the model accepted and the receipt in the text content, since OMP does not forward details', async () => {
+    const f = fixture(); await f.start(); await authorizeTask();
+    const pending = f.call('execution_complete', {});
+    const request = seam.send.mock.calls.at(-1)![0] as { id: string };
+    const receiptId = randomUUID();
+    await seam.frame!({ type: 'reply', id: request.id, ok: true, receiptId });
+    const result = await pending as { content: { text: string }[] };
+    expect(result.content[0]!.text).toContain('accepted: true');
+    expect(result.content[0]!.text).toContain(`receiptId: ${receiptId}`);
     await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
   it('queues cancellation at the next OMP step boundary and acknowledges only after the run drains', async () => {
