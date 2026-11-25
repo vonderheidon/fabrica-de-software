@@ -9,6 +9,8 @@ import { CaptureError } from '../workspaces/index.js';
 import { markCriteria } from '../pipeline/index.js';
 
 type Stage = 'inProgress' | 'inReview' | 'delivered';
+/** Age after which an unconfirmed write can no longer be in flight. */
+const writeSettleMs = 5 * 60_000;
 const statusKey = (stage: Stage) => stage === 'inProgress' ? 'in_progress' : stage === 'inReview' ? 'in_review' : 'delivered';
 type Snapshot = ReturnType<Storage['getPublicationSnapshot']>;
 type PublicationGitHub = Pick<GitHubClient, 'getIdentity' | 'getIssueContextById' | 'getProject' | 'getRepository'> &
@@ -115,7 +117,13 @@ export function createPublication(deps: PublicationDependencies) {
     const suspension = storage.getAttempt(id).suspension;
     return observation.reason === null && suspension === null;
   }
-  async function reconcileEffect(effect: EffectView): Promise<void> {
+  /** An ended attempt never sends its comment or stage Status on its own again, so an old unconfirmed write may be closed. */
+  function releasable(effect: EffectView): boolean {
+    return effect.state === 'unknown' && effect.attemptId !== null && effect.sentAtMs !== null &&
+      Date.now() - effect.sentAtMs >= writeSettleMs && storage.getAttempt(effect.attemptId).result !== null;
+  }
+  /** `release` is set only by the operator's reconciliation; readbacks made while publishing never close a write. */
+  async function reconcileEffect(effect: EffectView, release = false): Promise<void> {
     if (!['running','unknown'].includes(effect.state) || !effect.attemptId) return;
     if ((effect.kind === 'push' || effect.kind === 'pull_request') && effect.deliveryId) {
       const d = storage.getDelivery(effect.deliveryId).delivery;
@@ -154,6 +162,11 @@ export function createPublication(deps: PublicationDependencies) {
       const issue = response.data; const wanted = effect.expectedIdentity;
       if (issue.id !== wanted.issueId || issue.repository.id !== wanted.repositoryId) return;
       const matches = issue.comments.filter(c => c.body.startsWith(wanted.marker + '\n'));
+      // Any trace of the marker, even quoted or forged, keeps the write unknown.
+      if (release && releasable(effect) && wanted.marker && !issue.comments.some(c => c.body.includes(wanted.marker!))) {
+        storage.finishEffect(effect.operationId, effect.revision, 'not_applicable', null, 'COMMENT_NOT_OBSERVED');
+        return;
+      }
       if (matches.length !== 1) return;
       const comment = matches[0]!;
       if (comment.author?.id !== capture.accountId || hash(comment.body) !== wanted.bodyHash || !isGitHubUrl(comment.url)) return;
@@ -188,11 +201,13 @@ export function createPublication(deps: PublicationDependencies) {
         // The write never got a success response and the item still holds the previous option: it was not applied.
         // Setting a single-select value is idempotent, so the same effect may be sent again or superseded by a later stage.
         storage.finishEffect(effect.operationId, effect.revision, 'failed_known', null, 'STATUS_NOT_OBSERVED');
+      } else if (release && releasable(effect) && statuses.length === 1) {
+        storage.finishEffect(effect.operationId, effect.revision, 'not_applicable', null, 'STATUS_SUPERSEDED');
       }
     }
   }
-  async function reconcile(id: string): Promise<void> {
-    for (const effect of storage.getEffects(id)) await reconcileEffect(effect);
+  async function reconcile(id: string, release = false): Promise<void> {
+    for (const effect of storage.getEffects(id)) await reconcileEffect(effect, release);
   }
   async function send(id: string, kind: EffectView['kind'], scopeKey: string, identity: EffectIdentity, sourceOperationId: string, body?: string): Promise<boolean> {
     supported();
@@ -560,7 +575,7 @@ export function createPublication(deps: PublicationDependencies) {
         supported();
         let targetPending = false;
         if (command.kind === 'publication.complete' || command.kind === 'publication.authorize-upgrade') await completeMode(command);
-        else if (command.kind === 'publication.reconcile' && 'deliveryId' in command.body) { targetPending = await targets.reconcile(command.attemptId,command.body.deliveryId); await reconcile(command.attemptId); }
+        else if (command.kind === 'publication.reconcile' && 'deliveryId' in command.body) { targetPending = await targets.reconcile(command.attemptId,command.body.deliveryId); await reconcile(command.attemptId,true); }
         else {
           await deps.reconcileResources?.(command.attemptId);
           if (!await observeAuthority(command.attemptId)) blocked('PUBLICATION_BLOCKED');

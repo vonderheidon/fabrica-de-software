@@ -47,6 +47,9 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
   if (!approved) limitations.push('Esta versão ainda não tem aprovação independente válida; consulte critérios e revisão.');
   if (satisfied < total) limitations.push('Há critérios não comprovados; consulte os resultados da revisão desta versão.');
   if (publication.unknownEffects) limitations.push('Há efeitos sem confirmação; consulte e reconcilie a publicação antes de continuar.');
+  if (db.prepare("SELECT 1 FROM effects WHERE attempt_id=? AND delivery_id=? AND kind='issue_comment' AND state='not_applicable'").get(attemptId,deliveryId)) {
+    limitations.push('O comentário de entrega não foi encontrado na issue e não será reenviado por esta tentativa.');
+  }
   if (attempt.suspension && d.id === attempt.deliveryId) limitations.push('A tentativa está suspensa; consulte a condição atual e siga a ação de recuperação antes de continuar.');
   if (nonblocking) limitations.push('Há observações não bloqueantes; consulte os achados da versão.');
   const integration = db.prepare<[string, number, string], { n: number }>(`SELECT count(*) AS n FROM rounds WHERE attempt_id=?

@@ -325,6 +325,100 @@ it('keeps an unconfirmed Status unknown when the readback shows neither the inte
   expect(f.storage.getEffects(f.attemptId).find(e => e.expectedIdentity.optionId === 'REVIEW')?.state).toBe('unknown');
 });
 
+/** Moves the recorded send time back, past the window in which a delayed write could still land. */
+function ageWrite(f: PublicationFixture, operationId: string) {
+  f.db.prepare('UPDATE effects SET sent_at_ms=sent_at_ms-? WHERE operation_id=?').run(5 * 60_000, operationId);
+}
+/** Restarts the controller, so the active attempt ends as interrupted, and runs the publication service on it. */
+async function restart(f: PublicationFixture) {
+  await f.pipeline.close(); f.storage.close();
+  const storage = openStorage({ dataDirectory: f.directory });
+  const service = publicationServiceFixture(f,storage);
+  const context = () => ({ operationId: randomUUID(),expectedRevision: `"${f.attemptId}:${storage.getAttempt(f.attemptId).revision}"` });
+  const reconcile = async () => {
+    const op = service.publication.reconcile(f.attemptId,{ deliveryId: storage.getAttempt(f.attemptId).deliveryId! },context()); await service.drain();
+    return storage.getOperation(op.operation_id)?.state;
+  };
+  return { storage,service,context,reconcile };
+}
+
+it('releases an unobserved comment of an ended attempt only on explicit reconciliation, without ever sending it again', async () => {
+  const f = await fixture(); await f.implement();
+  const write = f.mutateEffect.getMockImplementation()!;
+  f.mutateEffect.mockImplementation(async input => input.effect.kind === 'issue_comment'
+    ? { state: 'unknown', receipt: null, reason: 'QUERY_FAILED', retryAtMs: null } : write(input));
+  await f.approve(); const deliveryId = f.status().deliveryId!;
+  const comment = f.storage.getEffects(f.attemptId).find(e => e.kind === 'issue_comment')!;
+  ageWrite(f,comment.operationId);
+  // While the attempt is active, absence proves nothing, however old the write is.
+  const active = f.pipeline.reconcilePublication(f.attemptId,{ deliveryId },f.context()); await f.pipeline.drain();
+  expect(f.storage.getOperation(active.operation_id)?.state).toBe('unknown');
+  expect(() => f.storage.finishEffect(comment.operationId,f.storage.getEffect(comment.operationId).revision,'not_applicable',null,'COMMENT_NOT_OBSERVED'))
+    .toThrow(expect.objectContaining({ code: 'EFFECT_RECEIPT_INVALID' }));
+  const writes = f.mutateEffect.mock.calls.length;
+
+  const ended = await restart(f);
+  try {
+    expect(ended.storage.getAttempt(f.attemptId).result).toBe('interrupted');
+    expect(ended.storage.getConfiguration(f.projectId).view.configuration_lock).toEqual({ attempt_id: f.attemptId });
+    // Completion reconciles on its own and must not release the write.
+    confirmTerminalStops(f,f.attemptId,ended.storage.executionPersistence());
+    const request = { deliveryId,authorizedMode: 'icr' as const,authorized: true as const };
+    ended.service.publication.complete(f.attemptId,request,ended.context()); await ended.service.drain();
+    expect(ended.storage.getEffect(comment.operationId).state).toBe('unknown');
+
+    expect(await ended.reconcile()).toBe('succeeded');
+    expect(ended.storage.getEffect(comment.operationId)).toMatchObject({ state: 'not_applicable',reason: 'COMMENT_NOT_OBSERVED',receipt: null });
+    expect(ended.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
+    const detail = ended.storage.getDeliveryDetail(deliveryId,{});
+    expect(detail.publication).toMatchObject({ unknownEffects: 0,completeCapability: { available: false,reason_code: 'COMMENT_NOT_OBSERVED' } });
+    expect(detail.deliverySummary.limitations).toContain('O comentário de entrega não foi encontrado na issue e não será reenviado por esta tentativa.');
+    ended.service.publication.complete(f.attemptId,request,ended.context()); await ended.service.drain();
+    expect(ended.storage.getAttempt(f.attemptId).result).toBe('interrupted');
+    expect(f.mutateEffect).toHaveBeenCalledTimes(writes);
+    expect(f.issue.comments).toEqual([]);
+  } finally { ended.storage.close(); }
+});
+
+it.each(['recent','partial','forged'])('keeps the comment of an ended attempt unknown when the write is %s', async scenario => {
+  const f = await fixture(); await f.implement();
+  const write = f.mutateEffect.getMockImplementation()!;
+  f.mutateEffect.mockImplementation(async input => input.effect.kind === 'issue_comment'
+    ? { state: 'unknown', receipt: null, reason: 'QUERY_FAILED', retryAtMs: null } : write(input));
+  await f.approve();
+  const comment = f.storage.getEffects(f.attemptId).find(e => e.kind === 'issue_comment')!;
+  if (scenario !== 'recent') ageWrite(f,comment.operationId);
+  if (scenario === 'forged') f.issue.comments = [{ id: 'C_forged', url: f.issue.url+'#comment', body: 'quoted\n'+comment.expectedIdentity.marker, author: { id: 'OTHER', login: 'other' }, updatedAt: '2026-10-17' }];
+  const ended = await restart(f);
+  try {
+    if (scenario === 'partial') f.issueReader.mockResolvedValue({ state: 'partial', data: f.issue, diagnostics: [], retryAtMs: null });
+    expect(await ended.reconcile()).toBe('unknown');
+    expect(ended.storage.getEffect(comment.operationId).state).toBe('unknown');
+    expect(ended.storage.getConfiguration(f.projectId).view.configuration_lock).toEqual({ attempt_id: f.attemptId });
+  } finally { ended.storage.close(); }
+});
+
+it('releases an unconfirmed Status of an ended attempt after the card moved to another option', async () => {
+  const f = await fixture(); const write = f.mutateEffect.getMockImplementation()!;
+  f.mutateEffect.mockImplementation(async input => {
+    if (input.effect.expectedIdentity.optionId !== 'REVIEW') return write(input);
+    f.issue.memberships[0]!.statusValues[0]!.optionId = 'DELIVERED';
+    return { state: 'unknown', receipt: null, reason: 'QUERY_FAILED', retryAtMs: null };
+  });
+  await f.implement();
+  const status = f.storage.getEffects(f.attemptId).find(e => e.expectedIdentity.optionId === 'REVIEW')!;
+  ageWrite(f,status.operationId);
+  const writes = f.mutateEffect.mock.calls.length;
+  const ended = await restart(f);
+  try {
+    expect(await ended.reconcile()).toBe('succeeded');
+    expect(ended.storage.getEffect(status.operationId)).toMatchObject({ state: 'not_applicable',reason: 'STATUS_SUPERSEDED' });
+    expect(ended.storage.getConfiguration(f.projectId).view.configuration_lock).toBeNull();
+    expect(f.mutateEffect).toHaveBeenCalledTimes(writes);
+    expect(f.issue.memberships[0]!.statusValues[0]!.optionId).toBe('DELIVERED');
+  } finally { ended.storage.close(); }
+});
+
 it('immediately reconciles an unknown comment through its exact projection and never sends it twice', async () => {
   const f = await fixture(); await f.implement();
   const write = f.mutateEffect.getMockImplementation()!;

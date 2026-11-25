@@ -60,6 +60,7 @@ const codeLabels: Readonly<Record<string, string>> = {
   TRACKING_LOST: 'Acompanhamento da tentativa perdido', RESOURCE_STATE_UNCERTAIN: 'Estado dos recursos sem confirmação',
   RESOURCE_OWNERSHIP_UNCONFIRMED: 'Vínculo dos recursos sem confirmação', RESOURCES_NOT_OBSERVED: 'Recursos ainda não observados',
   RESOURCES_RECORDED: 'Recursos registrados', CREATION_EFFECT_UNKNOWN: 'Efeito da criação sem confirmação',
+  COMMENT_NOT_OBSERVED: 'Comentário de entrega não encontrado na issue', STATUS_SUPERSEDED: 'Quadro em outro Status; escrita anterior encerrada',
   CREATION_RESOURCES_RECORDED: 'Recursos da criação registrados', DIAGNOSTIC_CHECK_UNAVAILABLE: 'Verificação indisponível',
   VALIDATION_FAILED: 'Dados precisam de revisão', PAYLOAD_TOO_LARGE: 'Conteúdo acima do limite permitido',
   SESSION_REQUIRED: 'Sessão técnica necessária', CSRF_INVALID: 'Sessão técnica desatualizada',

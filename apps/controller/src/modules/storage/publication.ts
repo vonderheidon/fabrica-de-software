@@ -198,6 +198,8 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
   const targetPending = Boolean(db.prepare("SELECT 1 FROM publication_target_selections WHERE attempt_id=? AND state IN ('accepted','running','unknown')").get(attemptId));
   if (!reason && targetPending) reason = 'TARGET_SELECTION_PENDING';
   if (!reason && db.prepare("SELECT operation_id FROM publication_requests WHERE attempt_id=? AND state IN ('accepted','running')").get(attemptId)) reason = 'PUBLICATION_BUSY';
+  // A closed comment is never sent again, so this version cannot be completed here.
+  if (!reason && db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind='issue_comment' AND state='not_applicable'").get(attemptId,selectedId)) reason = 'COMMENT_NOT_OBSERVED';
   const resolved = (kind: EffectView['kind']) => Boolean(db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind=? AND state IN ('confirmed','not_applicable')").get(attemptId,selectedId,kind));
   const completed = (a.result === 'delivered' || Boolean(historical)) && (mode === 'icr' ? resolved('issue_comment') : resolved('local_commit') && (mode === 'commit' ? resolved('issue_comment') : resolved('push') && resolved('pull_request')));
   const upgrades = completed && d && d.id === a.deliveryId && review?.state === 'approved' && a.phase === 'finished' ? upgradeSummaries(db,attemptId,d.id,reason) : [];

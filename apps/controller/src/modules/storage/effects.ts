@@ -240,8 +240,11 @@ export function finishEffect(db: Database.Database, id: string, revision: number
     if (receipt && e.kind === 'issue_body' && receipt.id !== e.expectedIdentity.issueId) {
       throw new OperationError(409,'EFFECT_RECEIPT_INVALID','The issue body receipt does not match the intended issue.');
     }
+    // An unconfirmed comment or Status of an ended attempt may be closed without a receipt; it is never sent again.
+    const released = e.state === 'unknown' && (e.kind === 'issue_comment' && reason === 'COMMENT_NOT_OBSERVED' ||
+      e.kind === 'project_status' && reason === 'STATUS_SUPERSEDED') && e.attemptId !== null && readAttempt(db,e.attemptId).result !== null;
     // An unobserved check mark is terminal and non-blocking: the body is never edited again for this delivery.
-    if (state === 'not_applicable' && !(e.kind === 'issue_body' && reason === 'CRITERIA_NOT_MARKED') && (!['local_commit','push','pull_request'].includes(e.kind) || reason !== 'APPROVED_NO_DELTA' ||
+    if (state === 'not_applicable' && !released && !(e.kind === 'issue_body' && reason === 'CRITERIA_NOT_MARKED') && (!['local_commit','push','pull_request'].includes(e.kind) || reason !== 'APPROVED_NO_DELTA' ||
       db.prepare<[string],{ has_delta: number }>('SELECT has_delta FROM deliveries WHERE id=?').get(e.deliveryId!)?.has_delta !== 0)) {
       throw new OperationError(409,'EFFECT_RECEIPT_INVALID','Only a verified approved delivery without changes skips its local commit.');
     }
