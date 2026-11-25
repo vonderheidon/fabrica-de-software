@@ -208,8 +208,10 @@ export function finishEffect(db: Database.Database, id: string, revision: number
     const e = readEffect(db, id);
     if (e.state === 'confirmed' || e.state === 'not_applicable') return;
     const observedAbsentCommit = e.state === 'unknown' && e.kind === 'local_commit' && state === 'failed_known' && reason === 'COMMIT_NOT_OBSERVED';
+    // A complete readback that still shows the previous option proves an unconfirmed Status write was not applied.
+    const observedUnchangedStatus = e.state === 'unknown' && e.kind === 'project_status' && state === 'failed_known' && reason === 'STATUS_NOT_OBSERVED';
     if (e.revision !== revision || !['running','unknown'].includes(e.state) ||
-        (e.state === 'unknown' && !['confirmed','not_applicable'].includes(state) && !observedAbsentCommit)) {
+        (e.state === 'unknown' && !['confirmed','not_applicable'].includes(state) && !observedAbsentCommit && !observedUnchangedStatus)) {
       throw new OperationError(409, 'EFFECT_REVISION_CONFLICT', 'The effect changed during observation.');
     }
     if ((state === 'confirmed') !== (receipt !== null) || (receipt && !Value.Check(EffectReceipt, receipt)) || (reason !== null && !/^[A-Z0-9_]{1,128}$/.test(reason))) {

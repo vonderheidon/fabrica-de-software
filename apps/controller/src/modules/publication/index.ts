@@ -183,6 +183,11 @@ export function createPublication(deps: PublicationDependencies) {
       const statuses = memberships[0]!.statusValues.filter(v => v.fieldId === wanted.fieldId);
       if (statuses.length === 1 && statuses[0]!.optionId === wanted.optionId) {
         storage.finishEffect(effect.operationId, effect.revision, 'confirmed', { id: wanted.itemId!, optionId: wanted.optionId! }, null);
+      } else if (effect.state === 'unknown' && effect.reason !== 'STATUS_READBACK_REQUIRED' && wanted.previousOptionId && wanted.previousOptionId !== wanted.optionId &&
+        statuses.length === 1 && statuses[0]!.optionId === wanted.previousOptionId) {
+        // The write never got a success response and the item still holds the previous option: it was not applied.
+        // Setting a single-select value is idempotent, so the same effect may be sent again or superseded by a later stage.
+        storage.finishEffect(effect.operationId, effect.revision, 'failed_known', null, 'STATUS_NOT_OBSERVED');
       }
     }
   }

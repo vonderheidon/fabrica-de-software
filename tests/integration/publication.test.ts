@@ -298,6 +298,33 @@ it('does not replay an unknown Status when readback is partial, and does not sen
   expect(f.mutateEffect.mock.calls.filter(([input]) => input.effect.expectedIdentity.optionId === 'REVIEW')).toHaveLength(1);
 });
 
+it('resolves an unconfirmed Status write whose readback still shows the previous option and lets publication continue', async () => {
+  const f = await fixture(); const write = f.mutateEffect.getMockImplementation()!;
+  // The transport failed after sending; GitHub never applied the change.
+  f.mutateEffect.mockImplementation(async input => input.effect.expectedIdentity.optionId === 'REVIEW'
+    ? { state: 'unknown', receipt: null, reason: 'QUERY_FAILED', retryAtMs: null } : write(input));
+  await f.implement();
+  expect(f.issue.memberships[0]!.statusValues[0]!.optionId).toBe('PROGRESS');
+  expect(f.storage.getEffects(f.attemptId).find(e => e.expectedIdentity.optionId === 'REVIEW'))
+    .toMatchObject({ state: 'failed_known', reason: 'STATUS_NOT_OBSERVED' });
+  f.mutateEffect.mockImplementation(write);
+  await f.approve();
+  expect(f.status().result).toBe('delivered'); expect(f.issue.comments).toHaveLength(1);
+  expect(f.issue.memberships[0]!.statusValues[0]!.optionId).toBe('DELIVERED');
+  expect(f.storage.getEffects(f.attemptId).every(e => !['running','unknown'].includes(e.state))).toBe(true);
+});
+
+it('keeps an unconfirmed Status unknown when the readback shows neither the intended nor the previous option', async () => {
+  const f = await fixture(); const write = f.mutateEffect.getMockImplementation()!;
+  f.mutateEffect.mockImplementation(async input => {
+    if (input.effect.expectedIdentity.optionId !== 'REVIEW') return write(input);
+    f.issue.memberships[0]!.statusValues[0]!.optionId = 'BACKLOG';
+    return { state: 'unknown', receipt: null, reason: 'QUERY_FAILED', retryAtMs: null };
+  });
+  await f.implement();
+  expect(f.storage.getEffects(f.attemptId).find(e => e.expectedIdentity.optionId === 'REVIEW')?.state).toBe('unknown');
+});
+
 it('immediately reconciles an unknown comment through its exact projection and never sends it twice', async () => {
   const f = await fixture(); await f.implement();
   const write = f.mutateEffect.getMockImplementation()!;
