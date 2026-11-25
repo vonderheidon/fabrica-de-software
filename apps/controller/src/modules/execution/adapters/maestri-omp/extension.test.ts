@@ -252,6 +252,26 @@ describe('supported OMP extension on the same TUI', () => {
     expect(await corrected).toMatchObject({ details: { accepted: true } });
     expect(seam.close).not.toHaveBeenCalled(); await f.handlers.get('session_shutdown')!(undefined, f.context);
   });
+  it('admits textual literals in the OMP schema and forwards the exact contract values', async () => {
+    const f = fixture(); await f.start(); await authorizeTask();
+    const properties = (f.tools.get('execution_complete')!.parameters as { properties: Record<string, unknown> }).properties;
+    expect(properties.formatVersion).toEqual({ anyOf: [{ const: 1 }, { const: '1' }] });
+    expect(properties.writesStopped).toEqual({ anyOf: [{ const: true }, { const: 'true' }] });
+    const criteria = [{ criterionId: 'ac-1', verdict: 'passed', evidence: ['null'] }];
+    const pending = f.call('execution_complete', { formatVersion: '1', summary: 'null', writesStopped: 'true',
+      additionalChangesJustification: 'null', declaredFiles: ['landing/index.html'], criteria, checks: [] });
+    const sent = seam.send.mock.calls.at(-1)![0] as { id: string; payload: unknown };
+    expect(sent.payload).toEqual({ formatVersion: 1, summary: 'null', writesStopped: true,
+      additionalChangesJustification: null, declaredFiles: ['landing/index.html'], criteria, checks: [] });
+    await seam.frame!({ type: 'reply', id: sent.id, ok: true, receiptId: randomUUID() });
+    expect(await pending).toMatchObject({ details: { accepted: true } });
+    const unrelated = f.call('execution_complete', { formatVersion: '01', writesStopped: 'yes' });
+    const forwarded = seam.send.mock.calls.at(-1)![0] as { id: string; payload: unknown };
+    expect(forwarded.payload).toEqual({ formatVersion: '01', writesStopped: 'yes' });
+    await seam.frame!({ type: 'reply', id: forwarded.id, ok: false, code: 'RESULT_INVALID' });
+    expect(await unrelated).toMatchObject({ isError: true });
+    await f.handlers.get('session_shutdown')!(undefined, f.context);
+  });
   it('routes answers through supported follow-up messages without blocking native TUI interaction', async () => {
     const f = fixture(); await f.start(); await authorizeTask();
     const answer = { type: 'answer', questionId: randomUUID(), operationId: randomUUID(), answer: 'Revisão e opção B 😀' };

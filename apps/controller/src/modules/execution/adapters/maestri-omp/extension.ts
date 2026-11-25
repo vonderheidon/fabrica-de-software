@@ -42,10 +42,18 @@ const object = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ExecutionError('FRAME_INVALID');
   return value as Record<string, unknown>;
 };
-/** Rebuild distributed JSON schemas with the TypeBox implementation supplied by OMP. */
+/**
+ * Rebuild distributed JSON schemas with the TypeBox implementation supplied by OMP.
+ * Some providers deliver every tool argument as text. OMP repairs typed values
+ * but not literals, so a non-string literal also admits its JSON text here;
+ * `normalize` restores the exact value before the controller validates it.
+ */
 function hydrate(builder: SchemaBuilder, value: unknown): unknown {
   const schema = object(value);
-  if ('const' in schema) return builder.Literal(schema.const);
+  if ('const' in schema) {
+    const literal = builder.Literal(schema.const);
+    return typeof schema.const === 'string' ? literal : builder.Union([literal, builder.Literal(JSON.stringify(schema.const))]);
+  }
   if (Array.isArray(schema.anyOf)) return builder.Union(schema.anyOf.map(v => hydrate(builder, v)));
   const { type, properties, items, ...options } = schema;
   if (type === 'string') return builder.String(options);
@@ -55,6 +63,32 @@ function hydrate(builder: SchemaBuilder, value: unknown): unknown {
   if (type === 'array') return builder.Array(hydrate(builder, items), options);
   if (type === 'object') return builder.Object(Object.fromEntries(Object.entries(object(properties)).map(([k, v]) => [k, hydrate(builder, v)])), options);
   throw new ExecutionError('RESOURCE_INVALID');
+}
+const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
+/**
+ * Undo textual scalars only where the role schema leaves no ambiguity: a
+ * non-string literal given as its JSON text, and "null" where the schema
+ * accepts null. Everything else is forwarded untouched; the controller keeps
+ * the strict contract validation.
+ */
+function normalize(schema: unknown, value: unknown): unknown {
+  if (!record(schema)) return value;
+  if ('const' in schema) return typeof schema.const !== 'string' && typeof value === 'string' && value === JSON.stringify(schema.const) ? schema.const : value;
+  if (Array.isArray(schema.anyOf)) {
+    const branches: unknown[] = schema.anyOf;
+    if (value === 'null' && branches.some(branch => record(branch) && branch.type === 'null')) return null;
+    for (const branch of branches) {
+      const normalized = normalize(branch, value);
+      if (normalized !== value) return normalized;
+    }
+    return value;
+  }
+  if (schema.type === 'array' && Array.isArray(value)) return value.map(item => normalize(schema.items, item));
+  if (schema.type === 'object' && record(value) && record(schema.properties)) {
+    const properties = schema.properties;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, Object.hasOwn(properties, key) ? normalize(properties[key], item) : item]));
+  }
+  return value;
 }
 function loadLaunch(): Launch {
   try {
@@ -162,7 +196,7 @@ export default function executionExtension(api: ExtensionApi): void {
           return { content: [{ type: 'text', text: 'Aguarde o término das ferramentas e dos processos próprios antes de entregar o resultado oficial.' }],
             details: { accepted: false, code: 'OWNED_TOOLS_RUNNING' }, isError: true };
         }
-        return request(name, payload, ctx);
+        return request(name, normalize(schema, payload), ctx);
       },
     });
   }
