@@ -27,7 +27,7 @@ describe('native tool discovery', () => {
     expect(result.git.recovery).toContain('2.45.0');
     expect(JSON.stringify(result)).not.toContain('synthetic-private-stderr');
     expect(run.mock.calls.every(([, args]) => args.at(-1) === '--version')).toBe(true);
-    expect(run).toHaveBeenCalledWith(path, ['--no-optional-locks', '--no-lazy-fetch', '--version']);
+    expect(run).toHaveBeenCalledWith(path, ['--no-optional-locks', '--no-lazy-fetch', '--version'], 1_500);
   });
   it('approves Git only after the selected executable accepts the protected version probe', async () => {
     const path = 'C:\\Git 2.45\\cmd\\git.exe';
@@ -37,7 +37,15 @@ describe('native tool discovery', () => {
     const result = await detector.detect({ ...preferences, git: { preferred_path: path, last_validated_at_ms: 1 } }, null);
     expect(result.git).toMatchObject({ state: 'available', selected_path: path, diagnostic: null,
       candidates: [{ path, version: 'git version 2.45.0.windows.1' }] });
-    expect(run.mock.calls).toEqual([[path, ['--version']], [path, ['--no-optional-locks', '--no-lazy-fetch', '--version']]]);
+    expect(run.mock.calls).toEqual([[path, ['--version'], 1_500], [path, ['--no-optional-locks', '--no-lazy-fetch', '--version'], 1_500]]);
+  });
+  it('gives Windows PowerShell enough time to start before rejecting it', async () => {
+    const path = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+    const run = vi.fn(async () => '5.1.26100.9818');
+    const detector = createToolDetector({ environment: () => ({ PATH: '' }), platform: 'win32',
+      stat: async () => ({ isFile: () => true }), access: async () => {}, run });
+    expect(await detector.validate(path, 'powershell')).toEqual({ path, version: '5.1.26100.9818' });
+    expect(run).toHaveBeenCalledWith(path, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], 10_000);
   });
   it('reports the same OMP version format as the execution adapter', async () => {
     const detector = createToolDetector({ platform: 'win32', stat: async () => ({ isFile: () => true }),

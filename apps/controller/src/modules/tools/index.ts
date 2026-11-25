@@ -8,7 +8,7 @@ import { gitSafety } from '../workspaces/index.js';
 export type ManagedTool = 'git' | 'maestri' | 'omp' | 'powershell';
 type ExecutableTool = ManagedTool | 'gh';
 type ToolCandidate = { path: string; version: string };
-type Runner = (path: string, args: readonly string[]) => Promise<string>;
+type Runner = (path: string, args: readonly string[], timeoutMs: number) => Promise<string>;
 type FileStat = { isFile(): boolean };
 const exeNames: Record<ExecutableTool, readonly string[]> = {
   git: ['git.exe'], maestri: ['maestri.exe'], omp: ['omp.exe'], powershell: ['pwsh.exe', 'powershell.exe'], gh: ['gh.exe'],
@@ -17,11 +17,14 @@ const commandArgs: Record<ExecutableTool, readonly string[]> = {
   git: ['--version'], maestri: ['--version'], omp: ['--version'],
   powershell: ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.ToString()'], gh: ['--version'],
 };
+// Windows PowerShell 5.1 routinely needs 1.3-2s to start, more when the
+// detector probes every tool concurrently; the other tools answer quickly.
+const probeTimeoutMs: Record<ExecutableTool, number> = { git: 1_500, maestri: 1_500, omp: 1_500, powershell: 10_000, gh: 1_500 };
 const now = () => Date.now();
 
-function nativeRun(path: string, args: readonly string[]): Promise<string> {
+function nativeRun(path: string, args: readonly string[], timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(path, [...args], { cwd: process.cwd(), env: process.env, shell: false, windowsHide: true, timeout: 1_500, maxBuffer: 16_384, encoding: 'utf8' },
+    execFile(path, [...args], { cwd: process.cwd(), env: process.env, shell: false, windowsHide: true, timeout: timeoutMs, maxBuffer: 16_384, encoding: 'utf8' },
       (error, stdout) => {
         if (error || typeof stdout !== 'string') { reject(new Error('TOOL_VERSION_UNAVAILABLE')); return; }
         const version = stdout.split(/\r?\n/u).map(line => line.trim()).find(Boolean);
@@ -63,11 +66,11 @@ export function createToolDetector(dependencies: ToolDetectorDependencies = {}):
     try {
       if (!(await checkStat(path)).isFile()) return { candidate: null };
       await checkAccess(path);
-      const version = await run(path, commandArgs[tool]);
+      const version = await run(path, commandArgs[tool], probeTimeoutMs[tool]);
       if (tool === 'git') {
         // A bare --version succeeds on Git 2.43, but does not attest the
         // no-lazy-fetch protection required by every workspace operation.
-        try { await run(path, [...gitSafety.options, '--version']); }
+        try { await run(path, [...gitSafety.options, '--version'], probeTimeoutMs.git); }
         catch { return { candidate: null, unsupported: true }; }
       }
       return { candidate: { path, version: tool === 'omp' ? version.replace(/^omp\//i, '') : version } };
@@ -93,7 +96,7 @@ export function createToolDetector(dependencies: ToolDetectorDependencies = {}):
     for (const [index, path] of unique.entries()) {
       const found = tool === 'gh' ? await (async () => {
         if (win32.basename(path).toLowerCase() !== 'gh.exe') return null;
-        try { if (!(await checkStat(path)).isFile()) return null; await checkAccess(path); return { path, version: await run(path, commandArgs.gh) }; } catch { return null; }
+        try { if (!(await checkStat(path)).isFile()) return null; await checkAccess(path); return { path, version: await run(path, commandArgs.gh, probeTimeoutMs.gh) }; } catch { return null; }
       })() : await (async () => {
         const inspected = await inspect(path, tool);
         unsupportedGit ||= inspected.unsupported === true;
