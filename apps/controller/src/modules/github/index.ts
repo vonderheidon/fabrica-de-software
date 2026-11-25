@@ -17,11 +17,15 @@ export type { GitHubRateLimitSnapshot } from './transport.js';
 export type { IssueAuthorityContext, IssueCommentConfirmationContext, IssueStatusConfirmationContext, IssueQueueContext } from './client.js';
 export type { GitHubContext, GitHubHostAccess } from './transport.js';
 export type { GitHubBeforeSendContext } from './transport.js';
+import type { GitHubProviderErrorObservation } from './transport.js';
+export type { GitHubProviderErrorObservation };
 
 export interface GitHubOptions {
   observeQuery?: (measurement: { operation: string; duration_ms: number }) => void;
   /** @internal Test-only observation of the shared physical admission queue. */
   observeAdmissionWaitMs?: (durationMs: number) => void;
+  /** Receives the sanitized GitHub error of a rejected mutation, for operator logs only. */
+  observeProviderError?: (observation: GitHubProviderErrorObservation) => void;
   context?: GitHubContext;
   access?: GitHubHostAccess;
   savedExecutablePath?: () => string | null;
@@ -63,7 +67,7 @@ export function createGitHub(options: GitHubOptions = {}) {
     } };
   };
   const reader = new GraphQLReader(undefined, Date.now, { retryAtMs: 0 }, undefined, new Set(), () => performance.now(), undefined, prepareRunner,
-    undefined, options.observeAdmissionWaitMs);
+    undefined, options.observeAdmissionWaitMs, options.observeProviderError);
   return {
     ...createClient(reader), ...createRemoteScaffolder(reader, options.scaffoldAuthorization),
     ...createBoardOperations(reader, options.scaffoldAuthorization),

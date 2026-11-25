@@ -43,7 +43,7 @@ export function createEffectWriter(reader: GraphQLReader, authorization?: GitHub
       const response = await scope.query(pullRequestMutation,{ input: { repositoryId: identity.repositoryId,headRepositoryId: identity.repositoryId,
         headRefName: identity.branchRef.slice(11),baseRefName: identity.baseBranch,title: identity.title,body,maintainerCanModify: false,draft: false,clientMutationId: effect.operationId } },() => { sent = true; },1,
         beforeSend ? { beforeSend } : undefined);
-      if (!sent) return { ...denied(authorizationDenied ? 'EFFECT_AUTHORITY_REVOKED' : response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED'),retryAtMs: response.retryAtMs };
+      if (!sent) return { ...denied(authorizationDenied ? 'EFFECT_AUTHORITY_REVOKED' : response.provider?.reason ?? response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED'),retryAtMs: response.retryAtMs };
       // A mutation response alone never confirms PR identity or the remote head SHA.
       return inspectPullRequest(scope,effect,accountId,false);
     }
@@ -80,6 +80,7 @@ export function createEffectWriter(reader: GraphQLReader, authorization?: GitHub
         return { state: 'unknown', receipt: null, reason: 'STATUS_READBACK_REQUIRED', retryAtMs: null };
       } catch { return { state: 'unknown', receipt: null, reason: 'EFFECT_RESPONSE_INVALID', retryAtMs: response.retryAtMs }; }
     }
-    return { state: sent ? 'unknown' : 'failed_known', receipt: null, reason: response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED', retryAtMs: response.retryAtMs };
+    // The provider reason is a code derived from GitHub's error type; its text goes only to the reader's diagnostic observer.
+    return { state: sent ? 'unknown' : 'failed_known', receipt: null, reason: response.provider?.reason ?? response.diagnostics[0]?.code ?? 'EFFECT_UNCONFIRMED', retryAtMs: response.retryAtMs };
   };
 }

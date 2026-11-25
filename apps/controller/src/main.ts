@@ -58,6 +58,10 @@ export async function startController(hostContext: ControllerHostContext = {}, d
       savedExecutablePath: storage.getGitHubExecutablePath,
       // This is wrapper elapsed time; onSend and child close own physical transport observations.
       observeQuery: measurement => app?.log.info({ event: 'github_read', ...measurement }, 'GitHub read completed'),
+      // Operator diagnosis of rejected mutations: reason code, sanitized GitHub text and the effect operationId.
+      observeProviderError: ({ reason, message, operationId }) => {
+        console.error(JSON.stringify({ level: 'error', event: 'github_mutation_rejected', code: reason, operationId, providerMessage: message }));
+      },
       ...(hostContext.githubAccess || hostContext.github ? { attemptEffectAuthorization: { kind: 'confirmed_attempt' as const } } : {}),
       ...(hostContext.githubMutationAuthorization ? { mutationAuthorization: hostContext.githubMutationAuthorization } : {}),
       ...(hostContext.scaffoldAuthorization ? { scaffoldAuthorization: hostContext.scaffoldAuthorization } : {}) });

@@ -456,6 +456,31 @@ export function diagnostic(code: GitHubDiagnostic['code']): GitHubDiagnostic {
 export function result<T>(state: GitHubQueryResult<T>['state'], data: T | null, codes: GitHubDiagnostic['code'][] = [], retryAtMs: number | null = null): GitHubQueryResult<T> {
   return { state, data, diagnostics: [...new Set(codes)].map(diagnostic), retryAtMs };
 }
+/** Sanitized provider failure for a mutation. Never carries stderr, headers, variables or request content. */
+export interface GitHubProviderError { reason: string; message: string }
+/** Diagnostic-only view: the message never enters results, effects, storage or HTTP responses. */
+export interface GitHubProviderErrorObservation extends GitHubProviderError { operationId: string | null }
+/** Mutation results expose only the reason code derived from GitHub's error type or HTTP status. */
+export type GitHubMutationQueryResult = GitHubQueryResult<Record<string, unknown>> & { provider?: { reason: string } };
+const providerMessageLimit = 1024;
+function providerText(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]+/gu, '[redacted]')
+    .replace(/[\u0000-\u001f\u007f]+/gu, ' ').replace(/\s+/gu, ' ').trim().slice(0, 300);
+}
+function providerCode(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const code = value.toUpperCase().replace(/[^A-Z0-9]+/gu, '_').replace(/^_+|_+$/gu, '').slice(0, 100);
+  return code ? `GITHUB_${code}` : null;
+}
+export function providerError(status: number, body: Record<string, unknown>): GitHubProviderError {
+  const errors = Array.isArray(body.errors) ? body.errors.filter((error): error is Record<string, unknown> => error !== null && typeof error === 'object' && !Array.isArray(error)) : [];
+  const types = errors.map(error => error.type ?? (error.extensions && typeof error.extensions === 'object' ? (error.extensions as Record<string, unknown>).code : undefined));
+  const reason = (status < 200 || status >= 300 ? `GITHUB_HTTP_${status}` : null) ?? types.map(providerCode).find(code => code !== null) ?? 'GITHUB_GRAPHQL_ERROR';
+  const messages = errors.slice(0, 3).map(error => providerText(error.message)).filter(Boolean);
+  if (!messages.length) { const fallback = providerText(body.message); if (fallback) messages.push(fallback); }
+  return { reason, message: (messages.join(' | ') || `GitHub returned HTTP ${status} without an error message.`).slice(0, providerMessageLimit) };
+}
 export function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('RESPONSE_INVALID');
   return value as Record<string, unknown>;
@@ -475,12 +500,13 @@ export class GraphQLReader {
     private readonly physicalRuns: Set<GitHubRunnerLifecycle> = new Set(), private readonly monotonicNow: () => number = () => performance.now(),
     private readonly admission = new GraphQLAdmission(monotonicNow), private readonly prepareRunner?: GhRunnerPreparer,
     private readonly operationDeadline?: OperationDeadline,
-    private readonly observeAdmissionWaitMs?: (durationMs: number) => void) {}
+    private readonly observeAdmissionWaitMs?: (durationMs: number) => void,
+    private readonly observeProviderError?: (observation: GitHubProviderErrorObservation) => void) {}
 
   scope(): GraphQLReader {
     return new GraphQLReader(this.run, this.now, this.throttle, { queries: queryLimits.operationQueries, bytes: queryLimits.operationBytes },
       this.physicalRuns, this.monotonicNow, this.admission, this.prepareRunner, this.operationDeadline ?? { deadlineMonotonicMs: null },
-      this.observeAdmissionWaitMs);
+      this.observeAdmissionWaitMs, this.observeProviderError);
   }
 
   /** @internal Sent children remain counted until their physical close event arrives. */
@@ -578,7 +604,7 @@ export class GraphQLReader {
   }
 
   query(query: string, variables: Record<string, unknown>, onSend?: () => void, responsePages: 1 | 2 | 3 = 1,
-    options?: GitHubQueryOptions): Promise<GitHubQueryResult<Record<string, unknown>>> {
+    options?: GitHubQueryOptions): Promise<GitHubMutationQueryResult> {
     const operationDeadline = this.operationDeadline ?? { deadlineMonotonicMs: null };
     const stage = this.createStage(options, operationDeadline);
     const authorization = authorizationStorage.getStore();
@@ -605,7 +631,19 @@ export class GraphQLReader {
 
   private async executeQuery(query: string, variables: Record<string, unknown>, onSend: (() => void) | undefined,
     responsePages: 1 | 2 | 3, options: GitHubQueryOptions | undefined, stage: QueryStage,
-    inheritedPermit: AdmissionPermit | null, ownsPermit: boolean): Promise<GitHubQueryResult<Record<string, unknown>>> {
+    inheritedPermit: AdmissionPermit | null, ownsPermit: boolean): Promise<GitHubMutationQueryResult> {
+    // Reads keep their contract shape; only mutation failures carry the sanitized provider detail.
+    const mutation = !isGraphQLRead(query);
+    const failed = (outcome: GitHubQueryResult<Record<string, unknown>>, provider: GitHubProviderError): GitHubMutationQueryResult => {
+      if (!mutation) return outcome;
+      const input = variables.input;
+      const correlation = input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>).clientMutationId : undefined;
+      try {
+        this.observeProviderError?.({ ...provider,
+          operationId: typeof correlation === 'string' && /^[A-Za-z0-9-]{1,64}$/u.test(correlation) ? correlation : null });
+      } catch { /* Optional diagnostics must not affect mutation outcomes. */ }
+      return { ...outcome, provider: { reason: provider.reason } };
+    };
     let permit = inheritedPermit;
     let reservationActive = false;
     let sendObserved = false;
@@ -788,7 +826,11 @@ export class GraphQLReader {
       if (response.exitCode === 4) return result('authentication_invalid', null, ['AUTHENTICATION_INVALID']);
       try {
         const match = /^HTTP\/[\d.]+\s+(\d{3})[^\r\n]*\r?\n([\s\S]*?)\r?\n\r?\n([\s\S]*)$/.exec(response.stdout);
-        if (!match) return result('unavailable', null, [response.exitCode === 0 ? 'RESPONSE_INVALID' : 'QUERY_FAILED']);
+        if (!match) {
+          if (response.exitCode === 0) return result('unavailable', null, ['RESPONSE_INVALID']);
+          return failed(result('unavailable', null, ['QUERY_FAILED']),
+            { reason: 'GITHUB_CLI_EXIT', message: `GitHub CLI exited with code ${response.exitCode} without an HTTP response.` });
+        }
         const status = Number(match[1]);
         const headers = new Map((match[2] ?? '').split(/\r?\n/).map((line) => {
           const at = line.indexOf(':');
@@ -819,13 +861,14 @@ export class GraphQLReader {
         }
         if (status === 403) return result('inaccessible', null, ['ACCESS_DENIED']);
         if (status === 404) return result('inaccessible', null, ['NOT_FOUND_OR_INACCESSIBLE']);
-        if (status < 200 || status >= 300) return result('unavailable', null, ['QUERY_FAILED']);
+        if (status < 200 || status >= 300) return failed(result('unavailable', null, ['QUERY_FAILED']), providerError(status, body));
         if (body.errors !== undefined && (!Array.isArray(body.errors) || body.errors.length !== errors.length)) return result('unavailable', null, ['RESPONSE_INVALID']);
         const data = body.data === null || body.data === undefined ? null : object(body.data);
         if (errors.length) {
           if (codes.includes('UNAUTHENTICATED')) return result('authentication_invalid', null, ['AUTHENTICATION_INVALID']);
           const inaccessible = codes.every((code) => code === 'FORBIDDEN' || code === 'NOT_FOUND');
-          return result(data ? 'partial' : inaccessible ? 'inaccessible' : 'unavailable', data, [inaccessible ? 'REFERENCE_INACCESSIBLE' : 'QUERY_FAILED']);
+          return failed(result(data ? 'partial' : inaccessible ? 'inaccessible' : 'unavailable', data, [inaccessible ? 'REFERENCE_INACCESSIBLE' : 'QUERY_FAILED']),
+            providerError(status, body));
         }
         if (response.exitCode !== 0 || !data) return result('unavailable', null, ['RESPONSE_INVALID']);
         return result('complete', data);

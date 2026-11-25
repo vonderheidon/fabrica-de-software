@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { expect, it, vi } from 'vitest';
 import type { EffectView } from '#contracts';
 import { createEffectWriter } from './effects.js';
-import { GraphQLReader, type CommandResponse, type GhRunner, type GitHubRunnerLifecycle } from './transport.js';
+import { GraphQLReader, type CommandResponse, type GhRunner, type GitHubProviderErrorObservation, type GitHubRunnerLifecycle } from './transport.js';
 import { createGitHub } from './index.js';
 
 function fixture(monotonicNow: () => number = () => performance.now()) {
@@ -259,4 +259,42 @@ it('publishes the identified delivery comment with current attempt authority and
 it('fails before IO when the real adapter has no authorized host context', async () => {
   const f = fixture();
   expect(await createGitHub({ mutationAuthorization: f.authorization }).mutateEffect({ effect: f.effect,accountId: 'A',body: f.body })).toMatchObject({ state: 'failed_known',reason: 'CONTEXT_UNAVAILABLE' });
+});
+function observedReader(run: GhRunner) {
+  const observed: GitHubProviderErrorObservation[] = [];
+  return { observed, reader: new GraphQLReader(run,Date.now,{ retryAtMs: 0 },undefined,new Set(),() => performance.now(),undefined,undefined,undefined,undefined,
+    observation => { observed.push(observation); }) };
+}
+it('records a GitHub error code on the effect and sends the sanitized message only to the diagnostic observer', async () => {
+  const f = fixture();
+  f.run.mockImplementation(async (_input, onSend) => {
+    onSend?.();
+    return { exitCode: 1,stdout: 'HTTP/2.0 200 OK\r\ncontent-type: application/json\r\n\r\n'+JSON.stringify({ data: { addComment: null },
+      errors: [{ type: 'UNPROCESSABLE',message: 'Could not\nadd comment ghp_abcdefSECRET123' },{ message: 'second problem' }] }) };
+  });
+  const { observed,reader } = observedReader(f.run);
+  const result = await createEffectWriter(reader,f.authorization)({ effect: f.effect,accountId: 'A',body: f.body });
+  expect(result).toEqual({ state: 'unknown',receipt: null,reason: 'GITHUB_UNPROCESSABLE',retryAtMs: null });
+  expect(observed).toEqual([{ reason: 'GITHUB_UNPROCESSABLE',message: 'Could not add comment [redacted] | second problem',operationId: f.effect.operationId }]);
+});
+it('reports the HTTP status of a rejected status mutation and falls back for errors without a type', async () => {
+  const f = fixture();
+  const effect: EffectView = { ...f.effect,kind: 'project_status',expectedIdentity: { repositoryId: 'R',issueId: 'I',projectId: 'P',itemId: 'PI',fieldId: 'F',optionId: 'O' } };
+  const { observed,reader } = observedReader(f.run);
+  const writer = createEffectWriter(reader,f.authorization);
+  f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { exitCode: 1,stdout: 'HTTP/2.0 502 Bad Gateway\r\ncontent-type: text/html\r\n\r\n<html>bad gateway</html>' }; });
+  expect(await writer({ effect,accountId: 'A' })).toMatchObject({ state: 'unknown',reason: 'GITHUB_HTTP_502' });
+  f.run.mockImplementationOnce(async (_input, onSend) => { onSend?.(); return { exitCode: 1,stdout: 'HTTP/2.0 200 OK\r\ncontent-type: application/json\r\n\r\n'+JSON.stringify({ errors: [{ message: 'Something went wrong while executing your query.' }] }) }; });
+  expect(await writer({ effect,accountId: 'A' })).toMatchObject({ state: 'unknown',reason: 'GITHUB_GRAPHQL_ERROR' });
+  expect(observed.map(o => [o.reason,o.message])).toEqual([['GITHUB_HTTP_502','GitHub returned HTTP 502 without an error message.'],
+    ['GITHUB_GRAPHQL_ERROR','Something went wrong while executing your query.']]);
+});
+it('does not observe or decorate failed reads', async () => {
+  const f = fixture();
+  f.run.mockImplementation(async (_input, onSend) => { onSend?.(); return { exitCode: 1,stdout: 'HTTP/2.0 200 OK\r\ncontent-type: application/json\r\n\r\n'+JSON.stringify({ errors: [{ type: 'INTERNAL',message: 'boom' }] }) }; });
+  const { observed,reader } = observedReader(f.run);
+  const response = await reader.query('query Q { viewer { id } }',{});
+  expect(response).toMatchObject({ state: 'unavailable' });
+  expect(response).not.toHaveProperty('provider');
+  expect(observed).toEqual([]);
 });
