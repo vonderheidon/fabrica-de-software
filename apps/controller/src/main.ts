@@ -56,8 +56,6 @@ export async function startController(hostContext: ControllerHostContext = {}, d
         powershellExecutable: detectedTools.powershell.selected_path, inheritedEnvironment: process.env } : undefined);
     const github = createGitHub({ ...(hostContext.github ? { context: hostContext.github } : {}), ...(githubAccess ? { access: githubAccess } : {}),
       savedExecutablePath: storage.getGitHubExecutablePath,
-      // This is wrapper elapsed time; onSend and child close own physical transport observations.
-      observeQuery: measurement => app?.log.info({ event: 'github_read', ...measurement }, 'GitHub read completed'),
       // Operator diagnosis of rejected mutations: reason code, sanitized GitHub text and the effect operationId.
       observeProviderError: ({ reason, message, operationId }) => {
         console.error(JSON.stringify({ level: 'error', event: 'github_mutation_rejected', code: reason, operationId, providerMessage: message }));
@@ -88,10 +86,19 @@ export async function startController(hostContext: ControllerHostContext = {}, d
     await validateScaffoldResources();
     const activeExecution = execution;
     const preparations = createPreparations({ storage, github, workspaces });
+    // The pipeline ticks every second, so a persistent failure would repeat the same line continuously.
+    // Each code is printed once per window; the next print reports how many repeats were suppressed.
+    const failureRepeatWindowMs = 5 * 60_000;
+    const recentFailures = new Map<string, { printedAtMs: number; suppressed: number }>();
     const logFailure = (code: string) => {
+      const now = Date.now();
+      const previous = recentFailures.get(code);
+      if (previous && now - previous.printedAtMs < failureRepeatWindowMs) { previous.suppressed++; return; }
+      if (!previous && recentFailures.size >= 256) recentFailures.delete(recentFailures.keys().next().value!);
+      recentFailures.set(code, { printedAtMs: now, suppressed: 0 });
       const diagnostic = issueContentPrerequisite(code);
       console.error(JSON.stringify({ level: 'error', code, message: diagnostic?.message ?? 'Pipeline operation failed.',
-        ...(diagnostic ? { recovery: diagnostic.recovery } : {}) }));
+        ...(diagnostic ? { recovery: diagnostic.recovery } : {}), ...(previous?.suppressed ? { suppressedRepeats: previous.suppressed } : {}) }));
     };
     deletions = createDeletionCoordinator({ storage, workspaces, logFailure,
       prepareAttempts: async (ids, operationId) => {

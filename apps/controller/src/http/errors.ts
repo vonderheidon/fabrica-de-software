@@ -43,7 +43,10 @@ export function installErrors(app: FastifyInstance): void {
       : status === 413 ? 'PAYLOAD_TOO_LARGE'
       : error.validation ? 'VALIDATION_FAILED' : status === 500 ? 'INTERNAL_ERROR' : 'REQUEST_REJECTED';
     // Never serialize error/cause, validation values, URL, headers or body.
-    request.log[status >= 500 ? 'error' : 'warn']({ code, statusCode: status }, 'Request failed');
+    // Routine client outcomes (expired session, conflicts, preconditions, validation, absent resources) are already
+    // returned to the UI; only server failures and security/size refusals reach the operator log.
+    if (status >= 500) request.log.error({ code, statusCode: status }, 'Request failed');
+    else if (status === 403 || status === 413) request.log.warn({ code, statusCode: status }, 'Request refused');
     const fieldErrors = validationFieldErrors(error);
     if (fieldErrors.length === 0) fieldErrors.push(...operationFieldErrors(error));
     return reply.code(status).send({

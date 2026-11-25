@@ -40,8 +40,7 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
       level: configuration.logLevel,
       hooks: {
         logMethod(args, method, level) {
-          const entry = args[0] as { event?: string } | undefined;
-          if (level < 40 && entry?.event !== 'github_read') return;
+          if (level < 40) return;
           method.apply(this, args);
         },
       },
