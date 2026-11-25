@@ -1,1 +1,5 @@
 * text=auto eol=lf
+
+# SQL resources retain the exact bytes used by migration and schema checksums.
+apps/controller/src/modules/storage/migrations/035_correction_package.sql -text
+resources/storage/initial-schema.v*.sql -text
