@@ -69,29 +69,3 @@ export function assertDeletionPathsAvailable(db: Database.Database, candidates: 
     }
   }
 }
-
-/** Cancellation, lost tracking and a final result do not prove physical termination. */
-export function assertDeletionQuiescent(db: Database.Database, projectId: string): void {
-  const attempts = 'SELECT id FROM attempts WHERE project_id=?';
-  const probes = [
-    'SELECT 1 FROM attempts WHERE project_id=? AND result IS NULL',
-    `SELECT 1 FROM resources WHERE attempt_id IN (${attempts}) AND
-      ((kind='terminal' AND stop_state<>'confirmed' AND (owned=1 OR launch_state<>'planned')) OR launch_state='starting')`,
-    `SELECT 1 FROM passages WHERE attempt_id IN (${attempts}) AND state='starting'`,
-    `SELECT 1 FROM capture_runs WHERE delivery_id IN (SELECT id FROM deliveries WHERE attempt_id IN (${attempts})) AND state='running'`,
-    `SELECT 1 FROM publication_target_selections WHERE attempt_id IN (${attempts}) AND state IN ('accepted','running','unknown')`,
-    `SELECT 1 FROM publication_requests WHERE attempt_id IN (${attempts}) AND state IN ('accepted','running','unknown')`,
-    `SELECT 1 FROM effects WHERE (attempt_id IN (${attempts}) OR creation_id IN (SELECT id FROM project_creations WHERE project_id=?))
-      AND state IN ('not_started','running','unknown')`,
-    `SELECT 1 FROM resource_removals WHERE resource_id IN (SELECT id FROM resources WHERE attempt_id IN (${attempts})) AND state IN ('accepted','unknown')`,
-    `SELECT 1 FROM native_open_requests WHERE resource_id IN (SELECT id FROM resources WHERE attempt_id IN (${attempts})) AND state IN ('accepted','unknown')`,
-    "SELECT 1 FROM project_creations WHERE project_id=? AND state IN ('pending','running','partial')",
-    "SELECT 1 FROM creation_reconciliations WHERE creation_id IN (SELECT id FROM project_creations WHERE project_id=?) AND state IN ('accepted','unknown')",
-  ];
-  probes.push(`SELECT 1 FROM terminal_occupancies WHERE attempt_id IN (${attempts}) AND state IN ('occupied','uncertain')`);
-  if (probes.some(sql => db.prepare(sql).get(...(sql.includes('OR creation_id') ? [projectId, projectId] : [projectId])))) {
-    throw new OperationError(409, 'PROJECT_DELETION_ACTIVITY_BLOCKED', 'Há trabalho, efeito incerto ou encerramento ainda não confirmado neste projeto.', {
-      recovery: 'Conclua ou reconcilie as operações e confirme o encerramento dos recursos antes de excluir.',
-    });
-  }
-}

@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3';
 import { OperationError } from './operations.js';
-import { assertDeletionQuiescent } from './project-deletion-barrier.js';
 import { deletionTables, identifier, keyExpression, primaryKey, projectDeletionInventory, type DeletionTable } from './project-deletion-inventory.js';
 
 export interface FinalizeProjectDeletion {
@@ -77,7 +76,6 @@ export function createProjectDeletionPersistence(db: Database.Database) {
             throw new OperationError(409, 'PROJECT_DELETION_TARGETS_UNVERIFIED', 'Confirme a ausência de todas as pastas antes de concluir a exclusão.');
           }
           if (db.pragma('foreign_keys', { simple: true }) !== 1) throw new Error('PROJECT_DELETION_FOREIGN_KEYS_REQUIRED');
-          assertDeletionQuiescent(db, command.projectId);
           const inventory = projectDeletionInventory(db, command.projectId);
           if (inventory.blockers.length) {
             throw new OperationError(409, inventory.blockers[0]?.code ?? 'PROJECT_DELETION_EXTERNAL_REFERENCE',

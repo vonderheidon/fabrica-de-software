@@ -84,15 +84,13 @@ it('prepares owned work after durable acceptance and before removing any target'
   expect(f.storage.getProjectDeletion(f.id)).toEqual({ operation_id: f.id, state: 'succeeded' });
 });
 
-it('preserves authorization without removal when stopping work fails and retries preparation', async () => {
+it('removes the project even when stopping work cannot be confirmed', async () => {
   const f = await fixture();
-  const prepareAttempts = vi.fn().mockRejectedValueOnce(new Error('STOP_UNCONFIRMED')).mockResolvedValueOnce(undefined);
+  const prepareAttempts = vi.fn().mockRejectedValueOnce(new Error('STOP_UNCONFIRMED'));
   const coordinator = createDeletionCoordinator({ storage: f.storage, workspaces: f.workspaces, logFailure: f.logFailure, prepareAttempts });
   await coordinator.schedule(f.id);
-  expect(f.remove).not.toHaveBeenCalled();
-  expect(f.storage.getProjectDeletion(f.id)).toMatchObject({ state: 'pending', can_retry: true });
-  await coordinator.resume(f.id); await coordinator.drain();
-  expect(prepareAttempts).toHaveBeenCalledTimes(2);
+  expect(f.logFailure).toHaveBeenCalledWith('PROJECT_DELETION_STOP_UNCONFIRMED');
+  expect(f.remove).toHaveBeenCalled();
   expect(f.storage.getProjectDeletion(f.id)).toEqual({ operation_id: f.id, state: 'succeeded' });
 });
 

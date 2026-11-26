@@ -719,7 +719,10 @@ export function createPipeline(deps: PipelineDependencies) {
     async prepareProjectDeletion(attemptIds: readonly string[], operationId: string) {
       for (const id of attemptIds) revoke(id);
       const inFlight = [...pending];
-      for (const id of attemptIds) await execution.cancelAttempt(id, operationId);
+      for (const id of attemptIds) {
+        try { await execution.cancelAttempt(id, operationId); }
+        catch { deps.logFailure('PROJECT_DELETION_STOP_UNCONFIRMED'); }
+      }
       await Promise.all(inFlight);
     },
     setPublicationTarget(id: string, body: import('#contracts').SetPublicationTarget, context: { operationId: string; expectedRevision: string | undefined }) {

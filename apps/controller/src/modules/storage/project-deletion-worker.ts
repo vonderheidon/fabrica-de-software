@@ -3,7 +3,6 @@ import type Database from 'better-sqlite3';
 import type { DeletionInspection, DeletionPathObservation } from '../workspaces/index.js';
 import { readProjectDeletionPaths } from './project-deletion-paths.js';
 import { OperationError } from './operations.js';
-import { assertDeletionQuiescent } from './project-deletion-barrier.js';
 
 export interface DeletionWorker { operationId: string; token: string; generation: number }
 interface WorkerRow { project_id: string; worker_token: string | null; worker_generation: number; state: string; authorization_digest: string }
@@ -28,9 +27,6 @@ export function createDeletionWorkerPersistence(db: Database.Database, directory
       const current = assert(worker);
       return db.prepare<[string], { id: string }>('SELECT id FROM attempts WHERE project_id=? ORDER BY id')
         .all(current.project_id).map(attempt => attempt.id);
-    },
-    assertQuiescent: (worker: DeletionWorker): void => {
-      assertDeletionQuiescent(db, assert(worker).project_id);
     },
     // Only controller composition, while holding the installation lock and before
     // creating any coordinator, may reconcile ownership of the dead process.

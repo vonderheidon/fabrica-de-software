@@ -19,8 +19,8 @@ export function createDeletionCoordinator({ storage, workspaces, logFailure, pre
     if (!worker) return;
     try {
       const attempts = storage.deletionWorker.attempts(worker);
-      if (prepareAttempts) await prepareAttempts(attempts, id);
-      storage.deletionWorker.assertQuiescent(worker);
+      // Stopping is best effort: an unconfirmed stop never holds back a confirmed deletion.
+      if (prepareAttempts) await prepareAttempts(attempts, id).catch(() => logFailure('PROJECT_DELETION_STOP_UNCONFIRMED'));
       const snapshot = storage.deletionWorker.snapshot(worker);
       const { input } = snapshot;
       // An empty target set grants no filesystem identity. No policy was stored
@@ -30,12 +30,11 @@ export function createDeletionCoordinator({ storage, workspaces, logFailure, pre
       const verify = async () => {
         if (closing) throw new Error('PROJECT_DELETION_INTERRUPTED');
         const snapshot = storage.deletionWorker.snapshot(worker);
-        storage.deletionWorker.assertQuiescent(worker);
         const inspection = await workspaces.reconcileProjectDeletion(snapshot.input, authorization);
         const latest = storage.deletionWorker.snapshot(worker);
         if (latest.input.inventoryVersion !== snapshot.input.inventoryVersion || blocksDeletion(latest.input.blockers)) {
-          throw new OperationError(409, 'PROJECT_DELETION_TARGETS_CHANGED', 'Os vínculos ou a atividade mudaram durante a conferência.', {
-            recovery: 'Confira o encerramento dos recursos e tente novamente.',
+          throw new OperationError(409, 'PROJECT_DELETION_TARGETS_CHANGED', 'Os vínculos mudaram durante a conferência.', {
+            recovery: 'Clique em Tentar novamente para continuar a exclusão.',
           });
         }
         if (!inspection.preview.can_confirm) {
@@ -68,7 +67,7 @@ export function createDeletionCoordinator({ storage, workspaces, logFailure, pre
     } catch (error) {
       logFailure(error instanceof OperationError ? error.code : 'PROJECT_DELETION_INTERRUPTED');
       try {
-        storage.deletionWorker.finish(worker, error instanceof OperationError && error.code !== 'PROJECT_DELETION_ACTIVITY_BLOCKED' ? 'reconfirmation_required' : 'pending',
+        storage.deletionWorker.finish(worker, error instanceof OperationError ? 'reconfirmation_required' : 'pending',
           error instanceof OperationError ? error.message : 'A execução foi interrompida; o progresso realizado foi preservado.',
           'Clique em Tentar novamente para continuar a exclusão.');
       } catch { logFailure('PROJECT_DELETION_PROGRESS_UNCONFIRMED'); }

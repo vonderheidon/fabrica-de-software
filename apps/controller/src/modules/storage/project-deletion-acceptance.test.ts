@@ -12,7 +12,7 @@ import { registerProject, saveConfiguration, saveSettings } from './configuratio
 import { savePreparation } from './preparations.js';
 import { readProjectDeletionPaths } from './project-deletion-paths.js';
 import { acceptProjectDeletion, recoverProjectDeletion, type ProjectDeletionCommand } from './project-deletion-acceptance.js';
-import { assertDeletionPathsAvailable, assertDeletionQuiescent } from './project-deletion-barrier.js';
+import { assertDeletionPathsAvailable } from './project-deletion-barrier.js';
 import { createProjectDeletionPersistence } from './project-deletions.js';
 import { createDeletionInspector } from '../workspaces/index.js';
 import { createProjectDeletions, createQueue, createDeletionCoordinator } from '../projects/index.js';
@@ -53,14 +53,45 @@ function fixture() {
 }
 
 describe('durable project deletion acceptance and shared authorization barrier', () => {
-  it('accepts active work and automatically stops it before the deletion barrier opens', async () => {
+  it('deletes even when stops fail and work or external writes stay unconfirmed', async () => {
     const f = await attemptFixture(); close.push(() => f.close());
     const prepared = await f.prepare();
     const started = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
-    expect(() => assertDeletionQuiescent(f.db, f.projectId)).toThrow();
+    const attemptId = started.resource.id;
+    const publicationId = randomUUID();
+    f.storage.acceptPublication({ operationId: publicationId, attemptId, kind: 'attempt.revalidate', body: {},
+      expectedRevision: `"${attemptId}:${f.storage.getAttempt(attemptId).revision}"` });
+    f.storage.finishPublicationRequest(publicationId, 'unknown', 'EFFECT_UNRESOLVED');
+    const removed = new Set<string>();
+    const workspaces = createDeletionInspector({ pathStyle: 'windows', caseSensitive: false,
+      policyVersion: 'controlled-reference-capability/v1', safeReferenceRemoval: true,
+      removeReference: async observation => { removed.add(observation.path); },
+      observe: async path => ({ path, resolvedPath: removed.has(path) ? null : path,
+        kind: removed.has(path) ? 'absent' : 'directory', identity: removed.has(path) ? null : path.toLowerCase(),
+        ancestors: [{ path: 'C:\\', resolvedPath: 'C:\\', identity: 'volume-root' }] }) });
+    const inspection = await workspaces.inspectProjectDeletion(f.storage.getProjectDeletionPaths(f.projectId));
+    const operationId = randomUUID();
+    f.storage.acceptProjectDeletion({ inspection, command: { operationId, projectId: f.projectId,
+      expectedRevision: f.storage.getProject(f.projectId).etag,
+      body: { confirmed: true, authorization_digest: inspection.preview.authorization_digest } } });
+    vi.mocked(f.execution.cancelAttempt).mockRejectedValue(new Error('MAESTRI_UNAVAILABLE'));
+    const coordinator = createDeletionCoordinator({ storage: f.storage, workspaces, logFailure: f.logFailure,
+      prepareAttempts: (ids, id) => f.pipeline.prepareProjectDeletion(ids, id) });
+    await coordinator.schedule(operationId);
+    expect(f.storage.getProjectDeletion(operationId)).toEqual({ operation_id: operationId, state: 'succeeded' });
+    expect(removed.size).toBeGreaterThan(0);
+    expect(f.logFailure).toHaveBeenCalledWith('PROJECT_DELETION_STOP_UNCONFIRMED');
+    expect(f.db.prepare('SELECT id FROM projects WHERE id=?').get(f.projectId)).toBeUndefined();
+    expect(f.db.pragma('foreign_key_check')).toEqual([]);
+  });
+
+  it('accepts active work and automatically stops it before removing anything', async () => {
+    const f = await attemptFixture(); close.push(() => f.close());
+    const prepared = await f.prepare();
+    const started = await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
     const removed = new Set<string>();
     const removeReference = vi.fn(async (observation: { path: string }) => {
-      expect(() => assertDeletionQuiescent(f.db, f.projectId)).not.toThrow();
+      expect(f.execution.cancelAttempt).toHaveBeenCalled();
       removed.add(observation.path);
     });
     const workspaces = createDeletionInspector({ pathStyle: 'windows', caseSensitive: false,
@@ -316,17 +347,13 @@ describe('durable project deletion acceptance and shared authorization barrier',
     expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
   });
 
-  it('rejects acceptance after work wins; cancellation/lost tracking without stop confirmation remains blocking', async () => {
+  it('rejects a confirmation made stale by work that started after the preview', async () => {
     const f = await attemptFixture(); close.push(() => f.close());
     const inspection = await inspector().inspectProjectDeletion(f.storage.getProjectDeletionPaths(f.projectId));
     const command: ProjectDeletionCommand = { operationId: randomUUID(), projectId: f.projectId, expectedRevision: f.storage.getProject(f.projectId).etag,
       body: { confirmed: true, authorization_digest: inspection.preview.authorization_digest } };
     const prepared = await f.prepare(); await f.pipeline.startAttempt(prepared.body, prepared.context); await f.pipeline.drain();
     expect(() => f.storage.acceptProjectDeletion({ command, inspection })).toThrow();
-    expect(() => assertDeletionQuiescent(f.db, f.projectId)).toThrow(expect.objectContaining({ code: 'PROJECT_DELETION_ACTIVITY_BLOCKED' }));
-    f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled',suspension=NULL WHERE project_id=?").run(f.projectId);
-    f.db.prepare("UPDATE resources SET stop_state='uncertain' WHERE attempt_id IN (SELECT id FROM attempts WHERE project_id=?) AND kind='terminal'").run(f.projectId);
-    expect(() => assertDeletionQuiescent(f.db, f.projectId)).toThrow(expect.objectContaining({ code: 'PROJECT_DELETION_ACTIVITY_BLOCKED' }));
     expect(f.db.prepare('SELECT * FROM project_deletions').all()).toEqual([]);
     expect(f.execution.cancelAttempt).not.toHaveBeenCalled();
   });
@@ -379,7 +406,6 @@ describe('durable project deletion acceptance and shared authorization barrier',
     } else {
       expect(f.storage.acceptPublication(publication).created).toBe(true);
       expect(() => f.storage.acceptProjectDeletion(deletion)).toThrow(expect.objectContaining({ code: 'PROJECT_DELETION_PREVIEW_CHANGED' }));
-      expect(() => assertDeletionQuiescent(f.db, f.projectId)).toThrow(expect.objectContaining({ code: 'PROJECT_DELETION_ACTIVITY_BLOCKED' }));
       expect(f.db.prepare('SELECT * FROM project_deletions').all()).toEqual([]);
     }
     expect(f.workspaces.createLocalCommit).not.toHaveBeenCalled();
