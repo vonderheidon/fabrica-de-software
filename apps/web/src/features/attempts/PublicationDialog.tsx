@@ -189,7 +189,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
     </div>}
     <div className="delivery-continuation">
       {upgrades.map(upgrade => <div className="publication-upgrade" key={upgrade.target_mode}>
-        <p>Branch de destino: {upgrade.delivery_branch ? `${upgrade.delivery_branch.name} (${upgrade.delivery_branch.kind === 'existing' ? 'existente' : 'nova'})` : 'nova branch com nome automático'}.</p>
+        <p>Branch de entrega: {upgrade.delivery_branch?.kind === 'existing' ? 'branch em checkout' : 'branch nova com o nome sugerido pela issue'}.</p>
         <p>{upgrade.additional_effects.map(kind => effectLabel[kind]).join(' · ')}.</p>
         {!upgrade.capability.available && <p>Há pré-requisitos pendentes. Atualize a tentativa antes de continuar.</p>}
         <button type="button" className="primary" disabled={busy || deletionRestricted || !projectChecked || !summaryMatchesAuthorization || !upgrade.capability.available}

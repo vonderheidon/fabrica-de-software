@@ -13,7 +13,7 @@ import {
 import { OperationError, type ConfigurationCommand, type Storage, type StoredOperation } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import type { Workspaces } from '../workspaces/index.js';
-import { githubReference, validBranch } from '../workspaces/index.js';
+import { githubReference } from '../workspaces/index.js';
 import { ExecutionError, type Execution } from '../execution/index.js';
 import { createToolDetector, type ManagedTool, type ToolDetector } from '../tools/index.js';
 import { createQueue } from './queue.js';
@@ -121,8 +121,6 @@ export function validateProjectConfiguration(configuration: ProjectConfiguration
     fail(400, 'STATUS_MAPPING_INVALID', 'A V3 Status mapping requires five distinct option IDs.');
   }
   if (!Value.Check(ProjectConfiguration, configuration)) fail(400, 'CONFIGURATION_INVALID', 'Project configuration is invalid.');
-  if (configuration.delivery_branch && !validBranch(configuration.delivery_branch.name)) fail(400,'DELIVERY_BRANCH_INVALID','Informe um nome válido para a branch de destino.');
-  if (configuration.default_delivery_mode === 'pr' && configuration.delivery_branch?.name === configuration.base_branch) fail(400,'PR_BRANCH_EQUALS_BASE','A branch entregue e a base do PR precisam ser diferentes.');
 }
 export function createProjects({ storage, github, githubSetup, execution, workspaces, directoryBase, selectProjectsDirectory, selectGitHubExecutable,
   selectExecutable, toolDetector = createToolDetector() }: ProjectDependencies) {

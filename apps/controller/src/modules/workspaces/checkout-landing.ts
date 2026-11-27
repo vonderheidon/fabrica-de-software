@@ -114,6 +114,8 @@ export type RepairResult =
   | { status: 'repaired'; config: string[] }
   | { status: 'failed'; reason: 'PROJECT_FOLDER_REPAIR_FAILED'; block: LocalCommitBlock }
   | { status: 'refused'; reason: 'PROJECT_FOLDER_REPAIR_REFUSED' | 'PROJECT_FOLDER_LANDING_UNVERIFIED'; block?: LocalCommitBlock };
+/** The branch the Pasta do projeto had in checkout before a branch nova is created, and its tip; recorded so the write sees the same state. */
+export interface SwitchOrigin { branchRef: string; head: string }
 
 /** Brings an approved commit into the operator's checkout without ever discarding or re-applying their work. */
 export function createCheckoutLanding(deps: CheckoutLandingDeps) {
@@ -575,5 +577,45 @@ export function createCheckoutLanding(deps: CheckoutLandingDeps) {
   }
   /** Every write the factory makes in the operator's repository runs with the empty hooks directory, not only the checkout update. */
   async function hooksOff(): Promise<string[]> { return ['-c',`core.hooksPath=${await emptyHooks()}`]; }
-  return { readOperatorConfig,writeConfig,hooksOff,touchedPaths,preflight,beforeWrite,land,matches,hasPartialLanding,repair,assertNoOtherWorktree,currentBranch };
+  async function switchOrigin(root: string,newRef: string): Promise<SwitchOrigin> {
+    const current = await currentBranch(root);
+    if (current === null) throw new LandingBlocked('PROJECT_FOLDER_DETACHED_HEAD',blockOf([],{ expected: null,current: null }));
+    const existing = await run(root,['rev-parse','--verify','--quiet','--end-of-options',newRef]);
+    if (existing.exitCode === 0) fail('DELIVERY_BRANCH_COLLISION');
+    if (existing.exitCode !== 1) fail('DELIVERY_TARGET_GIT_FAILED');
+    return { branchRef: current,head: (await ok(root,['rev-parse','--verify','HEAD^{commit}'])).trim() };
+  }
+  /** Paths a switch from the current checkout to `commit` writes; the approved commit must already be in the folder's object store. */
+  async function switchTouched(root: string,head: string,commit: string): Promise<TouchedPath[]> {
+    return parseTouched(await ok(root,['diff-tree','-r','-z','--no-renames','--raw',head,commit]));
+  }
+  /**
+   * Pre-voo for a branch nova: same locks, configuration, unsupported content and dirty rules as the branch em checkout,
+   * measured against what the switch from the current checkout to `commit` would write. The new ref must not exist.
+   */
+  async function preflightSwitch(plan: LandingPlan,commit: string): Promise<{ config: string[]; touched: TouchedPath[]; origin: SwitchOrigin }> {
+    const config = await writeConfig(plan.root,plan.sealedConfig);
+    await assertIdle(plan.root,plan.branchRef);
+    const origin = await switchOrigin(plan.root,plan.branchRef);
+    const touched = await switchTouched(plan.root,origin.head,commit);
+    await assertSupported(plan,touched);
+    await assertClean(plan.root,config,touched);
+    return { config,touched,origin };
+  }
+  /** Last look before the switch: nothing moved since the pre-voo, and a dry-run two-tree checkout accepts it. */
+  async function beforeSwitch(plan: LandingPlan,config: readonly string[],origin: SwitchOrigin,commit: string): Promise<void> {
+    await assertIdle(plan.root,plan.branchRef);
+    const now = await switchOrigin(plan.root,plan.branchRef);
+    if (now.branchRef !== origin.branchRef) throw new LandingBlocked('PROJECT_FOLDER_BRANCH_CHANGED',blockOf([],{ expected: origin.branchRef,current: now.branchRef }));
+    if (now.head !== origin.head) throw new LandingBlocked('PROJECT_FOLDER_CHANGED');
+    const barrier = await run(plan.root,['read-tree','-n','-m','-u',origin.head,commit],config);
+    if (barrier.exitCode !== 0) throw new LandingBlocked('PROJECT_FOLDER_REFUSED');
+  }
+  /** Creates the branch at `commit` and checks it out; `-c` never rewrites an existing ref and ignored files are never overwritten. */
+  async function switchNew(plan: LandingPlan,config: readonly string[],commit: string): Promise<GitResponse> {
+    const name = plan.branchRef.replace(/^refs\/heads\//u,'');
+    return run(plan.root,['switch','--no-guess','--no-recurse-submodules','--no-overwrite-ignore','-c',name,commit],config);
+  }
+  return { readOperatorConfig,writeConfig,hooksOff,touchedPaths,preflight,beforeWrite,land,matches,hasPartialLanding,repair,assertNoOtherWorktree,currentBranch,
+    preflightSwitch,beforeSwitch,switchNew,switchTouched };
 }

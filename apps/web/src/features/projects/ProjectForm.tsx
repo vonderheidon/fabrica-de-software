@@ -1,6 +1,7 @@
 import { deliveryModeLabel } from '../../app/delivery-modes.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
 import { BranchSelector } from './BranchSelector.js';
+import { DeliveryBranchCards } from '../delivery/DeliveryBranchCards.js';
 import { ProjectFolderField, repositoryLabel } from './ProjectFolderField.js';
 import { ProjectImportPanel } from './ProjectImportPanel.js';
 import { readProjectImportSession } from './project-import-model.js';
@@ -694,15 +695,21 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       <p className="project-configuration-hint">A issue deve pertencer ao quadro selecionado, inclusive no início manual.</p>
       <div className="form-grid">
         <ProjectFolderField projectId={projectId} location={draft.project.source.location} kind={draft.project.source.kind} repositoryUrl={baselineSource?.repository_url ?? draft.project.source.repository_url} disabled={Boolean(configurationLock)} error={folderError} onSelect={selectProjectFolder} />
-        <BranchSelector source={draft.project.source} value={draft.project.base_branch} onChange={(value) => updateProject((current) => ({ ...current, base_branch: value }))} />
-        <SelectField searchable={false} label="Branch de destino" value={draft.project.delivery_branch?.kind ?? 'automatic'} onChange={(value) => updateProject(current => ({ ...current, delivery_branch: value !== 'new' && value !== 'existing' ? null : { kind: value as 'new' | 'existing', name: current.delivery_branch?.name ?? '' } }))} options={[{ value: 'automatic', label: 'Nova branch com nome automático' }, { value: 'new', label: 'Nova branch com nome escolhido' }, { value: 'existing', label: 'Branch existente' }]} />
-        {draft.project.delivery_branch?.kind === 'existing' ? <BranchSelector label="Branch existente de destino" source={draft.project.source} value={draft.project.delivery_branch.name} onChange={name => updateProject(current => ({...current,delivery_branch:{kind:'existing',name}}))} /> : draft.project.delivery_branch && <TextField label="Nome da branch de destino" value={draft.project.delivery_branch.name} onChange={(name) => updateProject(current => ({ ...current, delivery_branch: { ...current.delivery_branch!, name } }))} />}
+        <div className="field-full delivery-block" role="group" aria-labelledby="project-delivery-heading">
+          <h3 id="project-delivery-heading">Entrega</h3>
+          <div className="form-grid">
+            <SelectField searchable={false} label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: deliveryModeLabel.icr }, { value: 'commit', label: deliveryModeLabel.commit }, { value: 'pr', label: deliveryModeLabel.pr }]} />
+            <BranchSelector source={draft.project.source} value={draft.project.base_branch} onChange={(value) => updateProject((current) => ({ ...current, base_branch: value }))} />
+          </div>
+          <DeliveryBranchCards label="Branch de entrega padrão (Commit)" value={draft.project.delivery_branch?.kind ?? 'new'} baseBranch={draft.project.base_branch}
+            onChange={kind => updateProject(current => ({ ...current, delivery_branch: { kind } }))} />
+          <p className="muted">No PR a fábrica sempre cria uma branch nova; no ICR nada é gravado na Pasta do projeto. O nome da branch nova é sugerido a cada issue e pode ser trocado no Preparar.</p>
+        </div>
         <ProjectConditions diagnostic={projectDiagnostic} section="origin" projectId={projectId} />
         <SelectField label="Perfil implementador" value={implementerProfileAvailable ? draft.project.implementer_profile_id ?? '' : ''} onChange={(value) => updateProject((current) => ({ ...current, implementer_profile_id: value || null }))} options={implementerProfiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
         <SelectField label="Perfil revisor" value={reviewerProfileAvailable ? draft.project.reviewer_profile_id ?? '' : ''} onChange={(value) => updateProject((current) => ({ ...current, reviewer_profile_id: value || null }))} options={reviewerProfiles.map((profile) => ({ value: profile.id ?? '', label: profile.name || profile.id || 'Perfil sem nome' }))} />
         <ProjectConditions diagnostic={projectDiagnostic} section="profiles" projectId={projectId} missingProfileRoles={missingProfileRoles} />
         <NumberField label="Limite de correções" value={draft.project.correction_limit} min={0} max={5} onChange={(value) => updateProject((current) => ({ ...current, correction_limit: Math.max(0, Math.min(5, value)) }))} />
-        <SelectField searchable={false} label="Modo de entrega padrão" value={draft.project.default_delivery_mode} onChange={(value) => updateProject((current) => ({ ...current, default_delivery_mode: value as ProjectConfiguration['default_delivery_mode'] }))} options={[{ value: 'icr', label: deliveryModeLabel.icr }, { value: 'commit', label: deliveryModeLabel.commit }, { value: 'pr', label: deliveryModeLabel.pr }]} />
         <Checkbox label="Automação deste projeto habilitada" checked={draft.project.automation_enabled} onChange={(value) => updateProject((current) => ({ ...current, automation_enabled: value }))} />
         {draft.project.automation_enabled && !draft.global.automation_enabled && <p className="notice" role="status">Automação deste projeto habilitada. Fila global pausada. <a href="#principal/fila">Abrir fila global para habilitar novos inícios</a>.</p>}
         <Checkbox label="Usar posição do quadro" checked={draft.project.queue_order.use_board_position} onChange={(value) => updateProject((current) => ({ ...current, queue_order: { ...current.queue_order, use_board_position: value } }))} />

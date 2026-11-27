@@ -53,22 +53,56 @@ it('completes PR in durable commit/push/PR order using the same approved version
   expect(f.db.pragma('foreign_key_check')).toEqual([]);
 });
 
-it.each(['new','existing'] as const)('uses the captured %s destination for commit, push and PR', async kind => {
-  const f = await publicationFixture(true,'pr',true,{ deliveryBranch:{ kind,name:'release/selected' } }); fixtures.push(f);
+const suggested = 'refs/heads/feat/17-executable-issue';
+it.each([[undefined],[{ kind:'existing' as const }]])('opens the PR from a branch nova with the suggested name even when the project or Preparar choose the branch em checkout (%j)', async preparationBranch => {
+  const f = await publicationFixture(true,'pr',true,{ deliveryBranch:{ kind:'existing' },...(preparationBranch ? { preparationBranch } : {}) }); fixtures.push(f);
+  expect(f.storage.getAttemptCapture(f.attemptId).configuration.delivery_branch).toEqual({ kind:'new',name:'feat/17-executable-issue',name_origin:'suggested',suggested_name:'feat/17-executable-issue' });
   await f.implement(); await f.approve();
   expect(f.status()).toMatchObject({phase:'finished',result:'delivered'});
-  for (const kind of ['local_commit','push','pull_request'] as const) expect(effect(f,kind).expectedIdentity).toMatchObject({branchRef:'refs/heads/release/selected'});
-  expect(effect(f,'push').expectedIdentity.branchKind).toBe(kind);
+  for (const kind of ['local_commit','push','pull_request'] as const) expect(effect(f,kind).expectedIdentity).toMatchObject({branchRef:suggested});
+  expect(effect(f,'push').expectedIdentity.branchKind).toBe('new');
   expect(effect(f,'pull_request').expectedIdentity.baseBranch).toBe('main');
 });
 
-it('preserves the captured existing destination when continuing an ICR delivery', async () => {
-  const deliveryBranch = {kind:'existing' as const,name:'release/selected'};
-  const f = await publicationFixture(true,'icr',true,{deliveryBranch}); fixtures.push(f);
+it('seals the Preparar choice in the capture and commits on it, whatever the project default', async () => {
+  const typed = await publicationFixture(true,'commit',true,{ deliveryBranch:{ kind:'existing' },preparationBranch:{ kind:'new',name:'feat/login' } }); fixtures.push(typed);
+  expect(typed.storage.getAttemptCapture(typed.attemptId).configuration.delivery_branch).toMatchObject({ kind:'new',name:'feat/login',name_origin:'typed' });
+  await typed.implement(); await typed.approve();
+  expect(effect(typed,'local_commit')).toMatchObject({ state:'confirmed',expectedIdentity:{ branchRef:'refs/heads/feat/login',branchKind:'new' } });
+  const checkout = await publicationFixture(true,'commit',true,{ deliveryBranch:{ kind:'new' },preparationBranch:{ kind:'existing' } }); fixtures.push(checkout);
+  await checkout.implement(); await checkout.approve();
+  expect(effect(checkout,'local_commit').expectedIdentity).toMatchObject({ branchRef:'refs/heads/main',branchKind:'existing' });
+});
+
+it('uses the project default and the suggested name without a Preparar choice, as the queue does', async () => {
+  const f = await publicationFixture(true,'commit',true,{ deliveryBranch:{ kind:'new' } }); fixtures.push(f);
   await f.implement(); await f.approve();
-  expect(f.storage.getPublicationSummary(f.attemptId).upgrades![0]!.deliveryBranch).toEqual(deliveryBranch);
+  expect(effect(f,'local_commit').expectedIdentity).toMatchObject({ branchRef:suggested,branchKind:'new' });
+});
+
+it('moves a suggested name in use to the next free suffix without blocking', async () => {
+  const f = await publicationFixture(true,'commit',true,{ deliveryBranch:{ kind:'new' },folderBranches:['main','feat/17-executable-issue','feat/17-executable-issue-2'] }); fixtures.push(f);
+  expect(f.storage.getAttemptCapture(f.attemptId).configuration.delivery_branch).toMatchObject({ name:'feat/17-executable-issue-3',name_origin:'suggested' });
+  await f.implement(); await f.approve();
+  expect(effect(f,'local_commit').expectedIdentity.branchRef).toBe('refs/heads/feat/17-executable-issue-3');
+});
+
+it('reports a typed branch name already in the Pasta do projeto as a start blocker, case-insensitively', async () => {
+  const f = await fixture('icr');
+  f.workspaces.projectFolderBranches.mockResolvedValue(['main','feat/login']);
+  const prepared = await f.prepare(f.projectId,'commit',undefined,undefined,{ kind:'new',name:'Feat/Login' });
+  expect(prepared.saved.view.preparation.prerequisites.map(item => item.code)).toContain('DELIVERY_BRANCH_EXISTS');
+  const suggestedOk = await f.prepare(f.projectId,'commit',undefined,undefined,{ kind:'new' });
+  expect(suggestedOk.saved.view.preparation.prerequisites.map(item => item.code)).not.toContain('DELIVERY_BRANCH_EXISTS');
+});
+
+it('continues an ICR delivery as PR on a branch nova with the suggested name', async () => {
+  const f = await publicationFixture(true,'icr',true,{ deliveryBranch:{ kind:'existing' } }); fixtures.push(f);
+  await f.implement(); await f.approve();
+  expect(f.storage.getAttemptCapture(f.attemptId).configuration.delivery_branch).toBeNull();
+  expect(f.storage.getPublicationSummary(f.attemptId).upgrades!.find(item => item.targetMode === 'pr')!.deliveryBranch).toEqual({ kind:'new' });
   await f.pipeline.authorizePublicationUpgrade(f.attemptId,upgrade(f,'pr'),f.context()); await f.pipeline.drain();
-  expect(effect(f,'local_commit').expectedIdentity.branchRef).toBe('refs/heads/release/selected');
+  expect(effect(f,'local_commit').expectedIdentity).toMatchObject({ branchRef:suggested,branchKind:'new' });
   expect(effect(f,'pull_request').state).toBe('confirmed');
 });
 

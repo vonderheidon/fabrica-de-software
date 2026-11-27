@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
 import { AttemptWorkspaceSnapshot, managedWorkspaceReference, ProjectRevision, ScaffoldPlanV3 } from '#contracts';
-import { readQueueOrderJson, readStatusOptionIds } from './configuration-json.js';
+import { readDeliveryBranchDefault, readQueueOrderJson, readStatusOptionIds } from './configuration-json.js';
 import { digest } from './configuration-reads.js';
 import { StorageError } from './errors.js';
 import { readSettings } from './settings.js';
@@ -209,7 +209,7 @@ function inspectProjectRevisions(db: Database.Database): void {
       base_branch: row.base_branch,
       ...(row.delivery_branch_json === null
         ? {}
-        : { delivery_branch: parseJson(row.delivery_branch_json, 'PROJECT_DATA_INVALID') }),
+        : { delivery_branch: readDeliveryBranchDefault(parseJson(row.delivery_branch_json, 'PROJECT_DATA_INVALID')) }),
       github_project: githubProject,
       implementer_profile_id: row.implementer_profile_id,
       reviewer_profile_id: row.reviewer_profile_id,

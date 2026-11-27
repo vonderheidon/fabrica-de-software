@@ -25,8 +25,9 @@ function git(cwd: string,...args: string[]) {
   return result.stdout.trim();
 }
 
-it.each([[false, 'automatic', false, false], [true, 'automatic', false, false], [true, 'new', false, false],
-  [true, 'automatic', true, false], [true, 'automatic', true, true]] as const)('commits and reconciles with project storage=%s, branch=%s, inherited=%s, inherited only=%s preserving checkout state', async (projectScoped, branchKind, inherited, inheritedOnly) => {
+// Captures without a sealed Branch de entrega keep the ref-only delivery: the operator's checkout is never touched.
+it.each([[false, false, false], [true, false, false],
+  [true, true, false], [true, true, true]] as const)('commits and reconciles without a sealed branch, project storage=%s, inherited=%s, inherited only=%s preserving checkout state', async (projectScoped, inherited, inheritedOnly) => {
   const root = await mkdtemp(join(process.cwd(),'.cache','delivery-target-git-')); roots.push(root);
   const bare = join(root,'origin.git'); const seed = join(root,'seed'); const targetRoot = join(root,'clone ç');
   const data = join(root,'factory-data'); const attemptRoot = projectScoped ? join(data,'projects','p','v1','managed') : data;
@@ -90,13 +91,10 @@ it.each([[false, 'automatic', false, false], [true, 'automatic', false, false], 
   const workspaces = createDeliveryTargetWorkspace(github,data,port,undefined,resolveAttemptRoot);
   const delivery: Delivery = { id:deliveryId,attemptId,producerPassageId:passageId,round:1,baseSha:captureBaseSha,captureState:'captured',
     gitRef:approvedRef,repositoryRelative:'git/' + attemptId + '.git',contentIdentity,commitSha,hasDelta:!inheritedOnly,diagnostic:null,capturedAtMs:1,revision:1,warnings:[] };
-  const task = { attemptId,approvedRef,contentIdentity,repositoryRelative:delivery.repositoryRelative,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha, ...(branchKind === 'automatic' ? {} : { sourceKind: 'local' as const, deliveryBranch: { kind:branchKind,name:'custom/result' } }) };
+  const task = { attemptId,approvedRef,contentIdentity,repositoryRelative:delivery.repositoryRelative,issueNumber:17,issueTitle:'fix: Corrigir acesso ç e Unicode',repositoryId:repository.id,repositoryUrl:repository.url,baseBranch:'main',baseSha };
   const plan = await workspaces.inspectDeliveryTarget(targetRoot,task,{ approvedRef,contentIdentity,baseSha });
-  if (branchKind === 'new') {
-    await expect(workspaces.inspectDeliveryTarget(targetRoot,{ ...task,deliveryBranch:{kind:'new',name:'main'} },task)).rejects.toMatchObject({code:'DELIVERY_BRANCH_COLLISION'});
-  }
   expect(plan.task_type).toBe('fix'); expect(plan.task_description).toBe('Corrigir acesso ç e Unicode');
-  expect(plan.branch_ref).toBe(branchKind === 'automatic' ? 'refs/heads/fix/17-corrigir-acesso-c-e-unicode-' + attemptId.replaceAll('-','').slice(0,8) : 'refs/heads/custom/result');
+  expect(plan.branch_ref).toBe('refs/heads/fix/17-corrigir-acesso-c-e-unicode-' + attemptId.replaceAll('-','').slice(0,8));
   const target = { operation_id:targetOperationId,selection_operation_id:null,delivery_id:deliveryId,attempt_id:attemptId,repository_id:repository.id,
     local_path:plan.local_path,local_identity:plan.local_identity,branch_ref:plan.branch_ref,task_type:plan.task_type,task_description:plan.task_description,
     issue_number:17,base_branch:'main',base_sha:captureBaseSha,approved_ref:approvedRef,content_identity:contentIdentity,format_version:1 as const,created_at_ms:1 };

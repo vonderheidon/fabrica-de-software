@@ -1,4 +1,4 @@
-import { readStatusOptionIds, readQueueOrderJson } from './configuration-json.js';
+import { readDeliveryBranchDefault, readStatusOptionIds, readQueueOrderJson } from './configuration-json.js';
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
@@ -173,7 +173,7 @@ export function readConfiguration(db: Database.Database, projectId: string): Con
   if (!r) throw new StorageError('PROJECT_DATA_INVALID');
   const configuration: unknown = { id: r.id, project_id: projectId, revision: r.revision_number, created_at_ms: r.created_at_ms,
     source: project.project.source, base_branch: r.base_branch,
-    ...(r.delivery_branch_json == null ? {} : { delivery_branch: JSON.parse(String(r.delivery_branch_json)) as unknown }),
+    ...(r.delivery_branch_json == null ? {} : { delivery_branch: readDeliveryBranchDefault(JSON.parse(String(r.delivery_branch_json)) as unknown) }),
     github_project: r.github_project_id === null ? null : { id: r.github_project_id, owner_id: r.github_project_owner_id, status_field_id: r.status_field_id, status_option_ids: readStatusOptionIds(JSON.parse(String(r.status_options_json)) as unknown) },
     implementer_profile_id: r.implementer_profile_id, reviewer_profile_id: r.reviewer_profile_id,
     correction_limit: r.correction_limit, default_delivery_mode: r.default_delivery_mode,

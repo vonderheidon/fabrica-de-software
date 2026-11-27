@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
-import type { DeliveryMode, GitHubProjectDetails, GitHubQueryResult, IssueContext, OriginInspection, PreparedWorkspace, StartAttempt, ToolObservation } from '#contracts';
+import type { DeliveryMode, GitHubProjectDetails, GitHubQueryResult, IssueContext, OriginInspection, PreparationChoices, PreparedWorkspace, StartAttempt, ToolObservation } from '#contracts';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import type { GitHub } from '../../apps/controller/src/modules/github/index.js';
 import { createPreparations, type PreparationDependencies } from '../../apps/controller/src/modules/projects/index.js';
@@ -87,6 +87,7 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
     getRateLimitSnapshot: vi.fn(() => null),
   };
   const workspaces = { inspectOrigin: vi.fn(async () => structuredClone(observation)),
+    projectFolderBranches: vi.fn(async (): Promise<string[] | null> => ['main']),
     prepareAttempt: vi.fn(async (input: Parameters<import('../../apps/controller/src/modules/workspaces/index.js').Workspaces['prepareAttempt']>[0]): Promise<PreparedWorkspace> => {
       const comparisonBase = input.inheritedBaseSha !== null ? 'b'.repeat(40) : input.baseSha;
       return { state: 'prepared' as const, attemptId: input.attemptId, workspace: input.workspace, baseSha: input.baseSha, branch: `factory/${input.issueNumber}/${input.attemptId}`,
@@ -142,8 +143,9 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const observeTools = vi.fn(async () => structuredClone(tools)); const logFailure = vi.fn();
   const dependencies: PipelineDependencies = { storage, preparations, execution, workspaces, observeTools, hostName: 'test-host', logFailure };
   const pipeline = createPipeline(dependencies);
-  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr', baseBranch?: string, previousAttemptId?: string) {
-    const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '', overrides: baseBranch ? { base_branch: baseBranch } : {},
+  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr', baseBranch?: string, previousAttemptId?: string, deliveryBranch?: PreparationChoices['overrides']['delivery_branch']) {
+    const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '',
+      overrides: { ...(baseBranch ? { base_branch: baseBranch } : {}), ...(deliveryBranch ? { delivery_branch: deliveryBranch } : {}) },
       ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}) }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;
     const body: StartAttempt = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true };

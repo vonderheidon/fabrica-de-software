@@ -1,3 +1,4 @@
+import { DeliveryBranchCards, deliveryPreview } from '../delivery/DeliveryBranchCards.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
 import { BranchSelector } from '../projects/BranchSelector.js';
 import { deliveryModeLabel, deliveryModeDescription } from '../../app/delivery-modes.js';
@@ -371,6 +372,8 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
     {selectedIssue && issueBlockers.length > 0 && <div className="notice"><b>Impedimentos desta issue</b><ul>{issueBlockers.map((reason) => <li key={reason}>{operatorCodeLabel(reason)}</li>)}</ul></div>}
     {draft && <ConditionNotices items={draft.current.prerequisites.filter((item) => !issueBlockers.includes(item.code))} section="issue" projectId={projectId} />}
     </section>
+    {draft && configuration && <PreparationDelivery mode={draft.choices.delivery_mode} configuration={configuration} prerequisites={draft.current.prerequisites}
+      override={draft.choices.overrides.delivery_branch} onChange={value => updateChoices(current => ({ ...current, overrides: { ...current.overrides, delivery_branch: value } }))} />}
 
     {!draft && saveError && <div className="queue-error" role="alert"><p>{saveError}</p><p>Não foi possível reler a preparação salva. Consulte novamente antes de iniciar outra.</p><button type="button" onClick={() => { setSaveError(null); setIssueReload(value => value + 1); }}>Consultar preparação salva</button></div>}
     {!draft && <div className="preparation-actions dialog-actions"><p>{issueLoading ? 'Aguarde a consulta da issue.' : issueLoadError ? 'Tente consultar a issue novamente.' : 'Selecione uma issue elegível para revisar a tentativa.'}</p><button type="button" className="primary" disabled>Revisar e autorizar</button></div>}
@@ -379,7 +382,7 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
         <dl className="preparation-facts"><div><dt>Issue atual</dt><dd>{draft.current.issue ? `#${draft.current.issue.number} · ${draft.current.issue.title}` : 'Não confirmada'}</dd></div><div><dt>Estado e responsáveis</dt><dd>{draft.current.issue ? <><OperatorState value={draft.current.issue.state} /> · {draft.current.issue.assignees.map((person) => `@${person.login}`).join(', ') || 'sem responsável observado'}</> : 'Não confirmados'}</dd></div><div><dt>Modo</dt><dd>{modes.find((item) => item.value === draft.current.delivery_mode)?.label}</dd></div><div><dt>Implementador</dt><dd>{profileName(configuration?.implementer_profile ?? null)}</dd></div><div><dt>Revisor</dt><dd>{profileName(configuration?.reviewer_profile ?? null)}</dd></div><div><dt>Limite de correções</dt><dd>{configuration?.configuration.correction_limit ?? '—'}</dd></div><div><dt>Intervalo de consulta</dt><dd>{configuration ? formatMinuteValue(configuration.time_defaults.polling_interval_ms) : '—'}</dd></div><div><dt>Tempo ativo por passagem</dt><dd>{configuration ? formatMinuteValue(configuration.time_defaults.passage_active_time_ms) : '—'}</dd></div><div><dt>TTL da pergunta</dt><dd>{limitLabel(configuration?.time_defaults.question_ttl)}</dd></div><div><dt>Política de artefatos</dt><dd>{configuration?.artifact_policy.automatic_deletion ? 'Exclusão automática habilitada' : 'Sem exclusão automática'}</dd></div></dl>
         <p className="muted">O prazo da pergunta limita a espera por resposta. Intervalo de consulta e tempo ativo são contados separadamente.</p>
 
-        <dl className="preparation-facts"><div><dt>Branch de origem</dt><dd>{configuration?.configuration.base_branch ?? 'Não confirmada'}</dd></div><div><dt>Commit de partida</dt><dd>{draft.current.base_sha ?? 'Não confirmado'}</dd></div><div><dt>Branch de destino</dt><dd>{configuration?.configuration.delivery_branch ? `${configuration.configuration.delivery_branch.name} (${configuration.configuration.delivery_branch.kind === 'existing' ? 'existente' : 'nova'})` : 'Nova branch com nome automático'}</dd></div></dl>
+        <dl className="preparation-facts"><div><dt>Branch de origem</dt><dd>{configuration?.configuration.base_branch ?? 'Não confirmada'}</dd></div><div><dt>Commit de partida</dt><dd>{draft.current.base_sha ?? 'Não confirmado'}</dd></div><div><dt>Branch de entrega</dt><dd>{configuration?.delivery_branch ? `${configuration.delivery_branch.name} (${configuration.delivery_branch.kind === 'existing' ? 'em checkout' : 'nova'})` : 'Sem commit na Pasta do projeto'}</dd></div></dl>
         {(['origin', 'mapping', 'profiles', 'configuration'] as const).map((section) => <ConditionNotices key={section} items={draft.current.prerequisites} section={section} projectId={projectId} />)}
         <a href={`#principal/projetos?dialog=project-configuration&projectId=${encodeURIComponent(projectId)}`}>Abrir configuração deste projeto</a>
         <h3>Critérios de aceite</h3>{draft.current.criteria_preview.executable ? <ol className="preparation-criteria">{draft.current.criteria_preview.criteria.map((criterion) => <li key={`${criterion.id}:${criterion.occurrence_index}`}><b>{criterion.id}</b> · {criterion.text}</li>)}</ol> : <div className="notice"><b>Conteúdo da issue precisa de ajuste</b>{draft.current.criteria_preview.reasons.length ? draft.current.criteria_preview.reasons.map(reason => <p key={reason}>{operatorCodeLabel(reason)}. {draft.current.prerequisites.find(item => item.code === reason)?.recovery}</p>) : <p>A issue atual não contém critérios de aceite válidos.</p>}</div>}
@@ -442,3 +445,27 @@ function profileChoiceId(choice: PreparationChoices['overrides']['implementer_pr
   return '';
 }
 function limitLabel(value: { state: 'configured'; value: number; unit: string } | { state: 'not_configured' } | undefined): string { return !value || value.state === 'not_configured' ? 'Não configurado' : `${value.value} ${value.unit}`; }
+/** Bloco Entrega: Branch de entrega da tentativa, marcada com o padrão do projeto, e o que acontece na Pasta do projeto ao aprovar. */
+function PreparationDelivery({ mode, configuration, prerequisites, override, onChange }: {
+  mode: DeliveryMode; configuration: Preparation['effective_configuration']; prerequisites: Preparation['prerequisites'];
+  override: PreparationChoices['overrides']['delivery_branch']; onChange: (value: NonNullable<PreparationChoices['overrides']['delivery_branch']>) => void;
+}) {
+  const base = configuration.configuration.base_branch;
+  const resolved = configuration.delivery_branch;
+  if (mode === 'icr') return <section className="card preparation-section delivery-block"><div className="eyebrow">Entrega</div>
+    <p className="muted">ICR não faz commit na Pasta do projeto. A versão aprovada fica guardada e pode ser publicada depois.</p></section>;
+  const kind = mode === 'pr' ? 'new' : override?.kind ?? configuration.configuration.delivery_branch?.kind ?? 'new';
+  const suggested = resolved?.kind === 'new' ? resolved.suggested_name : '';
+  const typed = override?.kind === 'new' ? override.name : undefined;
+  const rejected = prerequisites.find(item => item.code === 'DELIVERY_BRANCH_EXISTS' || item.code === 'DELIVERY_BRANCH_INVALID');
+  const notice = rejected
+    ? { tone: 'warn' as const, text: rejected.code === 'DELIVERY_BRANCH_EXISTS' ? 'Esta branch já existe. Use outro nome ou escolha Branch em checkout.' : rejected.message }
+    : resolved?.kind === 'new' && resolved.name_origin === 'suggested' && resolved.name !== resolved.suggested_name ? { tone: 'info' as const, text: `${resolved.suggested_name} já está em uso; será ${resolved.name}.` } : null;
+  return <section className="card preparation-section delivery-block"><div className="eyebrow">Entrega</div>
+    <DeliveryBranchCards value={kind} baseBranch={base} prLocked={mode === 'pr'}
+      onChange={next => onChange(next === 'existing' ? { kind: 'existing' } : typed === undefined ? { kind: 'new' } : { kind: 'new', name: typed })}
+      name={{ value: typed ?? suggested, notice, onChange: value => onChange(value === suggested ? { kind: 'new' } : { kind: 'new', name: value }) }} />
+    {resolved && resolved.kind === kind && <div className="delivery-preview"><span className="eyebrow">Na Pasta do projeto, ao aprovar</span>
+      <span>{deliveryPreview(mode, resolved.kind, resolved.name, base)}</span><span className="muted">{configuration.configuration.source.location}</span></div>}
+  </section>;
+}

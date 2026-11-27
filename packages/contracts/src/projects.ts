@@ -164,7 +164,8 @@ export const QueueOrder = Type.Object({ use_board_position: Type.Boolean() }, cl
 export const ProjectConfiguration = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repository_id: Type.Optional(text(256)), repository_url: Type.Optional(text(4096)) }, closed),
   base_branch: text(1024),
-  delivery_branch: Type.Optional(Type.Union([Type.Null(), Type.Object({ kind: Type.Union([Type.Literal('new'), Type.Literal('existing')]), name: text(1024) }, closed)])),
+  /** Default Branch de entrega: `existing` = branch em checkout, `new` = branch nova. Names are chosen per attempt, never stored here. */
+  delivery_branch: Type.Optional(Type.Union([Type.Null(), Type.Object({ kind: Type.Union([Type.Literal('new'), Type.Literal('existing')]) }, closed)])),
   github_project: Type.Union([ProjectMapping, Type.Null()]),
   implementer_profile_id: Type.Union([OperationId, Type.Null()]), reviewer_profile_id: Type.Union([OperationId, Type.Null()]),
   correction_limit: Type.Integer({ minimum: 0, maximum: 5 }),

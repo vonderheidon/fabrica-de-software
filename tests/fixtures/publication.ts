@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { vi, type Mock } from 'vitest';
-import type { GitHubMutationResult, GitHubQueryResult, ImplementerResult, IssueContext, ProjectItem, ReviewerResult, ProjectConfiguration } from '#contracts';
+import type { GitHubMutationResult, GitHubQueryResult, ImplementerResult, IssueContext, ProjectItem, ReviewerResult, ProjectConfiguration, PreparationChoices } from '#contracts';
 import { attemptFixture, complete, confirmTerminalStops } from './attempt.js';
 import { createPipeline } from '../../apps/controller/src/modules/pipeline/index.js';
 import { digest } from '../../apps/controller/src/modules/execution/roles.js';
@@ -39,8 +39,11 @@ export function withPublicationIssueProjections<T extends Pick<GitHub, 'getIssue
 }
 
 export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
-  options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean; inheritPreviousAttempt?: boolean; sourceKind?: 'local' | 'github'; projectFolder?: string } = {}) {
+  options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean; inheritPreviousAttempt?: boolean; sourceKind?: 'local' | 'github'; projectFolder?: string;
+    /** The Preparar choice for this attempt; the project default applies when absent. */
+    preparationBranch?: PreparationChoices['overrides']['delivery_branch']; folderBranches?: string[] } = {}) {
   const f = await attemptFixture(options.temporaryRoot, options.baseSha, undefined, undefined, options.recordCleanInitialization ?? false, options.sourceKind, options.projectFolder); await f.pipeline.close();
+  if (options.folderBranches) f.workspaces.projectFolderBranches.mockResolvedValue(options.folderBranches);
   if (options.correctionLimit !== undefined || options.deliveryBranch !== undefined) {
     const current = f.storage.getConfiguration(f.projectId);
     const { id: _id, project_id: _project, revision: _revision, created_at_ms: _time, ...configuration } = current.view.configuration;
@@ -120,7 +123,7 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
     confirmTerminalStops(f,predecessorId);
     f.db.prepare("UPDATE attempts SET phase='finished',result='interrupted' WHERE id=?").run(predecessorId);
   }
-  const prepare = await f.prepare(f.projectId,mode,options.baseBranch,predecessorId); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
+  const prepare = await f.prepare(f.projectId,mode,options.baseBranch,predecessorId,options.preparationBranch); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
   const attemptId = op.resource.id;
   const status = () => f.storage.getAttempt(attemptId);
   const context = () => ({ operationId: randomUUID(), expectedRevision: `"${attemptId}:${status().revision}"` });

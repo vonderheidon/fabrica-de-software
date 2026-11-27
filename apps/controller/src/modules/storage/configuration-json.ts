@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { ComposedExecutionProfileValue, DeliveryMode, GitHubId, ExecutionProfileValue, OperationId, OriginSource, ScopeChange, ProjectConfiguration, type PreparationChoices, type EffectiveConfiguration, type Criterion } from '#contracts';
+import { ComposedExecutionProfileValue, DeliveryBranchOverride, DeliveryMode, GitHubId, ExecutionProfileValue, OperationId, OriginSource, ScopeChange, ProjectConfiguration, type PreparationChoices, type EffectiveConfiguration, type Criterion } from '#contracts';
 import { StorageError } from './errors.js';
 import { storedTimeDefaults, storedArtifactPolicy, readTimeDefaults, storeTimeDefaults, readArtifactPolicy, storeArtifactPolicy } from './common-json.js';
 
@@ -20,7 +20,10 @@ export const projectMappingJson = Type.Object({ id: text(256), ownerId: text(256
 export const queueOrderJson = Type.Object({ useBoardPosition: Type.Boolean() }, closed);
 export const projectConfigurationJson = Type.Object({
   source: Type.Object({ ...OriginSource.properties, repositoryId: Type.Optional(text(256)), repositoryUrl: Type.Optional(text(4096)) }, closed),
-  baseBranch: text(1024), deliveryBranch: ProjectConfiguration.properties.delivery_branch, githubProject: Type.Union([projectMappingJson, Type.Null()]),
+  baseBranch: text(1024), deliveryBranch: Type.Optional(Type.Union([Type.Null(), Type.Object({ kind: Type.Union([Type.Literal('new'), Type.Literal('existing')]),
+    /** Revisions before the per-attempt name kept a fixed branch name; it is read and ignored. */
+    name: Type.Optional(Type.String({ maxLength: 1024 })) }, closed)])),
+  githubProject: Type.Union([projectMappingJson, Type.Null()]),
   implementerProfileId: Type.Union([OperationId, Type.Null()]), reviewerProfileId: Type.Union([OperationId, Type.Null()]),
   correctionLimit: Type.Integer({ minimum: 0, maximum: 5 }),
   defaultDeliveryMode: DeliveryMode, automationEnabled: Type.Boolean(), queueOrder: queueOrderJson,
@@ -34,7 +37,7 @@ export const preparationOverridesJson = Type.Partial(Type.Object({
   baseBranch: projectConfigurationJson.properties.baseBranch,
   implementerProfile: profileChoice, reviewerProfile: profileChoice,
   correctionLimit: projectConfigurationJson.properties.correctionLimit,
-  timeDefaults: storedTimeDefaults, artifactPolicy: storedArtifactPolicy,
+  timeDefaults: storedTimeDefaults, artifactPolicy: storedArtifactPolicy, deliveryBranch: DeliveryBranchOverride,
 }, closed));
 export const preparationChoicesJson = Type.Object({
   issueId: GitHubId, deliveryMode: DeliveryMode, guidance: Type.String({ maxLength: 8192 }), overrides: preparationOverridesJson,
@@ -54,6 +57,9 @@ export const effectiveConfigurationJson = Type.Object({
   timeDefaults: storedTimeDefaults, artifactPolicy: storedArtifactPolicy,
   guidance: Type.String({ maxLength: 16385 }),
   origins: choiceOriginsJson,
+  deliveryBranch: Type.Optional(Type.Union([Type.Null(),
+    Type.Object({ kind: Type.Literal('existing'), name: text(1024) }, closed),
+    Type.Object({ kind: Type.Literal('new'), name: text(1024), nameOrigin: Type.Union([Type.Literal('suggested'), Type.Literal('typed')]), suggestedName: text(1024) }, closed)])),
 }, closed);
 export const criterionJson = Type.Object({ id: Type.String({ pattern: '^ac-[1-9][0-9]*$', maxLength: 128 }), text: Type.String({ minLength: 1, maxLength: 65536 }), occurrenceIndex: revision, explicit: Type.Boolean() }, closed);
 
@@ -125,7 +131,7 @@ export function readProjectConfiguration(value: Static<typeof projectConfigurati
   return {
     source: readSource(value.source),
     base_branch: value.baseBranch,
-    ...(value.deliveryBranch === undefined ? {} : { delivery_branch: value.deliveryBranch }),
+    ...(value.deliveryBranch === undefined ? {} : { delivery_branch: readDeliveryBranchDefault(value.deliveryBranch) }),
     github_project: value.githubProject === null ? null : readMapping(value.githubProject),
     implementer_profile_id: value.implementerProfileId,
     reviewer_profile_id: value.reviewerProfileId,
@@ -218,6 +224,9 @@ export function readEffectiveConfiguration(value: Static<typeof effectiveConfigu
     artifact_policy: readArtifactPolicy(value.artifactPolicy),
     guidance: value.guidance,
     origins: readOrigins(value.origins),
+    ...(value.deliveryBranch === undefined ? {} : { delivery_branch: value.deliveryBranch === null ? null : value.deliveryBranch.kind === 'existing'
+      ? { kind: 'existing', name: value.deliveryBranch.name }
+      : { kind: 'new', name: value.deliveryBranch.name, name_origin: value.deliveryBranch.nameOrigin, suggested_name: value.deliveryBranch.suggestedName } }),
   };
 }
 
@@ -232,6 +241,9 @@ export function storeEffectiveConfiguration(value: EffectiveConfiguration): Stat
     artifactPolicy: storeArtifactPolicy(value.artifact_policy),
     guidance: value.guidance,
     origins: storeOrigins(value.origins),
+    ...(value.delivery_branch === undefined ? {} : { deliveryBranch: value.delivery_branch === null ? null : value.delivery_branch.kind === 'existing'
+      ? { kind: 'existing', name: value.delivery_branch.name }
+      : { kind: 'new', name: value.delivery_branch.name, nameOrigin: value.delivery_branch.name_origin, suggestedName: value.delivery_branch.suggested_name } }),
   };
 }
 export function readOverrides(value: Static<typeof preparationOverridesJson>): PreparationChoices['overrides'] {
@@ -242,6 +254,7 @@ export function readOverrides(value: Static<typeof preparationOverridesJson>): P
     ...(value.correctionLimit === undefined ? {} : { correction_limit: value.correctionLimit }),
     ...(value.timeDefaults === undefined ? {} : { time_defaults: readTimeDefaults(value.timeDefaults) }),
     ...(value.artifactPolicy === undefined ? {} : { artifact_policy: readArtifactPolicy(value.artifactPolicy) }),
+    ...(value.deliveryBranch === undefined ? {} : { delivery_branch: value.deliveryBranch }),
   };
 }
 
@@ -253,6 +266,7 @@ export function storeOverrides(value: PreparationChoices['overrides']): Static<t
     ...(value.correction_limit === undefined ? {} : { correctionLimit: value.correction_limit }),
     ...(value.time_defaults === undefined ? {} : { timeDefaults: storeTimeDefaults(value.time_defaults) }),
     ...(value.artifact_policy === undefined ? {} : { artifactPolicy: storeArtifactPolicy(value.artifact_policy) }),
+    ...(value.delivery_branch === undefined ? {} : { deliveryBranch: value.delivery_branch }),
   };
 }
 export function readChoices(value: Static<typeof preparationChoicesJson>): PreparationChoices {
@@ -295,4 +309,10 @@ export function readScopeChange(value: unknown): ScopeChange {
 export function serializeScopeChange(value: ScopeChange): string {
   if (!Value.Check(ScopeChange, value)) throw new StorageError('OPERATION_DATA_INVALID');
   return JSON.stringify({ ...value, capturedCriteria: value.capturedCriteria.map(storeCriterion), currentCriteria: value.currentCriteria.map(storeCriterion) });
+}
+/** Keeps only the default option; a `name` from older revisions is ignored. */
+export function readDeliveryBranchDefault(value: unknown): NonNullable<ProjectConfiguration['delivery_branch']> | null {
+  if (value === null) return null;
+  if (typeof value === 'object' && 'kind' in value && (value.kind === 'new' || value.kind === 'existing')) return { kind: value.kind };
+  throw new StorageError('PROJECT_DATA_INVALID');
 }

@@ -3,7 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import type { Delivery, EffectView, GitHubQueryResult } from '#contracts';
+import type { Delivery, DeliveryBranchChoice, EffectView, GitHubQueryResult } from '#contracts';
 import type { GitInput, GitReader } from '../../apps/controller/src/modules/workspaces/git.js';
 import { createDeliveryTargetWorkspace, type TargetCommitResult } from '../../apps/controller/src/modules/workspaces/delivery-target.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
@@ -66,6 +66,10 @@ type FixtureOptions = {
   deletePaths?: readonly string[];
   rawApprovedTree?: (args: { git: (cwd: string,...args: string[]) => Promise<string>; run: (cwd: string,args: string[],input?: string) => Promise<{ exitCode: number; stdout: string }>; bare: string; baseSha: string; seed: string }) => Promise<string>;
   wrapReader?: (base: GitReader) => GitReader;
+  /** Defaults to the branch em checkout (`main`). */
+  deliveryBranch?: DeliveryBranchChoice;
+  /** Runs on the Pasta do projeto before the target is inspected. */
+  beforeInspect?: (folder: string,git: (cwd: string,...args: string[]) => Promise<string>) => Promise<void>;
 };
 
 async function fixture(options: FixtureOptions = {}) {
@@ -135,13 +139,14 @@ async function fixture(options: FixtureOptions = {}) {
   const delivery: Delivery = { id:deliveryId,attemptId,producerPassageId:passageId,round:1,baseSha,captureState:'captured',
     gitRef:approvedRef,repositoryRelative:'git/' + attemptId + '.git',contentIdentity,commitSha,hasDelta:true,diagnostic:null,capturedAtMs:1,revision:1,warnings:[] };
   const task = { attemptId,approvedRef,contentIdentity,repositoryRelative:delivery.repositoryRelative,issueNumber:17,issueTitle:'fix: Corrigir acesso ç',repositoryId:repository.id,
-    repositoryUrl:repository.url,baseBranch:'main',baseSha,sourceKind:'local' as const,deliveryBranch:{ kind:'existing' as const,name:'main' } };
+    repositoryUrl:repository.url,baseBranch:'main',baseSha,sourceKind:'local' as const,deliveryBranch:options.deliveryBranch ?? { kind:'existing' as const,name:'main' } };
+  await options.beforeInspect?.(folder,git);
   const plan = await workspaces.inspectDeliveryTarget(folder,task,{ approvedRef,contentIdentity,baseSha });
   const target = { operation_id:targetOperationId,selection_operation_id:null,delivery_id:deliveryId,attempt_id:attemptId,repository_id:repository.id,
     local_path:plan.local_path,local_identity:plan.local_identity,branch_ref:plan.branch_ref,task_type:plan.task_type,task_description:plan.task_description,
     issue_number:17,base_branch:'main',base_sha:baseSha,approved_ref:approvedRef,content_identity:contentIdentity,format_version:1 as const,created_at_ms:1 };
   const effect: EffectView = { operationId:randomUUID(),attemptId,creationId:null,deliveryId,kind:'local_commit',scopeKey:deliveryId,
-    state:'running',expectedIdentity:{ repositoryId:repository.id,issueId:randomUUID(),issueNumber:17,contentIdentity,parentSha:baseSha,branchRef:plan.branch_ref,branchKind:'existing',
+    state:'running',expectedIdentity:{ repositoryId:repository.id,issueId:randomUUID(),issueNumber:17,contentIdentity,parentSha:baseSha,branchRef:plan.branch_ref,branchKind:task.deliveryBranch.kind,
       commitTime:1_798_000_000,targetOperationId,taskType:plan.task_type,taskDescription:plan.task_description,repositoryOwner:'org',repositoryName:'repo',baseBranch:'main' },
     confirmedIdentity:null,receipt:null,reason:null,authorized:true,revision:2,sentAtMs:1,confirmedAtMs:null };
   const authorize = vi.fn(async () => {});
@@ -636,7 +641,7 @@ it('resolves local_commit coherently to confirmed, failed_known or unknown after
   const scenarios = ['confirmed_repaired','failed_known_clean','failed_known_locked','unknown_diverged'] as const;
   for (const scenario of scenarios) {
     const raw = await fixture();
-    const f = await publicationFixture(true,'commit',true,{ temporaryRoot:raw.root,baseSha:raw.baseSha,projectFolder:raw.folder,deliveryBranch:{ kind:'existing',name:'main' } });
+    const f = await publicationFixture(true,'commit',true,{ temporaryRoot:raw.root,baseSha:raw.baseSha,projectFolder:raw.folder,deliveryBranch:{ kind:'existing' } });
     try {
       await raw.git(raw.folder,'remote','set-url','origin',f.issue.repository.url + '.git');
       const deliveryDir = join(f.directory,'projects',f.projectId,'v1','managed','issues','17');
@@ -829,7 +834,7 @@ it('revalidates and enforces read-tree -n -m -u as second barrier in repair so o
 
 it('never repairs the Pasta do projeto during restart reconciliation when authorization or terminal stops are not valid', async () => {
   const raw = await fixture();
-  const f = await publicationFixture(true,'commit',true,{ temporaryRoot:raw.root,baseSha:raw.baseSha,projectFolder:raw.folder,deliveryBranch:{ kind:'existing',name:'main' } });
+  const f = await publicationFixture(true,'commit',true,{ temporaryRoot:raw.root,baseSha:raw.baseSha,projectFolder:raw.folder,deliveryBranch:{ kind:'existing' } });
   try {
     leaveReviewerStopUnconfirmed(f);
     await raw.git(raw.folder,'remote','set-url','origin',f.issue.repository.url + '.git');
@@ -889,4 +894,61 @@ it('never repairs the Pasta do projeto during restart reconciliation when author
       expect(await readFile(join(raw.folder,'tracked.txt'),'utf8')).toBe('approved change\n');
     } finally { storage.close(); }
   } finally { await f.close(); }
+}, 120_000);
+
+const suggestedBranch = 'fix/17-corrigir-acesso-c';
+const absent = async (f: Fixture,ref: string) => (await f.run(f.folder,['rev-parse','--verify','--quiet','--end-of-options',ref])).exitCode === 1;
+
+it('creates a branch nova at the base tip with switch, checks it out and commits there, leaving the base branch, operator files and hooks alone; a repeat is idempotent', async () => {
+  const f = await fixture({ deliveryBranch:{ kind:'new',name:'feat/login',name_origin:'typed',suggested_name:suggestedBranch } });
+  expect(f.plan).toMatchObject({ branch_ref:'refs/heads/feat/login',local_identity:{ branch_kind:'new',operator_config:expect.any(Object) } });
+  await writeFile(join(f.folder,'junk.txt'),'mine\n');
+  const result = await f.land();
+  expect(result).toMatchObject({ state:'confirmed',reason:null,receipt:{ branchRef:'refs/heads/feat/login',parentSha:f.baseSha } });
+  const sha = result.receipt!.id;
+  expect(await f.git(f.folder,'symbolic-ref','HEAD')).toBe('refs/heads/feat/login');
+  expect(await f.git(f.folder,'rev-parse','HEAD')).toBe(sha);
+  expect(await f.git(f.folder,'rev-parse','HEAD^')).toBe(f.baseSha);
+  expect(await f.git(f.folder,'rev-parse','HEAD^{tree}')).toBe(f.contentIdentity);
+  expect(await f.git(f.folder,'rev-parse','refs/heads/main')).toBe(f.baseSha);
+  expect(await readFile(join(f.folder,'tracked.txt'),'utf8')).toBe('approved change\n');
+  expect(await readFile(join(f.folder,'nested','new.txt'),'utf8')).toBe('nested\n');
+  expect((await f.run(f.folder,['diff','--cached','--quiet'])).exitCode).toBe(0);
+  expect(await f.git(f.folder,'status','--porcelain','--untracked-files=all')).toBe('?? junk.txt');
+  expect(await exists(f.marker)).toBe(false);
+  expect(await f.land()).toMatchObject({ state:'confirmed',receipt:{ id:sha } });
+  expect(await f.git(f.folder,'rev-list','--count','refs/heads/main..refs/heads/feat/login')).toBe('1');
+}, 120_000);
+
+it('never overwrites an ignored file the branch nova would write: the switch is refused before any ref or file changes', async () => {
+  const f = await fixture({ deliveryBranch:{ kind:'new',name:suggestedBranch,name_origin:'suggested',suggested_name:suggestedBranch },
+    beforeInspect: async folder => { await writeFile(join(folder,'.git','info','exclude'),'approved.txt\n'); await writeFile(join(folder,'approved.txt'),'operator secret\n'); } });
+  expect(await f.land()).toMatchObject({ state:'failed_known',reason:'PROJECT_FOLDER_UNTRACKED_CONFLICT',block:{ paths:['approved.txt'] } });
+  expect(await readFile(join(f.folder,'approved.txt'),'utf8')).toBe('operator secret\n');
+  expect(await f.git(f.folder,'symbolic-ref','HEAD')).toBe('refs/heads/main');
+  expect(await f.git(f.folder,'rev-parse','HEAD')).toBe(f.baseSha);
+  expect(await absent(f,'refs/heads/' + suggestedBranch)).toBe(true);
+}, 120_000);
+
+it('keeps every existing ref intact: a suggested name in use moves to the next suffix, a typed one is refused, and a ref created after inspection is never written', async () => {
+  const f = await fixture({ deliveryBranch:{ kind:'new',name:suggestedBranch,name_origin:'suggested',suggested_name:suggestedBranch },
+    beforeInspect: async (folder,git) => { await git(folder,'branch',suggestedBranch); await git(folder,'branch','feat/login'); } });
+  expect(f.plan.branch_ref).toBe('refs/heads/' + suggestedBranch + '-2');
+  await expect(f.workspaces.inspectDeliveryTarget(f.folder,{ ...f.task,deliveryBranch:{ kind:'new',name:'feat/login',name_origin:'typed',suggested_name:suggestedBranch } },f.task))
+    .rejects.toMatchObject({ code:'DELIVERY_BRANCH_COLLISION' });
+  await f.git(f.folder,'branch',suggestedBranch + '-2');
+  const result = await f.land();
+  expect(result.state).not.toBe('confirmed');
+  for (const branch of [suggestedBranch,suggestedBranch + '-2','feat/login','main']) expect(await f.git(f.folder,'rev-parse','refs/heads/' + branch)).toBe(f.baseSha);
+  expect(await f.git(f.folder,'symbolic-ref','HEAD')).toBe('refs/heads/main');
+  expect(await readFile(join(f.folder,'tracked.txt'),'utf8')).toBe('base\n');
+}, 120_000);
+
+it('never cuts a branch nova from a stale base: a base branch that moved after inspection is reported as DELIVERY_BASE_CHANGED with nothing written', async () => {
+  const f = await fixture({ deliveryBranch:{ kind:'new',name:'feat/login',name_origin:'typed',suggested_name:suggestedBranch } });
+  const moved = await f.git(f.folder,'-c','user.name=Fixture','-c','user.email=fixture@example.test','commit-tree',await f.git(f.folder,'rev-parse',f.baseSha + '^{tree}'),'-p',f.baseSha,'-m','operator moved main');
+  await f.git(f.folder,'branch','feature/elsewhere',f.baseSha); await f.git(f.folder,'switch','feature/elsewhere'); await f.git(f.folder,'update-ref','refs/heads/main',moved,f.baseSha);
+  expect(await f.land()).toMatchObject({ state:'failed_known',reason:'DELIVERY_BASE_CHANGED' });
+  expect(await absent(f,'refs/heads/feat/login')).toBe(true);
+  expect(await f.git(f.folder,'symbolic-ref','HEAD')).toBe('refs/heads/feature/elsewhere');
 }, 120_000);

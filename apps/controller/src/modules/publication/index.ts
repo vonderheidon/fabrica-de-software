@@ -1,11 +1,25 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { canAdaptLocalCommitIntegration, canFinishLocalCommit, isLocalCommitFolderBlockReason, type AuthorizeUpgrade, type CompletePublication, type EffectIdentity, type EffectView, type GitHubMutationResult, type ReconcilePublication } from '#contracts';
+import { canAdaptLocalCommitIntegration, canFinishLocalCommit, isLocalCommitFolderBlockReason, type AttemptCapture, type AuthorizeUpgrade, type CompletePublication, type DeliveryBranchChoice, type DeliveryMode, type EffectIdentity, type EffectView, type GitHubMutationResult, type ReconcilePublication } from '#contracts';
 import type { GitHub, GitHubBeforeSendContext, GitHubClient, GitHubEffectRequest } from '../github/index.js';
 import { OperationError, type AuthorityObservation, type PublicationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
 import type { DeliveryTargetPlan } from '../storage/index.js';
-import { CaptureError, type TargetCommitResult } from '../workspaces/index.js';
+import { CaptureError, suggestDeliveryBranch, type TargetCommitResult } from '../workspaces/index.js';
 import { markCriteria } from '../pipeline/index.js';
+
+/**
+ * The Branch de entrega sealed when the attempt started. ICR upgrades and older captures carry none:
+ * they use the project default, and PR always creates a branch nova with the suggested name.
+ */
+function sealedDeliveryBranch(capture: AttemptCapture, mode: DeliveryMode): DeliveryBranchChoice | null {
+  const sealed = capture.configuration.delivery_branch;
+  if (sealed && !(mode === 'pr' && sealed.kind === 'existing')) return sealed;
+  const kind = mode === 'pr' ? 'new' : capture.configuration.configuration.delivery_branch?.kind;
+  if (kind === 'existing') return { kind, name: capture.configuration.configuration.base_branch };
+  if (kind !== 'new') return null;
+  const suggested = suggestDeliveryBranch(capture.issue.number, capture.issue.title);
+  return { kind, name: suggested, name_origin: 'suggested', suggested_name: suggested };
+}
 
 type Stage = 'inProgress' | 'inReview' | 'delivered';
 /** Age after which an unconfirmed write can no longer be in flight. */
@@ -359,8 +373,7 @@ export function createPublication(deps: PublicationDependencies) {
     return body;
   }
   async function completeLocalCommit(snapshot: Snapshot, command: PublicationCommand): Promise<void> {
-    const configured = snapshot.capture.configuration.configuration;
-    if (snapshot.mode === 'pr' && configured.delivery_branch?.name === configured.base_branch) blocked('PR_BRANCH_EQUALS_BASE');
+    const deliveryBranch = sealedDeliveryBranch(snapshot.capture, snapshot.mode);
     const delivery = snapshot.delivery!;
     const previous = snapshot.effects.find(e => e.kind === 'local_commit' && e.deliveryId === delivery.id);
     if (previous && ['confirmed','not_applicable'].includes(previous.state)) {
@@ -388,7 +401,7 @@ export function createPublication(deps: PublicationDependencies) {
         const next = await deps.workspaces.inspectIntegrationTarget(target.local_path,{ attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
           contentIdentity:delivery.contentIdentity!,repositoryRelative:delivery.repositoryRelative,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
           repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
-          baseBranch:target.base_branch,baseSha:target.local_identity.base_sha, sourceKind:target.local_identity.source_kind, deliveryBranch: snapshot.capture.configuration.configuration.delivery_branch });
+          baseBranch:target.base_branch,baseSha:target.local_identity.base_sha, sourceKind:target.local_identity.source_kind, deliveryBranch });
         if (next.rootIdentity !== target.local_identity.root_identity) blocked('DELIVERY_TARGET_CHANGED');
         if (next.baseSha !== target.local_identity.base_sha) {
           if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
@@ -409,7 +422,7 @@ export function createPublication(deps: PublicationDependencies) {
       const task = { attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
         contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
         repositoryRelative:delivery.repositoryRelative,repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
-        baseBranch:snapshot.capture.configuration.configuration.delivery_branch?.kind === 'existing' ? snapshot.capture.configuration.configuration.delivery_branch.name : snapshot.capture.configuration.configuration.base_branch,baseSha:snapshot.publicationBaseSha!, sourceKind:source.kind, deliveryBranch:snapshot.capture.configuration.configuration.delivery_branch };
+        baseBranch:deliveryBranch?.kind === 'existing' ? deliveryBranch.name : snapshot.capture.configuration.configuration.base_branch,baseSha:snapshot.publicationBaseSha!, sourceKind:source.kind, deliveryBranch };
       let inspected;
       try { inspected = await deps.workspaces.inspectDeliveryTarget(localPath,task,task); }
       catch (error) {
@@ -421,7 +434,8 @@ export function createPublication(deps: PublicationDependencies) {
         return blocked('INTEGRATION_REVIEW_PENDING');
       }
       if (selectedIdentity && inspected.local_identity.root_identity !== selectedIdentity) blocked('DELIVERY_TARGET_CHANGED');
-      if (integrationTarget && !task.deliveryBranch) inspected = { ...inspected,branch_ref:`${inspected.branch_ref}-r${delivery.round}` };
+      // The first round's branch stays reserved by its sealed target, so an integration round of a branch nova gets its own `-r<round>` name; the switch still refuses any ref that exists.
+      if (integrationTarget && task.deliveryBranch?.kind !== 'existing') inspected = { ...inspected,branch_ref:`${inspected.branch_ref}-r${delivery.round}` };
       const plan: DeliveryTargetPlan = { operation_id:command.operationId,
         delivery_id:delivery.id,attempt_id:snapshot.status.id,repository_id:inspected.repository_id,local_path:inspected.local_path,
         local_identity:inspected.local_identity,branch_ref:inspected.branch_ref,task_type:inspected.task_type,task_description:inspected.task_description,

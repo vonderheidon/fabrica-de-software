@@ -13,11 +13,25 @@ const profileChoice = Type.Union([
   Type.Object({ kind: Type.Literal('reference'), id: OperationId, revision }, closed),
   Type.Object({ kind: Type.Literal('value'), profile: ExecutionProfileValue }, closed),
 ]);
+/** Per-attempt Branch de entrega: `new` without a `name` (or with a blank one) uses the suggested name; any other `name` is the operator's own. */
+export const DeliveryBranchOverride = Type.Union([
+  Type.Object({ kind: Type.Literal('existing') }, closed),
+  Type.Object({ kind: Type.Literal('new'), name: Type.Optional(Type.String({ maxLength: 1024 })) }, closed),
+]);
+export type DeliveryBranchOverride = Static<typeof DeliveryBranchOverride>;
+/** The attempt's resolved Branch de entrega, sealed in the capture when it starts; `null` in ICR. */
+export const DeliveryBranchChoice = Type.Union([
+  Type.Object({ kind: Type.Literal('existing'), name: text(1024) }, closed),
+  Type.Object({ kind: Type.Literal('new'), name: text(1024), name_origin: Type.Union([Type.Literal('suggested'), Type.Literal('typed')]),
+    suggested_name: text(1024) }, closed),
+]);
+export type DeliveryBranchChoice = Static<typeof DeliveryBranchChoice>;
 export const PreparationOverrides = Type.Partial(Type.Object({
   base_branch: ProjectConfiguration.properties.base_branch,
   implementer_profile: profileChoice, reviewer_profile: profileChoice,
   correction_limit: ProjectConfiguration.properties.correction_limit,
   time_defaults: TimeDefaults, artifact_policy: ArtifactPolicy,
+  delivery_branch: DeliveryBranchOverride,
 }, closed));
 export type PreparationOverrides = Static<typeof PreparationOverrides>;
 export const PreparationChoices = Type.Object({
@@ -52,6 +66,7 @@ export const EffectiveConfiguration = Type.Object({
   time_defaults: TimeDefaults, artifact_policy: ArtifactPolicy,
   guidance: Type.String({ maxLength: 16385 }),
   origins: ChoiceOrigins,
+  delivery_branch: Type.Optional(Type.Union([DeliveryBranchChoice, Type.Null()])),
 }, closed);
 export type EffectiveConfiguration = Static<typeof EffectiveConfiguration>;
 export const PreparationEffect = Type.Object({

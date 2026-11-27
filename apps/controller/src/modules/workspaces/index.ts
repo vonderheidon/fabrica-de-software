@@ -42,6 +42,7 @@ export { gitSafety } from './git.js';
 export { ProjectFolderError } from './project-folder.js';
 export type { FolderReservation } from './project-folder.js';
 export type { DeliveryTaskInput, DeliveryTargetInspection, TargetCommitResult } from './delivery-target.js';
+export { nextFreeBranch, suggestDeliveryBranch } from './delivery-target.js';
 export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'> & Partial<Pick<GitHub,'listBranches'>>; context?: GitContext; resolveContext?: () => GitContext | undefined; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization; projectStorage?: ProjectStoragePersistence; historyMigration?: RetainedHistoryMigrationStore }
 export function createWorkspaces(options: WorkspaceOptions) {
   const resolveContext = options.resolveContext;
@@ -70,6 +71,10 @@ export function createWorkspaces(options: WorkspaceOptions) {
     verifyDeliveryTarget: deliveryTargetWorkspace.verifyDeliveryTarget,
     createTargetCommit: deliveryTargetWorkspace.createLocalCommit,
     reconcileTargetCommit: deliveryTargetWorkspace.reconcileLocalCommit,
+    /** Local branches of the Pasta do projeto; `null` when the folder cannot be read. */
+    async projectFolderBranches(path: string): Promise<string[] | null> {
+      try { return await deliveryTargetWorkspace.localBranchNames(path); } catch { return null; }
+    },
     ...createRemotePublisher(options.dataDirectory,git,options.pushAuthorization,undefined,options.context || resolveContext ? { kind: 'confirmed_attempt' } : undefined, resolveAttemptRoot),
     materializeReview: sharedAttempt,
     async validateReview(delivery: import('#contracts').Delivery, reviewId: string): Promise<boolean> {

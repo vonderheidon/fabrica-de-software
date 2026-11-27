@@ -544,16 +544,24 @@ describe('project registration and lightweight catalog', () => {
     expect(f.listBranches).toHaveBeenCalledWith(source);
     expect(f.db.prepare('SELECT count(*) AS n FROM operation_requests').get()).toEqual(before);
   });
-  it.each(['new','existing'] as const)('persists the chosen %s destination branch independently from the source', async kind => {
+  it.each(['new','existing'] as const)('persists the %s Branch de entrega default without a name, and reads an older name as ignored', async kind => {
     const f = fixture(); const headers = await session(f); const registered = await register(f,headers);
     const project = registered.json<ProjectDetail>().project;
     const before = f.storage.getConfiguration(project.id);
-    const delivery_branch = { kind,name:'release/validacao' };
+    const delivery_branch = { kind };
+    const named = await f.app.inject({ method:'PUT',url:`/api/v1/projects/${project.id}/configuration`,
+      headers:{ ...headers,'if-match':before.etag,'idempotency-key':randomUUID() },payload:{ project_changes:{ delivery_branch:{ kind,name:'release/validacao' } } } });
+    expect(named.statusCode).toBe(400);
     const response = await f.app.inject({ method:'PUT',url:`/api/v1/projects/${project.id}/configuration`,
       headers:{ ...headers,'if-match':before.etag,'idempotency-key':randomUUID() },payload:{ project_changes:{ delivery_branch } } });
     expect(response.statusCode,response.body).toBe(200);
+    const revisionId = f.storage.getConfiguration(project.id).view.configuration.id;
     expect(f.storage.getConfiguration(project.id).view.configuration).toMatchObject({ base_branch:before.view.configuration.base_branch,delivery_branch });
-    expect(f.db.prepare('SELECT delivery_branch_json FROM project_revisions WHERE id=?').get(f.storage.getConfiguration(project.id).view.configuration.id)).toEqual({ delivery_branch_json:JSON.stringify(delivery_branch) });
+    expect(f.db.prepare('SELECT delivery_branch_json FROM project_revisions WHERE id=?').get(revisionId)).toEqual({ delivery_branch_json:JSON.stringify(delivery_branch) });
+    // A revision written before the per-attempt name kept a fixed branch name; revisions are immutable, so the old row is simulated in this disposable database.
+    f.db.exec('DROP TRIGGER project_revision_update_immutable');
+    f.db.prepare('UPDATE project_revisions SET delivery_branch_json=? WHERE id=?').run(JSON.stringify({ kind,name:'feat/inicio-projeto' }),revisionId);
+    expect(f.storage.getConfiguration(project.id).view.configuration.delivery_branch).toEqual(delivery_branch);
   });
   it.each(['remote', 'published_base', 'board'] as const)('requires repository and board identity but permits an unpublished local base: %s', async missing => {
     const f = fixture(); const headers = await session(f); const registration = await register(f, headers);

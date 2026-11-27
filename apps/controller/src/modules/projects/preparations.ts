@@ -1,12 +1,12 @@
 import { Value } from '@sinclair/typebox/value';
 import {
   CatalogQuery, PreparationChoices, PreparationUpdate,
-  type ConfigurationView, type EffectiveConfiguration, type IssueOptions, type Preparation, type StartAttempt, type StoredExecutionProfile,
+  type ConfigurationView, type DeliveryBranchChoice, type EffectiveConfiguration, type IssueOptions, type Preparation, type StartAttempt, type StoredExecutionProfile,
   type PreparationRecord, type Prerequisite, type IssueContext,
 } from '#contracts';
 import { assessIssueReadiness, type GitHub } from '../github/index.js';
 import { OperationError, type PreparationCommand, type Storage } from '../storage/index.js';
-import type { Workspaces } from '../workspaces/index.js';
+import { nextFreeBranch, suggestDeliveryBranch, validBranch, type Workspaces } from '../workspaces/index.js';
 import { validateProjectConfiguration, type CommandContext } from './index.js';
 import { interpretIssue, preparationDigest, issueContentPrerequisite } from '../pipeline/index.js';
 import { matchesObservedV3StatusMapping } from './status-mapping.js';
@@ -16,7 +16,7 @@ type PreparationObservation = Omit<Preparation, 'issue'> & { issue: IssueContext
 export interface PreparationDependencies {
   storage: Storage;
   github: Pick<GitHub, 'getIdentity' | 'getProject' | 'listProjectItems' | 'getIssueContextById'>;
-  workspaces: Pick<Workspaces, 'inspectOrigin'>;
+  workspaces: Pick<Workspaces, 'inspectOrigin'> & Partial<Pick<Workspaces, 'projectFolderBranches'>>;
 }
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
 function prerequisite(code: string): Prerequisite {
@@ -28,6 +28,12 @@ function prerequisite(code: string): Prerequisite {
   if (code === 'PROJECT_FOLDER_MISSING') return { code,
     message: 'Este projeto não tem uma Pasta do projeto local confirmada para Commit local ou Pull request.',
     recovery: 'Em Configurar projeto, selecione a pasta que contém o clone deste repositório, salve e revise o resumo novamente.' };
+  if (code === 'DELIVERY_BRANCH_EXISTS') return { code,
+    message: 'Já existe uma branch com o nome digitado para a branch nova na Pasta do projeto.',
+    recovery: 'Digite outro nome, volte ao nome sugerido ou escolha Branch em checkout para gravar o commit na branch existente.' };
+  if (code === 'DELIVERY_BRANCH_INVALID') return { code,
+    message: 'O nome digitado para a branch nova não é um nome de branch válido.',
+    recovery: 'Use letras, números, "/", "-" ou "_", sem espaços, e revise o resumo novamente.' };
   if (code === 'PROFILE_COMPOSITION_REQUIRED') return { code,
     message: 'Um dos perfis ainda não tem instruções efetivas compatíveis.',
     recovery: 'Abra Configuração > Perfis, ajuste as instruções ao limite de 8.192 caracteres e salve o perfil antes de iniciar.' };
@@ -98,6 +104,24 @@ function effective(view: ConfigurationView, choices: PreparationChoices): { conf
       artifact_policy: overrides.artifact_policy ? 'preparation' : 'global', guidance: choices.guidance ? 'preparation' : 'project', delivery_mode: 'preparation' },
   } };
 }
+/**
+ * Branch de entrega of the attempt: ICR has none, PR always creates a branch nova, Commit follows the Preparar choice or the project default.
+ * A suggested name in use moves to the next free suffix; a typed one in use blocks the start.
+ */
+function deliveryBranch(choices: PreparationChoices, config: EffectiveConfiguration['configuration'], issue: { number: number; title: string },
+  branches: readonly string[] | null, reasons: string[]): DeliveryBranchChoice | null {
+  if (choices.delivery_mode === 'icr') return null;
+  const override = choices.overrides.delivery_branch;
+  const kind = choices.delivery_mode === 'pr' ? 'new' : override?.kind ?? config.delivery_branch?.kind ?? 'new';
+  // Until the branch em checkout is read from the folder, it is the project's base branch, where the attempt starts.
+  if (kind === 'existing') return { kind, name: config.base_branch };
+  const suggested = suggestDeliveryBranch(issue.number, issue.title);
+  const typed = override?.kind === 'new' ? override.name?.trim() : undefined;
+  if (!typed) return { kind, name: nextFreeBranch(suggested, branches ?? []), name_origin: 'suggested', suggested_name: suggested };
+  if (!validBranch(typed)) reasons.push('DELIVERY_BRANCH_INVALID');
+  else if (branches?.some(branch => branch.toLowerCase() === typed.toLowerCase())) reasons.push('DELIVERY_BRANCH_EXISTS');
+  return { kind, name: typed, name_origin: 'typed', suggested_name: suggested };
+}
 function effects(mode: PreparationChoices['delivery_mode']): Preparation['effects_preview'] {
   return [
     { kind: 'clone', requested: true, description: 'Create an independent implementation clone from the fixed committed base.' },
@@ -121,7 +145,8 @@ export function createPreparations({ storage, github, workspaces }: PreparationD
     ]);
     const issue = issueResult.state === 'complete' && issueResult.data && 'repository' in issueResult.data ? issueResult.data : null;
     const reasons = [...resolved.reasons];
-    if (record.delivery_mode === 'pr' && config.delivery_branch?.name === config.base_branch) reasons.push('PR_BRANCH_EQUALS_BASE');
+    const branches = record.delivery_mode !== 'icr' && config.source.kind === 'local' ? await workspaces.projectFolderBranches?.(config.source.location) ?? null : null;
+    if (issue) resolved.configuration.delivery_branch = deliveryBranch(record, config, issue, branches, reasons);
     if (config.source.kind === 'github' && record.delivery_mode !== 'icr') reasons.push('PROJECT_FOLDER_MISSING');
     if (view.prerequisites.some(item => item.code === 'PROJECT_DELETION_PENDING')) reasons.push('PROJECT_DELETION_PENDING');
     if (!view.settings.account_id) reasons.push('ACCOUNT_UNOBSERVED');

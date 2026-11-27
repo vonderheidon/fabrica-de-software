@@ -22,8 +22,9 @@ export function upgradeSummaries(db: Database.Database, attemptId: string, deliv
   return modeOrder.slice(modeOrder.indexOf(mode) + 1).map(targetMode => {
     const additionalEffects: ModeUpgradeSummary['additionalEffects'] = [...(mode === 'icr' ? ['local_commit' as const] : []), ...(targetMode === 'pr' ? ['push' as const, 'pull_request' as const] : [])];
     const folderMissing = capture.configuration.configuration.source.kind === 'github' && targetMode !== 'icr';
-    const deliveryBranch = capture.configuration.configuration.delivery_branch;
-    const blocked = a.phase !== 'finished' || !a.result ? 'ATTEMPT_NOT_FINISHED' : reason ?? (folderMissing ? 'PROJECT_FOLDER_MISSING' : targetMode === 'pr' && deliveryBranch?.name === capture.configuration.configuration.base_branch ? 'PR_BRANCH_EQUALS_BASE' : null);
+    // PR always creates a branch nova; Commit follows the project default.
+    const deliveryBranch = targetMode === 'pr' ? { kind: 'new' as const } : capture.configuration.configuration.delivery_branch;
+    const blocked = a.phase !== 'finished' || !a.result ? 'ATTEMPT_NOT_FINISHED' : reason ?? (folderMissing ? 'PROJECT_FOLDER_MISSING' : null);
     return { targetMode, additionalEffects,...(deliveryBranch === undefined ? {} : { deliveryBranch }),
       summaryHash: digest([s.installation_id,s.account_id,s.revision,a.id,a.revision,deliveryId,version,review,mode,targetMode,additionalEffects,effects,targets,
         configurationETag(readConfiguration(db,a.projectId))]),

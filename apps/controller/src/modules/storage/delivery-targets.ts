@@ -20,9 +20,22 @@ export function sealDeliveryTarget(db: Database.Database, plan: DeliveryTargetPl
     }
     const attempt = readAttempt(db,plan.attempt_id); const capture = readCapture(db,plan.attempt_id);
     const delivery = readDelivery(db,plan.delivery_id); assertProjectAvailable(db,attempt.projectId); assertDeletionPathsAvailable(db,[plan.local_path]);
-    const chosenBranch = capture.configuration.configuration.delivery_branch;
-    if (chosenBranch && (plan.branch_ref !== `refs/heads/${chosenBranch.name}` || plan.local_identity.branch_kind !== chosenBranch.kind)) {
+    const chosenBranch = capture.configuration.delivery_branch;
+    // PR never lands on the branch em checkout: a sealed `existing` choice becomes a branch nova with the suggested name there.
+    if (chosenBranch && plan.local_identity.branch_kind !== chosenBranch.kind && !(chosenBranch.kind === 'existing' && plan.local_identity.branch_kind === 'new')) {
       throw new OperationError(409,'DELIVERY_TARGET_AUTHORIZATION_INVALID','A branch de destino diverge da escolha capturada no início.');
+    }
+    if (chosenBranch && plan.local_identity.branch_kind === chosenBranch.kind) {
+      // Only a suggested name may move to a free `-N` suffix; the branch em checkout and a typed name are exact. An integration round may add its own `-r<round>`.
+      const bare = plan.branch_ref.replace(/^refs\/heads\//u,'');
+      const roundSuffix = `-r${delivery.round}`;
+      const names = chosenBranch.kind === 'new' && delivery.round > 1 && bare.endsWith(roundSuffix) ? [bare,bare.slice(0,-roundSuffix.length)] : [bare];
+      const allowed = names.some(name => {
+        if (chosenBranch.kind !== 'new' || chosenBranch.name_origin === 'typed') return name === chosenBranch.name;
+        const suffix = name.startsWith(`${chosenBranch.suggested_name}-`) ? name.slice(chosenBranch.suggested_name.length + 1) : null;
+        return name === chosenBranch.suggested_name || (suffix !== null && /^[1-9][0-9]*$/u.test(suffix));
+      });
+      if (!allowed) throw new OperationError(409,'DELIVERY_TARGET_AUTHORIZATION_INVALID','A branch de destino diverge da escolha capturada no início.');
     }
     const operation = db.prepare<[string,string,string], { kind: string; authorized_mode: string; state: string }>(`SELECT p.kind,p.authorized_mode,p.state
       FROM publication_requests p WHERE p.operation_id=? AND p.attempt_id=? AND p.delivery_id=?`).get(plan.operation_id,plan.attempt_id,plan.delivery_id);
@@ -30,7 +43,7 @@ export function sealDeliveryTarget(db: Database.Database, plan: DeliveryTargetPl
         !['commit','pr'].includes(operation.authorized_mode) || !['accepted','running'].includes(operation.state) ||
         capture.issue.repository.id !== plan.repository_id || delivery.baseSha !== plan.base_sha || publicationBaseSha(db,delivery.id) !== plan.local_identity.base_sha || delivery.gitRef !== plan.approved_ref ||
         delivery.contentIdentity !== plan.content_identity || capture.issue.number !== plan.issue_number ||
-        (capture.configuration.configuration.delivery_branch?.kind === 'existing' ? capture.configuration.configuration.delivery_branch.name : capture.configuration.configuration.base_branch) !== plan.base_branch) {
+        (chosenBranch?.kind === 'existing' ? chosenBranch.name : capture.configuration.configuration.base_branch) !== plan.base_branch) {
       throw new OperationError(409,'DELIVERY_TARGET_AUTHORIZATION_INVALID','O destino não corresponde à autorização e à versão aprovada atuais.');
     }
     const prior = db.prepare<[string,string], { operation_id: string }>('SELECT operation_id FROM delivery_targets WHERE attempt_id=? AND delivery_id=? ORDER BY created_at_ms,rowid LIMIT 1').get(plan.attempt_id,plan.delivery_id);

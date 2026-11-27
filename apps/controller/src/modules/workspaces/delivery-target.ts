@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { Delivery, DeliveryTarget, type DeliveryTarget as SealedTarget, EffectView, type EffectReceipt, type LocalCommitBlock } from '#contracts';
+import { Delivery, DeliveryTarget, type DeliveryBranchChoice, type DeliveryTarget as SealedTarget, EffectView, type EffectReceipt, type LocalCommitBlock } from '#contracts';
 import type { GitHub } from '../github/index.js';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
 import type { GitReader } from './git.js';
@@ -12,7 +12,7 @@ import { githubReference } from './inspect.js';
 import { createCheckoutLanding, LandingBlocked, type LandingPlan, type OperatorConfig } from './checkout-landing.js';
 
 export interface DeliveryTaskInput {
-  sourceKind?: 'local' | 'github' | undefined; deliveryBranch?: { kind: 'new' | 'existing'; name: string } | null | undefined;
+  sourceKind?: 'local' | 'github' | undefined; deliveryBranch?: DeliveryBranchChoice | null | undefined;
   attemptId: string; approvedRef: string; contentIdentity: string; repositoryRelative: string; issueNumber: number; issueTitle: string; repositoryId: string; repositoryUrl: string; baseBranch: string; baseSha: string;
 }
 export interface DeliveryTargetInspection {
@@ -50,6 +50,18 @@ function taskIdentity(title: string,changedPaths: readonly string[] = []): { typ
   const slug = description.normalize('NFD').replace(/\p{Diacritic}/gu,'').replace(/ß/gu,'ss').replace(/æ/giu,'ae').replace(/œ/giu,'oe')
     .toLowerCase().replace(/[^a-z0-9]+/gu,'-').replace(/^-+|-+$/gu,'').slice(0,72).replace(/-+$/u,'') || `issue-${title.length}`;
   return { type,description: description || 'melhoria aprovada',slug };
+}
+/** Suggested name of a branch nova: `<tipo>/<N>-<slug>`, derived from the issue. */
+export function suggestDeliveryBranch(issueNumber: number,issueTitle: string): string {
+  const identity = taskIdentity(issueTitle);
+  return `${identity.type}/${issueNumber}-${identity.slug}`;
+}
+/** `name` when no local branch uses it, else the first free `-2`, `-3`…; refs compare case-insensitively, as on Windows. */
+export function nextFreeBranch(name: string,existing: readonly string[]): string {
+  const taken = new Set(existing.map(branch => branch.toLowerCase()));
+  let candidate = name;
+  for (let n = 2; taken.has(candidate.toLowerCase()); n++) candidate = `${name}-${n}`;
+  return candidate;
 }
 async function objectIdentity(path: string): Promise<string> {
   const s = await lstat(path,{ bigint: true });
@@ -161,10 +173,15 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     if (rootIdentity !== await objectIdentity(root) || gitDirectoryIdentity !== await objectIdentity(gitDir)) targetError('DELIVERY_TARGET_CHANGED');
     return { root,gitDir,rootIdentity,gitDirectoryIdentity,head,observedBranchRef,workingStateHash,indexHash,sharedIndexHash,remoteName:matches[0]!.name,remoteHash:matches[0]!.remoteHash,repositoryId: task.repositoryId };
   }
+  /** Local branch names of a checkout, without the `refs/heads/` prefix. */
+  async function localBranchNames(root: string): Promise<string[]> {
+    const listed = await gitRun(root,['for-each-ref','--format=%(refname)','refs/heads/']);
+    return listed.split(/\r?\n/u).filter(Boolean).map(ref => ref.replace(/^refs\/heads\//u,''));
+  }
   async function inspectDeliveryTarget(path: string,task: DeliveryTaskInput,approved: { approvedRef: string; contentIdentity: string; baseSha: string }): Promise<DeliveryTargetInspection> {
     if (!dataDirectory) targetError('CONTEXT_UNAVAILABLE');
-    const existingBranch = task.deliveryBranch?.kind === 'existing';
-    const found = await observe(path,task,approved,true,!existingBranch);
+    const landed = task.deliveryBranch?.kind === 'existing' || task.deliveryBranch?.kind === 'new';
+    const found = await observe(path,task,approved,true,!landed);
     const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(task.attemptId),canonicalize);
     const retained = retainedRepositoryPath(data, task.attemptId, task.repositoryRelative);
     await plainDirectory(dirname(retained),canonicalize); await plainDirectory(retained,canonicalize); await noBorrowedObjects(retained);
@@ -177,8 +194,8 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     let branch = task.deliveryBranch?.name ?? candidate(identity.slug);
     let check = await isolated!(found.root,['check-ref-format','--branch',branch]);
     if (check.exitCode !== 0) targetError('DELIVERY_BRANCH_INVALID');
-    const refs = (await isolated!(found.root,['for-each-ref','--format=%(refname)','refs/heads/'])).stdout.trim().split(/\r?\n/u).filter(Boolean);
-    const exists = (name: string) => refs.some(ref => ref.toLowerCase() === `refs/heads/${name}`.toLowerCase());
+    const refs = await localBranchNames(found.root);
+    const exists = (name: string) => refs.some(ref => ref.toLowerCase() === name.toLowerCase());
     let operatorConfig: OperatorConfig | undefined;
     if (task.deliveryBranch?.kind === 'existing') {
       if (!exists(branch)) targetError('DELIVERY_BRANCH_NOT_FOUND');
@@ -187,11 +204,19 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       // The branch in checkout is the delivery branch; only another worktree holding it is a conflict. The checkout itself is judged just before the write.
       await landing.assertNoOtherWorktree(found.root,`refs/heads/${branch}`);
       operatorConfig = await landing.readOperatorConfig(found.root);
-    } else if (await exists(branch)) {
-      if (task.deliveryBranch) targetError('DELIVERY_BRANCH_COLLISION');
+    } else if (task.deliveryBranch?.kind === 'new') {
+      // A typed name is the operator's: never written over. A suggested one moves on to the next free suffix.
+      if (exists(branch)) {
+        if (task.deliveryBranch.name_origin === 'typed') targetError('DELIVERY_BRANCH_COLLISION');
+        branch = nextFreeBranch(task.deliveryBranch.suggested_name,refs);
+        check = await isolated!(found.root,['check-ref-format','--branch',branch]);
+        if (check.exitCode !== 0) targetError('DELIVERY_BRANCH_INVALID');
+      }
+      operatorConfig = await landing.readOperatorConfig(found.root);
+    } else if (exists(branch)) {
       branch = `${branch}-${suffix}`;
       check = await isolated!(found.root,['check-ref-format','--branch',branch]);
-      if (check.exitCode !== 0 || await exists(branch)) targetError('DELIVERY_BRANCH_COLLISION');
+      if (check.exitCode !== 0 || exists(branch)) targetError('DELIVERY_BRANCH_COLLISION');
     }
     return { repository_id: task.repositoryId,local_path: found.root,local_identity: {
       ...(task.deliveryBranch ? { branch_kind: task.deliveryBranch.kind } : {}),
@@ -273,6 +298,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     let atBase = false;
     try {
       const existing = target.local_identity.branch_kind === 'existing';
+      const switched = target.local_identity.branch_kind === 'new';
       const c = await localContext(delivery,effect,target,false); const observed = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       if (observed.exitCode === 1) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
       let sha = observed.stdout.trim();
@@ -291,7 +317,14 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         if (oid.test(found)) { sha = found; inspectCheckout = false; }
       }
       if (!await matchesApproved(sha)) targetError('COMMIT_IDENTITY_CONFLICT');
-      if (!existing) {
+      if (switched) {
+        // A switch that is still unresolved is only done when the folder is on the new branch at the commit, with nothing left over.
+        if (effect.state !== 'confirmed') {
+          const config = await landing.writeConfig(c.repository,target.local_identity.operator_config);
+          if (!await landing.matches(plan,config,sha)) return { state:'unknown',receipt:null,reason:'PROJECT_FOLDER_LANDING_UNVERIFIED' };
+        }
+        await transferBranch(c,target,sha);
+      } else if (!existing) {
         await transferBranch(c,target,sha);
         await verifyWorkingState(c,target);
       } else if (inspectCheckout) {
@@ -320,7 +353,8 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         effect.expectedIdentity.taskType !== target.task_type || effect.expectedIdentity.taskDescription !== target.task_description ||
         delivery.attemptId !== target.attempt_id || delivery.id !== target.delivery_id || delivery.baseSha !== target.base_sha || effect.expectedIdentity.parentSha !== target.local_identity.base_sha ||
         delivery.gitRef !== target.approved_ref || delivery.contentIdentity !== target.content_identity || !dataDirectory || !isolated) targetError('COMMIT_IDENTITY_INVALID');
-    const existing = target.local_identity.branch_kind === 'existing';
+    // Both landing shapes judge the operator's checkout with their own pre-voo right before writing, not against a sealed hash.
+    const existing = target.local_identity.branch_kind === 'existing' || target.local_identity.branch_kind === 'new';
     const folderInput = { attemptId:delivery.attemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:delivery.repositoryRelative,
       issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,
       repositoryUrl:`https://github.com/${effect.expectedIdentity.repositoryOwner!}/${effect.expectedIdentity.repositoryName!}`,
@@ -391,6 +425,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const c = await localContext(delivery,effect,target);
       const current = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       const existing = target.local_identity.branch_kind === 'existing';
+      const switched = target.local_identity.branch_kind === 'new';
       const markMutation = async () => { await authorize(); mutationStarted = true; };
       if (current.exitCode === 0 && (!existing || current.stdout.trim() !== target.local_identity.base_sha)) {
         const observed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target,existing ? markMutation : undefined);
@@ -399,7 +434,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       }
       if (existing && (current.exitCode !== 0 || current.stdout.trim() !== target.local_identity.base_sha)) targetError('DELIVERY_BASE_CHANGED');
       if ((!existing && current.exitCode !== 1) || effect.state !== 'running') return { state:'unknown',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
-      if (existing) {
+      if (existing || switched) {
         // Verify delivery integrity and APPROVED_NO_DELTA before writing objects or FETCH_HEAD into the Pasta do projeto.
         const deliveryTree = await isolated!(c.retained,[`--git-dir=${c.retained}`,'rev-parse','--verify',`${delivery.commitSha}^{tree}`]);
         if (deliveryTree.exitCode !== 0 || deliveryTree.stdout.trim() !== target.content_identity) targetError('DELIVERY_INTEGRITY_FAILED');
@@ -409,6 +444,29 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         if (publicationBaseTree.exitCode !== 0) targetError('DELIVERY_INTEGRITY_FAILED');
         if (publicationBaseTree.stdout.trim() === delivery.contentIdentity) return { state:'not_applicable',receipt:null,reason:'APPROVED_NO_DELTA' };
         const plan = landingPlan(c,delivery,target);
+        if (switched) {
+          // A branch nova always starts at the tip of the base branch; a base that moved since the inspection goes to the integration round.
+          const baseTip = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',`refs/heads/${target.base_branch}^{commit}`]);
+          if (baseTip.exitCode !== 0 || baseTip.stdout.trim() !== target.local_identity.base_sha) targetError('DELIVERY_BASE_CHANGED');
+          const hooksOff = await landing.hooksOff();
+          await fetchApprovedCommit(c,delivery,target,hooksOff);
+          const sha = await commitApprovedTree(c,target);
+          const { config,touched,origin } = await landing.preflightSwitch(plan,sha);
+          await authorize();
+          // Only the switch below creates the branch and changes the checkout; until then a refusal leaves only an unreferenced object.
+          await landing.beforeSwitch(plan,config,origin,sha);
+          mutationStarted = true;
+          const created = await landing.switchNew(plan,config,sha);
+          const landed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+          if (landed.state === 'confirmed') return landed;
+          if (landed.state === 'failed_known' && landed.reason === 'COMMIT_NOT_OBSERVED') {
+            // A refused switch that left the original branch, index and files untouched wrote nothing: the operator may retry.
+            return created.exitCode !== 0 && await landing.matches({ ...plan,branchRef: origin.branchRef,baseSha: origin.head },config,origin.head,touched)
+              ? { state:'failed_known',receipt:null,reason:'PROJECT_FOLDER_REFUSED' }
+              : { state:'unknown',receipt:null,reason:'PROJECT_FOLDER_LANDING_UNVERIFIED' };
+          }
+          return landed.reason ? landed : { ...landed,reason:'PROJECT_FOLDER_LANDING_UNVERIFIED' };
+        }
         const partial = await tryRepairAtBase(c,delivery,effect,target,plan,markMutation);
         if (partial) return partial;
         const { config,touched } = await landing.preflight(plan);
@@ -455,7 +513,7 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     }
   }
   async function verifyDeliveryTarget(target: SealedTarget,task: DeliveryTaskInput): Promise<void> {
-    const existing = target.local_identity.branch_kind === 'existing';
+    const existing = target.local_identity.branch_kind === 'existing' || target.local_identity.branch_kind === 'new';
     const found = await observe(target.local_path,task,{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },!existing,!existing);
     if (found.rootIdentity !== target.local_identity.root_identity || found.gitDirectoryIdentity !== target.local_identity.git_directory_identity ||
         found.remoteHash !== target.local_identity.remote_hash || found.remoteName !== target.local_identity.remote_name) targetError('DELIVERY_CHECKOUT_CHANGED');
@@ -463,5 +521,5 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     if (!existing && (found.head !== target.local_identity.observed_head || found.observedBranchRef !== target.local_identity.observed_branch_ref ||
         found.workingStateHash !== target.local_identity.working_state_hash || found.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
   }
-  return { inspectDeliveryTarget,inspectIntegrationTarget,verifyDeliveryTarget,createLocalCommit,reconcileLocalCommit };
+  return { inspectDeliveryTarget,inspectIntegrationTarget,verifyDeliveryTarget,createLocalCommit,reconcileLocalCommit,localBranchNames };
 }

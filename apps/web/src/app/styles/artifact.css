@@ -775,3 +775,20 @@ td:first-child, th:first-child { padding-left: 0; }
 .attempt-stage-summary { min-width: 0; padding: 12px 0; overflow-wrap: anywhere; }
 .attempt-stage-summary h3 { margin: 0 0 10px; }
 .attempt-stage-summary .preparation-facts { margin: 0; }
+/* Bloco Entrega: Branch de entrega em cartões e prévia do efeito na Pasta do projeto. */
+.delivery-block { display: grid; gap: 12px; }
+.delivery-branch-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.delivery-branch-cards > legend { grid-column: 1 / -1; padding: 0; margin-bottom: 8px; font-weight: 650; }
+.delivery-branch-card { display: grid; gap: 6px; align-content: start; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface, #fff); min-width: 0; }
+.delivery-branch-card[data-selected="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.delivery-branch-card[aria-disabled="true"] { opacity: .55; }
+.delivery-branch-card-title { display: flex; gap: 8px; align-items: center; justify-content: flex-start; cursor: pointer; }
+.delivery-branch-card-title input[type="radio"] { flex: none; width: auto; min-height: 0; margin: 0; }
+.delivery-branch-card[aria-disabled="true"] .delivery-branch-card-title { cursor: not-allowed; }
+.delivery-branch-name { display: grid; gap: 4px; margin-top: 4px; }
+.delivery-branch-name label { font-size: 12px; color: var(--muted); }
+.delivery-branch-warn { font-size: 12px; color: #8b3b20; }
+.delivery-branch-info { font-size: 12px; color: var(--muted); }
+.delivery-preview { display: grid; gap: 4px; padding: 12px 14px; border-radius: 8px; background: #f4f6f8; font-size: 13px; overflow-wrap: anywhere; }
+.delivery-preview code, .delivery-branch-card code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+@media (max-width: 720px) { .delivery-branch-cards { grid-template-columns: 1fr; } }
