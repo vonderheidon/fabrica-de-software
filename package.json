@@ -32,7 +32,8 @@
     "acceptance:check": "node scripts/first-slice-evidence.mjs",
     "package:local": "npm run build && node scripts/package-distribution.mjs",
     "test:distribution": "node scripts/smoke-distribution.mjs",
-    "start": "node scripts/start-host.mjs"
+    "start": "node scripts/start-host.mjs",
+    "prototype:delivery": "vite --config config/vite.config.ts --port 5199"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.3",
