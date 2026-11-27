@@ -16,6 +16,10 @@ _Avoid_: Quadro Kanban, equipe permanente
 Unidade cadastrada que associa um repositório, sua origem de trabalho e configurações reutilizáveis. Sua identidade não depende do nome ou da existência de remoto.
 _Avoid_: Pasta como identidade, GitHub Project como sinônimo
 
+**Pasta do projeto**:
+Checkout Git local do projeto, mantido pelo operador, onde as entregas com commit aterrissam. É distinta do ambiente da issue, onde o trabalho acontece isolado.
+_Avoid_: Projeto original, ambiente da issue, destino escolhido por tentativa
+
 **Kanban monitorado**:
 GitHub Project explicitamente associado a um projeto para selecionar e acompanhar issues.
 _Avoid_: Projeto cadastrado
@@ -87,6 +91,10 @@ _Avoid_: Permissão permanente de publicação
 Implement -> Code-review: Implementação, validações técnicas pertinentes registradas pelo Implementador e revisão independente, com resultado e alterações disponíveis sem commit de entrega.
 _Avoid_: Código integrado, PR criada
 
+**Branch de entrega**:
+Opção dos modos com commit que define onde o commit aterrissa na pasta do projeto: na branch em checkout, que serve de base da tentativa e permite empilhar várias issues numa mesma branch, ou em uma branch nova, criada a partir da branch base e que passa a ser a branch em checkout. O padrão pertence ao projeto, é o que a fila usa, e pode ser trocado na tentativa; o modo com PR sempre usa branch nova.
+_Avoid_: Quarto modo de entrega, branch base
+
 **Publicação**:
 Efeitos de entrega executados pelo controlador conforme o modo escolhido, separados da aprovação técnica.
 _Avoid_: Aprovação, merge
@@ -98,6 +106,10 @@ _Avoid_: Bloqueio por qualquer erro de ferramenta
 **Interrupção**:
 Perda do acompanhamento necessário para continuar automaticamente, sem presumir encerramento físico dos recursos.
 _Avoid_: Recursos parados, retomada automática
+
+**Limpeza do ambiente**:
+Remoção da área de trabalho do ambiente da issue depois da entrega, preservando as versões aprovadas, as evidências e o histórico das tentativas. Pode ser automática, depois de uma publicação com commit bem-sucedida, ou manual. Uma falha na limpeza não desfaz a entrega.
+_Avoid_: Exclusão da issue, cancelamento, remoção do histórico
 
 **Cancelamento**:
 Revogação da continuidade e publicação da tentativa pelo operador ou por uma condição terminal, distinta da conclusão da limpeza.
