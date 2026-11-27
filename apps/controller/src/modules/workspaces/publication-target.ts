@@ -1,8 +1,9 @@
-import { lstat, realpath, mkdir, readdir } from 'node:fs/promises';
+import { realpath, mkdir, readdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import type { GitReader } from './git.js';
 import { githubReference } from './inspect.js';
 import type { GitHub } from '../github/index.js';
+import { cloneArguments, directoryIdentity as plainDirectoryIdentity, observeClone, pathExists } from './clone-support.js';
 
 export interface TargetIdentity {
   formatVersion: 1; repositoryId: string; root: string; parent: string; parentIdentity: string;
@@ -11,12 +12,9 @@ export interface TargetIdentity {
 export class TargetError extends Error { constructor(readonly code: string) { super(code); } }
 const fail = (code: string): never => { throw new TargetError(code); };
 async function identity(path: string) {
-  const stat = await lstat(path, { bigint: true });
-  if (!stat.isDirectory() || stat.isSymbolicLink()) fail('TARGET_PATH_REPLACED');
-  return `${stat.dev}:${stat.ino}:${stat.birthtimeNs}`;
-}
-async function exists(path: string) {
-  try { await lstat(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  const value = await plainDirectoryIdentity(path);
+  if (value === null) fail('TARGET_PATH_REPLACED');
+  return value as string;
 }
 export function createPublicationTargetWorkspace(github: Pick<GitHub, 'getRepository'>, git?: GitReader) {
   async function parentMatches(expected: TargetIdentity) {
@@ -28,14 +26,9 @@ export function createPublicationTargetWorkspace(github: Pick<GitHub, 'getReposi
     const directoryIdentity = await identity(expected.root);
     if (expected.directoryIdentity !== null && directoryIdentity !== expected.directoryIdentity) fail('TARGET_PATH_REPLACED');
     if (await realpath(expected.root) !== expected.root) fail('TARGET_PATH_REPLACED');
-    const top = await git(expected.root, ['rev-parse','--show-toplevel']);
-    if (top.exitCode !== 0 || await realpath(top.stdout.trim()) !== expected.root) fail('TARGET_NOT_CLONE');
-    const remote = await git(expected.root, ['config','--null','--get-all','remote.origin.url']);
-    const urls = remote.stdout.split('\0').filter(Boolean);
-    const reference = urls.length === 1 ? githubReference(urls[0]!) : null;
-    if (remote.exitCode !== 0 || !reference) fail('TARGET_REPOSITORY_MISMATCH');
-    const repository = await github.getRepository(reference!);
-    if (repository.state !== 'complete' || repository.data?.id !== expected.repositoryId) fail('TARGET_REPOSITORY_MISMATCH');
+    const observed = await observeClone(git, github, expected.root);
+    if (observed.state === 'not_clone') fail('TARGET_NOT_CLONE');
+    if (observed.state !== 'observed' || observed.repositoryId !== expected.repositoryId) fail('TARGET_REPOSITORY_MISMATCH');
     if (await identity(expected.root) !== directoryIdentity) fail('TARGET_PATH_REPLACED');
     await parentMatches(expected);
     return { ...expected, directoryIdentity };
@@ -47,7 +40,7 @@ export function createPublicationTargetWorkspace(github: Pick<GitHub, 'getReposi
       if (parent !== dirname(root)) fail('TARGET_PARENT_CHANGED');
       const expected: TargetIdentity = { formatVersion: 1, root, parent, parentIdentity: await identity(parent), directoryIdentity: null, repositoryId, repositoryUrl };
       if (kind === 'clone') {
-        if (await exists(root)) fail('TARGET_OCCUPIED');
+        if (await pathExists(root)) fail('TARGET_OCCUPIED');
         const reference = githubReference(repositoryUrl);
         if (!reference) fail('TARGET_REPOSITORY_MISMATCH');
         const repository = await github.getRepository(reference!);
@@ -65,7 +58,7 @@ export function createPublicationTargetWorkspace(github: Pick<GitHub, 'getReposi
       reserve(reserved);
       await parentMatches(reserved); authorize();
       if (await identity(reserved.root) !== reserved.directoryIdentity || (await readdir(reserved.root)).length) fail('TARGET_PATH_REPLACED');
-      const result = await git(reserved.root, ['-c','core.hooksPath=', 'clone','--',reserved.repositoryUrl,'.']);
+      const result = await git(reserved.root, cloneArguments(reserved.repositoryUrl));
       if (result.exitCode !== 0) fail('TARGET_CLONE_INCOMPLETE');
       return observe(reserved);
     },

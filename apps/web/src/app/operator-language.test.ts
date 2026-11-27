@@ -104,7 +104,7 @@ describe('operator language', () => {
       'Nome do projeto', 'Tipo de origem', 'Pasta local existente', 'URL do repositório GitHub',
       'Branch-base', 'Raiz dos projetos', 'Intervalo de consulta', 'Tempo ativo por passagem',
       'TTL de pergunta configurado', 'TTL de pergunta valor', 'TTL de pergunta unidade',
-      'Automação global habilitada', 'Tipo da origem', 'Localização da origem',
+      'Automação global habilitada', 'Pasta do projeto', 'Nome da pasta',
       'Perfil implementador', 'Perfil revisor', 'Limite de correções', 'Modo de entrega padrão',
       'Automação deste projeto habilitada', 'Ordem de prioridade', 'Campo de prioridade (ID)',
       'Usar posição do quadro', 'Orientações do projeto', 'GitHub Project', 'Campo Status',

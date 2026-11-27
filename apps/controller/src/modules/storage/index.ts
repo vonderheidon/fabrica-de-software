@@ -12,6 +12,10 @@ import { acceptCreation, acceptCreationReconciliation, finishCreationReconciliat
 import { claimCreationBoardOperation, finishCreationBoardOperation, getCreationBoardOperation, markCreationBoardOperationSent, recordCreationBoardIntent, type BoardOperationIntent } from './creation-board.js';
 import type { CreationBoardOperation, CreationStep } from '#contracts';
 export type { CreationCommand } from './creations.js';
+import { acceptProjectImport, advanceProjectImport, completeProjectImport, failProjectImport, readProjectImport, readProjectImportWork, recoverProjectImport, resumableProjectImports,
+  type ProjectImportAcceptance, type ProjectImportAdvance, type ProjectImportCleanup, type ProjectImportCommand, type ProjectImportCompletion, type ProjectImportPlan, type ProjectImportWork } from './project-imports.js';
+import type { ProjectImportView } from '#contracts';
+export type { ProjectImportAcceptance, ProjectImportAdvance, ProjectImportCleanup, ProjectImportCommand, ProjectImportCompletion, ProjectImportPlan, ProjectImportWork } from './project-imports.js';
 import { readAttemptPage, readAttemptDetail, readDeliveryDetail } from './queries.js';
 import type { AttemptListQuery, AttemptDetailQuery, DeliveryDetailQuery } from '#contracts';
 import { recordEffectIntent, readEffect, claimEffect, finishEffect, assertEffectAuthorized, type EffectIntent } from './effects.js';
@@ -148,6 +152,14 @@ export interface Storage {
   completeCreation(id: string): void;
   failCreation(id: string, diagnostic: string): void;
   interruptCreations(): void;
+  recoverProjectImport(command: ProjectImportCommand): StoredOperation | null;
+  acceptProjectImport(command: ProjectImportCommand, plan: ProjectImportPlan): ProjectImportAcceptance;
+  getProjectImport(id: string): ProjectImportView;
+  getProjectImportWork(id: string): ProjectImportWork;
+  advanceProjectImport(id: string, revision: number, patch: ProjectImportAdvance): ProjectImportView;
+  completeProjectImport(id: string, revision: number, completion: ProjectImportCompletion): ProjectImportView;
+  failProjectImport(id: string, revision: number, diagnostic: string, cleanup: ProjectImportCleanup): ProjectImportView;
+  resumableProjectImports(): string[];
   recordCreationBoardIntent(input: BoardOperationIntent): CreationBoardOperation;
   getCreationBoardOperation(operationId: string): CreationBoardOperation;
   claimCreationBoardOperation(operationId: string, revision: number): CreationBoardOperation | null;
@@ -456,6 +468,14 @@ function openStorageWithSchema(options: StorageOptions): Storage {
       completeCreation: id => completeCreation(connection, id),
       failCreation: (id, diagnostic) => failCreation(connection, id, diagnostic),
       interruptCreations: () => interruptCreations(connection),
+      recoverProjectImport: command => guarded(() => connection.transaction(() => recoverProjectImport(connection, command))()),
+      acceptProjectImport: (command, plan) => acceptProjectImport(connection, command, plan),
+      getProjectImport: id => readProjectImport(connection, id),
+      getProjectImportWork: id => readProjectImportWork(connection, id),
+      advanceProjectImport: (id, revision, patch) => advanceProjectImport(connection, id, revision, patch),
+      completeProjectImport: (id, revision, completion) => completeProjectImport(connection, id, revision, completion),
+      failProjectImport: (id, revision, diagnostic, cleanup) => failProjectImport(connection, id, revision, diagnostic, cleanup),
+      resumableProjectImports: () => guarded(() => resumableProjectImports(connection)),
       recordCreationBoardIntent: input => recordCreationBoardIntent(connection, input),
       getCreationBoardOperation: id => guarded(() => connection.transaction(() => getCreationBoardOperation(connection, id))()),
       claimCreationBoardOperation: (id, revision) => claimCreationBoardOperation(connection, id, revision),

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeletionPreview, SessionResponse } from '#contracts';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -94,9 +95,11 @@ describe('project deletion HTTP boundary', () => {
     await f.coordinator.schedule(accepted.id);
     await f.coordinator.drain();
     expect(f.storage.getProjectDeletion(accepted.id)).toEqual({ operation_id: accepted.id, state: 'succeeded' });
+    const folder = join(f.directory, 'fresh-clone');
+    f.observation.source = { kind: 'local', location: folder };
     const response = await f.app.inject({ method: 'POST', url: '/api/v1/projects', headers: {
       ...f.headers, 'idempotency-key': randomUUID(),
-    }, payload: { name: 'Project', source: { kind: 'github', location: f.issue.repository.url }, base_branch: 'main' } });
+    }, payload: { name: 'Project', source: { kind: 'local', location: folder }, base_branch: 'main' } });
     expect(response.statusCode).toBe(201);
     const registered = response.json<{ project: { id: string }; configuration?: unknown }>();
     const projectId = registered.project.id;

@@ -625,9 +625,9 @@ describe('project registration and lightweight catalog', () => {
   });
   it('stores canonical GitHub identity from inspection rather than trusting caller IDs or folder names', async () => {
     const f = fixture(); const headers = await session(f);
-    f.inspection.source = { kind: 'github', location: 'https://github.com/test-org/repository' };
-    f.inspection.remote = { name: null, url: f.inspection.source.location, confirmed: true, branch: null, repository: { id: 'REPOSITORY_test', name: 'repository', owner: { id: 'OWNER_test', login: 'test-org' }, url: f.inspection.source.location, defaultBranch: 'main', isPrivate: true, isArchived: false } };
-    const r = await f.app.inject({ method: 'POST', url: '/api/v1/projects', headers: { ...headers, 'idempotency-key': randomUUID() }, payload: { name: 'Unrelated name', source: { kind: 'github', location: 'git@github.com:test-org/repository.git' }, base_branch: 'main' } });
+    f.inspection.source = { kind: 'local', location: f.directory };
+    f.inspection.remote = { name: 'origin', url: 'git@github.com:test-org/repository.git', confirmed: true, branch: null, repository: { id: 'REPOSITORY_test', name: 'repository', owner: { id: 'OWNER_test', login: 'test-org' }, url: 'https://github.com/test-org/repository', defaultBranch: 'main', isPrivate: true, isArchived: false } };
+    const r = await f.app.inject({ method: 'POST', url: '/api/v1/projects', headers: { ...headers, 'idempotency-key': randomUUID() }, payload: { name: 'Unrelated name', source: { kind: 'local', location: f.directory }, base_branch: 'main' } });
     expect(r.statusCode).toBe(201); expect(r.json<ProjectDetail>().project.source).toMatchObject({ repository_id: 'REPOSITORY_test', repository_url: 'https://github.com/test-org/repository' });
   });
   it('uses a bounded cursor tied to filters, account, installation and stable name/ID order', async () => {
@@ -1200,17 +1200,15 @@ describe('global and aggregate configuration', () => {
     expect(f.storage.getSettings().time_defaults).toEqual(before.view.settings.time_defaults); expect(f.storage.getOperation(key)).toBeNull();
     expect(f.storage.getGlobalConfiguration().view.profiles).toHaveLength(1);
   });
-  it('does not keep confirmed repository IDs when a changed source is inspected without a remote', async () => {
+  it('keeps the confirmed repository when a changed Pasta do projeto is not a clone of it', async () => {
     const f = fixture(); const headers = await session(f);
+    f.inspection.remote = { name: 'origin', url: 'https://github.com/test-org/repository', confirmed: true, branch: null, repository: { id: 'REPOSITORY_test', name: 'repository', owner: { id: 'OWNER_test', login: 'test-org' }, url: 'https://github.com/test-org/repository', defaultBranch: 'main', isPrivate: true, isArchived: false } };
     const id = (await register(f, headers)).json<ProjectDetail>().project.id;
-    f.inspection.source = { kind: 'github', location: 'https://github.com/test-org/repository' };
-    f.inspection.remote = { name: null, url: f.inspection.source.location, confirmed: true, branch: null, repository: { id: 'REPOSITORY_test', name: 'repository', owner: { id: 'OWNER_test', login: 'test-org' }, url: f.inspection.source.location, defaultBranch: 'main', isPrivate: true, isArchived: false } };
-    expect((await putConfiguration(f, headers, id, { project_changes: { source: { kind: 'github', location: f.inspection.source.location } } })).statusCode).toBe(200);
     expect(f.storage.getConfiguration(id).view.configuration.source.repository_id).toBe('REPOSITORY_test');
-    f.inspection.remote = null; f.inspection.source = { kind: 'local', location: f.directory };
+    f.inspection.remote = null;
     const r = await putConfiguration(f, headers, id, { project_changes: { source: { kind: 'local', location: f.directory }, base_branch: 'release' } });
-    expect(r.statusCode).toBe(200); expect(r.json<ConfigurationView>().configuration.source.repository_id).toBeUndefined();
-    expect(f.inspectOrigin).toHaveBeenLastCalledWith({ source: { kind: 'local', location: f.directory }, baseBranch: 'release' });
+    expect(r.statusCode).toBe(409); expect(r.json<{ code: string }>().code).toBe('PROJECT_FOLDER_NOT_CLONE');
+    expect(f.storage.getConfiguration(id).view.configuration.source.repository_id).toBe('REPOSITORY_test');
   });
   it('returns a sanitized unavailable response under a finite SQLite write lock', async () => {
     const f = fixture(); const headers = await session(f); const id = (await register(f, headers)).json<ProjectDetail>().project.id;

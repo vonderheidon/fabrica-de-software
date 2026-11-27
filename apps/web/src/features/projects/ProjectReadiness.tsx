@@ -11,7 +11,7 @@ export function conditionSection(code: string): ConditionSection {
   if (/ACCOUNT|PROJECTS_ROOT|HOST|MAESTRI|ONBOARDING/.test(code)) return 'global';
   if (/PROFILE/.test(code)) return 'profiles';
   if (/CRITERI|OBJECTIVE|TITLE/.test(code)) return 'criteria';
-  if (/REMOTE|BASE_|ORIGIN|REPOSITORY_ARCHIVED|CODE_NOT_PUBLISHED/.test(code)) return 'origin';
+  if (/REMOTE|BASE_|ORIGIN|PROJECT_FOLDER|REPOSITORY_ARCHIVED|CODE_NOT_PUBLISHED/.test(code)) return 'origin';
   if (/PROJECT_REQUIRED|PROJECT_OWNER|STATUS_MAPPING|STATUS_FIELD|STATUS_OPTION/.test(code)) return 'mapping';
   if (/CONFIGURATION|REVISION|DELETION/.test(code)) return 'configuration';
   return 'issue';

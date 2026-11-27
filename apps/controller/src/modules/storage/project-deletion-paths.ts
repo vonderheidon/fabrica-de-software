@@ -118,6 +118,9 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
   const creations = db.prepare<[], { id: string; project_id: string | null; destination: string }>(
     'SELECT id,project_id,destination FROM project_creations ORDER BY id',
   ).all();
+  const imports = db.prepare<[], { id: string; project_id: string | null; destination: string }>(
+    "SELECT id,project_id,destination FROM project_imports WHERE state<>'failed' ORDER BY id",
+  ).all();
   const otherStorageLocations = db.prepare<[string], { project_id: string; root_relative: string }>(`SELECT project_id,root_relative FROM project_storage_locations
     WHERE project_id<>? ORDER BY project_id,location_key,revision`).all(projectId);
   const validOtherStorageLocations = otherStorageLocations.filter(location => {
@@ -133,6 +136,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
   const protectedPaths = [...otherOrigins.map(o => o.path), ...selectedTargets.map(t => t.local_path), ...otherDeliveryTargets.map(t => t.local_path),
     ...creations.filter(c => c.project_id !== projectId || project.source.kind !== 'local' || c.destination !== project.source.location).map(c => c.destination),
+    ...imports.filter(i => i.project_id !== projectId).map(i => i.destination),
     ...otherBootstraps,
     ...validOtherStorageLocations.map(location => resolve(installationRoot, ...location.root_relative.split('/'))),
     resolve(dataDirectory, 'factory.sqlite'), resolve(dataDirectory, 'controller-lock.sqlite')];
@@ -143,7 +147,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     resolve(dataDirectory, 'projects'), bootstrapRoot,
     ...(settings.projects_root ? [settings.projects_root] : [])];
   const inventoryVersion = digest({ version: 2, schema, project, keys: inventory.keys, storageLocations, otherStorageLocations,
-    resources, passages, otherPassages, attempts, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations,
+    resources, passages, otherPassages, attempts, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations, imports,
     installation: settings.installation_id, account: settings.account_id, containers });
   const originalProtectedPaths = [resolve(dataDirectory), resolve(dataDirectory, '../..')];
   return { projectId, projectName: project.name, projectRevision: project.revision, sourceKind: project.source.kind,

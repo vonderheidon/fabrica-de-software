@@ -6,7 +6,7 @@ export interface GitContext {
   kind: 'windows_keyring'; executable: string;
 }
 export interface GitResponse { exitCode: number; stdout: string }
-export interface GitInput { input?: string | Buffer; indexFile?: string; isolatedConfig?: boolean; commitTime?: number }
+export interface GitInput { input?: string | Buffer; indexFile?: string; isolatedConfig?: boolean; commitTime?: number; timeoutMs?: number }
 export type GitReader = (cwd: string, args: readonly string[], input?: GitInput) => Promise<GitResponse>;
 export const gitLimits = Object.freeze({ timeoutMs: 15_000, responseBytes: 4_194_304 });
 // Git 2.45 introduced both this flag and its environment equivalent.
@@ -40,7 +40,7 @@ export function createGitReader(context: GitContext): GitReader {
     // Project-scoped UUID paths exceed MAX_PATH even for small repositories.
     const pathOptions = process.platform === 'win32' ? ['-c', 'core.longpaths=true'] : [];
     const child = execFile(context.executable, [...gitSafety.options, '-c', 'core.fsmonitor=false', ...pathOptions, ...args], {
-      cwd, shell: false, windowsHide: true, timeout: gitLimits.timeoutMs, maxBuffer: gitLimits.responseBytes,
+      cwd, shell: false, windowsHide: true, timeout: input?.timeoutMs ?? gitLimits.timeoutMs, maxBuffer: gitLimits.responseBytes,
       encoding: 'buffer', env: environment,
     }, (error, stdout) => {
       if (error && (typeof error.code !== 'number' || error.killed)) { reject(new GitReadError('GIT_UNAVAILABLE')); return; }

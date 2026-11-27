@@ -12,12 +12,13 @@ import { httpLimits, installSecurity } from './security/index.js';
 import { installEventRoutes } from './routes/events.js';
 import { installNotificationRoutes } from './routes/notifications.js';
 import { installShutdownRoutes } from './routes/shutdown.js';
-import { createProjects, type ProjectDependencies } from '../modules/projects/index.js';
+import { createProjects, createProjectImports, supportsProjectImportGitHub, supportsProjectImportWorkspaces, type ProjectDependencies } from '../modules/projects/index.js';
 import { createGitHub, type GitHubClient } from '../modules/github/index.js';
 import { createWorkspaces } from '../modules/workspaces/index.js';
 import { createProjectDeletions, createDeletionCoordinator } from '../modules/projects/index.js';
 import { installProjectDeletionRoutes } from './routes/project-deletions.js';
 import { installProjectRoutes } from './routes/projects.js';
+import { installProjectImportRoutes } from './routes/project-imports.js';
 import { createPreparations, type PreparationDependencies } from '../modules/projects/index.js';
 import { installPreparationRoutes } from './routes/preparations.js';
 import { createPipeline, type Pipeline } from '../modules/pipeline/index.js';
@@ -98,6 +99,15 @@ export function createApp(configuration: ControllerConfiguration, storage: Stora
     ...(projectDependencies?.selectExecutable ? { selectExecutable: projectDependencies.selectExecutable } : {}),
     ...(projectDependencies?.toolDetector ? { toolDetector: projectDependencies.toolDetector } : {}) });
   installProjectRoutes(app, projects);
+  // Test doubles without the clone methods fall back to the real adapters; imports never run on a partial one.
+  const projectImports = createProjectImports({ storage,
+    github: supportsProjectImportGitHub(github) ? github : defaultGitHub,
+    workspaces: supportsProjectImportWorkspaces(workspaces) ? workspaces : createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory, projectStorage: storage }),
+    logFailure: code => app.log.error({ code }, 'Project import stopped') });
+  installProjectImportRoutes(app, projectImports, storage);
+  // Resume accepted or running imports once the controller is ready (boot, and HTTP tests that reopen storage).
+  app.addHook('onReady', async () => { projectImports.recover(); });
+  app.addHook('preClose', async () => { await projectImports.close(); });
   const deletionWorkspaces = deletionDependencies?.workspaces ?? createWorkspaces({ github: defaultGitHub, dataDirectory: configuration.dataDirectory, projectStorage: storage });
   const deletionCoordinator = deletionDependencies?.coordinator ?? createDeletionCoordinator({ storage, workspaces: deletionWorkspaces,
     prepareAttempts: (ids, operationId) => pipeline.prepareProjectDeletion(ids, operationId),

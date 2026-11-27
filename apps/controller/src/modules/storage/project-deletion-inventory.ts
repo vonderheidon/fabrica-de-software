@@ -46,6 +46,7 @@ const ownership = {
   queue_cycles: 'project_id = @projectId',
   queue_consumptions: 'project_id = @projectId',
   project_creations: 'project_id = @projectId',
+  project_imports: 'project_id = @projectId',
   creation_steps: 'creation_id IN (SELECT id FROM owned_project_creations)',
   creation_board_operations: 'creation_id IN (SELECT id FROM owned_project_creations)',
   creation_reconciliations: 'creation_id IN (SELECT id FROM owned_project_creations)',
@@ -87,7 +88,7 @@ export function keyExpression(columns: readonly string[], alias?: string): strin
 const domains = {
   project: ['projects', 'id'], preparation: ['preparations', 'id'],
   attempt: ['attempts', 'id'], passage: ['passages', 'id'],
-  delivery: ['deliveries', 'id'], creation: ['project_creations', 'id'],
+  delivery: ['deliveries', 'id'], creation: ['project_creations', 'id'], project_import: ['project_imports', 'id'],
   question: ['execution_questions', 'id'], resource: ['resources', 'id'],
   effect: ['effects', 'operation_id'], diagnostic: ['diagnostic_runs', 'operation_id'],
   operation: ['operation_requests', 'operation_id'],
@@ -102,7 +103,7 @@ function domainPredicate(type: string, id: string, includeOperations: boolean): 
 }
 
 const operationSources = [
-  ['attempts', 'operation_id'], ['project_creations', 'operation_id'], ['creation_board_operations', 'operation_id'],
+  ['attempts', 'operation_id'], ['project_creations', 'operation_id'], ['project_imports', 'operation_id'], ['creation_board_operations', 'operation_id'],
   ['cancellation_requests', 'operation_id'], ['resource_removals', 'operation_id'],
   ['native_open_requests', 'operation_id'], ['capture_runs', 'operation_id'],
   ['execution_questions', 'answer_operation_id'], ['publication_requests', 'operation_id'],

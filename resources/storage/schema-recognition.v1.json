@@ -1,11 +1,11 @@
 {
   "format_version": 1,
   "application_id": 1313231665,
-  "direct_install_user_version": 59,
-  "previous_direct_install_user_version": 58,
-  "current_ledger_user_version": 58,
-  "current_schema_sha256": "bfc1bba843bc088f5a41edf78f577fcb6bd4087a66fcd39a983560aed0353ceb",
-  "previous_schema_sha256": "2af5e851f776ab32ff22a63ffa41178bd0d5a6331eb7c24ba9db4c0204cbe2ca",
+  "direct_install_user_version": 60,
+  "previous_direct_install_user_version": 59,
+  "current_ledger_user_version": 59,
+  "current_schema_sha256": "f23fcafbaa783c1189959d5685e5cb402d8ffa5696d7e6436abff0d8325f08e4",
+  "previous_schema_sha256": "bfc1bba843bc088f5a41edf78f577fcb6bd4087a66fcd39a983560aed0353ceb",
   "historical_ledger": [
     {
       "version": 1,
@@ -296,7 +296,12 @@
       "version": 58,
       "name": "058_status_readback_resolution.sql",
       "checksum": "468db2f8a69bef2137370eacff2f82307ffad2151a6ac5d8594cdd8483053956"
+    },
+    {
+      "version": 59,
+      "name": "059_project_imports.sql",
+      "checksum": "28556600a954a530398e1a12dc68ccde65abf716d85d74bc77307204849612fb"
     }
   ],
-  "schema_sql_sha256": "b0f36b1e9324c36f03caad366ecf1ad8653c8b12a148e45109a654d3e9c2e079"
+  "schema_sql_sha256": "a14433398d7ee6ea67413a21c367c11f570d30f01a503682d6b437e229eac7f8"
 }

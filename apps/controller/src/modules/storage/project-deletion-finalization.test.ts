@@ -131,7 +131,7 @@ describe('exclusive project deletion closure and transactional finalization', ()
       // The clean-schema fixture includes current assessments but does not invent blocks.
       if (table === 'delivery_targets' || table === 'publication_target_selections' || table === 'attempt_decisions' || table === 'finding_disputes' || table === 'attempt_blocks' ||
         table === 'attempt_workspace_snapshots' ||
-        table === 'project_storage_locations' || table === 'project_storage_transitions' || table === 'retained_history_migrations' || table === 'creation_board_operations' ||
+        table === 'project_storage_locations' || table === 'project_storage_transitions' || table === 'retained_history_migrations' || table === 'creation_board_operations' || table === 'project_imports' ||
         (upgrade && (table === 'attempt_sessions' || table === 'terminal_occupancies'))) expect(inventory.keys[table], table).toEqual([]);
       else expect(inventory.keys[table].length, table).toBeGreaterThan(0);
     }

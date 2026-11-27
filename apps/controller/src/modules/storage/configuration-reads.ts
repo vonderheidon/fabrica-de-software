@@ -116,6 +116,7 @@ export function prerequisites(config: Pick<ProjectConfiguration, 'source' | 'imp
   const result: Prerequisite[] = [];
   const add = (code: string, message: string, recovery: string) => result.push({ code, message, recovery });
   const noteSet = new Set(notes);
+  if (config.source.kind === 'github') add('PROJECT_FOLDER_MISSING', 'Pasta do projeto ausente', 'Escolha a pasta do clone deste repositório na configuração do projeto.');
   if (!config.source.repository_id || noteSet.has('REMOTE_MISSING') || noteSet.has('REMOTE_UNCONFIRMED')) {
     add('REMOTE_UNCONFIRMED', 'A origem GitHub do projeto ainda não foi confirmada.', 'Configure um remoto GitHub acessível para esta pasta e confirme a identidade do repositório.');
   }

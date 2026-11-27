@@ -38,7 +38,7 @@ async function mount(locked = false, mapped = false, savedDraft?: DraftValue, wi
       active_transition_operation_id: null, state: 'current', cause: null, recovery: null },
     configuration_lock: locked ? { attempt_id: 'active-attempt' } : null,
     configuration: { id: 'revision', project_id: projectId, revision: 1, created_at_ms: 1,
-      source: { kind: 'local', location: 'C:\\source' }, base_branch: 'main', github_project: mapped ? { id: 'board', owner_id: 'owner', status_field_id: 'status', status_option_ids: { backlog: 'backlog', ready: 'ready', in_progress: 'progress', in_review: 'review', delivered: 'done' } } : null,
+      source: { kind: 'local', location: 'C:\\source', repository_id: 'R_app', repository_url: 'https://github.com/acme/app.git' }, base_branch: 'main', github_project: mapped ? { id: 'board', owner_id: 'owner', status_field_id: 'status', status_option_ids: { backlog: 'backlog', ready: 'ready', in_progress: 'progress', in_review: 'review', delivered: 'done' } } : null,
       implementer_profile_id: null, reviewer_profile_id: null,
       correction_limit: 2, default_delivery_mode: 'icr', automation_enabled: false,
       queue_order: { use_board_position: true }, guidance: '' },
@@ -55,6 +55,7 @@ async function mount(locked = false, mapped = false, savedDraft?: DraftValue, wi
     if (path === '/api/v1/settings') return settings;
     if (path.includes('/operations/')) return { state: 'succeeded', receipt: { revision: 1 } };
     if (path.includes('/diagnostics')) return init?.method === 'POST' ? { operation_id: new Headers(init.headers).get('Idempotency-Key') } : diagnostics;
+    if (path.includes('/folder-inspection')) return { location: 'C:\\source', clone: 'same_repository', repository: 'acme/app', checkout: { kind: 'branch', name: 'main' }, diagnostic: null, observed_at_ms: 1 };
     return { project: { id: projectId, name: 'Projeto de teste', revision: 1, current_revision_id: 'revision' }, deletion: null };
   });
   metadata.mockImplementation(async (path: string) => {
@@ -80,16 +81,16 @@ it('locates project conditions and keeps one configuration action without verifi
   expect(container.textContent).not.toContain('Verifica o projeto salvo');
   expect(container.textContent).not.toContain('Conta, origem, issue e executor serão revalidados');
   expect(container.querySelector('[aria-label="Atualizar leitura do projeto"]')).toBeNull();
-  expect(request.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0);
+  expect(request.mock.calls.filter(([path, init]) => init?.method === 'POST' && !String(path).includes('/folder-inspection'))).toHaveLength(0);
   expect(metadata.mock.calls.filter(([, init]) => init?.method)).toHaveLength(0);
 });
 it('omits manual check controls and preserves project edits, DOM and focused refresh without a save', async () => {
   const container = await mount();
-  const field = [...container.querySelectorAll('input')].find((item) => item.value.startsWith('C:'))!;
-  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'C:\\source-updated'); field.dispatchEvent(new Event('input', { bubbles: true })); });
+  const field = container.querySelector<HTMLTextAreaElement>('#project-guidance')!;
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'Orientação atualizada'); field.dispatchEvent(new Event('input', { bubbles: true })); });
   field.focus();
   await act(async () => window.dispatchEvent(new Event('factory-controller-resync')));
-  expect(field.isConnected).toBe(true); expect(field.value).toBe('C:\\source-updated'); expect(document.activeElement).toBe(field);
+  expect(field.isConnected).toBe(true); expect(field.value).toBe('Orientação atualizada'); expect(document.activeElement).toBe(field);
   expect(metadata.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
   expect(container.textContent).not.toContain('Adicionar check');
   expect(container.textContent).not.toContain('cwd relativo do check');
@@ -98,6 +99,25 @@ it('omits manual check controls and preserves project edits, DOM and focused ref
   expect([...container.querySelectorAll('label')].map((item) => item.textContent)).not.toEqual(expect.arrayContaining([
     expect.stringContaining('Comando do check'), expect.stringContaining('Timeout do check'),
   ]));
+});
+it('replaces the source selector with Pasta do projeto and shows PROJECT_FOLDER_NOT_CLONE on that field after saving', async () => {
+  const container = await mount();
+  expect(container.textContent).not.toContain('Tipo da origem');
+  expect(container.textContent).not.toContain('Localização da origem');
+  expect(container.textContent).toContain('Clone de acme/app');
+  expect(container.textContent).toContain('Em checkout: main');
+  const original = metadata.getMockImplementation()!;
+  metadata.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path === '/api/v1/settings/selections') return { data: { kind: 'project_directory', state: 'selected', path: 'C:\\other', observed_at_ms: 1 }, etag: null };
+    if (init?.method === 'PUT') throw new HttpError(409, 'PROJECT_FOLDER_NOT_CLONE', 'Não é clone de acme/app.', null, [], null, null, null);
+    return original(path, init);
+  });
+  await act(async () => button(container, 'Trocar pasta').click());
+  expect(container.querySelector<HTMLInputElement>('#project-folder')!.value).toBe('C:\\other');
+  await act(async () => button(container, 'Salvar configuração').click());
+  const put = metadata.mock.calls.find(([, init]) => init?.method === 'PUT')!;
+  expect(String(put[1].body)).toContain('"source":{"kind":"local","location":"C:\\\\other"}');
+  expect(container.querySelector('#project-folder')!.closest('.form-field')!.textContent).toContain('Não é clone de acme/app');
 });
 it('keeps missing associations through draft selection and a failed save, then updates only after a receipt', async () => {
   const container = await mount(false, false, undefined, true);

@@ -172,6 +172,15 @@ export function readOperation(db: Database.Database, operationId: string): Store
     return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'creation', id: row.resource_id }, state, receipt,
       ...(creation.diagnostic ? { error: { code: creation.diagnostic, message: 'Inspect the preserved local creation before any further action.', operation_id: operationId } } : {}) };
   }
+  if (row.operation_kind === 'project.import' && row.resource_type === 'project_import') {
+    const imported = db.prepare<[string, string], { state: string; diagnostic: string | null }>('SELECT state,diagnostic FROM project_imports WHERE id=? AND operation_id=?').get(row.resource_id, operationId);
+    if (!imported || !receipt || !event || event.entity_type !== 'project_import' || event.entity_id !== row.resource_id ||
+        event.event_type !== 'project_import.accepted' || receipt.revision !== event.entity_revision || receipt.event_cursor !== String(event.seq)) throw new StorageError('OPERATION_DATA_INVALID');
+    const state: StoredOperation['state'] = imported.state === 'completed' ? 'succeeded' : imported.state === 'failed' ? 'failed' : imported.state === 'running' ? 'running' : 'accepted';
+    return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'project_import', id: row.resource_id }, state, receipt,
+      ...(imported.diagnostic ? { error: { code: imported.diagnostic, message: 'O cadastro por URL não foi concluído.', operation_id: operationId,
+        recovery: 'Consulte o cadastro para ver a etapa que falhou e inicie um novo cadastro.' } } : {}) };
+  }
   if (row.operation_kind === 'scaffold.board.effect' && row.resource_type === 'creation') {
     const board = db.prepare<[string,string],{ kind: string; state: string; reason: string | null }>(
       'SELECT kind,state,reason FROM creation_board_operations WHERE operation_id=? AND creation_id=?').get(operationId,row.resource_id);

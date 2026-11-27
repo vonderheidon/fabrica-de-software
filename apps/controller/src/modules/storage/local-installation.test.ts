@@ -94,7 +94,7 @@ describe('fixed local installation', () => {
     expect(Number(db.pragma('application_id', { simple: true }))).toBe(applicationId);
     expect(Number(db.pragma('user_version', { simple: true }))).toBe(metadata.directInstallUserVersion);
     expect(digest).toBe(metadata.currentSchemaSha256);
-    expect(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type='table' AND substr(name,1,7)<>'sqlite_'").get()).toEqual({ n: 59 });
+    expect(db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type='table' AND substr(name,1,7)<>'sqlite_'").get()).toEqual({ n: 60 });
     expect(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()).toEqual({ n: 0 });
     expect(db.prepare('SELECT count(*) AS n FROM factory_settings').get()).toEqual({ n: 1 });
     for (const table of ['accounts', 'execution_profiles', 'projects', 'attempts', 'attempt_sessions', 'project_creations']) {
@@ -121,7 +121,7 @@ describe('fixed local installation', () => {
       resources.push(db);
       expect(db.prepare('SELECT count(*) AS n FROM factory_settings').get()).toEqual({ n: 1 });
       expect(db.prepare('SELECT count(*) AS n FROM schema_migrations').get()).toEqual({ n: 0 });
-      expect(inspectHistory(db)).toEqual({ kind: 'direct', schemaVersion: 59 });
+      expect(inspectHistory(db)).toEqual({ kind: 'direct', schemaVersion: 60 });
     } finally {
       exec.mockRestore();
     }
@@ -170,10 +170,12 @@ describe('fixed local installation', () => {
       new URL('../../../../../resources/storage/initial-schema.v57.sql', import.meta.url),
       new URL('../../../../../resources/storage/initial-schema.v58.sql', import.meta.url),
       new URL('../../../../../resources/storage/initial-schema.v59.sql', import.meta.url),
+      new URL('../../../../../resources/storage/initial-schema.v60.sql', import.meta.url),
       new URL('../../../../../resources/storage/055_issue_history_repository_reference.sql', import.meta.url),
       new URL('../../../../../resources/storage/056_immediate_controller_shutdown.sql', import.meta.url),
       new URL('../../../../../resources/storage/057_issue_body_effect.sql', import.meta.url),
       new URL('../../../../../resources/storage/058_status_readback_resolution.sql', import.meta.url),
+      new URL('../../../../../resources/storage/059_project_imports.sql', import.meta.url),
       new URL('../../../../../resources/storage/schema-recognition.v1.json', import.meta.url),
     ];
     const resourceHashes = resourcePaths.map(url => sha256(readFileSync(url)));
@@ -189,7 +191,7 @@ describe('fixed local installation', () => {
   });
 
   it.each([
-    ['future version', 'PRAGMA user_version = 60', 'DATABASE_NEWER_THAN_APPLICATION'],
+    ['future version', 'PRAGMA user_version = 61', 'DATABASE_NEWER_THAN_APPLICATION'],
     ['unknown identity', 'PRAGMA application_id = 1', 'DATABASE_UNKNOWN'],
     ['partial schema', 'DROP TABLE project_storage_locations', 'DATABASE_SCHEMA_INCOMPATIBLE'],
   ] as const)('refuses %s without changing the current database files', (_name, sql, code) => {

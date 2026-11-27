@@ -1,6 +1,9 @@
 import { deliveryModeLabel } from '../../app/delivery-modes.js';
 import { CustomSelect } from '../../app/CustomSelect.js';
 import { BranchSelector } from './BranchSelector.js';
+import { ProjectFolderField, repositoryLabel } from './ProjectFolderField.js';
+import { ProjectImportPanel } from './ProjectImportPanel.js';
+import { readProjectImportSession } from './project-import-model.js';
 import { ProjectConfigurationDialog } from './ProjectConfigurationDialog.js';
 import { knownProjectDeletion, useProjectDeletionRestriction } from './ProjectDeletionPendingNotice.js';
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
@@ -218,12 +221,12 @@ type RegistrationDraft = { name: string; kind: 'local' | 'github'; location: str
 const registrationDraftKey = 'project-registration';
 export function ProjectRegistrationForm({ identity, onRegistered }: { identity: string; onRegistered: (projectId: string) => void }) {
   const folderSelection = useNativeSelection();
-  const [form, setForm] = useState<RegistrationDraft>(() => getDraft<RegistrationDraft>(identity, registrationDraftKey) ?? { name: '', kind: 'local', location: '', baseBranch: 'main', commandId: null });
+  const [form, setForm] = useState<RegistrationDraft>(() => getDraft<RegistrationDraft>(identity, registrationDraftKey) ?? { name: '', kind: readProjectImportSession() ? 'github' : 'local', location: '', baseBranch: 'main', commandId: null });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<(ProjectRegistered) | null>(null);
   const [failure, setFailure] = useState<{ message: string; requestId: string | null; fields: ReadonlyMap<string, string> } | null>(null);
-  const locationLabel = form.kind === 'local' ? 'Pasta local existente' : 'URL do repositório GitHub';
   const fieldMessage = (field: string) => failure?.fields.get(field) ?? null;
+  const kindField = <SelectField compactHelp label="Tipo de origem" help="Escolha onde o projeto já está armazenado." value={form.kind} onChange={(value) => updateForm({ kind: value as 'local' | 'github', commandId: null })} options={[{ value: 'local', label: 'Pasta local existente' }, { value: 'github', label: 'Repositório GitHub' }]} searchable={false} error={fieldMessage('source.kind')} />;
   function updateForm(changes: Partial<RegistrationDraft>): void {
     setForm((current) => {
       const next = { ...current, ...changes };
@@ -240,7 +243,7 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setBusy(true); setFailure(null); setResult(null);
-    const body: ProjectRegistration = { name: form.name.trim(), source: { kind: form.kind, location: form.location.trim() }, base_branch: form.baseBranch.trim() };
+    const body: ProjectRegistration = { name: form.name.trim(), source: { kind: 'local', location: form.location.trim() }, base_branch: form.baseBranch.trim() };
     try {
       const stableId = form.commandId ?? crypto.randomUUID();
       updateForm({ commandId: stableId });
@@ -255,9 +258,10 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
     } finally { setBusy(false); }
   }
 
+  if (form.kind === 'github') return <ProjectImportPanel identity={identity} onRegistered={onRegistered} kindField={kindField} />;
   if (result) return <section className="project-form-success" aria-live="polite"><span className="pill">Cadastro confirmado</span><h3>{result.project.name}</h3><p>{result.project.source.kind === 'local' ? 'Origem local registrada. Somente o histórico commitado entra em uma execução; alterações não commitadas ficam de fora.' : 'Origem GitHub registrada.'}</p>{result.prerequisites.length > 0 && <div className="notice"><b>Pré-requisitos de execução</b>{result.prerequisites.map((item) => <OperatorDiagnosticCard key={item.code} code={item.code} state="blocked" cause={item.message} recovery={item.recovery} projectId={result.project.id} />)}</div>}<button type="button" className="primary" onClick={() => onRegistered(result.project.id)}>Abrir configuração do projeto</button></section>;
 
-  const missingFields = [!form.name.trim() && 'nome do projeto', !form.location.trim() && locationLabel.toLocaleLowerCase('pt-BR'), !form.baseBranch.trim() && 'branch-base'].filter(Boolean);
+  const missingFields = [!form.name.trim() && 'nome do projeto', !form.location.trim() && 'pasta local existente', !form.baseBranch.trim() && 'branch-base'].filter(Boolean);
   return <form className="creation-flow feature-form registration-form" onSubmit={(event) => void submit(event)} noValidate>
     <p className="creation-intro">Conecte um projeto que você já tem para configurar e acompanhar pela fábrica. Você pode cadastrar uma pasta Git sem remoto GitHub, publicação inicial ou quadro. Essas pendências serão apresentadas separadamente antes de iniciar.</p>
     {failure && <div className="read-state" role="alert"><b>Cadastro não confirmado</b><p>{failure.message}</p><p><strong>Próxima ação:</strong> revise os campos destacados e consulte o estado atual antes de repetir.</p></div>}
@@ -265,11 +269,11 @@ export function ProjectRegistrationForm({ identity, onRegistered }: { identity: 
       <div className="creation-group-heading field-full"><h3>Dados do projeto</h3><span>* Obrigatório</span></div>
       <div className="field-full"><TextField compactHelp label="Nome do projeto" value={form.name} onChange={(value) => updateForm({ name: value, commandId: null })} required error={fieldMessage('name')} help="Nome usado para identificar o projeto na fábrica." /></div>
       <div className="creation-group-heading creation-repository-heading field-full"><h3>Origem do projeto</h3><span>Local ou GitHub</span></div>
-      <SelectField compactHelp label="Tipo de origem" help="Escolha onde o projeto já está armazenado." value={form.kind} onChange={(value) => updateForm({ kind: value as 'local' | 'github', commandId: null })} options={[{ value: 'local', label: 'Pasta local existente' }, { value: 'github', label: 'Repositório GitHub' }]} searchable={false} error={fieldMessage('source.kind')} />
-      <BranchSelector source={{kind:form.kind,location:form.location}} value={form.baseBranch} onChange={(value) => updateForm({baseBranch:value,commandId:null})} error={fieldMessage('base_branch')} />
-      <div className="field-full">{form.kind === 'local' ? <div className="registration-folder-field"><label htmlFor="registration-folder">Pasta local existente *</label><div className="registration-folder-row"><input id="registration-folder" value={form.location} readOnly placeholder="Selecione a pasta do projeto" aria-describedby="registration-folder-help" /><button type="button" disabled={busy || folderSelection.state.status === 'selecting'} onClick={() => void folderSelection.select('project_directory')}>{folderSelection.state.status === 'selecting' ? 'Abrindo janela…' : form.location ? 'Trocar pasta' : 'Selecionar pasta'}</button></div><small id="registration-folder-help">Escolha uma pasta que já contenha um repositório Git.</small>{fieldMessage('source.location') && <p className="error" role="alert">{fieldMessage('source.location')}</p>}{folderSelection.state.status !== 'idle' && folderSelection.state.status !== 'selected' && <p role="status">{nativeSelectionMessage(folderSelection.state)}</p>}</div> : <TextField compactHelp label={locationLabel} value={form.location} onChange={(value) => updateForm({ location: value, commandId: null })} required error={fieldMessage('source.location')} help="Use uma URL HTTPS ou SSH sem credenciais embutidas." />}</div>
+      {kindField}
+      <BranchSelector source={{ kind: 'local', location: form.location }} value={form.baseBranch} onChange={(value) => updateForm({baseBranch:value,commandId:null})} error={fieldMessage('base_branch')} />
+      <div className="field-full"><div className="registration-folder-field"><label htmlFor="registration-folder">Pasta local existente *</label><div className="registration-folder-row"><input id="registration-folder" value={form.location} readOnly placeholder="Selecione a pasta do projeto" aria-describedby="registration-folder-help" /><button type="button" disabled={busy || folderSelection.state.status === 'selecting'} onClick={() => void folderSelection.select('project_directory')}>{folderSelection.state.status === 'selecting' ? 'Abrindo janela…' : form.location ? 'Trocar pasta' : 'Selecionar pasta'}</button></div><small id="registration-folder-help">Escolha uma pasta que já contenha um repositório Git.</small>{fieldMessage('source.location') && <p className="error" role="alert">{fieldMessage('source.location')}</p>}{folderSelection.state.status !== 'idle' && folderSelection.state.status !== 'selected' && <p role="status">{nativeSelectionMessage(folderSelection.state)}</p>}</div></div>
     </div>
-    <div className="creation-destination-preview"><span>Sobre o cadastro</span><p className="registration-source-note">{form.kind === 'local' ? 'A pasta permanece intacta. As execuções usam apenas o conteúdo commitado no Git.' : 'O cadastro vincula o repositório GitHub; não clona arquivos nem inicia uma execução.'}</p></div>
+    <div className="creation-destination-preview"><span>Sobre o cadastro</span><p className="registration-source-note">A pasta permanece intacta. As execuções usam apenas o conteúdo commitado no Git.</p></div>
     <div className="form-actions creation-form-footer"><p id="registration-guidance">{busy ? 'Aguarde a confirmação do cadastro.' : missingFields.length ? `Preencha: ${missingFields.join(', ')}.` : 'Depois de adicionar, configure os pré-requisitos do projeto.'}</p><button type="submit" className="primary" aria-describedby="registration-guidance" disabled={busy || folderSelection.state.status === 'selecting' || missingFields.length > 0}>{busy ? 'Cadastrando…' : 'Adicionar existente'}</button></div>
   </form>;
 }
@@ -419,6 +423,14 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
   function updateProject(update: (current: ProjectConfiguration) => ProjectConfiguration): void {
     updateDraft((current) => current.project ? ({ ...current, project: update(current.project) }) : current);
   }
+
+  const baselineSource = load.status === 'ready' && isConfigurationView(load.view) ? load.view.configuration.source : null;
+  function selectProjectFolder(location: string): void {
+    updateProject((current) => baselineSource?.kind === 'local' && baselineSource.location === location ? { ...current, source: baselineSource } : { ...current, source: { kind: 'local', location } });
+    setSaveState((current) => current.status === 'error' && current.code === 'PROJECT_FOLDER_NOT_CLONE' ? { status: 'idle' } : current);
+  }
+  const folderError = saveState.status === 'error' && saveState.code === 'PROJECT_FOLDER_NOT_CLONE'
+    ? `Não é clone de ${repositoryLabel(baselineSource?.repository_url) ?? 'este repositório'}. Escolha a pasta que contém o clone deste repositório.` : null;
 
   async function refreshCurrent(operation: SaveOperation): Promise<{ view: EditableView; etag: string }> {
     const expectedIdentity = operation.identity;
@@ -681,8 +693,7 @@ export function ProjectConfigurationForm({ projectId, onSaveIssue, onDraftStateC
       <fieldset disabled={Boolean(configurationLock)} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }} aria-label="Configuração do projeto">
       <p className="project-configuration-hint">A issue deve pertencer ao quadro selecionado, inclusive no início manual.</p>
       <div className="form-grid">
-        <SelectField searchable={false} label="Tipo da origem" value={draft.project.source.kind} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: value as 'local' | 'github', location: current.source.location } }))} options={[{ value: 'local', label: 'Local' }, { value: 'github', label: 'GitHub' }]} />
-        <TextField label="Localização da origem" value={draft.project.source.location} onChange={(value) => updateProject((current) => ({ ...current, source: { kind: current.source.kind, location: value } }))} />
+        <ProjectFolderField projectId={projectId} location={draft.project.source.location} kind={draft.project.source.kind} repositoryUrl={baselineSource?.repository_url ?? draft.project.source.repository_url} disabled={Boolean(configurationLock)} error={folderError} onSelect={selectProjectFolder} />
         <BranchSelector source={draft.project.source} value={draft.project.base_branch} onChange={(value) => updateProject((current) => ({ ...current, base_branch: value }))} />
         <SelectField searchable={false} label="Branch de destino" value={draft.project.delivery_branch?.kind ?? 'automatic'} onChange={(value) => updateProject(current => ({ ...current, delivery_branch: value !== 'new' && value !== 'existing' ? null : { kind: value as 'new' | 'existing', name: current.delivery_branch?.name ?? '' } }))} options={[{ value: 'automatic', label: 'Nova branch com nome automático' }, { value: 'new', label: 'Nova branch com nome escolhido' }, { value: 'existing', label: 'Branch existente' }]} />
         {draft.project.delivery_branch?.kind === 'existing' ? <BranchSelector label="Branch existente de destino" source={draft.project.source} value={draft.project.delivery_branch.name} onChange={name => updateProject(current => ({...current,delivery_branch:{kind:'existing',name}}))} /> : draft.project.delivery_branch && <TextField label="Nome da branch de destino" value={draft.project.delivery_branch.name} onChange={(name) => updateProject(current => ({ ...current, delivery_branch: { ...current.delivery_branch!, name } }))} />}

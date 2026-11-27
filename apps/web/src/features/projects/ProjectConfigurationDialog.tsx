@@ -10,7 +10,7 @@ export function ProjectConfigurationDialog({ storage }: { storage: ProjectStorag
     catch { setCopied('Não foi possível copiar. Selecione o caminho completo acima.'); }
   }
   return <section className="card form-section project-storage" aria-labelledby="project-storage-title">
-    <div className="project-storage-heading"><h3 id="project-storage-title">Pasta do projeto</h3></div>
+    <div className="project-storage-heading"><h3 id="project-storage-title">Armazenamento do projeto</h3></div>
     <div className="project-folder-row">
       <span className="storage-path">{path ?? 'Este projeto ainda não tem uma pasta local.'}</span>
       {path && <button type="button" aria-label="Copiar pasta do projeto" onClick={() => void copy()}>Copiar</button>}

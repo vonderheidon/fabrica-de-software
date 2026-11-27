@@ -13,7 +13,7 @@ import {
 import { OperationError, type ConfigurationCommand, type Storage, type StoredOperation } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import type { Workspaces } from '../workspaces/index.js';
-import { validBranch } from '../workspaces/index.js';
+import { githubReference, validBranch } from '../workspaces/index.js';
 import { ExecutionError, type Execution } from '../execution/index.js';
 import { createToolDetector, type ManagedTool, type ToolDetector } from '../tools/index.js';
 import { createQueue } from './queue.js';
@@ -21,6 +21,7 @@ import { matchesObservedV3StatusMapping } from './status-mapping.js';
 export { createPreparations, type Preparations, type PreparationDependencies } from './preparations.js';
 export { createProjectDeletions } from './project-deletions.js';
 export { createDeletionCoordinator } from './deletion.js';
+export { createProjectImports, supportsProjectImportGitHub, supportsProjectImportWorkspaces, type ProjectImports, type ProjectImportDependencies, type ProjectImportWorkspaces } from './project-imports.js';
 export { createScaffold, type Scaffold, type ScaffoldDependencies } from './scaffold.js';
 export { loadScaffoldCatalog as validateScaffoldResources } from './scaffold-resources.js';
 export { interpretIssue } from '../pipeline/index.js';
@@ -40,6 +41,9 @@ export interface ProjectDependencies {
 export interface CommandContext { operationId: string; expectedRevision: string | undefined }
 export { createQueue, QueueSummaryChanged, type Queue } from './queue.js';
 function fail(status: 400 | 404 | 409 | 412 | 428 | 503, code: string, message: string): never { throw new OperationError(status, code, message); }
+function rejectGitHubSource(source: ProjectRegistration['source'] | undefined): void {
+  if (source?.kind === 'github') fail(400, 'SOURCE_KIND_UNSUPPORTED', 'Repositórios GitHub são cadastrados por URL, que clona para a Pasta do projeto. Informe uma pasta local.');
+}
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const selectionCloseConfirmationMs = 5_000;
 const selectionConflictMessage = 'Já existe uma seleção em andamento. Conclua ou cancele a janela aberta e tente novamente.';
@@ -540,6 +544,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     saveQueue: queue.save,
     async registerProject(body: ProjectRegistration, context: CommandContext) {
       if (!Value.Check(ProjectRegistration, body)) fail(400, 'REGISTRATION_INVALID', 'Project registration is invalid.');
+      rejectGitHubSource(body.source);
       const command: ConfigurationCommand = { ...context, kind: 'project.register', body };
       let operation = storage.recoverConfigurationCommand(command);
       if (!operation) {
@@ -689,6 +694,7 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
     },
     async saveConfiguration(projectId: string, body: ConfigurationUpdate, context: CommandContext) {
       if (!Value.Check(ConfigurationUpdate, body)) fail(400, 'CONFIGURATION_INVALID', 'Configuration changes are invalid.');
+      rejectGitHubSource(body.project_changes.source);
       const command: ConfigurationCommand = { ...context, kind: 'project.configuration.update', projectId, body };
       const recovered = storage.recoverConfigurationCommand(command);
       if (recovered) return await configurationResponse(projectId, recovered);
@@ -708,6 +714,11 @@ export function createProjects({ storage, github, githubSetup, execution, worksp
       let originNotes: readonly string[] | undefined;
       if (body.project_changes.source !== undefined || body.project_changes.base_branch !== undefined) {
         const observed = await inspect(configuration.source, configuration.base_branch);
+        const knownRepository = previous.source.repository_id;
+        if (body.project_changes.source !== undefined && knownRepository && observed.source.repository_id !== knownRepository) {
+          const reference = previous.source.repository_url ? githubReference(previous.source.repository_url) : null;
+          fail(409, 'PROJECT_FOLDER_NOT_CLONE', `Não é clone de ${reference ? `${reference.owner}/${reference.name}` : 'este repositório'}.`);
+        }
         configuration.source = observed.source; originNotes = observed.notes;
       }
       validateProjectConfiguration(configuration);

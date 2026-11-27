@@ -13,6 +13,7 @@ const stateLabels: Readonly<Record<string, string>> = {
   cleanup_uncertain: 'Limpeza sem confirmação', not_configured: 'Não configurado', configured: 'Configurado',
   idle: 'Aguardando ação', saving: 'Salvando', submitting: 'Enviando', expired: 'Expirada', cancelled: 'Cancelada',
   canceled: 'Cancelada', enabled: 'Habilitada', disabled: 'Desabilitada', completed: 'Concluída',
+  skipped: 'Dispensada',
 };
 
 const codeLabels: Readonly<Record<string, string>> = {
@@ -68,7 +69,26 @@ const codeLabels: Readonly<Record<string, string>> = {
   INTERNAL_ERROR: 'Falha interna', NOT_FOUND: 'Item não encontrado',
 };
 
-const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; nextAction: string }>> = {
+type OperatorCopy = { title: string; cause: string; nextAction: string };
+const projectImportCopy: Readonly<Record<string, OperatorCopy>> = {
+  IMPORT_URL_INVALID: { title: 'URL do repositório inválida', cause: 'A URL informada não é de um repositório GitHub ou contém credenciais.', nextAction: 'Informe a URL HTTPS ou SSH do repositório, sem credenciais embutidas.' },
+  IMPORT_FOLDER_INVALID: { title: 'Nome da pasta inválido', cause: 'O nome da pasta deve ser um único nome simples, sem separadores, sem caracteres reservados do Windows e sem ponto ou espaço no final.', nextAction: 'Escolha outro nome para a Pasta do projeto.' },
+  IMPORT_DESTINATION_RESERVED: { title: 'Pasta já reservada', cause: 'Outro cadastro ou criação em andamento, ou um projeto já cadastrado, usa esta pasta.', nextAction: 'Escolha outro nome de pasta ou aguarde a conclusão da operação em andamento.' },
+  IMPORT_DESTINATION_OCCUPIED: { title: 'Pasta ocupada', cause: 'A pasta escolhida já tem outro conteúdo. Escolha outro nome.', nextAction: 'Use uma pasta vazia ou um clone deste mesmo repositório.' },
+  IMPORT_BASE_BRANCH_NOT_FOUND: { title: 'Branch base não encontrada', cause: 'A branch base escolhida não existe no repositório GitHub.', nextAction: 'Escolha uma branch existente ou deixe vazio para usar a branch padrão do repositório.' },
+  IMPORT_REPOSITORY_UNAVAILABLE: { title: 'Repositório indisponível', cause: 'O repositório não pôde ser lido no GitHub com a conta vinculada.', nextAction: 'Confira a URL, o acesso da conta vinculada e tente novamente.' },
+  IMPORT_URL_REWRITE_UNSUPPORTED: { title: 'Configuração do Git não suportada', cause: 'A configuração do Git neste computador reescreve URLs (insteadOf), o que impede um clone confiável.', nextAction: 'Remova a reescrita de URL da configuração do Git e tente novamente.' },
+  IMPORT_CLONE_FAILED: { title: 'Clone não concluído', cause: 'O Git não conseguiu clonar o repositório para a Pasta do projeto.', nextAction: 'Confira a conexão e as credenciais do Git e tente novamente.' },
+  IMPORT_VERIFICATION_FAILED: { title: 'Pasta não confirmada', cause: 'A pasta clonada não corresponde ao repositório ou à branch base esperados.', nextAction: 'Confira a pasta e tente novamente com outro nome.' },
+  IMPORT_CLEANUP_FAILED: { title: 'Pasta criada não removida', cause: 'O cadastro falhou e a pasta criada por esta operação não pôde ser removida.', nextAction: 'Confira e remova a pasta manualmente antes de tentar novamente.' },
+  IMPORT_INTERRUPTED: { title: 'Cadastro interrompido', cause: 'O controlador foi encerrado antes de concluir o cadastro.', nextAction: 'Tente novamente; o cadastro recomeça a partir do estado confirmado.' },
+  PROJECT_FOLDER_NOT_CLONE: { title: 'Pasta não é clone do repositório', cause: 'A pasta escolhida não é um clone do repositório deste projeto.', nextAction: 'Escolha a pasta que contém o clone deste repositório.' },
+  PROJECT_FOLDER_MISSING: { title: 'Pasta do projeto ausente', cause: 'Este projeto não tem uma Pasta do projeto local confirmada.', nextAction: 'Em Configurar projeto, selecione a pasta que contém o clone do repositório e salve.' },
+  SOURCE_KIND_UNSUPPORTED: { title: 'Cadastro por URL indisponível aqui', cause: 'A origem GitHub não é gravada diretamente; o cadastro por URL clona o repositório para a Pasta do projeto.', nextAction: 'Use Adicionar existente → Repositório GitHub ou selecione uma pasta local.' },
+};
+
+const diagnosticCopy: Readonly<Record<string, OperatorCopy>> = {
+  ...projectImportCopy,
   DISPATCH_FAILED: { title: 'Inicialização da passagem interrompida', cause: 'O controlador não conseguiu concluir a preparação ou iniciar a passagem.', nextAction: 'Consulte os registros da tentativa para identificar a falha antes de preparar uma nova execução.' },
   PROJECT_STORAGE_ROOT_UNAVAILABLE: { title: 'Área gerenciada do projeto indisponível', cause: 'O controlador não conseguiu confirmar a localização gerenciada necessária à tentativa.', nextAction: 'Confira a localização e os registros do projeto antes de continuar. Preserve as pastas existentes.' },
   IMPLEMENTATION_BLOCKED: { title: 'Implementação impedida', cause: 'O Implementador registrou um pré-requisito bloqueante. A tentativa não avançou para revisão.', nextAction: 'Consulte o resultado do Implementador, resolva o pré-requisito e prepare uma nova tentativa, ou encerre a atual.' },
@@ -97,7 +117,7 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
   GIT_INPUT_FAILED: { title: 'Comunicação com o Git interrompida', cause: 'O processo Git não recebeu a entrada da operação; a autoria não pôde ser determinada.', nextAction: 'Confira a disponibilidade do Git e execute nova detecção antes de tentar novamente.' },
   CREATION_REMOTE_DESCRIPTION_UNCONFIRMED: { title: 'Descrição sem confirmação', cause: 'O repositório foi criado, mas a atualização da descrição não foi confirmada.', nextAction: 'Consulte os efeitos preservados para conferir a descrição, sem recriar o repositório.' },
   CREATION_REMOTE_DESCRIPTION_CHANGED: { title: 'Descrição alterada no GitHub', cause: 'A descrição foi editada após a criação e foi preservada.', nextAction: 'Confira a descrição no GitHub antes de prosseguir com a criação.' },
-  ORIGIN_INVALID: { title: 'Origem não confirmada', cause: 'Não foi possível confirmar a pasta Git ou a URL do repositório informada.', nextAction: 'Confira o tipo e a localização da origem na configuração do projeto e consulte novamente.' },
+  ORIGIN_INVALID: { title: 'Origem não confirmada', cause: 'Não foi possível confirmar o repositório GitHub da Pasta do projeto.', nextAction: 'Confira a Pasta do projeto na configuração do projeto e consulte novamente.' },
   BASE_BRANCH_INVALID: { title: 'Branch-base não confirmada', cause: 'A consulta da origem não confirmou a branch-base escolhida.', nextAction: 'Confirme a origem e selecione uma branch existente no projeto.' },
   BASE_UNCONFIRMED: { title: 'Base remota não confirmada', cause: 'O commit da branch-base no GitHub ainda não foi confirmado.', nextAction: 'Confira o remoto e a branch-base antes de consultar a preparação novamente.' },
   EXECUTOR_REVALIDATION_REQUIRED: { title: 'Executor será conferido no início', cause: 'A preparação ainda não inicia agentes. O contexto Maestri/OMP será validado ao solicitar o início.', nextAction: 'Resolva os demais impedimentos e revise o resumo. O início continuará condicionado à validação do executor.' },
@@ -275,6 +295,7 @@ const diagnosticCopy: Readonly<Record<string, { title: string; cause: string; ne
 };
 
 const errorCopy: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(Object.entries(projectImportCopy).map(([code, copy]) => [code, `${copy.cause} ${copy.nextAction}`])),
   INTEGRATION_LIMIT: 'A base Git do destino mudou e a integração exige outra rodada de validação, mas o limite de correções desta tentativa foi atingido. A versão aprovada foi preservada. Prepare uma nova tentativa para adaptar a entrega.',
   INTEGRATION_REVIEW_PENDING: 'A base Git do destino mudou. A integração está em uma nova rodada e precisa de validação e revisão antes da entrega.',
   DELIVERY_BASE_CHANGED: 'A base Git do destino difere da base de publicação prevista. Consulte o estado da integração antes de tentar novamente.',
@@ -390,6 +411,11 @@ const eventLabels: Readonly<Record<string, string>> = {
   'creation.stopped': 'Criação de projeto interrompida', 'creation.reconcile.accepted': 'Conferência da criação aceita',
   'creation.reconciled': 'Efeitos da criação conferidos',
   'publication.completed': 'Efeitos de entrega concluídos', 'publication.reconciled': 'Efeitos de entrega reconciliados',
+  'project_import.accepted': 'Cadastro por URL aceito', 'project_import.completed': 'Cadastro por URL concluído', 'project_import.failed': 'Cadastro por URL falhou',
+};
+
+export const projectImportStepLabels: Readonly<Record<string, string>> = {
+  repository: 'Conferir repositório', reservation: 'Reservar pasta', clone: 'Clonar', verification: 'Verificar', registration: 'Registrar projeto',
 };
 
 export function operatorEventLabel(eventType: string): string {
@@ -423,6 +449,8 @@ export function operatorEventLabel(eventType: string): string {
     const labels: Record<string, string> = { directory: 'Pasta do projeto', files: 'Arquivos do projeto', git: 'Repositório Git local', baseline: 'Commit inicial', registration: 'Cadastro do projeto' };
     return `${labels[step[1]!]}: ${operatorState(step[2]).label}`;
   }
+  const importStep = /^project_import\.(repository|reservation|clone|verification|registration)\.(not_started|running|confirmed|skipped|failed)$/.exec(normalized);
+  if (importStep) return `Cadastro por URL · ${projectImportStepLabels[importStep[1]!]}: ${operatorState(importStep[2]).label}`;
   return 'Evento sem descrição disponível';
 }
 

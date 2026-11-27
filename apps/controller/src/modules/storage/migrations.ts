@@ -150,7 +150,7 @@ export function loadSchemaRecognitionResources(): SchemaRecognitionResources {
     const document = readRecognitionDocument(JSON.parse(
       readFileSync(new URL('schema-recognition.v1.json', resourceDirectory), 'utf8'),
     ) as unknown);
-    const schemaSql = readFileSync(new URL('initial-schema.v59.sql', resourceDirectory), 'utf8');
+    const schemaSql = readFileSync(new URL('initial-schema.v60.sql', resourceDirectory), 'utf8');
     if (sha256(schemaSql) !== document.schema_sql_sha256) throw new StorageError('MIGRATION_RESOURCES_INVALID');
     const upgradeMigration = document.historical_ledger.at(-1);
     if (!upgradeMigration) throw new StorageError('MIGRATION_RESOURCES_INVALID');

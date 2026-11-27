@@ -30,7 +30,7 @@ async function mount(value = storage) {
 }
 it('shows only the project folder even when internal storage needs attention', async () => {
   await mount({ ...storage, state: 'blocked', cause: 'STORAGE_TRANSITION_ACCESS_DENIED', recovery: 'Confira a pasta gerenciada.' });
-  expect(container.textContent).toContain('Pasta do projeto');
+  expect(container.textContent).toContain('Armazenamento do projeto');
   expect(container.textContent).toContain(storage.original_path);
   expect(container.textContent).not.toContain(storage.managed_root);
   expect(container.textContent).not.toContain('transição');
