@@ -3,7 +3,7 @@ import type { HttpAttemptDetail, HttpReview, HttpProducerResult } from '#contrac
 import { requestJson } from '../../api/http.js';
 import { setAttemptSelection } from './execution-requests.js';
 
-type Page = Exclude<NonNullable<HttpAttemptDetail['v3_details']>, { section: 'target_selections' }>;
+type Page = NonNullable<HttpAttemptDetail['v3_details']>;
 const titles = { finding_assessments: 'Progresso dos problemas', finding_disputes: 'Contestações e respostas', decisions: 'Decisões registradas' };
 export const progressLabel = (value: string) => ({ proven: 'Progresso comprovado', partial: 'Parcial comprovado', none: 'Sem progresso', not_assessable: 'Não foi possível avaliar' })[value] ?? 'Avaliação indisponível';
 export const decisionLabel = (value: string) => ({ guidance: 'Orientar a mesma tentativa', change_profile: 'Preparar sucessora com outro perfil', end: 'Encerrar tentativa' })[value] ?? 'Decisão indisponível';

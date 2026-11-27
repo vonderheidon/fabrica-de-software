@@ -34,7 +34,6 @@ async function createCapturedAttempt(f: Awaited<ReturnType<typeof attemptFixture
   const operationId = randomUUID();
   const capture: AttemptCapture = {
     formatVersion: 1,
-    v3Delivery: { format_version: 1, publication_target: null, publication_target_hash: null, authorization_operation_id: operationId },
     preparationId: preparation.id,
     preparationRevision: preparation.revision,
     summaryHash: preparation.summary_hash,

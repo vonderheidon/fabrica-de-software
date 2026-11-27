@@ -145,13 +145,11 @@ function attemptPagePosition(key: string): AttemptPagePosition | null {
   if (!Number.isSafeInteger(createdAtMs) || createdAtMs < 0 || !id || !Value.Check(OperationId, id)) throw cursorError();
   return { createdAtMs, id, key };
 }
-import { targetSelection } from './target-selections.js';
 import { readAttemptBlock } from './progress.js';
 import { AttemptDecisionView } from '#contracts';
 
 interface SectionPlan { from: string; key: string; delivery: string; round: string; select: string }
 const plans: Record<DetailSection, SectionPlan> = {
-  target_selections: { from: 'publication_target_selections t JOIN deliveries d ON d.id=t.delivery_id', key: "printf('%020d',t.created_at_ms)||':'||t.operation_id", delivery: 't.delivery_id', round: 'd.round_number', select: 't.operation_id' },
   finding_disputes: { from: 'finding_disputes t JOIN deliveries d ON d.id=t.delivery_id LEFT JOIN reviews response ON response.id=t.response_review_id', key: "printf('%020d',t.created_at_ms)||':'||t.id", delivery: 't.delivery_id', round: 'd.round_number',
     select: `t.id,t.attempt_id AS attemptId,t.finding_id AS findingId,t.passage_id AS passageId,t.delivery_id AS deliveryId,t.content_identity AS contentIdentity,
       t.justification,t.evidence_json,t.response_review_id AS responseReviewId,t.response_verdict AS responseVerdict,t.response_justification AS responseJustification,
@@ -225,7 +223,6 @@ export function readDetailPage(db: Database.Database, attemptId: string, query: 
     if (query.section === 'finding_assessments') { const { evidence_json, ...entry } = row; value = { ...entry, evidence: JSON.parse(String(evidence_json)) as unknown }; }
     if (query.section === 'decisions') { const { guidance_json, ...entry } = row; value = { ...entry,
       guidance: typeof guidance_json === 'string' ? (JSON.parse(guidance_json) as { text: string }).text : null }; }
-    if (query.section === 'target_selections') value = targetSelection(db,String(row.operation_id)).view;
     if (query.section === 'effects') value = readEffect(db, String(row.operationId));
     if (query.section === 'criteria') {
       const { producer_json, reviewer_json, ...c } = row;
@@ -259,20 +256,17 @@ export function readAttemptDetail(db: Database.Database, id: string, query: Atte
   if (!expectedAccountId) throw new StorageError('ATTEMPT_DATA_INVALID');
   const publication = publicationSummary(db,id,exists ? selectedDeliveryId! : undefined);
   const attemptCapture = readCapture(db,id);
-  const targetCapture = attemptCapture.v3Delivery;
   const details = readDetailPage(db,id,query);
-   const v3Details = details?.section === 'target_selections' ? { section: 'target_selections' as const, items: details.items.filter((item): item is import('#contracts').PublicationTargetSelection => 'selection_kind' in item), next_cursor: details.next_cursor, has_more: details.has_more }
-     : details?.section === 'finding_assessments' ? { section: 'finding_assessments' as const, items: details.items.filter((item): item is import('#contracts').FindingAssessment => 'progress' in item && 'findingId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
+   const v3Details = details?.section === 'finding_assessments' ? { section: 'finding_assessments' as const, items: details.items.filter((item): item is import('#contracts').FindingAssessment => 'progress' in item && 'findingId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
      : details?.section === 'finding_disputes' ? { section: 'finding_disputes' as const, items: details.items.filter((item): item is import('#contracts').FindingDispute => 'responseReviewId' in item), next_cursor: details.next_cursor, has_more: details.has_more }
      : details?.section === 'decisions' ? { section: 'decisions' as const, items: details.items.filter((item): item is AttemptDecisionView => 'operationId' in item && 'blockId' in item), next_cursor: details.next_cursor, has_more: details.has_more } : null;
-  const historySections = (['target_selections', 'finding_assessments', 'finding_disputes', 'decisions'] as const).filter(section => {
+  const historySections = (['finding_assessments', 'finding_disputes', 'decisions'] as const).filter(section => {
     const plan = plans[section]!;
     return Boolean(db.prepare(`SELECT 1 FROM ${plan.from} WHERE t.attempt_id=? AND ${plan.round}=?${selectedDeliveryId ? ` AND ${plan.delivery}=?` : ''} LIMIT 1`)
       .get(...(selectedDeliveryId ? [id, selectedRound, selectedDeliveryId] : [id, selectedRound])));
   });
   return { ...a, v3Details, historySections, workspaceLineage: attemptCapture.workspace, block: readAttemptBlock(db,id), expectedAccountId, issue: issueHeader(db,id),selectedDeliveryId, selectedRound,
     deliverySummary: exists ? readDeliverySummary(db,id,selectedDeliveryId!,publication) : null,
-    publicationTarget: targetCapture?.publication_target ?? null, publicationTargetHash: targetCapture?.publication_target_hash ?? null,
     stageActivity: readStageActivity(db,id), publication, measurements: readMeasurements(db,id), cleanup: readResources(db,id).cleanup,
     authority: authority ? { ...authority,recovery: authority.reason === 'ASSIGNEE_CHANGED' ? 'Encerre a tentativa anterior antes de transferir responsabilidade e rearmar Ready no GitHub.' : authority.reason ? 'Corrija conta, vínculo ou Status no GitHub e use Revalidar. A fábrica não altera o quadro para resolver divergências.' : 'Autoridade observada; cada despacho ou efeito ainda exige revalidação atual.' } : null,
     capabilities: { cancel: { available: a.result === null }, completePublication: publication.completeCapability, reconcilePublication: publication.reconcileCapability, revalidate: { available: a.result === null || publication.reviewState === 'approved' } },

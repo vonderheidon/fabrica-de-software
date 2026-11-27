@@ -63,7 +63,6 @@ function preparationChanges(value: PreparationUpdate['changes']) {
     ...(value.issue_id === undefined ? {} : { issueId: value.issue_id }),
     ...(value.delivery_mode === undefined ? {} : { deliveryMode: value.delivery_mode }),
     ...(value.guidance === undefined ? {} : { guidance: value.guidance }),
-    ...(value.publication_target === undefined ? {} : { publication_target: value.publication_target }),
     ...(overrides === undefined ? {} : { overrides: {
       ...(overrides.base_branch === undefined ? {} : { baseBranch: overrides.base_branch }),
       ...(overrides.implementer_profile === undefined ? {} : { implementerProfile: overrides.implementer_profile }),

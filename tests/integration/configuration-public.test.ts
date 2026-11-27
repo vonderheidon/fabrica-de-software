@@ -10,8 +10,8 @@ import { createInspector } from '../../apps/controller/src/modules/workspaces/in
 
 const cleanup: (() => Promise<unknown>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
-async function fixture() {
-  const f = await attemptFixture(); cleanup.push(() => f.close());
+async function fixture(sourceKind: 'local' | 'github' = 'local') {
+  const f = await attemptFixture(undefined, undefined, undefined, undefined, false, sourceKind); cleanup.push(() => f.close());
   const github = { ...f.github,
     getProjectOwner: vi.fn(async () => complete(f.project.project.owner)),
     listProjects: vi.fn(async () => complete([f.project.project])),
@@ -33,7 +33,7 @@ function durableRows(f: AttemptFixture) {
 }
 
 it('enables automation for a registered GitHub source through the real origin request validator', async () => {
-  const f = await fixture();
+  const f = await fixture('github');
   const origin = createInspector({
     getRepository: vi.fn(async () => complete(f.issue.repository)),
     resolveBranch: vi.fn(async () => complete(f.observation.remote!.branch!)),

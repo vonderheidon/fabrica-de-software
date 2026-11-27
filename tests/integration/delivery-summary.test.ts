@@ -10,7 +10,7 @@ import { loadConfiguration } from '../../apps/controller/src/config.js';
 const fixtures: PublicationFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 async function fixture(mode: 'icr' | 'commit' | 'pr' = 'icr') {
-  const f = await publicationFixture(true,mode,true,{ targetForIcr:mode === 'icr' }); fixtures.push(f); return f;
+  const f = await publicationFixture(true,mode,true); fixtures.push(f); return f;
 }
 const summary = (f: PublicationFixture, id = f.status().deliveryId!) => f.storage.getDeliveryDetail(id,{}).deliverySummary;
 

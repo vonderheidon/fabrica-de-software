@@ -8,13 +8,13 @@ import { assertDeletionPathsAvailable } from './project-deletion-barrier.js';
 import { OperationError } from './operations.js';
 import { guarded } from './configuration-reads.js';
 export interface DeliveryTargetPlan {
-  operation_id: string; selection_operation_id: string | null; delivery_id: string; attempt_id: string; repository_id: string;
+  operation_id: string; delivery_id: string; attempt_id: string; repository_id: string;
   local_path: string; local_identity: DeliveryTargetValue['local_identity']; branch_ref: string; task_type: DeliveryTargetValue['task_type'];
   task_description: string; issue_number: number; base_branch: string; base_sha: string; approved_ref: string; content_identity: string;
 }
 export function sealDeliveryTarget(db: Database.Database, plan: DeliveryTargetPlan): DeliveryTargetValue {
   return guarded(() => db.transaction(() => {
-    const value: DeliveryTargetValue = { ...plan,format_version: 1,created_at_ms: Date.now() };
+    const value: DeliveryTargetValue = { ...plan,selection_operation_id: null,format_version: 1,created_at_ms: Date.now() };
     if (!Value.Check(DeliveryTarget, value)) {
       throw new OperationError(400,'DELIVERY_TARGET_INVALID','A identidade do destino de entrega é inválida.');
     }
@@ -37,7 +37,7 @@ export function sealDeliveryTarget(db: Database.Database, plan: DeliveryTargetPl
     if (prior) {
       const old = readDeliveryTarget(db,prior.operation_id);
       if (old.repository_id !== plan.repository_id || old.local_path.toLowerCase() !== plan.local_path.toLowerCase() ||
-          old.selection_operation_id !== plan.selection_operation_id || old.base_sha !== plan.base_sha || old.local_identity.base_sha !== plan.local_identity.base_sha || old.content_identity !== plan.content_identity) {
+          old.base_sha !== plan.base_sha || old.local_identity.base_sha !== plan.local_identity.base_sha || old.content_identity !== plan.content_identity) {
         throw new OperationError(409,'DELIVERY_TARGET_CHANGED','O destino anterior permanece selado; reconcilie-o antes de escolher outro.');
       }
       return old;

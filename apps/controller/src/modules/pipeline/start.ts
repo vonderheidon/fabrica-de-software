@@ -3,7 +3,7 @@ import { lstat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
 import { PreparedWorkspace, RoleResourceReference, StartAttempt, type AttemptCapture, type AttemptWorkspaceBinding, type AttemptWorkspaceSnapshot, type ExecutionProfileValue, type PassageRequest, type ToolObservation, type PassageBinding, type QueueItem } from '#contracts';
-import { isLocalAbsoluteTargetPath, OperationError, publicationTargetHash, publicationTargetPath, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
+import { OperationError, type AttemptCommand, type AnswerCommand, type CaptureClaim, type RetryCaptureCommand, type Storage } from '../storage/index.js';
 import type { GitHub } from '../github/index.js';
 import { interpretIssue, preparationDigest } from './criteria.js';
 import { ExecutionError, type Execution } from '../execution/index.js';
@@ -262,14 +262,6 @@ export function createPipeline(deps: PipelineDependencies) {
     }
     if (publication && !await publication.observeControllerAccount()) throw new OperationError(409, 'ACCOUNT_CHANGED', 'Dispatch is paused until the configured account is observed.');
     const current = await preparations.revalidateSummary(body); const p = current.view.preparation;
-    const targetRequired = p.effective_configuration.configuration.source.kind === 'github' && p.delivery_mode !== 'icr';
-    if (targetRequired && !p.publication_target) throw new OperationError(409, 'PUBLICATION_TARGET_REQUIRED',
-      'Escolha um destino local para iniciar uma entrega Commit local ou Pull request deste projeto por URL.', {
-        affected_requirements: ['RF-23', 'RF-24', 'RF-28'], recovery: 'Selecione um clone existente ou um destino para o clone, salve e revise novamente o resumo.' });
-    if (p.publication_target && (p.effective_configuration.configuration.source.kind !== 'github' || p.publication_target.repository_id !== p.effective_configuration.configuration.source.repository_id ||
-      !isLocalAbsoluteTargetPath(publicationTargetPath(p.publication_target)))) throw new OperationError(409, 'PUBLICATION_TARGET_INVALID',
-        'O destino salvo não corresponde ao repositório atual ou não usa um caminho local absoluto válido.', {
-          affected_requirements: ['RF-23', 'RF-24', 'RF-28'], recovery: 'Escolha novamente o clone e o destino correspondentes ao repositório do projeto.' });
     const reasons = p.prerequisites.filter(r => r.code !== 'EXECUTOR_REVALIDATION_REQUIRED');
     if (reasons.length || !p.issue || !p.base_sha || !p.criteria_preview.executable || !config.view.settings.account_id ||
       !p.effective_configuration.implementer_profile || !p.effective_configuration.reviewer_profile) {
@@ -292,9 +284,6 @@ export function createPipeline(deps: PipelineDependencies) {
       throw new OperationError(503, 'ROLE_RESOURCE_REQUIRED', 'Both distributed versioned role contracts are required before dispatch.');
     }
     const tools = await deps.observeTools();
-    const v3Delivery = p.publication_target === null
-      ? { format_version: 1 as const, publication_target: null, publication_target_hash: null, authorization_operation_id: context.operationId }
-      : { format_version: 1 as const, publication_target: p.publication_target, publication_target_hash: publicationTargetHash(p.publication_target)!, authorization_operation_id: context.operationId };
     const capture: AttemptCapture = { formatVersion: 1, preparationId: p.id, preparationRevision: p.revision, summaryHash: p.summary_hash,
       accountId: config.view.settings.account_id, issue: p.issue, baseSha: p.base_sha, configuration: p.effective_configuration,
       criteria: p.criteria_preview.criteria, criteriaDigest: p.criteria_preview.digest, roleResources, tools,
@@ -302,8 +291,7 @@ export function createPipeline(deps: PipelineDependencies) {
         identity: { project_id: saved.view.project_id, repository_id: p.issue.repository.id, issue_id: p.issue.id },
         predecessor_attempt_id: p.previous_attempt_id ?? null,
         initial_state: { kind: 'base_checkout', content_identity: p.base_sha }, inherited_base_sha: null, comparison_base_sha: p.base_sha,
-      },
-      v3Delivery };
+      } };
     for (const candidate of storage.terminalRecoveryCandidates()) {
       if (!execution.observeManagedTerminal && candidate.state === 'available') continue;
       const observation = execution.observeManagedTerminal
@@ -724,10 +712,6 @@ export function createPipeline(deps: PipelineDependencies) {
         catch { deps.logFailure('PROJECT_DELETION_STOP_UNCONFIRMED'); }
       }
       await Promise.all(inFlight);
-    },
-    setPublicationTarget(id: string, body: import('#contracts').SetPublicationTarget, context: { operationId: string; expectedRevision: string | undefined }) {
-      if (!publication) throw new OperationError(503,'PUBLICATION_UNAVAILABLE','A publicação não está disponível neste host.');
-      return publication.selectTarget(id,body,context);
     },
     async makeAttemptDecision(attemptId: string, body: MakeAttemptDecision, context: { operationId: string; expectedRevision: string | undefined }) {
       const command = { ...context, attemptId, body };

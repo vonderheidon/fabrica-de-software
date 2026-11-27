@@ -13,7 +13,7 @@ import type { Execution, PassageRequest } from '../../apps/controller/src/module
 import { digest, loadRoleResources } from '../../apps/controller/src/modules/execution/roles.js';
 
 export const complete = <T>(data: T): GitHubQueryResult<T> => ({ state: 'complete', data, diagnostics: [], retryAtMs: null });
-export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high', directoryName?: 'factory' | 'var/factory', recordInitialStorage = false) {
+export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.repeat(40), profileEffort: string | null = 'high', directoryName?: 'factory' | 'var/factory', recordInitialStorage = false, sourceKind: 'local' | 'github' = 'local', projectFolder?: string) {
   const directory = directoryName ? join(temporaryRoot,directoryName) : mkdtempSync(join(temporaryRoot, 'factory-attempt-'));
   if (directoryName) mkdirSync(directory, { recursive: true });
   const storageOptions = { dataDirectory: directory, busyTimeoutMs: 10 };
@@ -52,10 +52,13 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const reviewerProfileId = reviewerProfile.id;
   const repository = { id: 'R_test', owner: { id: 'OWNER_test', login: 'test-org' }, name: 'repo', url: 'https://github.com/test-org/repo', defaultBranch: 'main', isArchived: false, isPrivate: true };
   const mapping = { id: 'PVT_test', owner_id: 'OWNER_test', status_field_id: 'FIELD_test', status_option_ids: { backlog: 'BACKLOG', ready: 'READY', in_progress: 'PROGRESS', in_review: 'REVIEW', delivered: 'DELIVERED' } };
+  let registrations = 0;
+  /** `local` registers a Pasta do projeto; `github` reproduces a legacy URL-sourced project, which has no folder. */
   function register() {
+    const source = { kind: sourceKind, location: sourceKind === 'local' ? projectFolder ?? `${directory}-origin-${++registrations}` : repository.url };
     const projectId = storage.registerProject({ operationId: randomUUID(), expectedRevision: undefined,
-      body: { name: 'Project', source: { kind: 'github', location: repository.url }, base_branch: 'main' },
-      source: { kind: 'github', location: repository.url, repository_id: repository.id, repository_url: repository.url }, originNotes: [] }).resource.id;
+      body: { name: 'Project', source, base_branch: 'main' },
+      source: { ...source, repository_id: repository.id, repository_url: repository.url }, originNotes: [] }).resource.id;
     const previous = storage.getConfiguration(projectId);
     const { id: _id, project_id: _projectId, revision: _revision, created_at_ms: _created, ...configuration } = previous.view.configuration;
     const changes = { github_project: mapping, implementer_profile_id: implementerProfileId, reviewer_profile_id: reviewerProfileId };
@@ -139,11 +142,9 @@ export async function attemptFixture(temporaryRoot = tmpdir(), baseSha = 'a'.rep
   const observeTools = vi.fn(async () => structuredClone(tools)); const logFailure = vi.fn();
   const dependencies: PipelineDependencies = { storage, preparations, execution, workspaces, observeTools, hostName: 'test-host', logFailure };
   const pipeline = createPipeline(dependencies);
-  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr', targetKind: 'clone' | 'existing_clone' = 'existing_clone', includeIcrTarget = false,
-    baseBranch?: string, previousAttemptId?: string) {
+  async function prepare(target = projectId, deliveryMode: DeliveryMode = 'icr', baseBranch?: string, previousAttemptId?: string) {
     const saved = await preparations.createPreparation(target, { issue_id: issue.id, delivery_mode: deliveryMode, guidance: '', overrides: baseBranch ? { base_branch: baseBranch } : {},
-      ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}),
-      ...(deliveryMode === 'icr' && !includeIcrTarget ? {} : { publication_target: { format_version: 1, repository_id: repository.id, selection: targetKind === 'clone' ? { kind: 'clone', destination: join(directory,'target') } : { kind: 'existing_clone', path: join(directory,'target') } } }) }, { operationId: randomUUID(), expectedRevision: undefined });
+      ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}) }, { operationId: randomUUID(), expectedRevision: undefined });
     const p = saved.view.preparation;
     const body: StartAttempt = { preparationId: p.id, preparationRevision: p.revision, authorizedSummaryHash: p.summary_hash, authorized: true };
     return { body, context: { operationId: randomUUID(), expectedRevision: saved.etag }, saved };

@@ -119,20 +119,6 @@ export function readOperation(db: Database.Database, operationId: string): Store
         message: 'A transição preservou as localizações para conferência.', operation_id: operationId,
         recovery: 'Consulte a configuração e retome a mesma operação para reconciliar origem e destino.' } } : {}) };
   }
-  if (row.operation_kind === 'publication.target') {
-    const selection = db.prepare<[string], import('#contracts').PublicationTargetSelection>(`SELECT operation_id,attempt_id,delivery_id,repository_id,selection_kind,local_path,state,revision,
-      state='confirmed' AS identity_verified,CASE WHEN state='accepted' THEN NULL ELSE updated_at_ms END AS checked_at_ms,reason,
-      CASE WHEN state='unknown' THEN 'Reconcilie a mesma seleção; não solicite outro clone.' ELSE NULL END AS recovery,
-      json_extract(authorization_json,'$.authorization_operation_id') AS authorization_operation_id,
-      json_extract(authorization_json,'$.target_intent_hash') AS target_intent_hash FROM publication_target_selections WHERE operation_id=?`).get(operationId);
-    if (!selection) throw new StorageError('OPERATION_DATA_INVALID');
-    selection.identity_verified = Boolean(selection.identity_verified);
-    if (!receipt || !event || event.event_type !== 'publication.target.accepted' || receipt.event_cursor !== String(event.seq)) throw new StorageError('OPERATION_DATA_INVALID');
-    return { operation_id: operationId, kind: row.operation_kind, resource: { type: 'attempt', id: row.resource_id }, receipt,
-      state: selection.state === 'confirmed' ? 'succeeded' : selection.state === 'failed_known' ? 'failed' : selection.state,
-      progress: { kind: 'publication_target', state: selection.state, target_selection: selection,
-        cause: selection.reason, recovery: selection.recovery, decision: null, transition_step: null } };
-  }
   if (isBindingOperation) {
     const expectedEvent = row.operation_kind === 'settings.account.bind' ? 'settings.account.bound' : 'settings.account.switched';
     const linkedAccount = row.result_account_id ? db.prepare<[string], { login: string }>(

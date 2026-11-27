@@ -1,7 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Capability, DeliveryMode, OperationId } from './base.js';
 import { GitHubId } from './github.js';
-import { PublicationTargetIntent } from './preparations.js';
 import { ProjectConfiguration } from './projects.js';
 
 const closed = { additionalProperties: false } as const;
@@ -52,7 +51,7 @@ export const AuthorizeUpgrade = Type.Object({ deliveryId: OperationId, currentMo
 export type AuthorizeUpgrade = Static<typeof AuthorizeUpgrade>;
 export const ModeUpgradeSummary = Type.Object({ targetMode: DeliveryMode, additionalEffects: Type.Array(EffectView.properties.kind),
   deliveryBranch: ProjectConfiguration.properties.delivery_branch,
-  publicationTarget: Type.Optional(nullable(PublicationTargetIntent)), summaryHash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability }, closed);
+  summaryHash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability }, closed);
 export type ModeUpgradeSummary = Static<typeof ModeUpgradeSummary>;
 /** Why the local commit could not land in the Pasta do projeto; bounded so a dirty folder never inflates the summary. */
 export const LocalCommitBlock = Type.Object({

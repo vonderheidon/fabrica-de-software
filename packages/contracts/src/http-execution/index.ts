@@ -61,4 +61,3 @@ export { FindingAssessment as HttpFindingAssessment } from './progress.js';
 export { FindingDispute as HttpFindingDispute } from './disputes.js';
 export { MakeAttemptDecision as HttpMakeAttemptDecision, AttemptDecisionView as HttpAttemptDecisionView } from './decisions.js';
 export { AttemptV3DetailPage as HttpAttemptV3DetailPage } from './queries.js';
-export { PublicationTargetChoice as HttpPublicationTargetChoice, PublicationTargetIntent as HttpPublicationTargetIntent } from '../preparations.js';

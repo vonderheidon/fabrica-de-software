@@ -231,7 +231,7 @@ it('renders a blocked preparation with local conditions and no diagnostic, start
       artifact_policy: savedConfiguration.settings.artifact_policy, guidance: '',
        origins: { base_branch: 'project', implementer_profile: 'project', reviewer_profile: 'project', correction_limit: 'project', time_defaults: 'global', artifact_policy: 'global', guidance: 'project', delivery_mode: 'preparation' } },
     criteria_preview: { executable: false, objective: '', criteria: [], digest: 'a'.repeat(64), reasons: ['CRITERIA_LIST_INVALID'] },
-    effects_preview: [], issue: null, base_sha: null, summary_hash: 'b'.repeat(64), diagnostics: [], retry_at_ms: null, publication_target: null,
+    effects_preview: [], issue: null, base_sha: null, summary_hash: 'b'.repeat(64), diagnostics: [], retry_at_ms: null,
   };
   request.mockReset(); metadata.mockReset();
   request.mockImplementation(async (path: string) => {
@@ -281,7 +281,7 @@ async function mountReadyStart() {
        origins:{base_branch:'project',implementer_profile:'project',reviewer_profile:'project',correction_limit:'project',time_defaults:'global',artifact_policy:'global',guidance:'project',delivery_mode:'preparation'}},
     criteria_preview:{executable:true,objective:'Start fixture',criteria:[],digest:'a'.repeat(64),reasons:[]},effects_preview:[],
     issue:{id:'I_start',number:1,title:'Start fixture',state:'OPEN',assignees:[]} as unknown as NonNullable<Preparation['issue']>,
-    base_sha:'a'.repeat(40),summary_hash:'b'.repeat(64),diagnostics:[],retry_at_ms:null,publication_target:null,
+    base_sha:'a'.repeat(40),summary_hash:'b'.repeat(64),diagnostics:[],retry_at_ms:null,
   };
   request.mockImplementation(async (path:string) => path === '/api/v1/settings' || path.endsWith('/configuration') ? savedConfiguration
     : path.includes('/issues?') ? {items:[],completeness:'complete',has_more:false,diagnostics:[],prerequisites:[]} : {project:{name:'Start fixture'},deletion:null});

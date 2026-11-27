@@ -189,11 +189,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
       {upgrades.map(upgrade => <div className="publication-upgrade" key={upgrade.target_mode}>
         <p>Branch de destino: {upgrade.delivery_branch ? `${upgrade.delivery_branch.name} (${upgrade.delivery_branch.kind === 'existing' ? 'existente' : 'nova'})` : 'nova branch com nome automático'}.</p>
         <p>{upgrade.additional_effects.map(kind => effectLabel[kind]).join(' · ')}.</p>
-        {upgrade.publication_target && <p className="muted">Intenção capturada: {upgrade.publication_target.selection.kind === 'clone'
-          ? 'clonar em ' + upgrade.publication_target.selection.destination : 'usar clone em ' + upgrade.publication_target.selection.path}.</p>}
-        {!upgrade.capability.available && <p>{upgrade.capability.reason_code === 'PUBLICATION_TARGET_REQUIRED'
-          ? 'Destino não capturado. Prepare outra tentativa com um destino local para entregar por commit ou PR.'
-          : 'Há pré-requisitos pendentes. Atualize a tentativa antes de continuar.'}</p>}
+        {!upgrade.capability.available && <p>Há pré-requisitos pendentes. Atualize a tentativa antes de continuar.</p>}
         <button type="button" className="primary" disabled={busy || deletionRestricted || !projectChecked || !summaryMatchesAuthorization || !upgrade.capability.available}
           onClick={() => void send('upgrade',upgrade.target_mode)}>{upgrade.target_mode === 'pr' ? authorizedMode === 'commit' ? 'Publicar branch e abrir PR' : 'Integrar, criar commit e abrir PR' : 'Integrar e criar commit'}</button>
       </div>)}

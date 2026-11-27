@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { OperationId } from './base.js';
-import { CapturedPublicationTarget, Criterion, EffectiveConfiguration } from './preparations.js';
+import { Criterion, EffectiveConfiguration } from './preparations.js';
 import { IssueContext } from './github.js';
 import { RoleResourceReference } from './execution.js';
 import { AttemptWorkspaceSnapshot } from './workspaces.js';
@@ -25,7 +25,7 @@ export const AttemptCapture = Type.Object({
   summaryHash: hash, accountId: text(), issue: IssueContext, baseSha: Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' }),
   configuration: EffectiveConfiguration, criteria: Type.Array(Criterion, { minItems: 1, maxItems: 1000 }),
   criteriaDigest: hash, roleResources: Type.Array(RoleResourceReference, { minItems: 2, maxItems: 2 }),
-  tools: Type.Array(ToolObservation, { minItems: 5, maxItems: 5 }), v3Delivery: Type.Optional(CapturedPublicationTarget),
+  tools: Type.Array(ToolObservation, { minItems: 5, maxItems: 5 }),
   workspace: AttemptWorkspaceSnapshot,
 }, closed);
 export type AttemptCapture = Static<typeof AttemptCapture>;

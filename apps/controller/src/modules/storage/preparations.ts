@@ -37,7 +37,7 @@ export function readPreparation(db: Database.Database, id: string): StoredPrepar
   readConfiguration(db, row.project_id);
   const snapshot: unknown = JSON.parse(row.choices_json);
   const choices = readPreparationChoices(snapshot);
-  const record = { ...choices, publication_target: choices.publication_target ?? null, id: row.id, project_id: row.project_id, project_revision_id: row.project_revision_id, revision: row.revision };
+  const record = { ...choices, id: row.id, project_id: row.project_id, project_revision_id: row.project_revision_id, revision: row.revision };
   if (!Value.Check(PreparationRecord, record)) throw new StorageError('PREPARATION_DATA_INVALID');
   return { view: record, etag: preparationETag(db, record), eventCursor: eventCursor(db) };
 }
@@ -76,7 +76,7 @@ export function savePreparationInTransaction(db: Database.Database, input: SaveP
     assertProjectAvailable(db, projectId);
     const config = readConfiguration(db, projectId);
     if (configurationETag(config) !== input.configurationETag) throw new OperationError(412, 'REVISION_CONFLICT', 'Configuration changed while preparing the issue.');
-    const choices: PreparationChoices = command.kind === 'preparation.create' ? { ...command.body, publication_target: command.body.publication_target ?? null } : {
+    const choices: PreparationChoices = command.kind === 'preparation.create' ? command.body : {
       issue_id: previous!.view.issue_id, delivery_mode: previous!.view.delivery_mode, guidance: previous!.view.guidance,
       overrides: previous!.view.overrides, ...command.body.changes,
       ...(previous!.view.previous_attempt_id ? { previous_attempt_id: previous!.view.previous_attempt_id } : {}),

@@ -14,7 +14,6 @@ import { readUncertainOperations, recordUncertainOperation, resolveUncertainOper
 import { profilesForRole } from '../projects/profile-collection.js';
 import { formatMinuteValue } from '../projects/time-minutes.js';
 import { FieldHelp } from '../projects/FieldHelp.js';
-import { useNativeSelection, nativeSelectionMessage } from '../projects/useNativeSelection.js';
 import { OperatorState } from '../../app/OperatorSupport.js';
 import { operatorCodeLabel, operatorErrorMessage, operatorState } from '../../app/operator-language.js';
 
@@ -51,8 +50,6 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const [issueId, setIssueId] = useState(initialIssueId ?? '');
   const [mode, setMode] = useState<DeliveryMode>('icr');
   const [guidance, setGuidance] = useState('');
-  const [targetFolderName, setTargetFolderName] = useState('');
-  const nativeSelection = useNativeSelection();
   const [draft, setDraftState] = useState<PreparationDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -347,18 +344,6 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
   const issueLoadError = issuesError ?? (issueChanged ? saveError : null);
   const blocked = Boolean(issueLoading || !draft || saving || saveError || draft.conflict || !draft.current.criteria_preview.executable || hasBlockingPrerequisites(draft.current.prerequisites) || !draft.current.base_sha || !draft.current.issue || !draft.current.effective_configuration.implementer_profile || !draft.current.effective_configuration.reviewer_profile || !draft.current.summary_hash);
   const configuration = draft?.current.effective_configuration;
-  const target = draft ? (draft.choices.publication_target === undefined ? draft.current.publication_target : draft.choices.publication_target) ?? null : null;
-  const targetRepositoryId = configuration?.configuration.source.kind === 'github' ? configuration.configuration.source.repository_id ?? null : null;
-  const hasUrlTargetRequirement = configuration?.configuration.source.kind === 'github' && mode !== 'icr';
-  const showTargetField = configuration?.configuration.source.kind === 'github' || hasUrlTargetRequirement || target !== null;
-  const targetCandidate = nativeSelection.candidates.project_directory;
-  const targetSelectionStatus = nativeSelection.state.status !== 'idle' && nativeSelection.state.kind === 'project_directory' ? nativeSelection.state : null;
-  const targetSelectionMessage = targetSelectionStatus ? nativeSelectionMessage(targetSelectionStatus) : null;
-  function applyTarget(selection: NonNullable<PreparationChoices['publication_target']>['selection']): void {
-    if (!targetRepositoryId) return;
-    updateChoices(current => ({ ...current, publication_target: { format_version: 1, repository_id: targetRepositoryId, selection } }));
-  }
-
   return <div className="preparation-dialog">
     {previousAttemptId && <div className="notice"><b>Nova tentativa</b><p>A preparação consulta a issue e a base atuais. O histórico, a sessão e as alterações da tentativa anterior não serão reutilizados.</p></div>}
     <section className="card preparation-section"><div className="eyebrow">Escolha do trabalho</div><div className="form-grid">
@@ -368,29 +353,6 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
         {issueLoadError && <div id="preparation-issue-status" className="preparation-issue-error" role="alert"><p>{issueLoadError}</p><button type="button" onClick={() => { if (issueChanged && saveError) void saveLatest(); else { setIssues(null); setIssuesError(null); setIssueReload(value => value + 1); } }}>Tentar novamente</button></div>}
       </div>
       <div className="form-field"><label htmlFor="preparation-delivery-mode">Modo de entrega</label><CustomSelect id="preparation-delivery-mode" value={mode} aria-describedby="preparation-delivery-mode-help" onChange={(event) => { const value = event.currentTarget.value as DeliveryMode; setMode(value); updateChoices((current) => ({ ...current, delivery_mode: value })); }} disabled={!configurationReady || !draft}>{modes.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</CustomSelect><p id="preparation-delivery-mode-help" className="field-guidance">{deliveryModeDescription[mode]}</p></div>
-      {showTargetField && <div className="form-field field-full publication-target-field">
-        <label>Destino de entrega</label>
-        <p className="muted">Salvar guarda o destino; não cria o clone. A escolha não confirma que um clone existente corresponde ao repositório.</p>
-        {!targetRepositoryId && <p className="notice" role="status">{configuration?.configuration.source.kind === 'local' ? 'Projetos locais usam o clone cadastrado. Limpe esta intenção adicional.' : 'O repositório da issue ainda não está confirmado para associar um destino.'}</p>}
-        {target && <>
-          <p>{target.selection.kind === 'existing_clone' ? 'Intenção: usar clone existente' : 'Intenção: clonagem futura'}</p>
-          <label htmlFor="preparation-target-path">Caminho local</label>
-          <input id="preparation-target-path" value={target.selection.kind === 'existing_clone' ? target.selection.path : target.selection.destination} readOnly maxLength={32768} aria-describedby="preparation-target-path-help" />
-          <p id="preparation-target-path-help" className="field-guidance">Repositório associado à issue atual. Confira este caminho no resumo antes de autorizar o início.</p>
-          <button type="button" onClick={() => updateChoices(current => ({ ...current, publication_target: null }))}>Limpar destino salvo</button>
-        </>}
-        <button type="button" onClick={() => void nativeSelection.select('project_directory')} disabled={!draft || saving || !targetRepositoryId || nativeSelection.state.status === 'selecting'}>
-          {nativeSelection.state.status === 'selecting' && nativeSelection.state.kind === 'project_directory' ? 'Aguardando a janela…' : 'Selecionar pasta'}
-        </button>
-        {targetSelectionMessage && <p role={targetSelectionStatus?.status === 'unavailable' || targetSelectionStatus?.status === 'expired' || targetSelectionStatus?.status === 'concurrent' ? 'alert' : 'status'}>{targetSelectionMessage}</p>}
-        {targetCandidate && <div className="projects-folder-candidate"><p><span className="eyebrow">Pasta candidata</span><span className="mono">{targetCandidate}</span></p>
-          <button type="button" onClick={() => applyTarget({ kind: 'existing_clone', path: targetCandidate })} disabled={!targetRepositoryId}>Usar como clone existente</button>
-          <label htmlFor="preparation-target-folder-name">Nome da nova pasta dentro deste local</label>
-          <input id="preparation-target-folder-name" value={targetFolderName} onChange={event => setTargetFolderName(event.currentTarget.value)} maxLength={255} placeholder="Nome da nova pasta" />
-          <button type="button" onClick={() => { const separator = targetCandidate.includes('\\') ? '\\' : '/'; const parent = targetCandidate.replace(/[\\/]+$/, ''); applyTarget({ kind: 'clone', destination: `${parent}${separator}${targetFolderName}` }); }} disabled={!targetRepositoryId || !validTargetFolderName(targetFolderName) || targetCandidate.length + targetFolderName.length + 1 > 32768}>Planejar clonagem neste local</button>
-        </div>}
-        {configuration?.configuration.source.kind === 'github' && mode === 'icr' && <p className="muted">O modo ICR não exige nem autoriza clonagem do destino local de entrega.</p>}
-      </div>}
       <div className="form-field field-full"><label htmlFor="preparation-guidance">Orientação</label><textarea id="preparation-guidance" value={guidance} aria-describedby="preparation-guidance-help" onChange={(event) => { const value = event.currentTarget.value; setGuidance(value); updateChoices((current) => ({ ...current, guidance: value })); }} disabled={!draft} maxLength={8192} /><FieldHelp id="preparation-guidance-help" label="Orientação" /></div>
       {draft && <>
         <BranchSelector id="preparation-base-branch" source={draft.current.effective_configuration.configuration.source} value={String(draft.choices.overrides.base_branch ?? draft.current.effective_configuration.configuration.base_branch)} onChange={baseBranch => updateChoices(current => ({...current,overrides:{...current.overrides,base_branch:baseBranch}}))} />
@@ -452,10 +414,6 @@ export function PreparationDialog({ projectId, initialIssueId = null, previousAt
 
 function sameChoices(left: PreparationChoices, right: PreparationChoices): boolean {
   return Object.keys(changedChoices(left, right)).length === 0 && left.previous_attempt_id === right.previous_attempt_id;
-}
-function validTargetFolderName(value: string): boolean {
-  return Boolean(value.trim()) && value.length <= 255 && !/[\\/:*?"<>|\x00-\x1f\x7f]/.test(value) && !/[. ]$/.test(value) && value !== '.' && value !== '..' &&
-    !/^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(value);
 }
 async function createPreparationDraft(identity: string, projectId: string, choices: PreparationChoices): Promise<PreparationDraft> {
   const existing = creationPromises.get(identity);

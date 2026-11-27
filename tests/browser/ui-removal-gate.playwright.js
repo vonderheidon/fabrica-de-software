@@ -117,7 +117,7 @@ async (page) => {
     preparation: {
       id: preparationId, project_id: projectId, project_revision_id: projectSummary.current_revision_id, revision: 1,
       issue_id: choice.issue_id, delivery_mode: choice.delivery_mode ?? 'icr', guidance: choice.guidance ?? '', overrides: {},
-      publication_target: null, ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}),
+      ...(previousAttemptId ? { previous_attempt_id: previousAttemptId } : {}),
       effective_configuration: effectiveConfiguration(),
       criteria_preview: { executable: true, objective: 'Objetivo controlado', criteria, digest: 'a'.repeat(64), reasons: [] },
       prerequisites: [], effects_preview: [],
@@ -167,7 +167,7 @@ async (page) => {
       phase: 'finished', result: isDelivered ? 'delivered' : 'failed', suspension: null, tracking: 'tracked', diagnostic: isDelivered ? null : 'RESULT_REJECTED',
       result_receipt_id: id(isDelivered ? 811 : 812), delivery_id: deliveryId, revision: 1, event_cursor: '1', pending_question_id: null,
       stage_activity: stageActivity, expected_account_id: 'account-fixture', issue: { id: isDelivered ? issueId : 'ISSUE_failed', number: isDelivered ? 42 : 41, title: isDelivered ? 'Entrega aprovada' : 'Falha registrada', url: `https://github.com/example/project/issues/${isDelivered ? 42 : 41}` },
-      selected_delivery_id: deliveryId, selected_round: 1, delivery_summary: deliverySummary(attemptId), publication_target: null, publication_target_hash: null,
+      selected_delivery_id: deliveryId, selected_round: 1, delivery_summary: deliverySummary(attemptId),
       publication: publicationSummary('icr'), measurements, cleanup: 'complete', authority: null,
       capabilities: { cancel: { available: false, reason_code: 'CONTROLLED_TEST' }, complete_publication: { available: false, reason_code: 'CONTROLLED_TEST' }, reconcile_publication: { available: false, reason_code: 'CONTROLLED_TEST' }, revalidate: { available: false, reason_code: 'CONTROLLED_TEST' } },
       block: null, v3_details: null, history_sections: [], details: null,

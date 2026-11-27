@@ -195,8 +195,6 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
     FROM effects WHERE attempt_id=? AND (delivery_id IS ? OR delivery_id IS NULL)`).get(attemptId,selectedId)!;
   if (!reason && d) reason = publicationBlockReason(db, attemptId, d.id, true);
   if (!reason && counts.unknown > 0) reason = 'EFFECT_UNRESOLVED';
-  const targetPending = Boolean(db.prepare("SELECT 1 FROM publication_target_selections WHERE attempt_id=? AND state IN ('accepted','running','unknown')").get(attemptId));
-  if (!reason && targetPending) reason = 'TARGET_SELECTION_PENDING';
   if (!reason && db.prepare("SELECT operation_id FROM publication_requests WHERE attempt_id=? AND state IN ('accepted','running')").get(attemptId)) reason = 'PUBLICATION_BUSY';
   // A closed comment is never sent again, so this version cannot be completed here.
   if (!reason && db.prepare("SELECT operation_id FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind='issue_comment' AND state='not_applicable'").get(attemptId,selectedId)) reason = 'COMMENT_NOT_OBSERVED';
@@ -219,5 +217,5 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
     unknownEffects: counts.unknown,
     completeCapability: reason ? { available: false, reason_code: reason } : { available: true },
     reconcileCapability: reason === 'PROJECT_DELETION_PENDING' ? { available: false, reason_code: reason }
-      : counts.unknown > 0 || targetPending ? { available: true } : { available: false, reason_code: 'NO_UNRESOLVED_EFFECTS' } };
+      : counts.unknown > 0 ? { available: true } : { available: false, reason_code: 'NO_UNRESOLVED_EFFECTS' } };
 }

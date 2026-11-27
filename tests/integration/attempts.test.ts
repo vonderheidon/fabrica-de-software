@@ -47,7 +47,7 @@ describe('manual attempt composition and HTTP', () => {
     await f.pipeline.cancelAttempt(first.id, {}, { operationId: randomUUID(), expectedRevision: undefined });
     await f.pipeline.drain();
     Object.assign(f.workspaces, { migrateLegacyIssueHistory: vi.fn(async () => undefined) });
-    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const command = await f.prepare(f.projectId, 'icr', undefined, first.id);
     const operation = await f.pipeline.startAttempt(command.body, command.context);
     await f.pipeline.drain();
     expect(f.storage.getAttempt(operation.resource.id)).toMatchObject({ phase: 'implementing', suspension: null });
@@ -63,12 +63,12 @@ describe('manual attempt composition and HTTP', () => {
     await f.pipeline.cancelAttempt(first.id, {}, { operationId: randomUUID(), expectedRevision: undefined });
     await f.pipeline.drain();
     Object.assign(f.workspaces, { migrateLegacyIssueHistory: vi.fn(async () => { throw new ProjectStorageError('PROJECT_STORAGE_ROOT_UNAVAILABLE'); }) });
-    const secondCommand = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const secondCommand = await f.prepare(f.projectId, 'icr', undefined, first.id);
     const second = await f.pipeline.startAttempt(secondCommand.body, secondCommand.context);
     await f.pipeline.drain();
     await f.pipeline.cancelAttempt(second.resource.id, {}, { operationId: randomUUID(), expectedRevision: undefined });
     await f.pipeline.drain();
-    const thirdCommand = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, second.resource.id);
+    const thirdCommand = await f.prepare(f.projectId, 'icr', undefined, second.resource.id);
     const third = await f.pipeline.startAttempt(thirdCommand.body, thirdCommand.context);
     expect(f.storage.getAttemptCapture(third.resource.id).workspace).toMatchObject({ initial_state: { kind: 'pending_inherited_attempt' }, inherited_base_sha: first.capture.baseSha });
   });
@@ -108,7 +108,7 @@ describe('manual attempt composition and HTTP', () => {
     const first = await start(f);
     confirmTerminalStops(f, first.id);
     f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(first.id);
-    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const command = await f.prepare(f.projectId, 'icr', undefined, first.id);
     await f.pipeline.startAttempt(command.body, command.context);
     await f.pipeline.drain();
     const progress = await readFile(path, 'utf8');
@@ -186,12 +186,12 @@ describe('manual attempt composition and HTTP', () => {
     const first = await start(f);
     f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(first.id);
     await f.pipeline.drain();
-    await expect(f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id))
+    await expect(f.prepare(f.projectId, 'icr', undefined, first.id))
       .rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_NOT_STOPPED' });
     confirmTerminalStops(f, first.id);
     const unlinked = await f.prepare();
     await expect(f.pipeline.startAttempt(unlinked.body, unlinked.context)).rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_REQUIRED' });
-    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const command = await f.prepare(f.projectId, 'icr', undefined, first.id);
     const operation = await f.pipeline.startAttempt(command.body, command.context);
     await f.pipeline.drain();
 
@@ -209,7 +209,7 @@ describe('manual attempt composition and HTTP', () => {
       .toThrow(expect.objectContaining({ code: 'WORKSPACE_SHARED' }));
     confirmTerminalStops(f, operation.resource.id);
     f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(operation.resource.id);
-    await expect(f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id))
+    await expect(f.prepare(f.projectId, 'icr', undefined, first.id))
       .rejects.toMatchObject({ code: 'PREVIOUS_ATTEMPT_NOT_LATEST' });
   });
   it('persists the immutable inherited commit before launching the retry session', async () => {
@@ -217,7 +217,7 @@ describe('manual attempt composition and HTTP', () => {
     const first = await start(f);
     confirmTerminalStops(f, first.id);
     f.db.prepare("UPDATE attempts SET phase='finished',result='cancelled' WHERE id=?").run(first.id);
-    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const command = await f.prepare(f.projectId, 'icr', undefined, first.id);
     const operation = await f.pipeline.startAttempt(command.body, command.context);
     await f.pipeline.drain();
     expect(f.storage.getAttempt(operation.resource.id)).toMatchObject({ phase: 'implementing', suspension: null });
@@ -245,7 +245,7 @@ describe('manual attempt composition and HTTP', () => {
     const issueFolder = join(f.directory, 'issues', '29');
     if (folder === 'present') await mkdir(issueFolder, { recursive: true });
     Object.assign(f.workspaces, { resolveAttemptWorkspace: vi.fn(async () => join(issueFolder, 'workspace')) });
-    const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, first.id);
+    const command = await f.prepare(f.projectId, 'icr', undefined, first.id);
     const operation = await f.pipeline.startAttempt(command.body, command.context);
     const workspace = f.storage.getAttemptCapture(operation.resource.id).workspace;
     if (inherits) expect(workspace).toMatchObject({ initial_state: { kind: 'pending_inherited_attempt' }, inherited_base_sha: first.capture.baseSha });
@@ -260,7 +260,7 @@ describe('manual attempt composition and HTTP', () => {
       f.db.prepare("UPDATE attempts SET phase='finished',result='interrupted' WHERE id=?").run(previousId);
       f.observation.base!.sha = 'c'.repeat(40);
       f.observation.remote!.branch!.sha = 'c'.repeat(40);
-      const command = await f.prepare(f.projectId,'icr','existing_clone',false,undefined,previousId);
+      const command = await f.prepare(f.projectId,'icr',undefined,previousId);
       const operation = await f.pipeline.startAttempt(command.body,command.context); await f.pipeline.drain();
       const capture = f.storage.getAttemptCapture(operation.resource.id);
       expect(capture.baseSha).toBe('c'.repeat(40));
@@ -459,7 +459,7 @@ describe('manual attempt composition and HTTP', () => {
   });
   it.each(['icr', 'commit', 'pr'] as const)('revalidates Ready and all authority prerequisites for %s', async mode => {
     const f = await fixture(); const p = await f.prepare();
-    const updated = await f.preparations.updatePreparation(p.body.preparationId, { changes: { delivery_mode: mode, ...(mode === 'icr' ? {} : { publication_target: { format_version: 1, repository_id: f.issue.repository.id, selection: { kind: 'existing_clone', path: join(f.directory,'target') } } }) } }, { operationId: randomUUID(), expectedRevision: p.context.expectedRevision });
+    const updated = await f.preparations.updatePreparation(p.body.preparationId, { changes: { delivery_mode: mode } }, { operationId: randomUUID(), expectedRevision: p.context.expectedRevision });
     const body = { ...p.body, preparationRevision: 2, authorizedSummaryHash: updated.view.preparation.summary_hash };
     f.issue.assignees.push({ id: 'OTHER', login: 'other' });
     await expect(f.pipeline.startAttempt(body, { operationId: randomUUID(), expectedRevision: updated.etag })).rejects.toMatchObject({ code: 'SUMMARY_CHANGED' });

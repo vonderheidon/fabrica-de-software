@@ -3,7 +3,6 @@ import type { AuthorizeUpgrade, CompletePublication, EffectIdentity, EffectView,
 import type { GitHub, GitHubBeforeSendContext, GitHubClient, GitHubEffectRequest } from '../github/index.js';
 import { OperationError, type AuthorityObservation, type PublicationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
-import { createTargetSelections, type TargetWorkspaces } from './targets.js';
 import type { DeliveryTargetPlan } from '../storage/index.js';
 import { CaptureError, type TargetCommitResult } from '../workspaces/index.js';
 import { markCriteria } from '../pipeline/index.js';
@@ -19,7 +18,7 @@ export interface PublicationDependencies {
   reconcileResources?: (attemptId: string) => Promise<void>;
   storage: Storage;
   github: PublicationGitHub;
-  workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget' | 'inspectIntegrationTarget'>> & Partial<TargetWorkspaces>;
+  workspaces: Pick<Workspaces, 'verifyRetainedDelivery' | 'folderCapability'> & Partial<Pick<Workspaces, 'createLocalCommit' | 'reconcileLocalCommit' | 'createTargetCommit' | 'reconcileTargetCommit' | 'verifyDeliveryTarget' | 'pushApproved' | 'reconcilePush' | 'inspectDeliveryTarget' | 'inspectIntegrationTarget'>>;
   cancelAttempt: (id: string) => Promise<void>;
   enqueue: (task: () => Promise<void>) => void;
   isClosed: () => boolean;
@@ -41,7 +40,6 @@ function stageFor(s: Snapshot): Stage {
 export function createPublication(deps: PublicationDependencies) {
   const { storage, github } = deps;
   const active = new Set<string>();
-  const targets = createTargetSelections(storage,deps.workspaces,deps.enqueue,deps.isClosed);
   function supported() { if (deps.isClosed()) throw new OperationError(503, 'PUBLICATION_CLOSED', 'The controller is shutting down.'); }
   async function observeAuthority(id: string, desired?: Stage, context?: GitHubBeforeSendContext): Promise<boolean> {
     context?.assertActive();
@@ -375,34 +373,11 @@ export function createPublication(deps: PublicationDependencies) {
     if (target && !deps.workspaces.createTargetCommit) blocked('DELIVERY_TARGET_CONTEXT_UNAVAILABLE');
     if (!previous && !target && deps.workspaces.inspectDeliveryTarget) {
       const source = snapshot.capture.configuration.configuration.source;
-      let localPath = source.location; let selectionOperationId: string | null = null; let selectedIdentity: string | null = null;
+      let localPath = source.location; let selectedIdentity: string | null = null;
       const integrationTarget = storage.getIntegrationTarget(delivery.id);
       if (integrationTarget) {
         localPath = integrationTarget.localPath; selectedIdentity = integrationTarget.rootIdentity;
-      } else if (source.kind === 'github') {
-        const intent = snapshot.capture.v3Delivery?.publication_target;
-        if (!intent) blocked('PUBLICATION_TARGET_REQUIRED');
-        const intentHash = snapshot.capture.v3Delivery!.publication_target_hash!;
-        let selection = storage.findTargetSelection(snapshot.status.id,delivery.id,{ hash:intentHash });
-        if (!selection) {
-          const pendingSelection = storage.findTargetSelection(snapshot.status.id,delivery.id);
-          if (pendingSelection) {
-            if (pendingSelection.view.target_intent_hash !== intentHash) blocked('TARGET_SELECTION_PENDING');
-            await targets.reconcile(snapshot.status.id,delivery.id);
-            selection = storage.findTargetSelection(snapshot.status.id,delivery.id,{ hash:intentHash });
-          }
-        }
-        if (!selection && command.kind === 'publication.authorize-upgrade' && snapshot.capture.configuration.configuration.default_delivery_mode === 'icr') {
-          const current = storage.getAttempt(snapshot.status.id);
-          await targets.select(snapshot.status.id,{ delivery_id:delivery.id,repository_id:intent!.repository_id,selection:intent!.selection,authorized:true,
-            authorization_operation_id:command.operationId,target_intent_hash:intentHash },{ operationId:randomUUID(),expectedRevision:`"${current.id}:${current.revision}"` });
-          await targets.reconcile(snapshot.status.id,delivery.id);
-          selection = storage.findTargetSelection(snapshot.status.id,delivery.id,{ hash:intentHash });
-        }
-        if (!selection || selection.view.state !== 'confirmed') blocked('TARGET_SELECTION_PENDING');
-        if (selection!.view.repository_id !== intent!.repository_id || selection!.view.local_path !== (intent!.selection.kind === 'clone' ? intent!.selection.destination : intent!.selection.path)) blocked('TARGET_SELECTION_INVALID');
-        localPath = selection!.view.local_path; selectionOperationId = selection!.view.operation_id; selectedIdentity = selection!.expected.directoryIdentity;
-      }
+      } else if (source.kind === 'github') blocked('PROJECT_FOLDER_MISSING');
       const task = { attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
         contentIdentity:delivery.contentIdentity!,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
         repositoryRelative:delivery.repositoryRelative,repositoryId:snapshot.capture.issue.repository.id,repositoryUrl:snapshot.capture.issue.repository.url,
@@ -419,7 +394,7 @@ export function createPublication(deps: PublicationDependencies) {
       }
       if (selectedIdentity && inspected.local_identity.root_identity !== selectedIdentity) blocked('DELIVERY_TARGET_CHANGED');
       if (integrationTarget && !task.deliveryBranch) inspected = { ...inspected,branch_ref:`${inspected.branch_ref}-r${delivery.round}` };
-      const plan: DeliveryTargetPlan = { operation_id:command.operationId,selection_operation_id:selectionOperationId,
+      const plan: DeliveryTargetPlan = { operation_id:command.operationId,
         delivery_id:delivery.id,attempt_id:snapshot.status.id,repository_id:inspected.repository_id,local_path:inspected.local_path,
         local_identity:inspected.local_identity,branch_ref:inspected.branch_ref,task_type:inspected.task_type,task_description:inspected.task_description,
         issue_number:snapshot.capture.issue.number,base_branch:task.baseBranch,base_sha:delivery.baseSha,
@@ -576,14 +551,13 @@ export function createPublication(deps: PublicationDependencies) {
       active.add(command.attemptId);
       try {
         supported();
-        let targetPending = false;
         if (command.kind === 'publication.complete' || command.kind === 'publication.authorize-upgrade') await completeMode(command);
-        else if (command.kind === 'publication.reconcile' && 'deliveryId' in command.body) { targetPending = await targets.reconcile(command.attemptId,command.body.deliveryId); await reconcile(command.attemptId,true); }
+        else if (command.kind === 'publication.reconcile' && 'deliveryId' in command.body) await reconcile(command.attemptId,true);
         else {
           await deps.reconcileResources?.(command.attemptId);
           if (!await observeAuthority(command.attemptId)) blocked('PUBLICATION_BLOCKED');
         }
-        const unknown = targetPending || storage.getEffects(command.attemptId).some(e => ['running','unknown'].includes(e.state));
+        const unknown = storage.getEffects(command.attemptId).some(e => ['running','unknown'].includes(e.state));
         storage.finishPublicationRequest(command.operationId, unknown ? 'unknown' : 'succeeded', unknown ? 'EFFECT_UNRESOLVED' : null);
       } catch (error) {
         const code = error instanceof OperationError || error instanceof CaptureError ? error.code : 'PUBLICATION_FAILED';
@@ -603,7 +577,6 @@ export function createPublication(deps: PublicationDependencies) {
     return accepted.operation;
   }
   return {
-    selectTarget: targets.select,
     observeAuthority, projectStage,
     async observeControllerAccount(): Promise<boolean> {
       supported(); const settings = storage.getSettings(); const identity = await github.getIdentity();
@@ -637,7 +610,6 @@ export function createPublication(deps: PublicationDependencies) {
     async publishApproved(deliveryId: string): Promise<void> {
       const d = storage.getDelivery(deliveryId).delivery; const a = storage.getAttempt(d.attemptId);
       if (a.result || a.suspension || storage.getReview(deliveryId)?.state !== 'approved') return;
-      await targets.ensureCaptured(deliveryId);
       const mode = storage.getPublicationSummary(a.id,deliveryId).mode;
       const current = storage.getAttempt(a.id);
       accept({ operationId: randomUUID(), attemptId: a.id, expectedRevision: `"${a.id}:${current.revision}"`, kind: 'publication.complete', body: { deliveryId, authorizedMode: mode, authorized: true } });

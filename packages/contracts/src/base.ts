@@ -104,28 +104,12 @@ export const OperationAccepted = Type.Object({
   receipt: Type.Optional(OperationReceipt), request_id: text(128),
 }, { additionalProperties: false });
 export type OperationAccepted = Static<typeof OperationAccepted>;
-const targetNullable = <T extends import('@sinclair/typebox').TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
-export const PublicationTargetSelection = Type.Object({
-  operation_id: OperationId, attempt_id: OperationId, delivery_id: OperationId, repository_id: Type.String({ minLength: 1, maxLength: 256 }),
-  selection_kind: Type.Union([Type.Literal('existing_clone'), Type.Literal('clone')]),
-  local_path: Type.String({ minLength: 1, maxLength: 32768 }),
-  state: Type.Union(['accepted','running','confirmed','failed_known','unknown'].map(state => Type.Literal(state))),
-  revision: Type.Integer({ minimum: 1 }), identity_verified: Type.Boolean(), checked_at_ms: targetNullable(Type.Integer({ minimum: 0 })),
-  reason: targetNullable(Type.String({ minLength: 1, maxLength: 2048 })), recovery: targetNullable(Type.String({ minLength: 1, maxLength: 2048 })),
-  authorization_operation_id: targetNullable(OperationId), target_intent_hash: targetNullable(Type.String({ pattern: '^[a-f0-9]{64}$' })),
-}, { additionalProperties: false });
-export type PublicationTargetSelection = Static<typeof PublicationTargetSelection>;
-
 export const StorageTransitionProgress = Type.Object({
   step: Type.Union(['planned', 'quiescence_checked', 'moving', 'verifying', 'publishing_location'].map(step => Type.Literal(step))),
   state: Type.Union(['planned', 'running', 'verified', 'uncertain', 'blocked'].map(state => Type.Literal(state))),
   generation: Type.Integer({ minimum: 1 }), revision: Type.Integer({ minimum: 1 }),
 }, { additionalProperties: false });
-export const OperationProgress = Type.Union([StorageTransitionProgress, Type.Object({
-  kind: Type.Literal('publication_target'), state: PublicationTargetSelection.properties.state,
-  cause: PublicationTargetSelection.properties.reason, recovery: PublicationTargetSelection.properties.recovery,
-  target_selection: PublicationTargetSelection, decision: Type.Null(), transition_step: Type.Null(),
-}, { additionalProperties: false })]);
+export const OperationProgress = StorageTransitionProgress;
 export type OperationProgress = Static<typeof OperationProgress>;
 export const OperationView = Type.Object({
   operation_id: OperationId, kind: text(128), resource: OperationResource,

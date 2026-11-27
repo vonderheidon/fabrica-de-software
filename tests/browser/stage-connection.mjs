@@ -29,7 +29,7 @@ const operation = () => ({ stage_activity: stage(), account: { id: 'account', lo
   integration_status: { kind: 'maestri_native', state: 'not_checked', observation: null, proves_provider_execution: false }, event_cursor: String(sequence) });
 const detail = section => ({ ...attempt(), operation_id: id(3), passage_id: id(4), round: 1, tracking: stage().tracking_state, diagnostic: null, result_receipt_id: null, delivery_id: null,
   pending_question_id: null, event_cursor: String(sequence), expected_account_id: 'account', issue: { id: 'issue', number: 42, title: 'Acompanhamento verificável', url: 'https://github.com/example/project/issues/42' },
-  selected_delivery_id: null, selected_round: 1, delivery_summary: null, publication_target: null, publication_target_hash: null, stage_activity: stage(), block: null, v3_details: null,
+  selected_delivery_id: null, selected_round: 1, delivery_summary: null, stage_activity: stage(), block: null, v3_details: null,
   publication: { mode: 'icr', review_state: null, local_state: 'pending', confirmed_effects: 0, pending_effects: 0, unknown_effects: 0, complete_capability: unavailable, reconcile_capability: unavailable,
     commit: { state: 'not_requested', sha: null, reason: 'MODE_ICR', operation_id: null, branch_ref: null, task_type: null, task_description: null }, upgrades: [], push: { state: 'not_requested', receipt: null, reason: null }, pull_request: { state: 'not_requested', receipt: null, reason: null } },
   measurements: { stage_activity: stage(), active_time: measured, human_wait: measured, cost: measured, active_limit: { state: 'not_configured' }, question_ttl: { state: 'not_configured' }, active_limit_state: 'unavailable', active_expired_at_ms: null, passages: [], pending_requirements: [] },

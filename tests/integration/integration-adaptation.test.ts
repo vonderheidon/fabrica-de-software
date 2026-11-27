@@ -113,7 +113,7 @@ it('respects a captured zero limit and preserves the approved version with no ne
 });
 
 it('keeps the authorized continuation mode across adaptation after a finished ICR delivery with a closed issue',async () => {
-  const f = await publicationFixture(true,'icr',true,{ targetForIcr:true }); fixtures.push(f);
+  const f = await publicationFixture(true,'icr',true); fixtures.push(f);
   await f.implement(); await f.approve(); const original = f.status().deliveryId!;
   f.issue.state = 'CLOSED';
   const summary = f.storage.getPublicationSummary(f.attemptId,original);
@@ -130,21 +130,6 @@ it('keeps the authorized continuation mode across adaptation after a finished IC
   expect(f.workspaces.createTargetCommit).toHaveBeenCalledOnce();
   expect(f.issue.comments).toHaveLength(2);
   expect(f.storage.getPublicationSummary(f.attemptId,original)).toMatchObject({ mode:'icr',localState:'completed',completeCapability:{ available:false } });
-});
-
-it('reuses the confirmed clone after adaptation without another clone effect',async () => {
-  const f = await publicationFixture(true,'commit',true,{ targetKind:'clone' }); fixtures.push(f);
-  f.workspaces.inspectPublicationTarget.mockImplementation(async (root,repositoryId,repositoryUrl) => ({ formatVersion:1,root,parent:f.directory,
-    parentIdentity:'controlled-parent',directoryIdentity:null,repositoryId,repositoryUrl }));
-  f.workspaces.clonePublicationTarget.mockImplementation(async (expected,reserve,authorize) => {
-    authorize(); const identity = { ...expected,directoryIdentity:'controlled-target' }; reserve(identity); authorize(); return identity;
-  });
-  await f.implement(); changedBase(f); await f.approve();
-  expect(f.status().round).toBe(2); expect(f.workspaces.clonePublicationTarget).toHaveBeenCalledOnce();
-  await f.implement(); await f.approve();
-  expect(f.status().result).toBe('delivered');
-  expect(f.workspaces.clonePublicationTarget).toHaveBeenCalledOnce();
-  expect(f.workspaces.createTargetCommit).toHaveBeenCalledOnce();
 });
 
 it('adapts after a sealed destination only when reconciliation proves that no delivery commit exists',async () => {

@@ -2,7 +2,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { Capability, DeliveryMode, OperationId } from "../base.js";
 import { GitHubId } from "../github.js";
-import { PublicationTargetIntent } from "../preparations.js";
 import { ProjectConfiguration } from '../projects.js';
 const closed = { additionalProperties: false } as const;
 const text = Type.String({ minLength: 1, maxLength: 4096 });
@@ -51,7 +50,7 @@ export const AuthorizeUpgrade = Type.Object({ delivery_id: OperationId, current_
 export type AuthorizeUpgrade = Static<typeof AuthorizeUpgrade>;
 export const ModeUpgradeSummary = Type.Object({ target_mode: DeliveryMode, additional_effects: Type.Array(EffectView.properties.kind),
     delivery_branch: ProjectConfiguration.properties.delivery_branch,
-    publication_target: Type.Optional(nullable(PublicationTargetIntent)), summary_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability }, closed);
+    summary_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability }, closed);
 export type ModeUpgradeSummary = Static<typeof ModeUpgradeSummary>;
 export const LocalCommitBlock = Type.Object({
     paths: Type.Array(Type.String({ minLength: 1, maxLength: 1024 }), { maxItems: 100 }), path_count: Type.Integer({ minimum: 0 }),

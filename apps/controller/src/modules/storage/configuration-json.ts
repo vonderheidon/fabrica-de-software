@@ -1,6 +1,6 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { ComposedExecutionProfileValue, DeliveryMode, GitHubId, ExecutionProfileValue, OperationId, OriginSource, PublicationTargetIntent, ScopeChange, ProjectConfiguration, type PreparationChoices, type EffectiveConfiguration, type Criterion } from '#contracts';
+import { ComposedExecutionProfileValue, DeliveryMode, GitHubId, ExecutionProfileValue, OperationId, OriginSource, ScopeChange, ProjectConfiguration, type PreparationChoices, type EffectiveConfiguration, type Criterion } from '#contracts';
 import { StorageError } from './errors.js';
 import { storedTimeDefaults, storedArtifactPolicy, readTimeDefaults, storeTimeDefaults, readArtifactPolicy, storeArtifactPolicy } from './common-json.js';
 
@@ -38,7 +38,8 @@ export const preparationOverridesJson = Type.Partial(Type.Object({
 }, closed));
 export const preparationChoicesJson = Type.Object({
   issueId: GitHubId, deliveryMode: DeliveryMode, guidance: Type.String({ maxLength: 8192 }), overrides: preparationOverridesJson,
-  publication_target: Type.Optional(Type.Union([PublicationTargetIntent, Type.Null()])),
+  /** Recorded by revisions that still offered a per-attempt destination; accepted on read and never written again. */
+  publication_target: Type.Optional(Type.Unknown()),
   previousAttemptId: Type.Optional(OperationId),
 }, closed);
 const origin = Type.Union([Type.Literal('project'), Type.Literal('global'), Type.Literal('preparation')]);
@@ -260,7 +261,6 @@ export function readChoices(value: Static<typeof preparationChoicesJson>): Prepa
     delivery_mode: value.deliveryMode,
     guidance: value.guidance,
     overrides: readOverrides(value.overrides),
-    ...(value.publication_target === undefined ? {} : { publication_target: value.publication_target }),
     ...(value.previousAttemptId === undefined ? {} : { previous_attempt_id: value.previousAttemptId }),
   };
 }
@@ -271,7 +271,6 @@ export function storeChoices(value: PreparationChoices): Static<typeof preparati
     deliveryMode: value.delivery_mode,
     guidance: value.guidance,
     overrides: storeOverrides(value.overrides),
-    ...(value.publication_target === undefined ? {} : { publication_target: value.publication_target }),
     ...(value.previous_attempt_id === undefined ? {} : { previousAttemptId: value.previous_attempt_id }),
   };
 }

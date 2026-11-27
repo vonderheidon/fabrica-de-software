@@ -6,7 +6,6 @@ export const configurationLockMessage = 'Este projeto tem uma tentativa ou publi
 export function projectConfigurationLock(db: Database.Database, projectId: string): { attempt_id: string } | null {
   const conditions = ['a.result IS NULL',
     "EXISTS (SELECT 1 FROM publication_requests p WHERE p.attempt_id=a.id AND p.state IN ('accepted','running'))",
-    "EXISTS (SELECT 1 FROM publication_target_selections t WHERE t.attempt_id=a.id AND t.state IN ('accepted','running','unknown'))",
     "EXISTS (SELECT 1 FROM effects e WHERE e.attempt_id=a.id AND e.state IN ('running','unknown'))",
     "EXISTS (SELECT 1 FROM resources r WHERE r.attempt_id=a.id AND r.launch_state='starting')",
     "EXISTS (SELECT 1 FROM terminal_occupancies t WHERE t.attempt_id=a.id AND t.state IN ('occupied','uncertain'))"];

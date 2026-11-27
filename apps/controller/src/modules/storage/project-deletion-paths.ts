@@ -130,11 +130,9 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     if (!valid) blockers.push({ reason: 'Uma localização de outro projeto não pôde ser protegida.', recovery: 'Confira as localizações gerenciadas antes de tentar excluir este projeto.' });
     return valid;
   });
-  const selectedTargets = db.prepare<[string], { local_path: string }>(`SELECT t.local_path FROM publication_target_selections t
-    JOIN attempts a ON a.id=t.attempt_id WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
   const otherDeliveryTargets = db.prepare<[string],{ local_path: string }>(`SELECT t.local_path FROM delivery_targets t JOIN attempts a ON a.id=t.attempt_id
     WHERE a.project_id<>? ORDER BY t.operation_id`).all(projectId);
-  const protectedPaths = [...otherOrigins.map(o => o.path), ...selectedTargets.map(t => t.local_path), ...otherDeliveryTargets.map(t => t.local_path),
+  const protectedPaths = [...otherOrigins.map(o => o.path), ...otherDeliveryTargets.map(t => t.local_path),
     ...creations.filter(c => c.project_id !== projectId || project.source.kind !== 'local' || c.destination !== project.source.location).map(c => c.destination),
     ...imports.filter(i => i.project_id !== projectId).map(i => i.destination),
     ...otherBootstraps,
@@ -147,7 +145,7 @@ export function readProjectDeletionPaths(db: Database.Database, projectId: strin
     resolve(dataDirectory, 'projects'), bootstrapRoot,
     ...(settings.projects_root ? [settings.projects_root] : [])];
   const inventoryVersion = digest({ version: 2, schema, project, keys: inventory.keys, storageLocations, otherStorageLocations,
-    resources, passages, otherPassages, attempts, otherOrigins, selectedTargets, otherDeliveryTargets, deliveryTargets, creations, imports,
+    resources, passages, otherPassages, attempts, otherOrigins, otherDeliveryTargets, deliveryTargets, creations, imports,
     installation: settings.installation_id, account: settings.account_id, containers });
   const originalProtectedPaths = [resolve(dataDirectory), resolve(dataDirectory, '../..')];
   return { projectId, projectName: project.name, projectRevision: project.revision, sourceKind: project.source.kind,

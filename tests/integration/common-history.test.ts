@@ -44,7 +44,7 @@ it('projects private historical common fields without changing documents or oper
   const rawChoices = f.db.prepare<[string], { choices_json: string }>('SELECT choices_json FROM preparation_revisions WHERE preparation_id = ? ORDER BY revision').all(preparation.id);
   expect(rawChoices).toHaveLength(2);
   expect(JSON.parse(rawChoices[0]!.choices_json)).toEqual({ formatVersion: 1, choices: {
-    issueId: f.issue.id, deliveryMode: 'icr', publication_target: null, guidance, overrides: {
+    issueId: f.issue.id, deliveryMode: 'icr', guidance, overrides: {
       implementerProfile: { kind: 'reference', id: f.profile.id, revision: f.profile.revision },
       correctionLimit: 4,
       timeDefaults: { formatVersion: 1, pollingIntervalMs: 15_000, passageActiveTimeMs: 1_800_000, questionTtl: { state: 'not_configured' } },

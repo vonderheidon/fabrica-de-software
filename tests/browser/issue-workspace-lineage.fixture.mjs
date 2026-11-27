@@ -42,7 +42,7 @@ function attempt(id = ids.deliveries[1], section = null) {
     workspace_lineage: { identity: { project_id: ids.project, repository_id: 'R_fixture', issue_id: issue.id },
       predecessor_attempt_id: proof.lineage === 'base' ? null : ids.predecessor, initial_state: initial,
       inherited_base_sha: proof.lineage === 'base' ? null : 'a'.repeat(40), comparison_base_sha: proof.lineage === 'pending' ? null : 'a'.repeat(40) },
-    selected_delivery_id: id, selected_round: round, delivery_summary: summary(id), publication_target: null, publication_target_hash: null,
+    selected_delivery_id: id, selected_round: round, delivery_summary: summary(id),
     publication, measurements, cleanup: 'complete', authority: null,
     capabilities: { cancel: unavailable, complete_publication: unavailable, reconcile_publication: unavailable, revalidate: unavailable },
     details: section ? { section, items: section === 'rounds' ? rounds : section === 'passages' ? passages.filter(p => p.round === round) : [],

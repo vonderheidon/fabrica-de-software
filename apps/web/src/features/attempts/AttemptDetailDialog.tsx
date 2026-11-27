@@ -17,7 +17,6 @@ import { AttemptStageSummary } from './AttemptStageSummary.js';
 import { useAttemptActions } from './useAttemptActions.js';
 import { useDelivery } from './useDelivery.js';
 import { PublicationDialog } from './PublicationDialog.js';
-import { PublicationTargetFacts } from './PublicationTargetFacts.js';
 import { formatMinuteValue } from '../projects/time-minutes.js';
 import { OperatorState, UnknownState } from '../../app/OperatorSupport.js';
 import { operatorCodeLabel, operatorErrorMessage, operatorFactLabel, operatorState, operatorVisibleFactValue } from '../../app/operator-language.js';
@@ -241,7 +240,6 @@ export function AttemptDetailDialog({ attemptId, selectedRound, selectedDelivery
       {actions.error && <div className="queue-error" role="alert"><p>{actions.error}</p><button type="button" onClick={() => void actions.refresh()}>Consultar ambiente novamente</button></div>}
       {actions.error === null && actions.resources === null && <p className="muted" role="status">Consultando recursos e capacidades…</p>}
       <HistoricalProfile key={attemptId} attemptId={attemptId} />
-      {(attempt.publication_target || delivery?.publication.commit?.branch_ref || attempt.history_sections?.includes('target_selections')) && <PublicationTargetFacts key={`${attemptId}:${effectiveDeliveryId}`} attemptId={attemptId} deliveryId={effectiveDeliveryId} target={attempt.publication_target} publication={delivery?.publication} />}
       {attempt.block && <AttemptBlockDecision key={`${attempt.expected_account_id}:${attemptId}:${attempt.block.id}`} attempt={attempt} etag={attemptEtag} current={selectionCurrent && !attemptError} onRefresh={refreshDetail} />}
       <CorrectionHistory key={sectionIdentity} attemptId={attemptId} round={selectedRound} deliveryId={effectiveDeliveryId} sections={attempt.history_sections ?? []} />
       <details className="attempt-axis-card card attempt-disclosure"><summary>Ver alterações da entrega</summary>

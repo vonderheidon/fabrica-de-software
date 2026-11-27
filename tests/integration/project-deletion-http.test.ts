@@ -14,7 +14,8 @@ const cleanup: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
 
 async function fixture() {
-  const f = await attemptFixture();
+  // Projects without an original directory are legacy URL-sourced ones; deletion of those needs no folder inspection.
+  const f = await attemptFixture(undefined, undefined, undefined, undefined, false, 'github');
   cleanup.push(() => f.close());
   // Metadata-only, controlled filesystem. These tests never delete a real path.
   const inspector = createDeletionInspector({ pathStyle: 'windows', caseSensitive: false,

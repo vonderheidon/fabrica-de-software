@@ -1,16 +1,9 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { OperationId } from './base.js';
 import { GitHubId } from './github.js';
-import { PublicationTargetChoice } from './preparations.js';
 
 const closed = { additionalProperties: false } as const;
 const targetNullable = <T extends import('@sinclair/typebox').TSchema>(schema: T) => Type.Union([schema, Type.Null()]);
-const hash = Type.String({ pattern: '^[a-f0-9]{64}$' });
-export const SetPublicationTarget = Type.Object({
-  delivery_id: OperationId, repository_id: GitHubId, selection: PublicationTargetChoice, authorized: Type.Literal(true),
-  authorization_operation_id: Type.Optional(OperationId), target_intent_hash: Type.Optional(hash),
-}, closed);
-export type SetPublicationTarget = Static<typeof SetPublicationTarget>;
 export const DeliveryTaskType = Type.Union(['feat','fix','docs','refactor','test','chore','perf','build','ci','revert'].map(v => Type.Literal(v)));
 export const DeliveryTargetLocalIdentity = Type.Object({
   branch_kind: Type.Optional(Type.Union([Type.Literal('new'), Type.Literal('existing')])),
@@ -34,4 +27,3 @@ export const DeliveryTarget = Type.Object({
   format_version: Type.Literal(1), created_at_ms: Type.Integer({ minimum: 0 }),
 }, closed);
 export type DeliveryTarget = Static<typeof DeliveryTarget>;
-export { PublicationTargetSelection } from './base.js';

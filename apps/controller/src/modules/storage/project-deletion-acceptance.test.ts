@@ -18,7 +18,9 @@ import { createDeletionInspector } from '../workspaces/index.js';
 import { createProjectDeletions, createQueue, createDeletionCoordinator } from '../projects/index.js';
 import { createPipeline } from '../pipeline/index.js';
 import { recordQueueObservations } from './queue-cycles.js';
-import { attemptFixture, complete, confirmTerminalStops } from '../../../../../tests/fixtures/attempt.js';
+import { attemptFixture as baseAttemptFixture, complete, confirmTerminalStops } from '../../../../../tests/fixtures/attempt.js';
+/** These cases delete a project that has no original directory, which only a legacy URL-sourced project is. */
+const attemptFixture = () => baseAttemptFixture(undefined, undefined, undefined, undefined, false, 'github');
 import { publicationFixture } from '../../../../../tests/fixtures/publication.js';
 import { openStorage } from './index.js';
 
@@ -384,7 +386,7 @@ describe('durable project deletion acceptance and shared authorization barrier',
   );
 
   it.each(['deletion','publication'] as const)('serializes publication and deletion when %s obtains authorization first', async first => {
-    const f = await publicationFixture(false, 'commit'); close.push(() => f.close());
+    const f = await publicationFixture(false, 'commit', true, { projectFolder: 'C:\\Projects\\Árvore' }); close.push(() => f.close());
     await f.implement(); await f.approve();
     // Completed historical attempt, physically stopped under the controlled host.
     f.db.prepare("UPDATE attempts SET phase='finished',result='delivered' WHERE id=?").run(f.attemptId);

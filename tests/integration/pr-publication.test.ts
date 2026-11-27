@@ -11,7 +11,7 @@ import { loadConfiguration } from '../../apps/controller/src/config.js';
 
 const fixtures: PublicationFixture[] = [];
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
-async function fixture(mode: 'icr' | 'commit' | 'pr' = 'pr',delta = true) { const f = await publicationFixture(true,mode,delta,{ targetForIcr: mode === 'icr' }); fixtures.push(f); return f; }
+async function fixture(mode: 'icr' | 'commit' | 'pr' = 'pr',delta = true) { const f = await publicationFixture(true,mode,delta); fixtures.push(f); return f; }
 const effects = (f: PublicationFixture) => f.storage.getEffects(f.attemptId);
 const effect = (f: PublicationFixture,kind: EffectView['kind']) => effects(f).find(e => e.kind === kind)!;
 const complete = (f: PublicationFixture) => f.pipeline.completePublication(f.attemptId,{ deliveryId: f.status().deliveryId!,authorizedMode: f.storage.getPublicationSummary(f.attemptId).mode,authorized: true },f.context());
@@ -64,7 +64,7 @@ it.each(['new','existing'] as const)('uses the captured %s destination for commi
 
 it('preserves the captured existing destination when continuing an ICR delivery', async () => {
   const deliveryBranch = {kind:'existing' as const,name:'release/selected'};
-  const f = await publicationFixture(true,'icr',true,{targetForIcr:true,deliveryBranch}); fixtures.push(f);
+  const f = await publicationFixture(true,'icr',true,{deliveryBranch}); fixtures.push(f);
   await f.implement(); await f.approve();
   expect(f.storage.getPublicationSummary(f.attemptId).upgrades![0]!.deliveryBranch).toEqual(deliveryBranch);
   await f.pipeline.authorizePublicationUpgrade(f.attemptId,upgrade(f,'pr'),f.context()); await f.pipeline.drain();
@@ -154,9 +154,7 @@ it('uses a single durable upgrade for ICR to PR, preserves confirmed comments an
   expect(f.workspaces.createLocalCommit).toHaveBeenCalledOnce(); expect(f.workspaces.pushApproved).toHaveBeenCalledOnce();
   const target = f.storage.findDeliveryTarget(f.attemptId,deliveryId)!;
   expect(target).toMatchObject({ task_type:'feat',task_description:'Executable issue',branch_ref:'refs/heads/feat/17-executable-issue' });
-  const selection = f.storage.getTargetSelection(target.selection_operation_id!).view;
-  expect(selection).toMatchObject({ state:'confirmed',authorization_operation_id:op.operation_id });
-  expect(JSON.parse((f.db.prepare('SELECT authorization_json FROM publication_target_selections WHERE operation_id=?').get(selection.operation_id) as { authorization_json: string }).authorization_json)).toMatchObject({ origin:'publication_upgrade' });
+  expect(target).toMatchObject({ local_path: f.storage.getConfiguration(f.projectId).view.configuration.source.location,selection_operation_id: null });
   expect(f.db.prepare('SELECT count(*) AS n FROM publication_upgrades').get()).toEqual({ n: 1 });
   expect(() => f.db.prepare("UPDATE publication_upgrades SET target_mode='commit'").run()).toThrow();
 });
@@ -185,14 +183,6 @@ it.each(['commit', 'pr'] as const)('continues ICR to %s after issue closure and 
   expect(f.storage.getAttemptCapture(f.attemptId)).toEqual(capture);
   expect(effect(f, 'issue_comment')).toEqual(comment);
   expect(f.issue.state).toBe('CLOSED');
-});
-
-it('blocks a URL-only ICR upgrade when it has no saved delivery target', async () => {
-  const f = await publicationFixture(true,'icr'); fixtures.push(f); await f.implement(); await f.approve();
-  const upgrade = f.storage.getPublicationSummary(f.attemptId).upgrades!.find(item => item.targetMode === 'commit')!;
-  expect(upgrade.capability).toMatchObject({ available:false,reason_code:'PUBLICATION_TARGET_REQUIRED' });
-  expect(f.workspaces.createLocalCommit).not.toHaveBeenCalled();
-  expect(f.db.prepare('SELECT count(*) AS n FROM delivery_targets').get()).toEqual({ n:0 });
 });
 
 it('continues an already authorized upgrade after known failure without requesting a second upgrade', async () => {

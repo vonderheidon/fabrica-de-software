@@ -39,8 +39,8 @@ export function withPublicationIssueProjections<T extends Pick<GitHub, 'getIssue
 }
 
 export async function publicationFixture(composed = true, mode: 'icr' | 'commit' | 'pr' = 'icr', hasDelta = true,
-  options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; targetKind?: 'clone' | 'existing_clone'; targetForIcr?: boolean; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean; inheritPreviousAttempt?: boolean } = {}) {
-  const f = await attemptFixture(options.temporaryRoot, options.baseSha, undefined, undefined, options.recordCleanInitialization ?? false); await f.pipeline.close();
+  options: { baseBranch?: string; temporaryRoot?: string; correctionLimit?: number; baseSha?: string; deliveryBranch?: ProjectConfiguration['delivery_branch']; recordCleanInitialization?: boolean; inheritPreviousAttempt?: boolean; sourceKind?: 'local' | 'github'; projectFolder?: string } = {}) {
+  const f = await attemptFixture(options.temporaryRoot, options.baseSha, undefined, undefined, options.recordCleanInitialization ?? false, options.sourceKind, options.projectFolder); await f.pipeline.close();
   if (options.correctionLimit !== undefined || options.deliveryBranch !== undefined) {
     const current = f.storage.getConfiguration(f.projectId);
     const { id: _id, project_id: _project, revision: _revision, created_at_ms: _time, ...configuration } = current.view.configuration;
@@ -94,9 +94,6 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
   const workspaces = { ...f.workspaces, verifyRetainedDelivery, folderCapability,
     importIntegrationBase: vi.fn<Workspaces['importIntegrationBase']>(async () => {}),
     inspectIntegrationTarget: vi.fn<Workspaces['inspectIntegrationTarget']>(async (localPath,task) => ({ localPath,baseSha:task.baseSha,rootIdentity:'controlled-target' })),
-    inspectPublicationTarget: vi.fn<Workspaces['inspectPublicationTarget']>(async (root,repositoryId,repositoryUrl) => ({ formatVersion: 1,root,parent: f.directory,parentIdentity: 'controlled-parent',directoryIdentity: 'controlled-target',repositoryId,repositoryUrl })),
-    observePublicationTarget: vi.fn<Workspaces['observePublicationTarget']>(async expected => expected),
-    clonePublicationTarget: vi.fn<Workspaces['clonePublicationTarget']>(async () => { throw new Error('Clone not authorized by this fixture'); }),
     inspectDeliveryTarget: vi.fn<Workspaces['inspectDeliveryTarget']>(async (root,task) => ({ repository_id: f.issue.repository.id,local_path: root,
       local_identity: { ...(task.deliveryBranch ? { branch_kind:task.deliveryBranch.kind } : {}),format_version: 1,root_identity: 'controlled-target',git_directory_identity: 'controlled-git',remote_name:'origin',remote_hash:'f'.repeat(64),base_branch: task.baseBranch,base_sha: task.baseSha,
         observed_head: options.baseSha ?? 'a'.repeat(40),observed_branch_ref: 'refs/heads/main',working_state_hash: 'd'.repeat(64),index_hash: 'e'.repeat(64) },
@@ -117,13 +114,13 @@ export async function publicationFixture(composed = true, mode: 'icr' | 'commit'
   if (options.baseBranch) { f.observation.base!.branch = options.baseBranch; f.observation.remote!.branch!.name = options.baseBranch; }
   let predecessorId: string | undefined;
   if (options.inheritPreviousAttempt) {
-    const initial = await f.prepare(f.projectId,mode,options.targetKind,options.targetForIcr ?? false,options.baseBranch);
+    const initial = await f.prepare(f.projectId,mode,options.baseBranch);
     const predecessor = await pipeline.startAttempt(initial.body,initial.context); await pipeline.drain();
     predecessorId = predecessor.resource.id;
     confirmTerminalStops(f,predecessorId);
     f.db.prepare("UPDATE attempts SET phase='finished',result='interrupted' WHERE id=?").run(predecessorId);
   }
-  const prepare = await f.prepare(f.projectId,mode,options.targetKind,options.targetForIcr ?? false,options.baseBranch,predecessorId); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
+  const prepare = await f.prepare(f.projectId,mode,options.baseBranch,predecessorId); const op = await pipeline.startAttempt(prepare.body,prepare.context); await pipeline.drain();
   const attemptId = op.resource.id;
   const status = () => f.storage.getAttempt(attemptId);
   const context = () => ({ operationId: randomUUID(), expectedRevision: `"${attemptId}:${status().revision}"` });

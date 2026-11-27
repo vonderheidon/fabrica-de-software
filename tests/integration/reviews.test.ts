@@ -104,7 +104,7 @@ it('keeps predecessor findings as history rather than current-attempt result obl
   confirmTerminalStops(f, f.attemptId);
   const prior = f.storage.getOpenFindings(f.attemptId, 2);
   expect(prior).toHaveLength(1);
-  const command = await f.prepare(f.projectId, 'icr', 'existing_clone', false, undefined, f.attemptId);
+  const command = await f.prepare(f.projectId, 'icr', undefined, f.attemptId);
   const next = await f.pipeline.startAttempt(command.body, command.context); await f.pipeline.drain();
   const request = vi.mocked(f.execution.startPassage).mock.calls.at(-1)![0];
   expect(request.previousFindingKeys).toEqual([]);

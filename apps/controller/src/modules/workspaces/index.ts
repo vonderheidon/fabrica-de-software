@@ -4,7 +4,6 @@ import { createInspector } from './inspect.js';
 import { createBranchLister } from './branches.js';
 export { validBranch, githubReference } from './inspect.js';
 import { createIntegrationImporter } from './integration.js';
-import { createPublicationTargetWorkspace } from './publication-target.js';
 import { createProjectFolderWorkspace } from './project-folder.js';
 import { createWorkspacePreparer } from './prepare.js';
 import { createCapturer } from './capture.js';
@@ -40,10 +39,8 @@ export { WorkspacePreparationError } from './prepare.js';
 
 export type { GitContext } from './git.js';
 export { gitSafety } from './git.js';
-export { TargetError } from './publication-target.js';
 export { ProjectFolderError } from './project-folder.js';
 export type { FolderReservation } from './project-folder.js';
-export type { TargetIdentity } from './publication-target.js';
 export type { DeliveryTaskInput, DeliveryTargetInspection, TargetCommitResult } from './delivery-target.js';
 export interface WorkspaceOptions { github: Pick<GitHub, 'getRepository' | 'resolveBranch'> & Partial<Pick<GitHub,'listBranches'>>; context?: GitContext; resolveContext?: () => GitContext | undefined; dataDirectory?: string; openFolder?: (path: string) => Promise<void>; pushAuthorization?: PushAuthorization; scaffoldAuthorization?: import('../github/index.js').ScaffoldAuthorization; projectStorage?: ProjectStoragePersistence; historyMigration?: RetainedHistoryMigrationStore }
 export function createWorkspaces(options: WorkspaceOptions) {
@@ -61,7 +58,7 @@ export function createWorkspaces(options: WorkspaceOptions) {
   const migrateLegacyIssueHistory = createRetainedHistoryMigrator(options.dataDirectory, git, options.historyMigration, resolveAttemptRoot);
   const deliveryTargetWorkspace = createDeliveryTargetWorkspace(options.github,options.dataDirectory,git,undefined,resolveAttemptRoot);
   const sharedAttempt = createAttemptMaterializer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace);
-  return { ...createPublicationTargetWorkspace(options.github,git), ...createProjectFolderWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...(resolveContext ? { scaffoldCapability: () => createLocalScaffolder(hasContext() ? git : undefined).scaffoldCapability() } : {}), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot, resolveAttemptWorkspace), ...projectStorage, ...projectStorageTransition,
+  return { ...createProjectFolderWorkspace(options.github,git), ...createDeletionInspector(deletionPlatform), ...createInspector(options.github, git), ...createLocalScaffolder(git), ...(resolveContext ? { scaffoldCapability: () => createLocalScaffolder(hasContext() ? git : undefined).scaffoldCapability() } : {}), ...createScaffoldRemoteGit(git,options.scaffoldAuthorization), ...createEnvironmentRecovery(options.dataDirectory, git, options.openFolder, undefined, resolveAttemptRoot, resolveAttemptWorkspace), ...projectStorage, ...projectStorageTransition,
     ...(options.historyMigration ? { migrateLegacyIssueHistory } : {}), prepareAttempt: createWorkspacePreparer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace),
     captureDelivery: createCapturer(options.dataDirectory, git, undefined, resolveAttemptRoot, resolveAttemptWorkspace), getDeliveryDiff: createDeliveryDiff(options.dataDirectory, git, undefined, resolveAttemptRoot),
     listBranches,

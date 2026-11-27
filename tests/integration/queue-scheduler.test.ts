@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -21,8 +20,8 @@ import { withPublicationIssueProjections } from '../fixtures/publication.js';
 
 const fixtures: AttemptFixture[] = [];
 afterEach(async () => { vi.restoreAllMocks(); for (const f of fixtures.splice(0)) { await f.pipeline.close(); await f.close(); } });
-async function fixture(enabled = true) {
-  const f = await attemptFixture(); fixtures.push(f); await f.pipeline.close();
+async function fixture(enabled = true, sourceKind: 'local' | 'github' = 'local') {
+  const f = await attemptFixture(undefined, undefined, undefined, undefined, false, sourceKind); fixtures.push(f); await f.pipeline.close();
   const settings = f.storage.getGlobalConfiguration();
   if (enabled) f.storage.saveSettings({ operationId: randomUUID(), expectedRevision: settings.etag, body: { changes: { automation_enabled: enabled } }, changes: { automation_enabled: enabled } });
   function automation(projectId: string, value: boolean) {
@@ -78,7 +77,7 @@ function command(observation: QueueObservation, enabled: boolean): QueueCommand 
 }
 
 it('observes an enabled registered source using the real origin request validator', async () => {
-  const { f, queue } = await fixture();
+  const { f, queue } = await fixture(true, 'github');
   Object.assign(f.workspaces, createInspector({
     getRepository: vi.fn(async () => complete(f.issue.repository)),
     resolveBranch: vi.fn(async () => complete(f.observation.remote!.branch!)),
@@ -130,7 +129,7 @@ describe('authorized queue changes', () => {
     },
   );
   it.each(['base_sha', 'base_branch', 'project_mapping', 'profile_guidance', 'global_pause', 'project_pause', 'preparation_revision',
-    'delivery_mode', 'destination', 'repository_identity'] as const)(
+    'delivery_mode', 'repository_identity'] as const)(
     'rejects a %s change made after the Ready envelope and before acceptance', async change => {
       const { f, queue, automation } = await fixture(); await f.pipeline.close();
       let envelope: Awaited<ReturnType<typeof f.preparations.prepareReadyStart>> | undefined;
@@ -161,14 +160,8 @@ describe('authorized queue changes', () => {
             { operationId: randomUUID(), expectedRevision: envelope!.expectedRevision });
         }
         if (change === 'delivery_mode') {
-          await f.preparations.updatePreparation(envelope!.body.preparationId, { changes: { delivery_mode: 'commit', publication_target: {
-            format_version: 1, repository_id: f.issue.repository.id, selection: { kind: 'existing_clone', path: join(f.directory, 'target') },
-          } } }, { operationId: randomUUID(), expectedRevision: envelope!.expectedRevision });
-        }
-        if (change === 'destination') {
-          await f.preparations.updatePreparation(envelope!.body.preparationId, { changes: { publication_target: {
-            format_version: 1, repository_id: f.issue.repository.id, selection: { kind: 'existing_clone', path: join(f.directory, 'alternate-target') },
-          } } }, { operationId: randomUUID(), expectedRevision: envelope!.expectedRevision });
+          await f.preparations.updatePreparation(envelope!.body.preparationId, { changes: { delivery_mode: 'commit' } },
+            { operationId: randomUUID(), expectedRevision: envelope!.expectedRevision });
         }
         if (change === 'repository_identity') f.issue.repository = { ...f.issue.repository, id: 'R_changed' };
       };
@@ -186,7 +179,7 @@ describe('authorized queue changes', () => {
       expect(f.workspaces.prepareAttempt).not.toHaveBeenCalled();
       expect(f.execution.startPassage).not.toHaveBeenCalled();
       if (change === 'global_pause' || change === 'project_pause') expect(f.logFailure).not.toHaveBeenCalled();
-      else expect(f.logFailure).toHaveBeenCalledWith(change === 'preparation_revision' || change === 'delivery_mode' || change === 'destination'
+      else expect(f.logFailure).toHaveBeenCalledWith(change === 'preparation_revision' || change === 'delivery_mode'
         ? 'REVISION_CONFLICT' : 'SUMMARY_CHANGED');
     },
   );
