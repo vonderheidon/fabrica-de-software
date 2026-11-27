@@ -114,3 +114,19 @@ it('lists the files that block the commit in the Pasta do projeto and retries th
   expect(String(send.mock.calls[0]![0])).toContain('/publication/complete');
   expect(JSON.parse(send.mock.calls[0]![1].body)).toMatchObject({ delivery_id:version,authorized:true });
 });
+
+it('shows blocked paths and reconciles when local_commit is unknown after a partial repair failure', async () => {
+  reads(); const value = delivery();
+  value.publication = { ...value.publication,mode:'commit',commit:{ state:'unknown',sha:null,reason:'PROJECT_FOLDER_REPAIR_FAILED',operation_id:null,branch_ref:'refs/heads/main',task_type:'fix',task_description:'Corrigir',
+    blocked:{ paths:['z-locked.txt'],path_count:1,expected_branch:'main',current_branch:'main' } } } as typeof value.publication;
+  value.authorizations = { captured_mode:'commit',authorized_mode:'commit' } as typeof value.authorizations;
+  value.capabilities = { complete_publication:unavailable,reconcile_publication:available } as typeof value.capabilities;
+  send.mockImplementation(async (_path: string, init: RequestInit) => ({ data:{ operation_id:(init.headers as Record<string,string>)['Idempotency-Key'] } }));
+  await mount(value);
+  expect(container.textContent).toContain('Commit bloqueado na Pasta do projeto');
+  expect([...container.querySelectorAll('.blocked-paths code')].map(node => node.textContent)).toEqual(['z-locked.txt']);
+  await act(async () => button('Tentar de novo').click());
+  expect(send).toHaveBeenCalledOnce();
+  expect(String(send.mock.calls[0]![0])).toContain('/publication/reconcile');
+  expect(JSON.parse(send.mock.calls[0]![1].body)).toEqual({ delivery_id:version });
+});

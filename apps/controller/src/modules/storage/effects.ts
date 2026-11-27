@@ -3,7 +3,7 @@ import { assertAttemptProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { EffectIdentity, EffectReceipt, EffectView, LocalCommitBlock, OperationId, type DeliveryMode, type CreationMode, type ScaffoldPlan } from '#contracts';
+import { canFinishLocalCommit, EffectIdentity, EffectReceipt, EffectView, LocalCommitBlock, OperationId, type DeliveryMode, type CreationMode, type ScaffoldPlan } from '#contracts';
 import { configurationETag, readSettingsView, digest, guarded } from './configuration-reads.js';
 import { readSettings } from './settings.js';
 import { readAttempt, readCapture } from './attempts.js';
@@ -219,15 +219,15 @@ export function finishEffect(db: Database.Database, id: string, revision: number
   guarded(() => db.transaction(() => {
     const e = readEffect(db, id);
     if (e.state === 'confirmed' || e.state === 'not_applicable') return;
-    const observedAbsentCommit = e.state === 'unknown' && e.kind === 'local_commit' && state === 'failed_known' && reason === 'COMMIT_NOT_OBSERVED';
+    const observedLocalCommit = e.state === 'unknown' && e.kind === 'local_commit' && canFinishLocalCommit(e.state, state, reason);
     // A complete readback that still shows the previous option proves an unconfirmed Status write was not applied.
     const observedUnchangedStatus = e.state === 'unknown' && e.kind === 'project_status' && state === 'failed_known' && reason === 'STATUS_NOT_OBSERVED';
     if (e.revision !== revision || !['running','unknown'].includes(e.state) ||
-        (e.state === 'unknown' && !['confirmed','not_applicable'].includes(state) && !observedAbsentCommit && !observedUnchangedStatus)) {
+        (e.state === 'unknown' && !['confirmed','not_applicable'].includes(state) && !observedLocalCommit && !observedUnchangedStatus)) {
       throw new OperationError(409, 'EFFECT_REVISION_CONFLICT', 'The effect changed during observation.');
     }
     if ((state === 'confirmed') !== (receipt !== null) || (receipt && !Value.Check(EffectReceipt, receipt)) || (reason !== null && !/^[A-Z0-9_]{1,128}$/.test(reason)) ||
-      (blocked !== undefined && (e.kind !== 'local_commit' || state !== 'failed_known' || reason === null || !Value.Check(LocalCommitBlock, blocked)))) {
+      (blocked !== undefined && (e.kind !== 'local_commit' || !['failed_known','unknown'].includes(state) || reason === null || !Value.Check(LocalCommitBlock, blocked)))) {
       throw new OperationError(400, 'EFFECT_RECEIPT_INVALID', 'The effect receipt is invalid.');
     }
     if (receipt && e.kind === 'project_status' && (receipt.id !== e.expectedIdentity.itemId || receipt.optionId !== e.expectedIdentity.optionId)) {
@@ -262,8 +262,17 @@ export function finishEffect(db: Database.Database, id: string, revision: number
       throw new OperationError(409,'EFFECT_RECEIPT_INVALID','Only a verified approved delivery without changes skips its local commit.');
     }
     // A late confirmation records a remote fact even after cancellation. It never restores attempt authority.
-    db.prepare('UPDATE effects SET state=?,receipt_json=?,reason=?,confirmed_at_ms=?,revision=revision+1 WHERE operation_id=? AND revision=?')
-      .run(state, receipt ? JSON.stringify(receipt) : null, blocked && reason ? `${reason}\n${JSON.stringify(blocked)}` : reason, state === 'confirmed' ? Date.now() : null, id, revision);
+    const storedReason = blocked && reason ? `${reason}\n${JSON.stringify(blocked)}` : reason;
+    const receiptJson = receipt ? JSON.stringify(receipt) : null;
+    const confirmedAt = state === 'confirmed' ? Date.now() : null;
+    // Keeping `state` out of SET when staying `unknown` updates the observed block diagnostic without violating the state-change trigger.
+    if (e.state === 'unknown' && state === 'unknown') {
+      db.prepare('UPDATE effects SET receipt_json=?,reason=?,confirmed_at_ms=?,revision=revision+1 WHERE operation_id=? AND revision=?')
+        .run(receiptJson, storedReason, confirmedAt, id, revision);
+    } else {
+      db.prepare('UPDATE effects SET state=?,receipt_json=?,reason=?,confirmed_at_ms=?,revision=revision+1 WHERE operation_id=? AND revision=?')
+        .run(state, receiptJson, storedReason, confirmedAt, id, revision);
+    }
     effectEvent(db, id, `effect.${state}`, revision + 1);
     if (state === 'confirmed' && e.kind === 'project_status' && e.attemptId) {
       const superseded = db.prepare<[string,string],{ operation_id: string; revision: number }>(`SELECT operation_id,revision FROM effects WHERE attempt_id=? AND kind='project_status'

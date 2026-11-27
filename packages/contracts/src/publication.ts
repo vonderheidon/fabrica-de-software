@@ -59,6 +59,83 @@ export const LocalCommitBlock = Type.Object({
   expectedBranch: nullable(Type.String({ minLength: 1, maxLength: 1024 })), currentBranch: nullable(Type.String({ minLength: 1, maxLength: 1024 })),
 }, closed);
 export type LocalCommitBlock = Static<typeof LocalCommitBlock>;
+/** Reasons proving that an unresolved `local_commit` never landed on the target branch and may close as `failed_known`. */
+export const localCommitAbsentReasons = [
+  'COMMIT_NOT_OBSERVED',
+  'PROJECT_FOLDER_DIRTY',
+  'PROJECT_FOLDER_UNTRACKED_CONFLICT',
+  'PROJECT_FOLDER_PATH_HIDDEN',
+  'PROJECT_FOLDER_BUSY',
+  'PROJECT_FOLDER_DETACHED_HEAD',
+  'PROJECT_FOLDER_BRANCH_CHANGED',
+  'PROJECT_FOLDER_CONFIG_CHANGED',
+  'PROJECT_FOLDER_REFUSED',
+  'PROJECT_FOLDER_REPAIR_REFUSED',
+  'PROJECT_FOLDER_SUBMODULE_UNSUPPORTED',
+  'PROJECT_FOLDER_SYMLINK_UNSUPPORTED',
+  'PROJECT_FOLDER_NTFS_NAME_INVALID',
+  'PROJECT_FOLDER_FILTER_UNSUPPORTED',
+  'PROJECT_FOLDER_SPARSE_CHECKOUT',
+] as const;
+/** Project-folder diagnostics that keep `local_commit` `unknown` while surfacing actionable paths to the operator. */
+export const localCommitUnresolvedBlockReasons = [
+  'PROJECT_FOLDER_REPAIR_FAILED',
+  'PROJECT_FOLDER_LANDING_UNVERIFIED',
+  'PROJECT_FOLDER_BUSY',
+  'PROJECT_FOLDER_DETACHED_HEAD',
+  'PROJECT_FOLDER_BRANCH_CHANGED',
+  'PROJECT_FOLDER_CONFIG_CHANGED',
+  'PROJECT_FOLDER_PATH_HIDDEN',
+  'PROJECT_FOLDER_SUBMODULE_UNSUPPORTED',
+  'PROJECT_FOLDER_SYMLINK_UNSUPPORTED',
+  'PROJECT_FOLDER_NTFS_NAME_INVALID',
+  'PROJECT_FOLDER_FILTER_UNSUPPORTED',
+  'PROJECT_FOLDER_SPARSE_CHECKOUT',
+  'PROJECT_FOLDER_REPAIR_REFUSED',
+  'DELIVERY_BASE_CHANGED',
+] as const;
+/** Project-folder codes surfaced on `local_commit` blocks and operation diagnostics. */
+export const localCommitFolderBlockReasons = [
+  'PROJECT_FOLDER_DIRTY',
+  'PROJECT_FOLDER_UNTRACKED_CONFLICT',
+  'PROJECT_FOLDER_PATH_HIDDEN',
+  'PROJECT_FOLDER_BUSY',
+  'PROJECT_FOLDER_DETACHED_HEAD',
+  'PROJECT_FOLDER_BRANCH_CHANGED',
+  'PROJECT_FOLDER_CONFIG_CHANGED',
+  'PROJECT_FOLDER_REFUSED',
+  'PROJECT_FOLDER_REPAIR_REFUSED',
+  'PROJECT_FOLDER_REPAIR_FAILED',
+  'PROJECT_FOLDER_LANDING_UNVERIFIED',
+  'PROJECT_FOLDER_SUBMODULE_UNSUPPORTED',
+  'PROJECT_FOLDER_SYMLINK_UNSUPPORTED',
+  'PROJECT_FOLDER_NTFS_NAME_INVALID',
+  'PROJECT_FOLDER_FILTER_UNSUPPORTED',
+  'PROJECT_FOLDER_SPARSE_CHECKOUT',
+  'PROJECT_FOLDER_INVALID',
+] as const;
+export function isAbsentLocalCommitReason(reason: string | null | undefined): boolean {
+  return typeof reason === 'string' && (localCommitAbsentReasons as readonly string[]).includes(reason);
+}
+export function isUnresolvedLocalCommitDiagnostic(reason: string | null | undefined): boolean {
+  return typeof reason === 'string' && (localCommitUnresolvedBlockReasons as readonly string[]).includes(reason);
+}
+export function isLocalCommitFolderBlockReason(reason: string | null | undefined): reason is string {
+  return typeof reason === 'string' && (localCommitFolderBlockReasons as readonly string[]).includes(reason);
+}
+export function canFinishLocalCommit(
+  currentState: EffectView['state'],
+  nextState: 'confirmed' | 'failed_known' | 'unknown' | 'not_applicable',
+  reason: string | null | undefined,
+): boolean {
+  if (nextState === 'confirmed' || nextState === 'not_applicable') return true;
+  if (currentState !== 'unknown' && currentState !== 'running') return false;
+  if (nextState === 'failed_known') return isAbsentLocalCommitReason(reason);
+  return isUnresolvedLocalCommitDiagnostic(reason);
+}
+export function canAdaptLocalCommitIntegration(previous: Pick<EffectView, 'state' | 'reason'> | undefined): boolean {
+  return !previous || (previous.state === 'failed_known' && previous.reason !== 'PROJECT_FOLDER_REPAIR_REFUSED');
+}
 export const PublicationSummary = Type.Object({
   mode: DeliveryMode, reviewState: nullable(Type.Union(['pending', 'approved', 'rejected'].map(v => Type.Literal(v)))),
   localState: Type.Union([Type.Literal('pending'), Type.Literal('completed')]),

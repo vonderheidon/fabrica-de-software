@@ -13,8 +13,9 @@ afterEach(async () => { for (const root of roots.splice(0)) await rm(root,{ recu
 const complete = <T>(data: T): GitHubQueryResult<T> => ({ state:'complete',data,diagnostics:[],retryAtMs:null });
 function realGit(cwd: string,args: readonly string[],input?: GitInput) {
   const commitDate = input?.commitTime === undefined ? {} : { GIT_AUTHOR_DATE:'@' + input.commitTime + ' +0000',GIT_COMMITTER_DATE:'@' + input.commitTime + ' +0000' };
+  const indexEnv = input?.indexFile ? { GIT_INDEX_FILE: input.indexFile } : {};
   const result = spawnSync('git',[...args],{ cwd,encoding:'utf8',input:input?.input,windowsHide:true,shell:false,timeout:30_000,
-    env:{ ...process.env,...commitDate,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform === 'win32' ? 'NUL' : '/dev/null',GIT_TERMINAL_PROMPT:'0' } });
+    env:{ ...process.env,...commitDate,...indexEnv,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform === 'win32' ? 'NUL' : '/dev/null',GIT_TERMINAL_PROMPT:'0' } });
   if (result.error) throw result.error;
   return { exitCode:result.status ?? 1,stdout:result.stdout ?? '' };
 }

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AuthorizeUpgrade, CompletePublication, EffectIdentity, EffectView, GitHubMutationResult, ReconcilePublication } from '#contracts';
+import { canAdaptLocalCommitIntegration, canFinishLocalCommit, isLocalCommitFolderBlockReason, type AuthorizeUpgrade, type CompletePublication, type EffectIdentity, type EffectView, type GitHubMutationResult, type ReconcilePublication } from '#contracts';
 import type { GitHub, GitHubBeforeSendContext, GitHubClient, GitHubEffectRequest } from '../github/index.js';
 import { OperationError, type AuthorityObservation, type PublicationCommand, type Storage } from '../storage/index.js';
 import type { Workspaces } from '../workspaces/index.js';
@@ -121,6 +121,24 @@ export function createPublication(deps: PublicationDependencies) {
       Date.now() - effect.sentAtMs >= writeSettleMs && storage.getAttempt(effect.attemptId).result !== null;
   }
   /** `release` is set only by the operator's reconciliation; readbacks made while publishing never close a write. */
+  async function assertTargetMutationAuthorized(attemptId: string, deliveryId: string, targetOperationId: string): Promise<void> {
+    supported();
+    if (!await observeAuthority(attemptId)) blocked('PUBLICATION_BLOCKED');
+    storage.assertPublicationEligible(attemptId, deliveryId, true);
+    storage.assertDeliveryTarget(targetOperationId);
+  }
+  function authorizeTargetRepair(attemptId: string, deliveryId: string, targetOperationId: string) {
+    let denied: unknown;
+    return {
+      beforeRepair: async (): Promise<void> => {
+        try { await assertTargetMutationAuthorized(attemptId, deliveryId, targetOperationId); }
+        catch (error) { denied = error; throw error; }
+      },
+      throwIfDenied(): void {
+        if (denied !== undefined) throw denied;
+      },
+    };
+  }
   async function reconcileEffect(effect: EffectView, release = false): Promise<void> {
     if (!['running','unknown'].includes(effect.state) || !effect.attemptId) return;
     if ((effect.kind === 'push' || effect.kind === 'pull_request') && effect.deliveryId) {
@@ -134,12 +152,18 @@ export function createPublication(deps: PublicationDependencies) {
     if (effect.kind === 'local_commit') {
       if (!effect.deliveryId || !deps.workspaces.reconcileLocalCommit) return;
       const delivery = storage.getDelivery(effect.deliveryId).delivery;
-      const result = effect.expectedIdentity.targetOperationId
-        ? await deps.workspaces.reconcileTargetCommit?.(delivery,effect,storage.getDeliveryTarget(effect.expectedIdentity.targetOperationId))
+      const targetOperationId = effect.expectedIdentity.targetOperationId;
+      const auth = targetOperationId ? authorizeTargetRepair(effect.attemptId, delivery.id, targetOperationId) : undefined;
+      const targetResult = targetOperationId
+        ? await deps.workspaces.reconcileTargetCommit?.(delivery,effect,storage.getDeliveryTarget(targetOperationId),auth?.beforeRepair)
+        : undefined;
+      auth?.throwIfDenied();
+      const result = targetOperationId
+        ? targetResult
         : await deps.workspaces.reconcileLocalCommit(delivery,effect);
       if (!result) return;
-      if (result.state === 'confirmed' || result.state === 'not_applicable' || effect.kind === 'local_commit' && result.state === 'failed_known' && result.reason === 'COMMIT_NOT_OBSERVED') {
-        storage.finishEffect(effect.operationId,effect.revision,result.state,result.receipt,result.reason);
+      if (canFinishLocalCommit(effect.state, result.state, result.reason)) {
+        storage.finishEffect(effect.operationId,effect.revision,result.state,result.receipt,result.reason,targetResult?.block);
       }
       return;
     }
@@ -344,7 +368,9 @@ export function createPublication(deps: PublicationDependencies) {
         const reconcileTargetCommit = deps.workspaces.reconcileTargetCommit;
         if (!reconcileTargetCommit) blocked('COMMIT_CONTEXT_UNAVAILABLE');
         const sealedTarget = storage.getDeliveryTarget(previous.expectedIdentity.targetOperationId);
-        const observed = await reconcileTargetCommit!(delivery,previous,sealedTarget);
+        const auth = authorizeTargetRepair(snapshot.status.id,delivery.id,sealedTarget.operation_id);
+        const observed = await reconcileTargetCommit!(delivery,previous,sealedTarget,auth.beforeRepair);
+        auth.throwIfDenied();
         if (observed.state !== 'confirmed' || observed.receipt?.id !== previous.receipt?.id) blocked('DELIVERY_TARGET_CHANGED');
       }
       return;
@@ -354,8 +380,10 @@ export function createPublication(deps: PublicationDependencies) {
       ? previous.expectedIdentity.targetOperationId ? storage.getDeliveryTarget(previous.expectedIdentity.targetOperationId) : null
       : storage.findDeliveryTarget(snapshot.status.id,delivery.id);
     let target = sealed;
-    if (target && deps.adaptIntegration && deps.workspaces.inspectIntegrationTarget && (!previous || previous.state === 'failed_known')) {
-      const absent = !previous || await deps.workspaces.reconcileTargetCommit?.(delivery,previous,target);
+    if (target && deps.adaptIntegration && deps.workspaces.inspectIntegrationTarget && canAdaptLocalCommitIntegration(previous)) {
+      const auth = previous ? authorizeTargetRepair(snapshot.status.id,delivery.id,target.operation_id) : undefined;
+      const absent = !previous || await deps.workspaces.reconcileTargetCommit?.(delivery,previous,target,auth?.beforeRepair);
+      auth?.throwIfDenied();
       if (absent === true || absent && absent.state === 'failed_known' && absent.reason === 'COMMIT_NOT_OBSERVED') {
         const next = await deps.workspaces.inspectIntegrationTarget(target.local_path,{ attemptId:snapshot.status.id,approvedRef:delivery.gitRef!,
           contentIdentity:delivery.contentIdentity!,repositoryRelative:delivery.repositoryRelative,issueNumber:snapshot.capture.issue.number,issueTitle:snapshot.capture.issue.title,
@@ -423,10 +451,7 @@ export function createPublication(deps: PublicationDependencies) {
     let result: TargetCommitResult;
     try {
       result = target && deps.workspaces.createTargetCommit
-        ? await deps.workspaces.createTargetCommit(delivery,running,target,async () => {
-          supported(); if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
-          storage.assertPublicationEligible(snapshot.status.id,delivery.id,true); storage.assertDeliveryTarget(target!.operation_id);
-        })
+        ? await deps.workspaces.createTargetCommit(delivery,running,target,() => assertTargetMutationAuthorized(snapshot.status.id,delivery.id,target!.operation_id))
         : await deps.workspaces.createLocalCommit!(delivery,running,async () => {
         supported();
         if (!await observeAuthority(snapshot.status.id)) blocked('PUBLICATION_BLOCKED');
@@ -436,7 +461,7 @@ export function createPublication(deps: PublicationDependencies) {
     const block = 'block' in result ? result.block : undefined;
     storage.finishEffect(running.operationId,running.revision,result.state,result.receipt,result.reason,block);
     // A folder the operator can fix keeps its own code so the delivery shows what to resolve before "Tentar de novo".
-    if (result.state === 'failed_known' && result.reason?.startsWith('PROJECT_FOLDER_')) blocked(result.reason);
+    if (isLocalCommitFolderBlockReason(result.reason)) blocked(result.reason);
     if (!['confirmed','not_applicable'].includes(result.state)) blocked('COMMIT_PENDING');
   }
   function pullRequestBody(s: Snapshot): string {

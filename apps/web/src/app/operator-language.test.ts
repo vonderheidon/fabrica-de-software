@@ -118,4 +118,20 @@ describe('operator language', () => {
       expect(help, label).not.toBe(label);
     }
   });
+
+  it('explains every partial-repair block and unsupported-content refusal in Portuguese', () => {
+    for (const code of [
+      'PROJECT_FOLDER_REPAIR_FAILED',
+      'PROJECT_FOLDER_REPAIR_REFUSED',
+      'PROJECT_FOLDER_SUBMODULE_UNSUPPORTED',
+      'PROJECT_FOLDER_SYMLINK_UNSUPPORTED',
+      'PROJECT_FOLDER_NTFS_NAME_INVALID',
+      'PROJECT_FOLDER_FILTER_UNSUPPORTED',
+      'PROJECT_FOLDER_SPARSE_CHECKOUT',
+    ]) {
+      const message = operatorErrorMessage(code, '');
+      expect(isPortugueseOperatorText(message), code).toBe(true);
+      expect(message, code).not.toBe('A solicitação não pôde ser concluída. Consulte o estado atual antes de tentar novamente.');
+    }
+  });
 });

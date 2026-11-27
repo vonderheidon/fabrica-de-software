@@ -2,7 +2,7 @@ import { toHttpCompletePublication, toHttpPublicationSummary } from '../../apps/
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
-import { confirmTerminalStops } from '../fixtures/attempt.js';
+import { confirmTerminalStops, leaveReviewerStopUnconfirmed } from '../fixtures/attempt.js';
 import { openStorage } from '../../apps/controller/src/modules/storage/index.js';
 import { createPublication } from '../../apps/controller/src/modules/publication/index.js';
 import { createApp } from '../../apps/controller/src/http/app.js';
@@ -266,4 +266,105 @@ it('keeps a dirty Pasta do projeto visible with its files, then lands on "Tentar
   expect(f.storage.getEffect(local.operationId)).toMatchObject({ state:'confirmed',reason:null });
   expect(f.storage.getDeliveryDetail(d,{}).publication.commit?.blocked).toBeUndefined();
   expect(f.workspaces.createTargetCommit).toHaveBeenCalledTimes(2);
+});
+
+it('reconciles local_commit after controller restart into confirmed, failed_known with block, and unknown', async () => {
+  for (const outcome of ['confirmed','failed_known','unknown'] as const) {
+    const f = await fixture(); await f.implement();
+    const create = f.workspaces.createTargetCommit.getMockImplementation()!;
+    f.workspaces.createTargetCommit.mockResolvedValueOnce({ state:'unknown',receipt:null,reason:'LOCAL_RESPONSE_LOST' });
+    await f.approve();
+    const deliveryId = f.status().deliveryId!;
+    const local = f.storage.getEffects(f.attemptId).find(e => e.kind === 'local_commit')!;
+    expect(local.state).toBe('unknown');
+    await f.pipeline.close(); f.storage.close();
+    const storage = openStorage({ dataDirectory: f.directory });
+    try {
+      storage.interruptAttempts();
+      confirmTerminalStops(f,f.attemptId,storage.executionPersistence());
+      const tasks: Promise<void>[] = [];
+      const block = { paths:['z-locked.txt'],pathCount:1,expectedBranch:'main',currentBranch:'main' };
+      const reconcileTargetCommit = vi.fn(async () => {
+        if (outcome === 'confirmed') return { state:'confirmed' as const,receipt:{ id:'c'.repeat(40),contentIdentity:storage.getDelivery(deliveryId).delivery.contentIdentity!,parentSha:'a'.repeat(40),branchRef:local.expectedIdentity.branchRef!,operationId:local.operationId,targetOperationId:local.expectedIdentity.targetOperationId!,taskType:'feat',taskDescription:'Executable issue' },reason:null };
+        if (outcome === 'failed_known') return { state:'failed_known' as const,receipt:null,reason:'PROJECT_FOLDER_REPAIR_REFUSED',block };
+        return { state:'unknown' as const,receipt:null,reason:'PROJECT_FOLDER_REPAIR_FAILED',block };
+      });
+      const publication = createPublication({ storage,github:f.github,workspaces:{ ...f.workspaces,reconcileTargetCommit,createTargetCommit:create },
+        cancelAttempt:async () => {},isClosed:() => false,logFailure:vi.fn(),enqueue:task => { tasks.push(task()); } });
+      const context = () => ({ operationId:randomUUID(),expectedRevision:`"${f.attemptId}:${storage.getAttempt(f.attemptId).revision}"` });
+      const op = publication.reconcile(f.attemptId,{ deliveryId },context());
+      await Promise.all(tasks);
+      const effect = storage.getEffect(local.operationId);
+      expect(effect.state).toBe(outcome);
+      if (outcome === 'failed_known') {
+        expect(effect.reason).toBe('PROJECT_FOLDER_REPAIR_REFUSED');
+        expect(storage.getDeliveryDetail(deliveryId,{}).publication.commit).toMatchObject({ state:'failed_known',reason:'PROJECT_FOLDER_REPAIR_REFUSED',blocked:block });
+        expect(storage.getOperation(op.operation_id)?.state).toBe('succeeded');
+        publication.complete(f.attemptId,{ deliveryId,authorizedMode:'commit',authorized:true },context());
+        await Promise.all(tasks);
+        expect(storage.getEffect(local.operationId).state).toBe('confirmed');
+        expect(storage.getAttempt(f.attemptId).result).toBe('delivered');
+      } else if (outcome === 'unknown') {
+        expect(effect.reason).toBe('PROJECT_FOLDER_REPAIR_FAILED');
+        expect(storage.getDeliveryDetail(deliveryId,{}).publication.commit).toMatchObject({ state:'unknown',reason:'PROJECT_FOLDER_REPAIR_FAILED',blocked:block });
+        expect(storage.getOperation(op.operation_id)?.state).toBe('unknown');
+      } else {
+        expect(storage.getOperation(op.operation_id)?.state).toBe('succeeded');
+      }
+    } finally { storage.close(); }
+  }
+});
+
+it('rejects closing an unknown local_commit as failed_known unless the reason proves no commit exists on the branch', async () => {
+  const f = await fixture(); await f.implement();
+  f.workspaces.createTargetCommit.mockResolvedValueOnce({ state:'unknown',receipt:null,reason:'LOCAL_RESPONSE_LOST' });
+  await f.approve();
+  const local = f.storage.getEffects(f.attemptId).find(e => e.kind === 'local_commit')!;
+  const block = { paths:['z-locked.txt'],pathCount:1,expectedBranch:'main',currentBranch:'main' };
+  for (const invalidReason of ['PROJECT_FOLDER_REPAIR_FAILED','PROJECT_FOLDER_LANDING_UNVERIFIED','PROJECT_FOLDER_INVALID','PROJECT_FOLDER_FUTURE_CODE']) {
+    expect(() => f.storage.finishEffect(local.operationId,local.revision,'failed_known',null,invalidReason,block)).toThrow(expect.objectContaining({ code:'EFFECT_REVISION_CONFLICT' }));
+  }
+  expect(f.storage.getEffect(local.operationId).state).toBe('unknown');
+  f.storage.finishEffect(local.operationId,local.revision,'unknown',null,'PROJECT_FOLDER_REPAIR_FAILED',block);
+  expect(f.storage.getDeliveryDetail(f.status().deliveryId!,{}).publication.commit).toMatchObject({ state:'unknown',reason:'PROJECT_FOLDER_REPAIR_FAILED',blocked:block });
+  const updated = f.storage.getEffect(local.operationId);
+  f.storage.finishEffect(local.operationId,updated.revision,'failed_known',null,'PROJECT_FOLDER_REPAIR_REFUSED',block);
+  expect(f.storage.getEffect(local.operationId)).toMatchObject({ state:'failed_known',reason:'PROJECT_FOLDER_REPAIR_REFUSED' });
+});
+
+it('authorizes via beforeRepair before writing during reconcileTargetCommit after restart', async () => {
+  const f = await fixture(); leaveReviewerStopUnconfirmed(f); await f.implement();
+  f.workspaces.createTargetCommit.mockResolvedValueOnce({ state:'unknown',receipt:null,reason:'LOCAL_RESPONSE_LOST' });
+  await f.approve();
+  const deliveryId = f.status().deliveryId!;
+  const local = f.storage.getEffects(f.attemptId).find(e => e.kind === 'local_commit')!;
+  await f.pipeline.close(); f.storage.close();
+  const storage = openStorage({ dataDirectory: f.directory });
+  try {
+    storage.interruptAttempts();
+    // Note: intentionally NOT confirming terminal stops yet; beforeRepair must reject writes.
+    const tasks: Promise<void>[] = [];
+    let wrote = false;
+    const reconcileTargetCommit = vi.fn(async (_d, _e, _t, beforeRepair) => {
+      expect(beforeRepair).toBeTypeOf('function');
+      await beforeRepair!();
+      wrote = true;
+      return { state:'confirmed' as const,receipt:{ id:'c'.repeat(40),contentIdentity:storage.getDelivery(deliveryId).delivery.contentIdentity!,parentSha:'a'.repeat(40),branchRef:local.expectedIdentity.branchRef!,operationId:local.operationId,targetOperationId:local.expectedIdentity.targetOperationId!,taskType:'feat',taskDescription:'Executable issue' },reason:null };
+    });
+    const publication = createPublication({ storage,github:f.github,workspaces:{ ...f.workspaces,reconcileTargetCommit },
+      cancelAttempt:async () => {},isClosed:() => false,logFailure:vi.fn(),enqueue:task => { tasks.push(task()); } });
+    const context = () => ({ operationId:randomUUID(),expectedRevision:`"${f.attemptId}:${storage.getAttempt(f.attemptId).revision}"` });
+    const blockedOp = publication.reconcile(f.attemptId,{ deliveryId },context());
+    await Promise.all(tasks);
+    expect(wrote).toBe(false);
+    expect(storage.getEffect(local.operationId).state).toBe('unknown');
+    expect(storage.getOperation(blockedOp.operation_id)).toMatchObject({ state:'unknown',error:{ code:'RESOURCES_NOT_RECONCILED' } });
+
+    confirmTerminalStops(f,f.attemptId,storage.executionPersistence());
+    const allowedOp = publication.reconcile(f.attemptId,{ deliveryId },context());
+    await Promise.all(tasks);
+    expect(wrote).toBe(true);
+    expect(storage.getEffect(local.operationId).state).toBe('confirmed');
+    expect(storage.getOperation(allowedOp.operation_id)?.state).toBe('succeeded');
+  } finally { storage.close(); }
 });

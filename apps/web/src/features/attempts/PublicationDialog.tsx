@@ -2,7 +2,7 @@ import { knownProjectDeletion, rememberProjectDeletion, useProjectDeletionRestri
 import type { ProjectDetail } from '#contracts';
 import { completePublicationBody, reconcilePublicationBody, authorizeUpgradeBody } from './execution-requests.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { HttpDeliveryDetail as DeliveryDetail, DeliveryMode, HttpEffectView as EffectView, OperationAccepted, OperationView } from '#contracts';
+import { isLocalCommitFolderBlockReason, type HttpDeliveryDetail as DeliveryDetail, type DeliveryMode, type HttpEffectView as EffectView, type OperationAccepted, type OperationView } from '#contracts';
 import { HttpError, requestJson, requestJsonWithMetadata } from '../../api/http.js';
 import { readUncertainOperations, recordUncertainOperation, resolveUncertainOperation } from '../../api/uncertain-operations.js';
 import { DeliverySummary } from './DeliverySummary.js';
@@ -70,8 +70,10 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
   }, [effectFingerprint, action?.view?.state]);
 
   const upgrades = (summary.upgrades ?? []).filter((upgrade) => modeOrder.indexOf(upgrade.target_mode) > modeOrder.indexOf(authorizedMode));
-  const commitFailure = summary.commit?.state === 'failed_known' ? summary.commit : null;
-  const blockedCommit = commitFailure && (commitFailure.reason?.startsWith('PROJECT_FOLDER_') || commitFailure.reason === 'DELIVERY_BRANCH_IN_USE' || commitFailure.blocked)
+  const commitFailure = summary.commit?.state === 'failed_known' ||
+    (summary.commit?.state === 'unknown' && (isLocalCommitFolderBlockReason(summary.commit.reason) || Boolean(summary.commit.blocked)))
+    ? summary.commit : null;
+  const blockedCommit = commitFailure && (isLocalCommitFolderBlockReason(commitFailure.reason) || commitFailure.reason === 'DELIVERY_BRANCH_IN_USE' || commitFailure.blocked)
     ? commitFailure.blocked ?? { paths: [], path_count: 0, expected_branch: null, current_branch: null } : null;
   const controls = delivery.capabilities;
   const summaryMatchesAuthorization = summary.mode === authorizedMode;
@@ -183,7 +185,7 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
         <p>{blockedCommit.path_count > blockedCommit.paths.length ? `Primeiros ${blockedCommit.paths.length} de ${blockedCommit.path_count} caminhos:` : 'Caminhos envolvidos:'}</p>
         <ul className="blocked-paths">{blockedCommit.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
       </>}
-      <button type="button" className="primary" disabled={busy || deletionRestricted || !projectChecked || !canComplete} onClick={() => void send('complete')}>Tentar de novo</button>
+      <button type="button" className="primary" disabled={busy || deletionRestricted || !projectChecked || !(commitFailure?.state === 'unknown' ? canReconcile : canComplete)} onClick={() => void send(commitFailure?.state === 'unknown' ? 'reconcile' : 'complete')}>Tentar de novo</button>
     </div>}
     <div className="delivery-continuation">
       {upgrades.map(upgrade => <div className="publication-upgrade" key={upgrade.target_mode}>

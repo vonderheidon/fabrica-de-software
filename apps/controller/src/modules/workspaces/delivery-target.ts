@@ -78,7 +78,9 @@ function inside(root: string,path: string): boolean {
 export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository'|'resolveBranch'>,dataDirectory: string | undefined,git: GitReader | undefined,
   canonicalize: (path: string) => Promise<string> = realpath, resolveAttemptRoot?: AttemptRootResolver) {
   const isolated: GitReader | undefined = git ? (cwd,args,input) => git(cwd,args,{ ...input,isolatedConfig: true }) : undefined;
-  const landing = createCheckoutLanding({ isolated,plain: git,hooksDirectory: dataDirectory ? join(dataDirectory,'hooks-disabled') : undefined });
+  const landing = createCheckoutLanding({ isolated,plain: git,
+    hooksDirectory: dataDirectory ? join(dataDirectory,'hooks-disabled') : undefined,
+    indexDirectory: dataDirectory ? join(dataDirectory,'landing-indexes') : undefined });
   async function gitRun(root: string,args: string[],input?: string,config: string[] = []) {
     const runGit = isolated; if (!runGit) targetError('CONTEXT_UNAVAILABLE');
     const result = await runGit!(root,['--no-optional-locks',...config,...args],input === undefined ? undefined : { input });
@@ -213,13 +215,72 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     }
     return { baseSha:local,localPath:found.root,rootIdentity:found.rootIdentity };
   }
-  async function reconcileLocalCommit(delivery: Delivery,effect: EffectView,target: SealedTarget): Promise<TargetCommitResult> {
+  async function expectedLandingSha(c: Awaited<ReturnType<typeof localContext>>,delivery: Delivery,effect: EffectView,target: SealedTarget): Promise<string | null> {
+    const commitTime = effect.expectedIdentity.commitTime;
+    if (commitTime === undefined || !Number.isSafeInteger(commitTime)) return null;
+    const payload = `tree ${delivery.contentIdentity!}\nparent ${target.local_identity.base_sha}\nauthor Nova Fábrica <fabrica@localhost> ${commitTime} +0000\ncommitter Nova Fábrica <fabrica@localhost> ${commitTime} +0000\n\n${c.message}`;
+    const computed = await isolated!(c.repository,['hash-object','-t','commit','--stdin'],{ input: payload });
+    if (computed.exitCode !== 0) return null;
+    const sha = computed.stdout.trim();
+    return oid.test(sha) ? sha : null;
+  }
+  async function tryRepairAtBase(c: Awaited<ReturnType<typeof localContext>>,delivery: Delivery,effect: EffectView,target: SealedTarget,plan: LandingPlan,beforeRepair?: () => Promise<void>): Promise<TargetCommitResult | null> {
+    const expectedSha = await expectedLandingSha(c,delivery,effect,target);
+    if (!expectedSha) return null;
+    const present = await isolated!(c.repository,['cat-file','-e',`${expectedSha}^{commit}`]);
+    if (present.exitCode !== 0) return null;
+    const config = await landing.writeConfig(c.repository,target.local_identity.operator_config);
+    const touched = await landing.touchedPaths(plan);
+    if (!await landing.hasPartialLanding(plan,config,expectedSha,touched)) return null;
+    let repaired: Awaited<ReturnType<typeof landing.repair>>;
+    try {
+      repaired = await landing.repair(plan,expectedSha,touched,beforeRepair);
+    } catch (error) {
+      if (error instanceof LandingBlocked) {
+        // `repair` only throws LandingBlocked before `reset --mixed`, so HEAD is still at `baseSha`.
+        return { state:'failed_known',receipt:null,reason:error.code,...(error.block ? { block: error.block } : {}) };
+      }
+      throw error;
+    }
+    if (repaired.status === 'failed') return { state:'unknown',receipt:null,reason:repaired.reason,block:repaired.block };
+    if (repaired.status === 'refused') {
+      // `PROJECT_FOLDER_LANDING_UNVERIFIED` means the refusal came after `reset --mixed` moved the branch to the target, so the landing can no longer be called absent.
+      const block = repaired.block ? { block: repaired.block } : {};
+      return repaired.reason === 'PROJECT_FOLDER_LANDING_UNVERIFIED'
+        ? { state:'unknown',receipt:null,reason:repaired.reason,...block }
+        : { state:'failed_known',receipt:null,reason:'PROJECT_FOLDER_REPAIR_REFUSED',...block };
+    }
+    await transferBranch(c,target,expectedSha);
+    return { state:'confirmed',receipt: receipt(delivery,effect,target,expectedSha),reason:null };
+  }
+  type LocalContext = Awaited<ReturnType<typeof localContext>>;
+  function landingPlan(c: LocalContext,delivery: Delivery,target: SealedTarget): LandingPlan {
+    return { root:c.repository,branchRef:target.branch_ref,baseSha:target.local_identity.base_sha,approvedTree:delivery.contentIdentity!,retained:c.retained,sealedConfig:target.local_identity.operator_config };
+  }
+  /** Brings the approved commit into the Pasta do projeto's object store and checks it is the delivery the factory approved. */
+  async function fetchApprovedCommit(c: LocalContext,delivery: Delivery,target: SealedTarget,hooksOff: readonly string[]): Promise<void> {
+    const fetch = await isolated!(c.repository,[...hooksOff,'fetch','--no-tags','--no-recurse-submodules','--',c.retained,delivery.gitRef!]);
+    if (fetch.exitCode !== 0 || (await isolated!(c.repository,['rev-parse','--verify','FETCH_HEAD'])).stdout.trim() !== delivery.commitSha) targetError('DELIVERY_INTEGRITY_FAILED');
+    if ((await isolated!(c.repository,['rev-parse','--verify',`${delivery.commitSha}^{tree}`])).stdout.trim() !== target.content_identity) targetError('DELIVERY_INTEGRITY_FAILED');
+  }
+  async function commitApprovedTree(c: LocalContext,target: SealedTarget): Promise<string> {
+    const created = await isolated!(c.repository,['-c','user.name=Nova Fábrica','-c','user.email=fabrica@localhost','commit-tree',target.content_identity,'-p',target.local_identity.base_sha],{input:c.message,commitTime:c.commitTime,isolatedConfig:true});
+    const sha = created.stdout.trim();
+    if (created.exitCode !== 0 || !oid.test(sha)) targetError('COMMIT_IDENTITY_INVALID');
+    return sha;
+  }
+  async function reconcileLocalCommit(delivery: Delivery,effect: EffectView,target: SealedTarget,beforeRepair?: () => Promise<void>): Promise<TargetCommitResult> {
+    let atBase = false;
     try {
       const existing = target.local_identity.branch_kind === 'existing';
       const c = await localContext(delivery,effect,target,false); const observed = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       if (observed.exitCode === 1) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
       let sha = observed.stdout.trim();
-      if (existing && sha === target.local_identity.base_sha) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
+      const plan = landingPlan(c,delivery,target);
+      if (existing && sha === target.local_identity.base_sha) {
+        atBase = true;
+        return await tryRepairAtBase(c,delivery,effect,target,plan,beforeRepair) ?? { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
+      }
       // The checkout is only inspected for a write that is still unresolved. Once confirmed, the operator may edit, commit or switch freely.
       let inspectCheckout = existing && effect.state !== 'confirmed';
       const matchesApproved = async (candidate: string) => oid.test(candidate) && (await c.commitMessage(candidate)).trimEnd() === c.message.trimEnd() &&
@@ -230,14 +291,27 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         if (oid.test(found)) { sha = found; inspectCheckout = false; }
       }
       if (!await matchesApproved(sha)) targetError('COMMIT_IDENTITY_CONFLICT');
-      if (!existing || inspectCheckout) await transferBranch(c,target,sha);
-      if (!existing) await verifyWorkingState(c,target);
-      else if (inspectCheckout) {
+      if (!existing) {
+        await transferBranch(c,target,sha);
+        await verifyWorkingState(c,target);
+      } else if (inspectCheckout) {
         const config = await landing.writeConfig(c.repository,target.local_identity.operator_config);
-        if (!await landing.matches({ root:c.repository,branchRef:target.branch_ref },config,sha)) targetError('PROJECT_FOLDER_LANDING_UNVERIFIED');
+        const touched = await landing.touchedPaths(plan);
+        if (!await landing.matches(plan,config,sha,touched)) {
+          const repaired = await landing.repair(plan,sha,touched,beforeRepair);
+          if (repaired.status === 'failed') return { state:'unknown',receipt:null,reason:repaired.reason,block:repaired.block };
+          if (repaired.status === 'refused') return { state:'unknown',receipt:null,reason:repaired.reason,...(repaired.block ? { block: repaired.block } : {}) };
+          if (!await landing.matches(plan,repaired.config,sha,touched)) targetError('PROJECT_FOLDER_LANDING_UNVERIFIED');
+        }
+        await transferBranch(c,target,sha);
       }
       return { state:'confirmed',receipt: receipt(delivery,effect,target,sha),reason:null };
-    } catch (e) { return { state:'unknown',receipt:null,reason:e instanceof CaptureError ? e.code : 'DELIVERY_TARGET_UNAVAILABLE' }; }
+    } catch (e) {
+      if (atBase && e instanceof LandingBlocked) {
+        return { state:'failed_known',receipt:null,reason:e.code,...(e.block ? { block: e.block } : {}) };
+      }
+      return { state:'unknown',receipt:null,reason:e instanceof CaptureError ? e.code : 'DELIVERY_TARGET_UNAVAILABLE',...(e instanceof LandingBlocked && e.block ? { block: e.block } : {}) };
+    }
   }
   async function localContext(delivery: Delivery,effect: EffectView,target: SealedTarget,compareWorkingState = true) {
     if (!Value.Check(Delivery,delivery) || !Value.Check(EffectView,effect) || !Value.Check(DeliveryTarget,target) ||
@@ -317,39 +391,57 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const c = await localContext(delivery,effect,target);
       const current = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       const existing = target.local_identity.branch_kind === 'existing';
+      const markMutation = async () => { await authorize(); mutationStarted = true; };
       if (current.exitCode === 0 && (!existing || current.stdout.trim() !== target.local_identity.base_sha)) {
-        const observed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+        const observed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target,existing ? markMutation : undefined);
         // A branch tip that is neither the base nor our commit means the base advanced: the integration round takes over.
         return existing && observed.state === 'unknown' && observed.reason === 'COMMIT_IDENTITY_CONFLICT' ? { state:'failed_known',receipt:null,reason:'DELIVERY_BASE_CHANGED' } : observed;
       }
       if (existing && (current.exitCode !== 0 || current.stdout.trim() !== target.local_identity.base_sha)) targetError('DELIVERY_BASE_CHANGED');
       if ((!existing && current.exitCode !== 1) || effect.state !== 'running') return { state:'unknown',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
-      const hooksOff = await landing.hooksOff();
-      const fetch = await isolated!(c.repository,[...hooksOff,'fetch','--no-tags','--no-recurse-submodules','--',c.retained,delivery.gitRef!]);
-      if (fetch.exitCode !== 0 || (await isolated!(c.repository,['rev-parse','--verify','FETCH_HEAD'])).stdout.trim() !== delivery.commitSha) targetError('DELIVERY_INTEGRITY_FAILED');
-      if ((await isolated!(c.repository,['rev-parse','--verify',`${delivery.commitSha}^{tree}`])).stdout.trim() !== target.content_identity) targetError('DELIVERY_INTEGRITY_FAILED');
-      const baseTree = (await isolated!(c.repository,['rev-parse','--verify',`${delivery.baseSha}^{tree}`])).stdout.trim();
-      if ((baseTree !== delivery.contentIdentity) !== delivery.hasDelta) targetError('DELIVERY_INTEGRITY_FAILED');
-      const publicationBaseTree = (await isolated!(c.repository,['rev-parse','--verify',`${target.local_identity.base_sha}^{tree}`])).stdout.trim();
-      if (publicationBaseTree === delivery.contentIdentity) return { state:'not_applicable',receipt:null,reason:'APPROVED_NO_DELTA' };
-      const plan: LandingPlan = { root:c.repository,branchRef:target.branch_ref,baseSha:target.local_identity.base_sha,approvedTree:delivery.contentIdentity!,retained:c.retained,sealedConfig:target.local_identity.operator_config };
-      let config: readonly string[] = [];
-      if (existing) config = (await landing.preflight(plan)).config; else await verifyWorkingState(c,target);
-      await authorize(); mutationStarted = !existing;
-      const created = await isolated!(c.repository,['-c','user.name=Nova Fábrica','-c','user.email=fabrica@localhost','commit-tree',delivery.contentIdentity!,'-p',target.local_identity.base_sha],{input:c.message,commitTime:c.commitTime,isolatedConfig:true});
-      const sha = created.stdout.trim();
-      if (created.exitCode !== 0 || !oid.test(sha)) targetError('COMMIT_IDENTITY_INVALID');
       if (existing) {
+        // Verify delivery integrity and APPROVED_NO_DELTA before writing objects or FETCH_HEAD into the Pasta do projeto.
+        const deliveryTree = await isolated!(c.retained,[`--git-dir=${c.retained}`,'rev-parse','--verify',`${delivery.commitSha}^{tree}`]);
+        if (deliveryTree.exitCode !== 0 || deliveryTree.stdout.trim() !== target.content_identity) targetError('DELIVERY_INTEGRITY_FAILED');
+        const baseTree = await isolated!(c.retained,[`--git-dir=${c.retained}`,'rev-parse','--verify',`${delivery.baseSha}^{tree}`]);
+        if (baseTree.exitCode !== 0 || (baseTree.stdout.trim() !== delivery.contentIdentity) !== delivery.hasDelta) targetError('DELIVERY_INTEGRITY_FAILED');
+        const publicationBaseTree = await isolated!(c.repository,['rev-parse','--verify',`${target.local_identity.base_sha}^{tree}`]);
+        if (publicationBaseTree.exitCode !== 0) targetError('DELIVERY_INTEGRITY_FAILED');
+        if (publicationBaseTree.stdout.trim() === delivery.contentIdentity) return { state:'not_applicable',receipt:null,reason:'APPROVED_NO_DELTA' };
+        const plan = landingPlan(c,delivery,target);
+        const partial = await tryRepairAtBase(c,delivery,effect,target,plan,markMutation);
+        if (partial) return partial;
+        const { config,touched } = await landing.preflight(plan);
+        const hooksOff = await landing.hooksOff();
+        await authorize();
+        await fetchApprovedCommit(c,delivery,target,hooksOff);
+        const sha = await commitApprovedTree(c,target);
         // Only the fast-forward below can move the branch and the checkout; until it starts, a refusal leaves nothing behind but an unreferenced object.
         await landing.beforeWrite(plan,config,sha);
         mutationStarted = true;
         const merged = await landing.land(plan,config,sha);
-        const landed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+        const landed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target,authorize);
         if (landed.state === 'confirmed') return landed;
         // A refused merge that left HEAD, index and files at the base wrote nothing, so the operator can retry once they resolve it.
-        if (merged.exitCode !== 0 && landed.state === 'failed_known' && await landing.matches(plan,config,plan.baseSha)) return { state:'failed_known',receipt:null,reason:'PROJECT_FOLDER_REFUSED' };
-        return { state:'unknown',receipt:null,reason:landed.reason ?? 'PROJECT_FOLDER_LANDING_UNVERIFIED' };
+        if (landed.state === 'failed_known') {
+          if (landed.reason === 'COMMIT_NOT_OBSERVED') {
+            return merged.exitCode !== 0 && await landing.matches(plan,config,plan.baseSha,touched)
+              ? { state:'failed_known',receipt:null,reason:'PROJECT_FOLDER_REFUSED' }
+              : { state:'unknown',receipt:null,reason:'PROJECT_FOLDER_LANDING_UNVERIFIED' };
+          }
+          return landed;
+        }
+        return landed.reason ? landed : { ...landed,reason:'PROJECT_FOLDER_LANDING_UNVERIFIED' };
       }
+      const hooksOff = await landing.hooksOff();
+      await fetchApprovedCommit(c,delivery,target,hooksOff);
+      const baseTree = (await isolated!(c.repository,['rev-parse','--verify',`${delivery.baseSha}^{tree}`])).stdout.trim();
+      if ((baseTree !== delivery.contentIdentity) !== delivery.hasDelta) targetError('DELIVERY_INTEGRITY_FAILED');
+      const publicationBaseTree = (await isolated!(c.repository,['rev-parse','--verify',`${target.local_identity.base_sha}^{tree}`])).stdout.trim();
+      if (publicationBaseTree === delivery.contentIdentity) return { state:'not_applicable',receipt:null,reason:'APPROVED_NO_DELTA' };
+      await verifyWorkingState(c,target);
+      await authorize(); mutationStarted = true;
+      const sha = await commitApprovedTree(c,target);
       const update = await isolated!(c.repository,[...hooksOff,'update-ref','--no-deref',target.branch_ref,sha,'0'.repeat(sha.length)]);
       if (update.exitCode !== 0) {
         const reconciled = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
