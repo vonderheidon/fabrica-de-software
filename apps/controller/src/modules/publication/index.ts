@@ -5,7 +5,7 @@ import { OperationError, type AuthorityObservation, type PublicationCommand, typ
 import type { Workspaces } from '../workspaces/index.js';
 import { createTargetSelections, type TargetWorkspaces } from './targets.js';
 import type { DeliveryTargetPlan } from '../storage/index.js';
-import { CaptureError } from '../workspaces/index.js';
+import { CaptureError, type TargetCommitResult } from '../workspaces/index.js';
 import { markCriteria } from '../pipeline/index.js';
 
 type Stage = 'inProgress' | 'inReview' | 'delivered';
@@ -445,7 +445,7 @@ export function createPublication(deps: PublicationDependencies) {
     supported();
     if (!storage.claimEffect(effect.operationId,effect.revision,command.operationId)) blocked('COMMIT_PENDING');
     const running = storage.getEffect(effect.operationId);
-    let result;
+    let result: TargetCommitResult;
     try {
       result = target && deps.workspaces.createTargetCommit
         ? await deps.workspaces.createTargetCommit(delivery,running,target,async () => {
@@ -458,7 +458,10 @@ export function createPublication(deps: PublicationDependencies) {
         storage.assertPublicationEligible(snapshot.status.id,delivery.id,true);
       });
     } catch { result = { state: 'unknown' as const, receipt: null, reason: 'COMMIT_TRANSPORT_LOST' }; }
-    storage.finishEffect(running.operationId,running.revision,result.state,result.receipt,result.reason);
+    const block = 'block' in result ? result.block : undefined;
+    storage.finishEffect(running.operationId,running.revision,result.state,result.receipt,result.reason,block);
+    // A folder the operator can fix keeps its own code so the delivery shows what to resolve before "Tentar de novo".
+    if (result.state === 'failed_known' && result.reason?.startsWith('PROJECT_FOLDER_')) blocked(result.reason);
     if (!['confirmed','not_applicable'].includes(result.state)) blocked('COMMIT_PENDING');
   }
   function pullRequestBody(s: Snapshot): string {

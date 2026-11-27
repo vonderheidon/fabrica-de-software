@@ -9,7 +9,7 @@ import { configurationETag, digest, guarded, readConfiguration } from './configu
 import { readSettings } from './settings.js';
 import { OperationError, readOperation, type StoredOperation } from './operations.js';
 import { StorageError } from './errors.js';
-import { effectView } from './effects.js';
+import { effectView, splitEffectReason } from './effects.js';
 import { authorizedMode, upgradeSummaries } from './publication-modes.js';
 
 export interface PublicationCommand {
@@ -204,10 +204,12 @@ export function publicationSummary(db: Database.Database, attemptId: string, del
   const completed = (a.result === 'delivered' || Boolean(historical)) && (mode === 'icr' ? resolved('issue_comment') : resolved('local_commit') && (mode === 'commit' ? resolved('issue_comment') : resolved('push') && resolved('pull_request')));
   const upgrades = completed && d && d.id === a.deliveryId && review?.state === 'approved' && a.phase === 'finished' ? upgradeSummaries(db,attemptId,d.id,reason) : [];
   if (!reason && completed && counts.pending === 0) reason = 'MODE_COMPLETED';
-  const commit = db.prepare<[string,string | null],{ state: EffectView['state']; sha: string | null; reason: string | null; operationId: string; branchRef: string | null; taskType: string | null; taskDescription: string | null }>(`SELECT e.state,json_extract(e.receipt_json,'$.id') AS sha,e.reason,e.operation_id AS operationId,
+  const commitRow = db.prepare<[string,string | null],{ state: EffectView['state']; sha: string | null; reason: string | null; operationId: string; branchRef: string | null; taskType: string | null; taskDescription: string | null }>(`SELECT e.state,json_extract(e.receipt_json,'$.id') AS sha,e.reason,e.operation_id AS operationId,
     t.branch_ref AS branchRef,t.task_type AS taskType,t.task_description AS taskDescription FROM effects e LEFT JOIN delivery_targets t
       ON t.operation_id=json_extract(e.expected_identity_json,'$.targetOperationId')
     WHERE e.attempt_id=? AND e.delivery_id IS ? AND e.kind='local_commit' ORDER BY e.rowid DESC LIMIT 1`).get(attemptId,selectedId);
+  const split = commitRow ? splitEffectReason(commitRow.reason) : null;
+  const commit = commitRow && split ? { ...commitRow,reason: split.code,...(split.blocked ? { blocked: split.blocked } : {}) } : undefined;
   const remote = (kind: 'push' | 'pull_request') => { const row = db.prepare<[string,string | null,string],Parameters<typeof effectView>[0]>('SELECT * FROM effects WHERE attempt_id=? AND delivery_id IS ? AND kind=?').get(attemptId,selectedId,kind); const e = row ? effectView(row) : null; return { state: e?.state ?? 'not_requested' as const,receipt: e?.receipt ?? null,reason: e?.reason ?? null }; };
   return { mode, reviewState: review?.state ?? null, upgrades, push: remote('push'), pullRequest: remote('pull_request'),
     commit: commit ?? { state: 'not_requested', sha: null, reason: mode === 'icr' ? 'MODE_ICR' : 'COMMIT_NOT_STARTED', operationId: null,branchRef: null,taskType: null,taskDescription: null },

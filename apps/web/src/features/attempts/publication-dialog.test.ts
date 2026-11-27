@@ -97,3 +97,20 @@ it('keeps the same version visible after refresh failure and discards it on sele
   await act(async () => root!.render(createElement(Probe,{ selected:id,reload:1 })));
   expect(container.textContent).toBe('error:none');
 });
+
+it('lists the files that block the commit in the Pasta do projeto and retries the commit on "Tentar de novo"',async () => {
+  reads(); const value = delivery();
+  value.publication = { ...value.publication,mode:'commit',commit:{ state:'failed_known',sha:null,reason:'PROJECT_FOLDER_DIRTY',operation_id:null,branch_ref:'refs/heads/main',task_type:'fix',task_description:'Corrigir',
+    blocked:{ paths:['src/a.ts','b.txt'],path_count:2,expected_branch:null,current_branch:null } } } as typeof value.publication;
+  value.authorizations = { captured_mode:'commit',authorized_mode:'commit' } as typeof value.authorizations;
+  value.capabilities = { complete_publication:available,reconcile_publication:unavailable } as typeof value.capabilities;
+  send.mockImplementation(async (_path: string, init: RequestInit) => ({ data:{ operation_id:(init.headers as Record<string,string>)['Idempotency-Key'] } }));
+  await mount(value);
+  expect(container.textContent).toContain('Commit bloqueado na Pasta do projeto');
+  expect([...container.querySelectorAll('.blocked-paths code')].map(node => node.textContent)).toEqual(['src/a.ts','b.txt']);
+  expect(container.textContent).toContain('alterações não salvas em commit');
+  await act(async () => button('Tentar de novo').click());
+  expect(send).toHaveBeenCalledOnce();
+  expect(String(send.mock.calls[0]![0])).toContain('/publication/complete');
+  expect(JSON.parse(send.mock.calls[0]![1].body)).toMatchObject({ delivery_id:version,authorized:true });
+});

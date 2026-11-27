@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { lstat, readFile, readlink, realpath } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { Value } from '@sinclair/typebox/value';
-import { Delivery, DeliveryTarget, type DeliveryTarget as SealedTarget, EffectView, type EffectReceipt } from '#contracts';
+import { Delivery, DeliveryTarget, type DeliveryTarget as SealedTarget, EffectView, type EffectReceipt, type LocalCommitBlock } from '#contracts';
 import type { GitHub } from '../github/index.js';
 import { CaptureError, managedRoot, metadataBytes, noBorrowedObjects, plainDirectory, verifyRetained } from './capture.js';
 import type { GitReader } from './git.js';
 import { retainedRepositoryOwner, retainedRepositoryPath, requireAttemptRootResolver, type AttemptRootResolver } from './project-storage.js';
 import { githubReference } from './inspect.js';
+import { createCheckoutLanding, LandingBlocked, type LandingPlan, type OperatorConfig } from './checkout-landing.js';
 
 export interface DeliveryTaskInput {
   sourceKind?: 'local' | 'github' | undefined; deliveryBranch?: { kind: 'new' | 'existing'; name: string } | null | undefined;
@@ -19,12 +20,15 @@ export interface DeliveryTargetInspection {
   task_type: SealedTarget['task_type']; task_description: string;
 }
 export interface SelectedDeliveryPath { path: string; rootIdentity: string | null; selectionOperationId: string | null }
-export interface TargetCommitResult { state: 'confirmed' | 'not_applicable' | 'failed_known' | 'unknown'; receipt: EffectReceipt | null; reason: string | null }
+export interface TargetCommitResult { state: 'confirmed' | 'not_applicable' | 'failed_known' | 'unknown'; receipt: EffectReceipt | null; reason: string | null; block?: LocalCommitBlock }
 
 type TaskType = SealedTarget['task_type'];
 const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const targetError = (code: string): never => { throw new CaptureError(code); };
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+/** Failures that mean the registered folder is no longer a usable clone of the project's repository. */
+const invalidFolderCodes: readonly string[] = ['DELIVERY_TARGET_PATH_INVALID','DELIVERY_TARGET_ROOT_MISMATCH','DELIVERY_TARGET_NOT_WORKTREE','DELIVERY_TARGET_REMOTE_INVALID',
+  'DELIVERY_TARGET_REPOSITORY_MISMATCH','DELIVERY_TARGET_CHANGED','DELIVERY_TARGET_GIT_FAILED','MANAGED_PATH_INVALID'];
 function taskIdentity(title: string,changedPaths: readonly string[] = []): { type: TaskType; description: string; slug: string } {
   const allowed: TaskType[] = ['feat','fix','docs','refactor','test','chore','perf','build','ci','revert'];
   const prefix = /^\s*(feat|fix|docs|refactor|test|chore|perf|build|ci|revert)\s*[:/-]\s*/iu.exec(title);
@@ -74,13 +78,14 @@ function inside(root: string,path: string): boolean {
 export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository'|'resolveBranch'>,dataDirectory: string | undefined,git: GitReader | undefined,
   canonicalize: (path: string) => Promise<string> = realpath, resolveAttemptRoot?: AttemptRootResolver) {
   const isolated: GitReader | undefined = git ? (cwd,args,input) => git(cwd,args,{ ...input,isolatedConfig: true }) : undefined;
+  const landing = createCheckoutLanding({ isolated,plain: git,hooksDirectory: dataDirectory ? join(dataDirectory,'hooks-disabled') : undefined });
   async function gitRun(root: string,args: string[],input?: string,config: string[] = []) {
     const runGit = isolated; if (!runGit) targetError('CONTEXT_UNAVAILABLE');
     const result = await runGit!(root,['--no-optional-locks',...config,...args],input === undefined ? undefined : { input });
     if (result.exitCode !== 0) targetError('DELIVERY_TARGET_GIT_FAILED');
     return result.stdout;
   }
-  async function observe(rootInput: string,task: DeliveryTaskInput,approved: { approvedRef: string; contentIdentity: string; baseSha: string },checkBase = true) {
+  async function observe(rootInput: string,task: DeliveryTaskInput,approved: { approvedRef: string; contentIdentity: string; baseSha: string },checkBase = true,workingState = true) {
     const gitPort = isolated; if (!gitPort || !isAbsolute(rootInput) || /[\u0000-\u001f\u007f]/u.test(rootInput)) targetError('DELIVERY_TARGET_PATH_INVALID');
     const runGit = gitPort!;
     const root = await canonicalize(rootInput);
@@ -103,7 +108,8 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       if (ref && `${ref.owner}/${ref.name}`.toLowerCase() === `${repositoryReference!.owner}/${repositoryReference!.name}`.toLowerCase()) matches.push({ name:m![1]!,owner:ref.owner,repo:ref.name,remoteHash:hash(m![2]!) });
     }
     const identity = await github.getRepository(repositoryReference!);
-    if (identity.state !== 'complete' || identity.data?.id !== task.repositoryId || matches.length !== 1) targetError('DELIVERY_TARGET_REPOSITORY_MISMATCH');
+    if (identity.state !== 'complete') targetError('DELIVERY_TARGET_UNAVAILABLE');
+    if (identity.data?.id !== task.repositoryId || matches.length !== 1) targetError('DELIVERY_TARGET_REPOSITORY_MISMATCH');
     if (checkBase) {
       const branchCheck = await runGit(root,['check-ref-format','--branch',task.baseBranch]);
       if (branchCheck.exitCode !== 0) targetError('DELIVERY_BASE_BRANCH_INVALID');
@@ -125,31 +131,38 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     if (!oid.test(head)) targetError('DELIVERY_CHECKOUT_INVALID');
     const currentBranchResult = await runGit(root,['symbolic-ref','--quiet','HEAD']);
     const observedBranchRef = currentBranchResult.exitCode === 0 ? currentBranchResult.stdout.trim() : null;
-    const status = await gitRun(root,['status','--porcelain=v2','-z','--untracked-files=all','--ignore-submodules=none']);
-    const paths = [...new Set([...nul(await gitRun(root,['ls-files','-z'])),...nul(await gitRun(root,['ls-files','--others','--exclude-standard','-z']))])].sort();
-    const files: [string,string][] = [];
-    for (const path of paths) {
-      if (!path || path.includes('\\') || path.includes(':') || path.split('/').some(part => part === '' || part === '.' || part === '..')) targetError('DELIVERY_CHECKOUT_PATH_INVALID');
-      const absolute = resolve(root,...path.split('/'));
-      if (!inside(root,absolute)) targetError('DELIVERY_CHECKOUT_PATH_INVALID');
-      files.push([path,await fileDigest(absolute)]);
+    let workingStateHash: string; let indexHash: string; let sharedIndexHash: string | null = null;
+    if (workingState) {
+      const status = await gitRun(root,['status','--porcelain=v2','-z','--untracked-files=all','--ignore-submodules=none']);
+      const paths = [...new Set([...nul(await gitRun(root,['ls-files','-z'])),...nul(await gitRun(root,['ls-files','--others','--exclude-standard','-z']))])].sort();
+      const files: [string,string][] = [];
+      for (const path of paths) {
+        if (!path || path.includes('\\') || path.includes(':') || path.split('/').some(part => part === '' || part === '.' || part === '..')) targetError('DELIVERY_CHECKOUT_PATH_INVALID');
+        const absolute = resolve(root,...path.split('/'));
+        if (!inside(root,absolute)) targetError('DELIVERY_CHECKOUT_PATH_INVALID');
+        files.push([path,await fileDigest(absolute)]);
+      }
+      const indexValue = (await gitRun(root,['rev-parse','--git-path','index'])).trim();
+      const indexPath = await realpath(isAbsolute(indexValue) ? indexValue : resolve(root,indexValue));
+      if (!inside(gitDir,indexPath)) targetError('DELIVERY_INDEX_INVALID');
+      const indexBefore = await lstat(indexPath,{ bigint:true });
+      if (!indexBefore.isFile() || indexBefore.isSymbolicLink()) targetError('DELIVERY_INDEX_INVALID');
+      indexHash = hash(await readFile(indexPath)); const indexAfter = await lstat(indexPath,{ bigint:true });
+      if (indexBefore.dev !== indexAfter.dev || indexBefore.ino !== indexAfter.ino || indexBefore.size !== indexAfter.size || indexBefore.mtimeNs !== indexAfter.mtimeNs) targetError('DELIVERY_CHECKOUT_CHANGED');
+      const sharedIndex = (await gitRun(root,['rev-parse','--shared-index-path'])).trim();
+      sharedIndexHash = sharedIndex ? hash(await readFile(isAbsolute(sharedIndex) ? sharedIndex : resolve(root,sharedIndex))) : null;
+      workingStateHash = hash(JSON.stringify({ head,observedBranchRef,status:hash(status),files,indexHash,sharedIndexHash }));
+    } else {
+      // The landing path never hashes the operator's files: its own preflight decides before every write.
+      workingStateHash = hash(`landing\0${head}\0${observedBranchRef}`); indexHash = workingStateHash;
     }
-    const indexValue = (await gitRun(root,['rev-parse','--git-path','index'])).trim();
-    const indexPath = await realpath(isAbsolute(indexValue) ? indexValue : resolve(root,indexValue));
-    if (!inside(gitDir,indexPath)) targetError('DELIVERY_INDEX_INVALID');
-    const indexBefore = await lstat(indexPath,{ bigint:true });
-    if (!indexBefore.isFile() || indexBefore.isSymbolicLink()) targetError('DELIVERY_INDEX_INVALID');
-    const indexHash = hash(await readFile(indexPath)); const indexAfter = await lstat(indexPath,{ bigint:true });
-    if (indexBefore.dev !== indexAfter.dev || indexBefore.ino !== indexAfter.ino || indexBefore.size !== indexAfter.size || indexBefore.mtimeNs !== indexAfter.mtimeNs) targetError('DELIVERY_CHECKOUT_CHANGED');
-    const sharedIndex = (await gitRun(root,['rev-parse','--shared-index-path'])).trim();
-    const sharedIndexHash = sharedIndex ? hash(await readFile(isAbsolute(sharedIndex) ? sharedIndex : resolve(root,sharedIndex))) : null;
-    const workingStateHash = hash(JSON.stringify({ head,observedBranchRef,status:hash(status),files,indexHash,sharedIndexHash }));
     if (rootIdentity !== await objectIdentity(root) || gitDirectoryIdentity !== await objectIdentity(gitDir)) targetError('DELIVERY_TARGET_CHANGED');
     return { root,gitDir,rootIdentity,gitDirectoryIdentity,head,observedBranchRef,workingStateHash,indexHash,sharedIndexHash,remoteName:matches[0]!.name,remoteHash:matches[0]!.remoteHash,repositoryId: task.repositoryId };
   }
   async function inspectDeliveryTarget(path: string,task: DeliveryTaskInput,approved: { approvedRef: string; contentIdentity: string; baseSha: string }): Promise<DeliveryTargetInspection> {
     if (!dataDirectory) targetError('CONTEXT_UNAVAILABLE');
-    const found = await observe(path,task,approved);
+    const existingBranch = task.deliveryBranch?.kind === 'existing';
+    const found = await observe(path,task,approved,true,!existingBranch);
     const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(task.attemptId),canonicalize);
     const retained = retainedRepositoryPath(data, task.attemptId, task.repositoryRelative);
     await plainDirectory(dirname(retained),canonicalize); await plainDirectory(retained,canonicalize); await noBorrowedObjects(retained);
@@ -164,12 +177,14 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
     if (check.exitCode !== 0) targetError('DELIVERY_BRANCH_INVALID');
     const refs = (await isolated!(found.root,['for-each-ref','--format=%(refname)','refs/heads/'])).stdout.trim().split(/\r?\n/u).filter(Boolean);
     const exists = (name: string) => refs.some(ref => ref.toLowerCase() === `refs/heads/${name}`.toLowerCase());
+    let operatorConfig: OperatorConfig | undefined;
     if (task.deliveryBranch?.kind === 'existing') {
       if (!exists(branch)) targetError('DELIVERY_BRANCH_NOT_FOUND');
       const tip = (await gitRun(found.root,['rev-parse','--verify','--end-of-options',`refs/heads/${branch}^{commit}`])).trim();
       if (tip !== task.baseSha) targetError('DELIVERY_BASE_CHANGED');
-      const worktrees = await gitRun(found.root,['worktree','list','--porcelain']);
-      if (worktrees.split(/\r?\n/u).includes(`branch refs/heads/${branch}`)) targetError('DELIVERY_BRANCH_IN_USE');
+      // The branch in checkout is the delivery branch; only another worktree holding it is a conflict. The checkout itself is judged just before the write.
+      await landing.assertNoOtherWorktree(found.root,`refs/heads/${branch}`);
+      operatorConfig = await landing.readOperatorConfig(found.root);
     } else if (await exists(branch)) {
       if (task.deliveryBranch) targetError('DELIVERY_BRANCH_COLLISION');
       branch = `${branch}-${suffix}`;
@@ -182,10 +197,11 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       format_version: 1,root_identity: found.rootIdentity,git_directory_identity: found.gitDirectoryIdentity,remote_name:found.remoteName,remote_hash:found.remoteHash,
       base_branch: task.baseBranch,base_sha: task.baseSha,observed_head: found.head,observed_branch_ref: found.observedBranchRef,
       working_state_hash: found.workingStateHash,index_hash: found.indexHash,
+      ...(operatorConfig ? { operator_config: operatorConfig } : {}),
     },branch_ref: `refs/heads/${branch}`,task_type: identity.type,task_description: identity.description };
   }
   async function inspectIntegrationTarget(path: string,task: DeliveryTaskInput) {
-    const found = await observe(path,task,task,false);
+    const found = await observe(path,task,task,false,false);
     const baseBranch = task.deliveryBranch?.kind === 'existing' ? task.deliveryBranch.name : task.baseBranch;
     await gitRun(found.root,['check-ref-format','--branch',baseBranch]);
     const local = (await gitRun(found.root,['rev-parse','--verify','--end-of-options',`refs/heads/${baseBranch}^{commit}`])).trim();
@@ -199,13 +215,27 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
   }
   async function reconcileLocalCommit(delivery: Delivery,effect: EffectView,target: SealedTarget): Promise<TargetCommitResult> {
     try {
+      const existing = target.local_identity.branch_kind === 'existing';
       const c = await localContext(delivery,effect,target,false); const observed = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       if (observed.exitCode === 1) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
-      const sha = observed.stdout.trim();
-      if (target.local_identity.branch_kind === 'existing' && sha === target.local_identity.base_sha) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
-      if (!oid.test(sha) || (await c.commitMessage(sha)).trimEnd() !== c.message.trimEnd() || await c.tree(sha) !== delivery.contentIdentity || await c.parent(sha) !== target.local_identity.base_sha) targetError('COMMIT_IDENTITY_CONFLICT');
-      await transferBranch(c,target,sha);
-      await verifyWorkingState(c,target);
+      let sha = observed.stdout.trim();
+      if (existing && sha === target.local_identity.base_sha) return { state:'failed_known',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
+      // The checkout is only inspected for a write that is still unresolved. Once confirmed, the operator may edit, commit or switch freely.
+      let inspectCheckout = existing && effect.state !== 'confirmed';
+      const matchesApproved = async (candidate: string) => oid.test(candidate) && (await c.commitMessage(candidate)).trimEnd() === c.message.trimEnd() &&
+        await c.tree(candidate) === delivery.contentIdentity && await c.parent(candidate) === target.local_identity.base_sha;
+      if (existing && !await matchesApproved(sha)) {
+        // The operator may have committed on top of the landing; the factory commit stays identifiable by its own trailer.
+        const found = (await isolated!(c.repository,['rev-list','-n','1','--fixed-strings',`--grep=Factory-Operation: ${effect.operationId}`,`${target.local_identity.base_sha}..${target.branch_ref}`])).stdout.trim();
+        if (oid.test(found)) { sha = found; inspectCheckout = false; }
+      }
+      if (!await matchesApproved(sha)) targetError('COMMIT_IDENTITY_CONFLICT');
+      if (!existing || inspectCheckout) await transferBranch(c,target,sha);
+      if (!existing) await verifyWorkingState(c,target);
+      else if (inspectCheckout) {
+        const config = await landing.writeConfig(c.repository,target.local_identity.operator_config);
+        if (!await landing.matches({ root:c.repository,branchRef:target.branch_ref },config,sha)) targetError('PROJECT_FOLDER_LANDING_UNVERIFIED');
+      }
       return { state:'confirmed',receipt: receipt(delivery,effect,target,sha),reason:null };
     } catch (e) { return { state:'unknown',receipt:null,reason:e instanceof CaptureError ? e.code : 'DELIVERY_TARGET_UNAVAILABLE' }; }
   }
@@ -216,12 +246,23 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
         effect.expectedIdentity.taskType !== target.task_type || effect.expectedIdentity.taskDescription !== target.task_description ||
         delivery.attemptId !== target.attempt_id || delivery.id !== target.delivery_id || delivery.baseSha !== target.base_sha || effect.expectedIdentity.parentSha !== target.local_identity.base_sha ||
         delivery.gitRef !== target.approved_ref || delivery.contentIdentity !== target.content_identity || !dataDirectory || !isolated) targetError('COMMIT_IDENTITY_INVALID');
-    const expected = await observe(target.local_path,{ attemptId:delivery.attemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:delivery.repositoryRelative,
+    const existing = target.local_identity.branch_kind === 'existing';
+    const folderInput = { attemptId:delivery.attemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:delivery.repositoryRelative,
       issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,
       repositoryUrl:`https://github.com/${effect.expectedIdentity.repositoryOwner!}/${effect.expectedIdentity.repositoryName!}`,
-      baseBranch:target.base_branch,baseSha:target.local_identity.base_sha,sourceKind:target.local_identity.source_kind },{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },compareWorkingState && target.local_identity.branch_kind !== 'existing');
-    if (expected.rootIdentity !== target.local_identity.root_identity || expected.gitDirectoryIdentity !== target.local_identity.git_directory_identity || expected.remoteName !== target.local_identity.remote_name || expected.remoteHash !== target.local_identity.remote_hash ||
-        compareWorkingState && (expected.head !== target.local_identity.observed_head || expected.observedBranchRef !== target.local_identity.observed_branch_ref ||
+      baseBranch:target.base_branch,baseSha:target.local_identity.base_sha,sourceKind:target.local_identity.source_kind };
+    const folderApproved = { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha };
+    let expected: Awaited<ReturnType<typeof observe>>;
+    try { expected = await observe(target.local_path,folderInput,folderApproved,compareWorkingState && !existing,!existing); }
+    catch (error) {
+      // A folder that stopped being the project's clone is reported as such for the landing path; other paths keep their codes.
+      if (existing && (error instanceof CaptureError ? invalidFolderCodes.includes(error.code) : error instanceof Error && 'code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR'))) targetError('PROJECT_FOLDER_INVALID');
+      throw error;
+    }
+    if (expected.rootIdentity !== target.local_identity.root_identity || expected.gitDirectoryIdentity !== target.local_identity.git_directory_identity || expected.remoteName !== target.local_identity.remote_name || expected.remoteHash !== target.local_identity.remote_hash) {
+      targetError(existing ? 'PROJECT_FOLDER_INVALID' : 'DELIVERY_CHECKOUT_CHANGED');
+    }
+    if (compareWorkingState && !existing && (expected.head !== target.local_identity.observed_head || expected.observedBranchRef !== target.local_identity.observed_branch_ref ||
           expected.workingStateHash !== target.local_identity.working_state_hash || expected.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
     const repository = expected.root;
     const data = await managedRoot(await requireAttemptRootResolver(resolveAttemptRoot)(delivery.attemptId),canonicalize);
@@ -246,26 +287,23 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       async parent(sha: string) { return (await run(['rev-list','--parents','-n','1',sha])).trim().split(' ').slice(1).join(' '); } };
   }
   async function verifyWorkingState(c: Awaited<ReturnType<typeof localContext>>,target: SealedTarget) {
-    if (target.local_identity.branch_kind === 'existing') {
-      const worktrees = await c.run(['worktree','list','--porcelain']);
-      if (worktrees.split(/\r?\n/u).includes(`branch ${target.branch_ref}`)) targetError('DELIVERY_BRANCH_IN_USE');
-    }
     const observed = await observe(target.local_path,{ attemptId:c.sourceAttemptId,approvedRef:target.approved_ref,contentIdentity:target.content_identity,repositoryRelative:c.repositoryRelative,
       issueNumber:target.issue_number,issueTitle:target.task_description,repositoryId:target.repository_id,repositoryUrl:c.repositoryUrl,baseBranch:target.base_branch,baseSha:target.local_identity.base_sha,sourceKind:target.local_identity.source_kind },
-      { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },target.local_identity.branch_kind !== 'existing');
+      { approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha });
     if (observed.workingStateHash !== target.local_identity.working_state_hash || observed.indexHash !== target.local_identity.index_hash) targetError('DELIVERY_CHECKOUT_CHANGED');
   }
   async function transferBranch(c: Awaited<ReturnType<typeof localContext>>,target: SealedTarget,sha: string) {
     const ref = await isolated!(c.retained,[`--git-dir=${c.retained}`,'fetch','--no-tags','--no-recurse-submodules','--',c.repository,target.branch_ref]);
     if (ref.exitCode !== 0 || (await isolated!(c.retained,[`--git-dir=${c.retained}`,'rev-parse','--verify','FETCH_HEAD'])).stdout.trim() !== sha) targetError('COMMIT_TRANSFER_FAILED');
     const current = await isolated!(c.retained,[`--git-dir=${c.retained}`,'rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
-    if (current.exitCode === 0 && current.stdout.trim() !== sha) targetError('COMMIT_TRANSFER_CONFLICT');
-    if (current.exitCode !== 0) {
-      const update = await isolated!(c.retained,[`--git-dir=${c.retained}`,'update-ref','--no-deref',target.branch_ref,sha,'0'.repeat(sha.length)]);
-      if (update.exitCode !== 0) {
-        const raced = await isolated!(c.retained,[`--git-dir=${c.retained}`,'rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
-        if (raced.stdout.trim() !== sha) targetError('COMMIT_TRANSFER_CONFLICT');
-      }
+    const old = current.exitCode === 0 ? current.stdout.trim() : '0'.repeat(sha.length);
+    if (old === sha) return;
+    // The retained mirror may already hold an existing delivery branch at its base; it follows the landing but never moves from anywhere else.
+    if (current.exitCode === 0 && !(target.local_identity.branch_kind === 'existing' && old === target.local_identity.base_sha)) targetError('COMMIT_TRANSFER_CONFLICT');
+    const update = await isolated!(c.retained,[`--git-dir=${c.retained}`,'update-ref','--no-deref',target.branch_ref,sha,old]);
+    if (update.exitCode !== 0) {
+      const raced = await isolated!(c.retained,[`--git-dir=${c.retained}`,'rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
+      if (raced.stdout.trim() !== sha) targetError('COMMIT_TRANSFER_CONFLICT');
     }
   }
   function receipt(delivery: Delivery,effect: EffectView,target: SealedTarget,sha: string): EffectReceipt {
@@ -279,38 +317,59 @@ export function createDeliveryTargetWorkspace(github: Pick<GitHub,'getRepository
       const c = await localContext(delivery,effect,target);
       const current = await isolated!(c.repository,['rev-parse','--verify','--quiet','--end-of-options',target.branch_ref]);
       const existing = target.local_identity.branch_kind === 'existing';
-      if (current.exitCode === 0 && (!existing || current.stdout.trim() !== target.local_identity.base_sha)) return reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+      if (current.exitCode === 0 && (!existing || current.stdout.trim() !== target.local_identity.base_sha)) {
+        const observed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+        // A branch tip that is neither the base nor our commit means the base advanced: the integration round takes over.
+        return existing && observed.state === 'unknown' && observed.reason === 'COMMIT_IDENTITY_CONFLICT' ? { state:'failed_known',receipt:null,reason:'DELIVERY_BASE_CHANGED' } : observed;
+      }
       if (existing && (current.exitCode !== 0 || current.stdout.trim() !== target.local_identity.base_sha)) targetError('DELIVERY_BASE_CHANGED');
       if ((!existing && current.exitCode !== 1) || effect.state !== 'running') return { state:'unknown',receipt:null,reason:'COMMIT_NOT_OBSERVED' };
-      const fetch = await isolated!(c.repository,['fetch','--no-tags','--no-recurse-submodules','--',c.retained,delivery.gitRef!]);
+      const hooksOff = await landing.hooksOff();
+      const fetch = await isolated!(c.repository,[...hooksOff,'fetch','--no-tags','--no-recurse-submodules','--',c.retained,delivery.gitRef!]);
       if (fetch.exitCode !== 0 || (await isolated!(c.repository,['rev-parse','--verify','FETCH_HEAD'])).stdout.trim() !== delivery.commitSha) targetError('DELIVERY_INTEGRITY_FAILED');
       if ((await isolated!(c.repository,['rev-parse','--verify',`${delivery.commitSha}^{tree}`])).stdout.trim() !== target.content_identity) targetError('DELIVERY_INTEGRITY_FAILED');
       const baseTree = (await isolated!(c.repository,['rev-parse','--verify',`${delivery.baseSha}^{tree}`])).stdout.trim();
       if ((baseTree !== delivery.contentIdentity) !== delivery.hasDelta) targetError('DELIVERY_INTEGRITY_FAILED');
       const publicationBaseTree = (await isolated!(c.repository,['rev-parse','--verify',`${target.local_identity.base_sha}^{tree}`])).stdout.trim();
       if (publicationBaseTree === delivery.contentIdentity) return { state:'not_applicable',receipt:null,reason:'APPROVED_NO_DELTA' };
-      await verifyWorkingState(c,target);
-      await authorize(); mutationStarted = true;
+      const plan: LandingPlan = { root:c.repository,branchRef:target.branch_ref,baseSha:target.local_identity.base_sha,approvedTree:delivery.contentIdentity!,retained:c.retained,sealedConfig:target.local_identity.operator_config };
+      let config: readonly string[] = [];
+      if (existing) config = (await landing.preflight(plan)).config; else await verifyWorkingState(c,target);
+      await authorize(); mutationStarted = !existing;
       const created = await isolated!(c.repository,['-c','user.name=Nova Fábrica','-c','user.email=fabrica@localhost','commit-tree',delivery.contentIdentity!,'-p',target.local_identity.base_sha],{input:c.message,commitTime:c.commitTime,isolatedConfig:true});
       const sha = created.stdout.trim();
       if (created.exitCode !== 0 || !oid.test(sha)) targetError('COMMIT_IDENTITY_INVALID');
-      const update = await isolated!(c.repository,['update-ref','--no-deref',target.branch_ref,sha,existing ? target.local_identity.base_sha : '0'.repeat(sha.length)]);
+      if (existing) {
+        // Only the fast-forward below can move the branch and the checkout; until it starts, a refusal leaves nothing behind but an unreferenced object.
+        await landing.beforeWrite(plan,config,sha);
+        mutationStarted = true;
+        const merged = await landing.land(plan,config,sha);
+        const landed = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+        if (landed.state === 'confirmed') return landed;
+        // A refused merge that left HEAD, index and files at the base wrote nothing, so the operator can retry once they resolve it.
+        if (merged.exitCode !== 0 && landed.state === 'failed_known' && await landing.matches(plan,config,plan.baseSha)) return { state:'failed_known',receipt:null,reason:'PROJECT_FOLDER_REFUSED' };
+        return { state:'unknown',receipt:null,reason:landed.reason ?? 'PROJECT_FOLDER_LANDING_UNVERIFIED' };
+      }
+      const update = await isolated!(c.repository,[...hooksOff,'update-ref','--no-deref',target.branch_ref,sha,'0'.repeat(sha.length)]);
       if (update.exitCode !== 0) {
         const reconciled = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
         if (reconciled.state === 'confirmed') return reconciled;
         targetError('DELIVERY_BRANCH_COLLISION');
       }
-      const checked = await reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
-      if (checked.state !== 'confirmed') return checked;
-      return checked;
-    } catch (e) { return { state:mutationStarted ? 'unknown' : 'failed_known',receipt:null,reason:e instanceof CaptureError ? e.code : 'DELIVERY_TARGET_UNAVAILABLE' }; }
+      return reconcileLocalCommit(delivery,{ ...effect,state:'unknown' },target);
+    } catch (e) {
+      return { state:mutationStarted ? 'unknown' : 'failed_known',receipt:null,reason:e instanceof CaptureError ? e.code : 'DELIVERY_TARGET_UNAVAILABLE',
+        ...(e instanceof LandingBlocked && e.block ? { block: e.block } : {}) };
+    }
   }
   async function verifyDeliveryTarget(target: SealedTarget,task: DeliveryTaskInput): Promise<void> {
-    const found = await observe(target.local_path,task,{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },target.local_identity.branch_kind !== 'existing');
+    const existing = target.local_identity.branch_kind === 'existing';
+    const found = await observe(target.local_path,task,{ approvedRef:target.approved_ref,contentIdentity:target.content_identity,baseSha:target.local_identity.base_sha },!existing,!existing);
     if (found.rootIdentity !== target.local_identity.root_identity || found.gitDirectoryIdentity !== target.local_identity.git_directory_identity ||
-        found.remoteHash !== target.local_identity.remote_hash || found.remoteName !== target.local_identity.remote_name ||
-        found.head !== target.local_identity.observed_head || found.observedBranchRef !== target.local_identity.observed_branch_ref ||
-        found.workingStateHash !== target.local_identity.working_state_hash || found.indexHash !== target.local_identity.index_hash) targetError('DELIVERY_CHECKOUT_CHANGED');
+        found.remoteHash !== target.local_identity.remote_hash || found.remoteName !== target.local_identity.remote_name) targetError('DELIVERY_CHECKOUT_CHANGED');
+    // The landing moved HEAD, index and files on purpose, so only the other delivery shapes compare them with the sealed state.
+    if (!existing && (found.head !== target.local_identity.observed_head || found.observedBranchRef !== target.local_identity.observed_branch_ref ||
+        found.workingStateHash !== target.local_identity.working_state_hash || found.indexHash !== target.local_identity.index_hash)) targetError('DELIVERY_CHECKOUT_CHANGED');
   }
   return { inspectDeliveryTarget,inspectIntegrationTarget,verifyDeliveryTarget,createLocalCommit,reconcileLocalCommit };
 }

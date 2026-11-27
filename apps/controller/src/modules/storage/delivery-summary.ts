@@ -24,8 +24,9 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
     AND NOT EXISTS (SELECT 1 FROM finding_resolutions x JOIN reviews xr ON xr.id=x.review_id JOIN deliveries xd ON xd.id=xr.delivery_id
       WHERE x.finding_id=f.id AND x.verdict='resolved' AND xd.round_number<=?)`)
     .get(attemptId,d.round,d.round)!.n : 0;
-  const commit = db.prepare<[string, string], { state: string; sha: string | null; branch: string | null; path: string | null }>(`SELECT e.state,
-    json_extract(e.receipt_json,'$.id') AS sha,json_extract(e.expected_identity_json,'$.branchRef') AS branch,t.local_path AS path
+  const commit = db.prepare<[string, string], { state: string; sha: string | null; branch: string | null; path: string | null; landed: number }>(`SELECT e.state,
+    json_extract(e.receipt_json,'$.id') AS sha,json_extract(e.expected_identity_json,'$.branchRef') AS branch,t.local_path AS path,
+    coalesce(json_extract(e.expected_identity_json,'$.branchKind')='existing' AND json_type(t.local_identity_json,'$.operator_config') IS NOT NULL,0) AS landed
     FROM effects e LEFT JOIN delivery_targets t ON t.operation_id=json_extract(e.expected_identity_json,'$.targetOperationId')
     WHERE e.attempt_id=? AND e.delivery_id=? AND e.kind='local_commit'`).get(attemptId,deliveryId);
   const resource = d.id === attempt.deliveryId ? db.prepare<[string], { reference: string }>(`SELECT reference FROM resources
@@ -57,7 +58,7 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
   if (integration && attempt.result !== 'delivered') limitations.push('Uma adaptação posterior está pendente; acompanhe a nova versão sem reutilizar esta aprovação.');
   if (confirmedCommit && !commit.path) limitations.push('O histórico não informa o destino local do commit; consulte os registros antes de continuar.');
   if (!resource && !confirmedCommit) limitations.push('Localização de código indisponível neste resumo; consulte a referência fixa e os recursos retidos.');
-  if (confirmedCommit) limitations.push('Commit confirmado em branch própria; o checkout do operador não foi atualizado.');
+  if (confirmedCommit && !commit.landed) limitations.push('Commit confirmado em branch própria; o checkout do operador não foi atualizado.');
   const lastRequest = db.prepare<[string, string], { state: string; diagnostic: string | null }>(`SELECT state,diagnostic FROM publication_requests
     WHERE attempt_id=? AND delivery_id=? ORDER BY rowid DESC LIMIT 1`).get(attemptId,deliveryId);
   const publicationFailure = attempt.result === null && lastRequest && ['failed','unknown'].includes(lastRequest.state) ? lastRequest.diagnostic : null;
@@ -73,7 +74,7 @@ export function readDeliverySummary(db: Database.Database, attemptId: string, de
     code_location:resource?.reference ?? null,local_repository:confirmedCommit ? commit.path : null,
     branch_ref:confirmedCommit ? commit.branch : null,commit_sha:confirmedCommit ? commit.sha : null,
     pull_request_url:publication.pullRequest?.state === 'confirmed' ? publication.pullRequest.receipt?.url ?? null : null,
-    checkout_updated:false,pending_effects:pending,limitations,criteria_satisfied:satisfied,criteria_total:total,
+    checkout_updated:confirmedCommit && Boolean(commit.landed),pending_effects:pending,limitations,criteria_satisfied:satisfied,criteria_total:total,
     resolved_findings:resolved,details_url:`/api/v1/deliveries/${deliveryId}`,
     publication_failure:publicationFailure,
   };

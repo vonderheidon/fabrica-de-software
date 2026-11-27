@@ -70,6 +70,9 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
   }, [effectFingerprint, action?.view?.state]);
 
   const upgrades = (summary.upgrades ?? []).filter((upgrade) => modeOrder.indexOf(upgrade.target_mode) > modeOrder.indexOf(authorizedMode));
+  const commitFailure = summary.commit?.state === 'failed_known' ? summary.commit : null;
+  const blockedCommit = commitFailure && (commitFailure.reason?.startsWith('PROJECT_FOLDER_') || commitFailure.reason === 'DELIVERY_BRANCH_IN_USE' || commitFailure.blocked)
+    ? commitFailure.blocked ?? { paths: [], path_count: 0, expected_branch: null, current_branch: null } : null;
   const controls = delivery.capabilities;
   const summaryMatchesAuthorization = summary.mode === authorizedMode;
   const canComplete = summaryMatchesAuthorization && controls.complete_publication.available;
@@ -172,6 +175,16 @@ export function PublicationDialog({ projectId, attemptId, attemptEtag, delivery,
     <h4>Continuar entrega</h4>
     {!summaryMatchesAuthorization && <div className="queue-error" role="alert"><p>O resumo da publicação e o modo autorizado diferem. Atualize a tentativa e a versão antes de iniciar qualquer efeito.</p><button type="button" onClick={onRefresh}>Atualizar dados selecionados</button></div>}
     {error && <div className="queue-error" role="alert"><p>{error}</p><button type="button" onClick={() => { setError(null); onRefresh(); }}>Atualizar antes de revisar</button></div>}
+    {blockedCommit && <div className="queue-error publication-blocked" role="alert" aria-label="Commit bloqueado na Pasta do projeto">
+      <b>Commit bloqueado na Pasta do projeto</b>
+      <p>{operatorErrorMessage(summary.commit?.reason ?? '', '')}</p>
+      {blockedCommit.expected_branch && <p>Branch esperada: {blockedCommit.expected_branch}. Branch atual: {blockedCommit.current_branch ?? 'HEAD solto'}.</p>}
+      {blockedCommit.paths.length > 0 && <>
+        <p>{blockedCommit.path_count > blockedCommit.paths.length ? `Primeiros ${blockedCommit.paths.length} de ${blockedCommit.path_count} caminhos:` : 'Caminhos envolvidos:'}</p>
+        <ul className="blocked-paths">{blockedCommit.paths.map(path => <li key={path}><code>{path}</code></li>)}</ul>
+      </>}
+      <button type="button" className="primary" disabled={busy || deletionRestricted || !projectChecked || !canComplete} onClick={() => void send('complete')}>Tentar de novo</button>
+    </div>}
     <div className="delivery-continuation">
       {upgrades.map(upgrade => <div className="publication-upgrade" key={upgrade.target_mode}>
         <p>Branch de destino: {upgrade.delivery_branch ? `${upgrade.delivery_branch.name} (${upgrade.delivery_branch.kind === 'existing' ? 'existente' : 'nova'})` : 'nova branch com nome automático'}.</p>

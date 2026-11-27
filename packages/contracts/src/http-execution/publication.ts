@@ -53,11 +53,17 @@ export const ModeUpgradeSummary = Type.Object({ target_mode: DeliveryMode, addit
     delivery_branch: ProjectConfiguration.properties.delivery_branch,
     publication_target: Type.Optional(nullable(PublicationTargetIntent)), summary_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability }, closed);
 export type ModeUpgradeSummary = Static<typeof ModeUpgradeSummary>;
+export const LocalCommitBlock = Type.Object({
+    paths: Type.Array(Type.String({ minLength: 1, maxLength: 1024 }), { maxItems: 100 }), path_count: Type.Integer({ minimum: 0 }),
+    expected_branch: nullable(Type.String({ minLength: 1, maxLength: 1024 })), current_branch: nullable(Type.String({ minLength: 1, maxLength: 1024 })),
+}, closed);
+export type LocalCommitBlock = Static<typeof LocalCommitBlock>;
 export const PublicationSummary = Type.Object({
     mode: DeliveryMode, review_state: nullable(Type.Union(['pending', 'approved', 'rejected'].map(v => Type.Literal(v)))),
     local_state: Type.Union([Type.Literal('pending'), Type.Literal('completed')]),
     commit: Type.Optional(Type.Object({ state: EffectView.properties.state, sha: nullable(text), reason: nullable(text), operation_id: nullable(OperationId),
-      branch_ref: nullable(text), task_type: nullable(Type.String({ minLength: 1, maxLength: 16 })), task_description: nullable(Type.String({ minLength: 1, maxLength: 256 })) }, closed)),
+      branch_ref: nullable(text), task_type: nullable(Type.String({ minLength: 1, maxLength: 16 })), task_description: nullable(Type.String({ minLength: 1, maxLength: 256 })),
+      blocked: Type.Optional(LocalCommitBlock) }, closed)),
     upgrades: Type.Optional(Type.Array(ModeUpgradeSummary, { maxItems: 2 })),
     push: Type.Optional(Type.Object({ state: EffectView.properties.state, receipt: nullable(EffectReceipt), reason: nullable(text) }, closed)),
     pull_request: Type.Optional(Type.Object({ state: EffectView.properties.state, receipt: nullable(EffectReceipt), reason: nullable(text) }, closed)),

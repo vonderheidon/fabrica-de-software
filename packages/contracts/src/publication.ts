@@ -54,11 +54,18 @@ export const ModeUpgradeSummary = Type.Object({ targetMode: DeliveryMode, additi
   deliveryBranch: ProjectConfiguration.properties.delivery_branch,
   publicationTarget: Type.Optional(nullable(PublicationTargetIntent)), summaryHash: Type.String({ pattern: '^[a-f0-9]{64}$' }), capability: Capability }, closed);
 export type ModeUpgradeSummary = Static<typeof ModeUpgradeSummary>;
+/** Why the local commit could not land in the Pasta do projeto; bounded so a dirty folder never inflates the summary. */
+export const LocalCommitBlock = Type.Object({
+  paths: Type.Array(Type.String({ minLength: 1, maxLength: 1024 }), { maxItems: 100 }), pathCount: Type.Integer({ minimum: 0 }),
+  expectedBranch: nullable(Type.String({ minLength: 1, maxLength: 1024 })), currentBranch: nullable(Type.String({ minLength: 1, maxLength: 1024 })),
+}, closed);
+export type LocalCommitBlock = Static<typeof LocalCommitBlock>;
 export const PublicationSummary = Type.Object({
   mode: DeliveryMode, reviewState: nullable(Type.Union(['pending', 'approved', 'rejected'].map(v => Type.Literal(v)))),
   localState: Type.Union([Type.Literal('pending'), Type.Literal('completed')]),
   commit: Type.Optional(Type.Object({ state: EffectView.properties.state, sha: nullable(text), reason: nullable(text), operationId: nullable(OperationId),
-    branchRef: nullable(text), taskType: nullable(Type.String({ minLength: 1, maxLength: 16 })), taskDescription: nullable(Type.String({ minLength: 1, maxLength: 256 })) }, closed)),
+    branchRef: nullable(text), taskType: nullable(Type.String({ minLength: 1, maxLength: 16 })), taskDescription: nullable(Type.String({ minLength: 1, maxLength: 256 })),
+    blocked: Type.Optional(LocalCommitBlock) }, closed)),
   upgrades: Type.Optional(Type.Array(ModeUpgradeSummary, { maxItems: 2 })),
   push: Type.Optional(Type.Object({ state: EffectView.properties.state, receipt: nullable(EffectReceipt), reason: nullable(text) }, closed)),
   pullRequest: Type.Optional(Type.Object({ state: EffectView.properties.state, receipt: nullable(EffectReceipt), reason: nullable(text) }, closed)),

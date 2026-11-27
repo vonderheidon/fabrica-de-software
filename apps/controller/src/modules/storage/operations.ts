@@ -193,7 +193,7 @@ export function readOperation(db: Database.Database, operationId: string): Store
     if (row.operation_kind === 'effect.execute') {
       const effect = db.prepare<[string], { state: string; reason: string | null }>('SELECT state,reason FROM effects WHERE operation_id=?').get(operationId);
       if (!effect) throw new StorageError('OPERATION_DATA_INVALID');
-      diagnostic = effect.reason;
+      diagnostic = effect.reason === null ? null : effect.reason.split('\n')[0]!;
       state = effect.state === 'confirmed' || effect.state === 'not_applicable' ? 'succeeded' : effect.state === 'failed_known' ? 'failed' : effect.state === 'unknown' ? 'unknown' : effect.state === 'running' ? 'running' : 'accepted';
     } else {
       const request = db.prepare<[string, string], { state: StoredOperation['state']; diagnostic: string | null }>('SELECT state,diagnostic FROM publication_requests WHERE operation_id=? AND attempt_id=?').get(operationId, row.resource_id);

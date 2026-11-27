@@ -1,4 +1,4 @@
-import { toHttpCompletePublication } from '../../apps/controller/src/http/execution-views.js';
+import { toHttpCompletePublication, toHttpPublicationSummary } from '../../apps/controller/src/http/execution-views.js';
 import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { publicationFixture, type PublicationFixture } from '../fixtures/publication.js';
@@ -243,4 +243,27 @@ it('exposes Commit completion and its receipt through the existing protected HTT
     expect(get.statusCode).toBe(200);
     expect(get.json<{ publication: { commit: unknown; local_state: string } }>().publication).toMatchObject({ local_state: 'completed',commit: { state: 'confirmed',sha: 'c'.repeat(40) } });
   } finally { await app.close(); }
+});
+
+it('keeps a dirty Pasta do projeto visible with its files, then lands on "Tentar de novo" without a second commit effect', async () => {
+  const f = await fixture(); await f.implement();
+  const commit = f.workspaces.createTargetCommit.getMockImplementation()!;
+  const block = { paths:['src/a.ts','z.txt'],pathCount:2,expectedBranch:null,currentBranch:null };
+  f.workspaces.createTargetCommit.mockResolvedValueOnce({ state:'failed_known',receipt:null,reason:'PROJECT_FOLDER_DIRTY',block });
+  await f.approve(); const d = f.status().deliveryId!;
+  expect(f.storage.getReview(d)?.state).toBe('approved'); expect(f.status().result).toBeNull(); expect(f.issue.comments).toEqual([]);
+  expect(f.db.prepare('SELECT diagnostic FROM publication_requests WHERE attempt_id=? ORDER BY rowid DESC LIMIT 1').get(f.attemptId)).toEqual({ diagnostic:'PROJECT_FOLDER_DIRTY' });
+  const local = f.storage.getEffects(f.attemptId).find(e => e.kind === 'local_commit')!;
+  expect(local).toMatchObject({ state:'failed_known',reason:'PROJECT_FOLDER_DIRTY' });
+  const shown = f.storage.getDeliveryDetail(d,{}).publication.commit;
+  expect(shown).toMatchObject({ state:'failed_known',reason:'PROJECT_FOLDER_DIRTY',blocked:block });
+  expect(toHttpPublicationSummary(f.storage.getDeliveryDetail(d,{}).publication).commit?.blocked).toEqual({ paths:block.paths,path_count:2,expected_branch:null,current_branch:null });
+  // The operator resolves the folder; "Tentar de novo" is the ordinary completion on the same effect.
+  f.workspaces.createTargetCommit.mockImplementation(commit);
+  f.pipeline.completePublication(f.attemptId,request(f),f.context()); await f.pipeline.drain();
+  expect(f.status().result).toBe('delivered');
+  expect(f.storage.getEffects(f.attemptId).filter(e => e.kind === 'local_commit')).toHaveLength(1);
+  expect(f.storage.getEffect(local.operationId)).toMatchObject({ state:'confirmed',reason:null });
+  expect(f.storage.getDeliveryDetail(d,{}).publication.commit?.blocked).toBeUndefined();
+  expect(f.workspaces.createTargetCommit).toHaveBeenCalledTimes(2);
 });

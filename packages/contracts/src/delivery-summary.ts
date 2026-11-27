@@ -11,7 +11,7 @@ export const DeliverySummaryView = Type.Object({
   outcome: Type.Union(['pending','blocked','icr_approved','partial','complete','unavailable'].map(v => Type.Literal(v))),
   content_identity: nullable(GitObjectId), approved_ref: nullable(text(4096)),
   code_location: nullable(text(32768)), local_repository: nullable(text(32768)), branch_ref: nullable(text(1024)),
-  commit_sha: nullable(GitObjectId), pull_request_url: nullable(text(4096)), checkout_updated: Type.Literal(false),
+  commit_sha: nullable(GitObjectId), pull_request_url: nullable(text(4096)), checkout_updated: Type.Boolean(),
   pending_effects: Type.Array(text(128), { maxItems: 10 }), limitations: Type.Array(text(2048), { maxItems: 10 }),
    criteria_satisfied: count, criteria_total: count,
   resolved_findings: count, details_url: text(512),

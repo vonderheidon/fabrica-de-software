@@ -3,7 +3,7 @@ import { assertAttemptProjectAvailable } from './project-deletion-barrier.js';
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { Value } from '@sinclair/typebox/value';
-import { EffectIdentity, EffectReceipt, EffectView, OperationId, type DeliveryMode, type CreationMode, type ScaffoldPlan } from '#contracts';
+import { EffectIdentity, EffectReceipt, EffectView, LocalCommitBlock, OperationId, type DeliveryMode, type CreationMode, type ScaffoldPlan } from '#contracts';
 import { configurationETag, readSettingsView, digest, guarded } from './configuration-reads.js';
 import { readSettings } from './settings.js';
 import { readAttempt, readCapture } from './attempts.js';
@@ -107,11 +107,23 @@ interface Row {
   receipt_json: string | null; reason: string | null; revision: number; sent_at_ms: number | null; confirmed_at_ms: number | null;
   authorization_json: string;
 }
+/**
+ * A blocked local commit keeps its bounded file list beside the reason code ("CODE\n{json}") in the existing text column;
+ * every reader goes through this split so the code itself stays a plain identifier.
+ */
+export function splitEffectReason(stored: string | null): { code: string | null; blocked: LocalCommitBlock | null } {
+  if (stored === null) return { code: null, blocked: null };
+  const cut = stored.indexOf('\n');
+  if (cut < 0) return { code: stored, blocked: null };
+  const parsed: unknown = JSON.parse(stored.slice(cut + 1));
+  if (!Value.Check(LocalCommitBlock, parsed)) throw new StorageError('OPERATION_DATA_INVALID');
+  return { code: stored.slice(0, cut), blocked: parsed };
+}
 export function effectView(row: Row): EffectView {
   const receipt: unknown = row.receipt_json ? JSON.parse(row.receipt_json) : null;
   const value = { operationId: row.operation_id, attemptId: row.attempt_id, creationId: row.creation_id, deliveryId: row.delivery_id,
     kind: row.kind, scopeKey: row.scope_key, state: row.state, expectedIdentity: JSON.parse(row.expected_identity_json) as unknown,
-    confirmedIdentity: receipt, receipt, reason: row.reason, authorized: true, revision: row.revision,
+    confirmedIdentity: receipt, receipt, reason: splitEffectReason(row.reason).code, authorized: true, revision: row.revision,
     sentAtMs: row.sent_at_ms, confirmedAtMs: row.confirmed_at_ms };
   if (!Value.Check(EffectView, value)) throw new StorageError('OPERATION_DATA_INVALID');
   return value;
@@ -203,7 +215,7 @@ export function claimEffect(db: Database.Database, id: string, revision: number,
     effectEvent(db, id, 'effect.sent', revision + 1); return true;
   }).immediate());
 }
-export function finishEffect(db: Database.Database, id: string, revision: number, state: 'confirmed' | 'failed_known' | 'unknown' | 'not_applicable', receipt: EffectReceipt | null, reason: string | null): void {
+export function finishEffect(db: Database.Database, id: string, revision: number, state: 'confirmed' | 'failed_known' | 'unknown' | 'not_applicable', receipt: EffectReceipt | null, reason: string | null, blocked?: LocalCommitBlock): void {
   guarded(() => db.transaction(() => {
     const e = readEffect(db, id);
     if (e.state === 'confirmed' || e.state === 'not_applicable') return;
@@ -214,7 +226,8 @@ export function finishEffect(db: Database.Database, id: string, revision: number
         (e.state === 'unknown' && !['confirmed','not_applicable'].includes(state) && !observedAbsentCommit && !observedUnchangedStatus)) {
       throw new OperationError(409, 'EFFECT_REVISION_CONFLICT', 'The effect changed during observation.');
     }
-    if ((state === 'confirmed') !== (receipt !== null) || (receipt && !Value.Check(EffectReceipt, receipt)) || (reason !== null && !/^[A-Z0-9_]{1,128}$/.test(reason))) {
+    if ((state === 'confirmed') !== (receipt !== null) || (receipt && !Value.Check(EffectReceipt, receipt)) || (reason !== null && !/^[A-Z0-9_]{1,128}$/.test(reason)) ||
+      (blocked !== undefined && (e.kind !== 'local_commit' || state !== 'failed_known' || reason === null || !Value.Check(LocalCommitBlock, blocked)))) {
       throw new OperationError(400, 'EFFECT_RECEIPT_INVALID', 'The effect receipt is invalid.');
     }
     if (receipt && e.kind === 'project_status' && (receipt.id !== e.expectedIdentity.itemId || receipt.optionId !== e.expectedIdentity.optionId)) {
@@ -250,7 +263,7 @@ export function finishEffect(db: Database.Database, id: string, revision: number
     }
     // A late confirmation records a remote fact even after cancellation. It never restores attempt authority.
     db.prepare('UPDATE effects SET state=?,receipt_json=?,reason=?,confirmed_at_ms=?,revision=revision+1 WHERE operation_id=? AND revision=?')
-      .run(state, receipt ? JSON.stringify(receipt) : null, reason, state === 'confirmed' ? Date.now() : null, id, revision);
+      .run(state, receipt ? JSON.stringify(receipt) : null, blocked && reason ? `${reason}\n${JSON.stringify(blocked)}` : reason, state === 'confirmed' ? Date.now() : null, id, revision);
     effectEvent(db, id, `effect.${state}`, revision + 1);
     if (state === 'confirmed' && e.kind === 'project_status' && e.attemptId) {
       const superseded = db.prepare<[string,string],{ operation_id: string; revision: number }>(`SELECT operation_id,revision FROM effects WHERE attempt_id=? AND kind='project_status'

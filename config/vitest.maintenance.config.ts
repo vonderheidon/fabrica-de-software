@@ -6,5 +6,5 @@ import { defineConfig } from 'vitest/config';
 // The standard suite keeps its process/network prohibition and does not include .proof.ts files.
 export default defineConfig({
   resolve: { alias: { '#contracts': fileURLToPath(new URL('../packages/contracts/src/index.ts', import.meta.url)) } },
-  test: { environment: 'node', include: ['tests/native/maintenance.proof.ts', 'tests/native/persistence-recovery.proof.ts', 'tests/native/delivery-target.proof.ts'], testTimeout: 20_000 },
+  test: { environment: 'node', include: ['tests/native/maintenance.proof.ts', 'tests/native/persistence-recovery.proof.ts', 'tests/native/delivery-target.proof.ts', 'tests/native/delivery-landing.proof.ts'], testTimeout: 20_000 },
 });

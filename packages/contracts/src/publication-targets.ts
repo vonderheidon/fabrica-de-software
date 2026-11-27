@@ -20,6 +20,8 @@ export const DeliveryTargetLocalIdentity = Type.Object({
   base_branch: Type.String({ minLength: 1, maxLength: 1024 }), base_sha: Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' }),
   observed_head: Type.String({ pattern: '^(?:[a-f0-9]{40}|[a-f0-9]{64})$' }), observed_branch_ref: targetNullable(Type.String({ maxLength: 1024 })),
   working_state_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }), index_hash: Type.String({ pattern: '^[a-f0-9]{64}$' }),
+  /** Allowlisted operator Git settings observed without isolation; reapplied on every write in the Pasta do projeto. */
+  operator_config: Type.Optional(Type.Record(Type.String({ pattern: '^core\\.[a-z]{1,32}$' }), Type.String({ maxLength: 256 }), { maxProperties: 8 })),
 }, closed);
 export type DeliveryTargetLocalIdentity = Static<typeof DeliveryTargetLocalIdentity>;
 export const DeliveryTarget = Type.Object({
