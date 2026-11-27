@@ -168,8 +168,8 @@ export function ProjectImportPanel({ identity, onRegistered, kindField }: { iden
       <div className="field-full"><ImportField label="URL do repositório GitHub" value={form.url} onChange={(value) => updateForm({ url: value, commandId: null })} error={fieldMessage('repository_url')} required /></div>
       <div className="field-full registration-folder-field">
         <label htmlFor="import-folder-name">Pasta do projeto *</label>
-        <div className="registration-folder-row">
-          <span className="storage-path" aria-label="Raiz dos projetos">{root ? destinationPreview(root, '') : projectsRoot.status === 'loading' ? 'Consultando…' : 'Raiz dos projetos não definida'}</span>
+        <div className="registration-folder-row registration-folder-prefixed">
+          <span className="storage-path" aria-label="Raiz dos projetos" title={root ? destinationPreview(root, '') : undefined}>{root ? destinationPreview(root, '') : projectsRoot.status === 'loading' ? 'Consultando…' : 'Raiz dos projetos não definida'}</span>
           <input id="import-folder-name" value={folderValue} aria-invalid={Boolean(fieldMessage('folder_name'))} aria-describedby="import-folder-help" onChange={(event) => { const value = event.currentTarget.value; updateForm({ folderName: value, folderEdited: value !== '', commandId: null }); }} />
         </div>
         {fieldMessage('folder_name') && <span className="error" role="alert">{fieldMessage('folder_name')}</span>}
